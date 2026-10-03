@@ -12,7 +12,8 @@ Actionsの `NeoEPGStation-iOS-<run number>` ArtifactからZIPをダウンロー�
 このIPAはad-hoc署名であり、LiveContainerでの取り込み用。通常の直接インストールやApp Store提出には使わない。
 バンドルIDを維持して更新し、接続設定が残ることも確認する。
 
-シミュレーターではReleaseビルドをMetroなしで起動し、直後に終了しないこととスクリーンショットを確認する。
+シミュレーターはXcodeのad-hoc署名を使う。ReleaseビルドをMetroなしで起動し、
+接続設定のKeychainへの保存・読み戻し、直後に終了しないこととスクリーンショットを確認する。
 これは接続・映像デコード・PiP・ASS・実機の性能の試験にはならない。
 依存ロックファイルはActionsで生成した内容を検証して保存する。
 

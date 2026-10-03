@@ -3,7 +3,7 @@
  */
 
 import React from 'react';
-import { Text } from 'react-native';
+import { Modal, Text } from 'react-native';
 import ReactTestRenderer, { act } from 'react-test-renderer';
 import App from '../App';
 import { native } from '../src/native';
@@ -81,6 +81,10 @@ test('connects, selects an actual file, and hands the raw PLAY URL to native cod
           node.findAllByType(Text).some(text => text.props.children === 'AV1'),
       )[0]
       .props.onPress();
+  });
+  expect(native.play).not.toHaveBeenCalled();
+  await act(async () => {
+    root.findByType(Modal).props.onDismiss();
   });
   expect(native.play).toHaveBeenCalledWith(
     expect.objectContaining({

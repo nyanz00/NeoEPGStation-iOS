@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 def run(*args):
-    return subprocess.check_output(args, text=True).strip()
+    return subprocess.check_output(args, text=True, timeout=120).strip()
 
 available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '--json'))['devices']
 devices = [d for runtime, items in available.items() if '.iOS-' in runtime
@@ -15,15 +15,19 @@ if not devices:
     raise RuntimeError('No installed iPhone simulator is available')
 device = devices[0]
 app = Path('build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app')
-for framework in (app / 'Frameworks').glob('*.framework'):
-    run('codesign', '--force', '--sign', '-', str(framework))
-run('codesign', '--force', '--sign', '-', '--entitlements', 'ios/Simulator.entitlements', str(app))
 if device['state'] != 'Booted':
     run('xcrun', 'simctl', 'boot', device['udid'])
 run('xcrun', 'simctl', 'bootstatus', device['udid'], '-b')
 run('xcrun', 'simctl', 'install', device['udid'], str(app))
 os.environ['SIMCTL_CHILD_NEO_EPG_STORAGE_SMOKE'] = '1'
-launch = run('xcrun', 'simctl', 'launch', device['udid'], 'io.github.nyanz00.NeoEPGStation')
+try:
+    launch = run('xcrun', 'simctl', 'launch', device['udid'], 'io.github.nyanz00.NeoEPGStation')
+except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+    logs = run('xcrun', 'simctl', 'spawn', device['udid'], 'log', 'show', '--last', '3m',
+               '--style', 'compact', '--predicate',
+               'process == "NeoEPGStation" OR process == "runningboardd" OR process == "SpringBoard"')
+    Path('dist/simulator-launch-errors.log').write_text(logs)
+    raise
 pid = launch.rsplit(':', 1)[1].strip()
 time.sleep(15)
 processes = run('xcrun', 'simctl', 'spawn', device['udid'], 'launchctl', 'list')

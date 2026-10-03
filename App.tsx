@@ -62,6 +62,9 @@ function AppContent() {
   const details = useRef<AbortController | null>(null);
   const mounted = useRef(true);
   const openingRef = useRef(false);
+  const pendingPlayback = useRef<Parameters<typeof native.play>[0] | null>(
+    null,
+  );
 
   useEffect(() => {
     mounted.current = true;
@@ -171,21 +174,33 @@ function AppContent() {
     }
   }
 
-  async function play(file: VideoFile) {
+  function play(file: VideoFile) {
     if (!connection || !selected || openingRef.current) {
       return;
     }
     openingRef.current = true;
-    const title = selected.name;
+    pendingPlayback.current = {
+      url: apiURL(connection, `/videos/${file.id}`),
+      title: selected.name,
+      username: connection.username,
+      password: connection.password,
+      networkCaching: 5000,
+    };
     setSelected(null);
+  }
+
+  async function playAfterDismiss() {
+    const options = pendingPlayback.current;
+    pendingPlayback.current = null;
+    if (!options) {
+      return;
+    }
+    if (!mounted.current) {
+      openingRef.current = false;
+      return;
+    }
     try {
-      await native.play({
-        url: apiURL(connection, `/videos/${file.id}`),
-        title,
-        username: connection.username,
-        password: connection.password,
-        networkCaching: 5000,
-      });
+      await native.play(options);
     } catch {
       Alert.alert('再生', 'プレイヤーを開始できませんでした。');
     } finally {
@@ -427,6 +442,9 @@ function AppContent() {
         transparent
         animationType="fade"
         onRequestClose={() => setSelected(null)}
+        onDismiss={() => {
+          void playAfterDismiss();
+        }}
       >
         <View style={styles.modalBackdrop}>
           <View style={[styles.modal, { backgroundColor: colors.paper }]}>

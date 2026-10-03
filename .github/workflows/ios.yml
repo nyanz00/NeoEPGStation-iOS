@@ -71,7 +71,9 @@ jobs:
           xcodebuild -workspace ios/NeoEPGStation.xcworkspace \
             -scheme NeoEPGStation -configuration Release \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath build/simulator \
-            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee dist/simulator-build.log | xcbeautify
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_LOCAL_EXECUTION_IDENTITY='Ad Hoc' \
+            build 2>&1 | tee dist/simulator-build.log | xcbeautify
           python3 scripts/simulator-smoke.py
       - name: Upload IPA and diagnostics
         if: always()
