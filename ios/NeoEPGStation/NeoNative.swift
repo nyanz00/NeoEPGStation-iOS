@@ -5,7 +5,7 @@ import UIKit
 
 @objc(NeoNative)
 final class NeoNative: NSObject {
-  private let service = "io.github.nyanz00.neoepgstation.connection"
+  private var service = "io.github.nyanz00.neoepgstation.connection"
   private var player: NeoPlayerController?
 
   @objc static func requiresMainQueueSetup() -> Bool { true }
@@ -35,7 +35,7 @@ final class NeoNative: NSObject {
     if status == errSecItemNotFound { resolve(NSNull()); return }
     guard status == errSecSuccess, let data = item as? Data,
       let saved = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
-      reject("storage", "接続設定を読み込めませんでした。", nil); return
+      reject("keychain-\(status)", "接続設定を読み込めませんでした。", nil); return
     }
     resolve(prepared(saved))
   }
@@ -50,7 +50,7 @@ final class NeoNative: NSObject {
     }
     let saved = ["url": text, "username": value["username"] ?? "", "password": value["password"] ?? ""]
     guard let data = try? JSONSerialization.data(withJSONObject: saved) else {
-      reject("storage", "接続設定を保存できませんでした。", nil); return
+      reject("keychain-\(status)", "接続設定を保存できませんでした。", nil); return
     }
     let attributes: [String: Any] = [kSecValueData as String: data,
       kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
@@ -101,4 +101,25 @@ final class NeoNative: NSObject {
     }
     presenter.present(controller, animated: true)
   }
+
+#if targetEnvironment(simulator)
+  // The simulator job exercises the real storage methods with an isolated service.
+  static func runStorageSmokeTest() {
+    let module = NeoNative()
+    module.service += ".ci-smoke"
+    defer { SecItemDelete(module.keychainQuery as CFDictionary) }
+    let value = ["url": "https://example.com", "username": "", "password": ""]
+    var result: [String: Any] = ["success": false]
+    module.saveConnection(value, resolver: { _ in
+      module.loadConnection({ saved in
+        result["success"] = (saved as? [String: String])?["url"] == value["url"]
+      }, rejecter: { code, _, _ in result["error"] = code ?? "unknown" })
+    }, rejecter: { code, _, _ in result["error"] = code ?? "unknown" })
+    if let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+       let data = try? JSONSerialization.data(withJSONObject: result) {
+      try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      try? data.write(to: directory.appendingPathComponent("storage-smoke.json"))
+    }
+  }
+#endif
 }
