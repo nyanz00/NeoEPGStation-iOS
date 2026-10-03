@@ -1,0 +1,86 @@
+name: iOS prototype
+
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test -- --runInBand
+
+  build:
+    needs: checks
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: npm
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Environment
+        run: |
+          xcodebuild -version
+          node --version
+          bundle exec pod --version
+      - run: npm ci
+      - name: Install pods
+        working-directory: ios
+        run: bundle exec pod install
+      - name: Build device application
+        run: |
+          set -o pipefail
+          mkdir -p dist
+          xcodebuild -workspace ios/NeoEPGStation.xcworkspace \
+            -scheme NeoEPGStation -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath build/device \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            build 2>&1 | tee dist/device-build.log | xcbeautify
+      - name: Package LiveContainer IPA
+        run: bash scripts/package-ipa.sh
+      - name: Build and launch simulator application
+        run: |
+          set -o pipefail
+          xcodebuild -workspace ios/NeoEPGStation.xcworkspace \
+            -scheme NeoEPGStation -configuration Release \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build/simulator \
+            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee dist/simulator-build.log | xcbeautify
+          python3 scripts/simulator-smoke.py
+      - name: Upload IPA and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeoEPGStation-iOS-${{ github.run_number }}
+          path: |
+            dist/
+            ios/Podfile.lock
+            Gemfile.lock
+          retention-days: 7
+          if-no-files-found: error

@@ -1,0 +1,94 @@
+/**
+ * @format
+ */
+
+import React from 'react';
+import { Text } from 'react-native';
+import ReactTestRenderer, { act } from 'react-test-renderer';
+import App from '../App';
+import { native } from '../src/native';
+
+jest.mock('react-native-safe-area-context', () => {
+  const { View } = require('react-native');
+  return { SafeAreaProvider: View, SafeAreaView: View };
+});
+jest.mock('../src/native', () => ({
+  native: {
+    loadConnection: jest.fn().mockResolvedValue(null),
+    saveConnection: jest
+      .fn()
+      .mockImplementation(value => Promise.resolve(value)),
+    play: jest.fn().mockResolvedValue(undefined),
+  },
+}));
+
+test('connects, selects an actual file, and hands the raw PLAY URL to native code', async () => {
+  globalThis.fetch = jest
+    .fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        records: [{ id: 1, name: '番組', startAt: 1000 }],
+        total: 1,
+      }),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        id: 1,
+        name: '番組',
+        videoFiles: [{ id: 7, name: 'AV1', type: 'encoded', size: 100 }],
+      }),
+    });
+  let tree: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = ReactTestRenderer.create(<App />);
+  });
+  const root = tree!.root;
+  await act(async () => {
+    root
+      .findAll(
+        node =>
+          node.props.accessibilityLabel === 'サーバーURL' &&
+          typeof node.props.onChangeText === 'function',
+      )[0]
+      .props.onChangeText('https://example.com/neo/');
+  });
+  await act(async () => {
+    root
+      .findAll(
+        node =>
+          node.props.accessibilityLabel === '保存して接続' &&
+          typeof node.props.onPress === 'function',
+      )[0]
+      .props.onPress();
+  });
+  await act(async () => {
+    root
+      .findAll(
+        node =>
+          node.props.accessibilityLabel === '番組の再生ファイルを選択' &&
+          typeof node.props.onPress === 'function',
+      )[0]
+      .props.onPress();
+  });
+  await act(async () => {
+    root
+      .findAll(
+        node =>
+          node.props.accessibilityRole === 'button' &&
+          typeof node.props.onPress === 'function' &&
+          node.findAllByType(Text).some(text => text.props.children === 'AV1'),
+      )[0]
+      .props.onPress();
+  });
+  expect(native.play).toHaveBeenCalledWith(
+    expect.objectContaining({
+      url: 'https://example.com/neo/api/videos/7',
+      title: '番組',
+    }),
+  );
+  await act(async () => {
+    tree!.unmount();
+  });
+});
