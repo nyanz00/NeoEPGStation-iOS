@@ -16,6 +16,44 @@ test('preserves reverse-proxy subpaths and removes the optional API suffix', () 
 });
 
 test.each([
+  ['https://recorder.example.ts.net/#/', 'https://recorder.example.ts.net'],
+  [
+    'https://recorder.example.ts.net/neo/#/recorded?page=2',
+    'https://recorder.example.ts.net/neo',
+  ],
+  ['http://192.168.1.2:8888/#/recorded', 'http://192.168.1.2:8888'],
+])('accepts Web UI bookmarks: %s', (input, expected) => {
+  expect(normalizeServerURL(input)).toBe(expected);
+});
+
+test('normalizes bookmarks with the actual React Native URL implementation', () => {
+  const original = globalThis.URL;
+  const { URL: NativeURL } = jest.requireActual<{ URL: typeof URL }>(
+    'react-native/Libraries/Blob/URL',
+  );
+  try {
+    globalThis.URL = NativeURL;
+    expect(normalizeServerURL('https://recorder.example.ts.net/neo/#/')).toBe(
+      'https://recorder.example.ts.net/neo',
+    );
+    expect(() => normalizeServerURL('https://user:secret@example.com/#/')).toThrow();
+  } finally {
+    globalThis.URL = original;
+  }
+});
+
+test('requests newest recordings first on every page', async () => {
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ records: [], total: 0 }),
+  });
+  await getRecordings(connection, 30);
+  const requested = new URL((globalThis.fetch as jest.Mock).mock.calls[0][0]);
+  expect(requested.searchParams.get('isReverse')).toBe('false');
+  expect(requested.searchParams.get('offset')).toBe('30');
+});
+
+test.each([
   'file:///tmp/video',
   'https://user:secret@example.com',
   'https://example.com?token=test',

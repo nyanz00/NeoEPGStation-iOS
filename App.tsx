@@ -139,9 +139,11 @@ function AppContent() {
     try {
       const url = normalizeServerURL(form.url);
       void load({ ...form, url }, 0, true);
-    } catch {
+    } catch (cause) {
       setError(
-        'http:// または https:// から始まるサーバーURLを入力してください。認証情報は下の欄で指定します。',
+        cause instanceof Error
+          ? cause.message
+          : 'サーバーURLを確認してください。',
       );
     }
   }

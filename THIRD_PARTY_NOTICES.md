@@ -6,6 +6,10 @@ Its notice is preserved in `licenses/ReactNativeTemplate-MIT.txt`.
 React and React Native are provided under the MIT license.
 Other JavaScript dependencies retain their respective notices in their packages.
 
+URL parsing uses [react-native-url-polyfill](https://github.com/charpeni/react-native-url-polyfill)
+4.0.0 under the MIT license. Its notice is preserved in
+`licenses/ReactNativeURLPolyfill-MIT.txt` and included in the IPA.
+
 VLCKit and libVLC are VideoLAN projects distributed under LGPL-2.1-or-later;
 the bundled framework and its components have their own notices and licenses.
 The initial unmodified framework is downloaded from:

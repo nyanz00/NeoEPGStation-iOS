@@ -1,4 +1,5 @@
 import type { Connection } from './native';
+import { URL } from 'react-native-url-polyfill';
 
 export interface VideoFile {
   id: number;
@@ -24,19 +25,31 @@ export interface Recordings {
 }
 
 export function normalizeServerURL(input: string): string {
-  const url = new URL(input.trim());
+  let url: InstanceType<typeof URL>;
+  try {
+    url = new URL(input.trim());
+  } catch {
+    throw new Error('サーバーURLの形式を確認してください。');
+  }
   if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) {
     throw new Error(
       'http:// または https:// から始まるURLを入力してください。',
     );
   }
-  if (url.username || url.password || url.search || url.hash) {
+  if (
+    url.username ||
+    url.password ||
+    url.search ||
+    (url.hash && !url.hash.startsWith('#/'))
+  ) {
     throw new Error(
       'URLに認証情報・クエリ・フラグメントを含めないでください。',
     );
   }
   return url
     .toString()
+    // Web bookmarks include the SPA route; it is not part of the server base.
+    .split('#')[0]
     .replace(/\/+$/, '')
     .replace(/\/api$/, '');
 }
@@ -116,7 +129,7 @@ export async function getRecordings(
 ): Promise<Recordings> {
   const result = await request<Recordings>(
     connection,
-    `/recorded?isHalfWidth=true&isReverse=true&limit=30&offset=${offset}`,
+    `/recorded?isHalfWidth=true&isReverse=false&limit=30&offset=${offset}`,
     signal,
   );
   if (
