@@ -2,7 +2,7 @@ name: iOS prototype
 
 on:
   push:
-    branches: [main, 'codex/**']
+    branches: [master, 'codex/**']
   pull_request:
   workflow_dispatch:
 
