@@ -39,8 +39,8 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
       view.delegate = self; view.isPaused = true
       addSubview(view); metal = view
     } catch { status = "Metal描画を開始できません。VLCの字幕表示を利用してください。" }
-    NotificationCenter.default.addObserver(self, selector: #selector(didBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
-    NotificationCenter.default.addObserver(self, selector: #selector(willForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
+    NotificationCenter.default.addObserver(self, selector: #selector(didBackground), name: UIApplication.willResignActiveNotification, object: nil)
+    NotificationCenter.default.addObserver(self, selector: #selector(willForeground), name: UIApplication.didBecomeActiveNotification, object: nil)
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
@@ -165,8 +165,8 @@ private final class NeoCommentSettings: UIViewController {
   override func viewDidLoad() {
     super.viewDidLoad(); view.backgroundColor = .systemBackground
     let title = UILabel(); title.text = "コメント描画"; title.font = .preferredFont(forTextStyle: .headline)
-    let close = UIButton(type: .system); close.setTitle("閉じる", for: .normal); close.addTarget(self, action: #selector(close), for: .touchUpInside)
-    let header = UIStackView(arrangedSubviews: [title, close]); header.distribution = .equalSpacing
+    let closeButton = UIButton(type: .system); closeButton.setTitle("閉じる", for: .normal); closeButton.addTarget(self, action: #selector(close), for: .touchUpInside)
+    let header = UIStackView(arrangedSubviews: [title, closeButton]); header.distribution = .equalSpacing
     status.numberOfLines = 0; diagnostics.font = .preferredFont(forTextStyle: .caption1); diagnostics.numberOfLines = 0
     let label = UILabel(); label.text = "専用コメント描画"
     let toggleRow = UIStackView(arrangedSubviews: [label, toggle]); toggleRow.distribution = .equalSpacing
