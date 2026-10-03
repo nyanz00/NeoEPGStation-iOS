@@ -50,7 +50,7 @@ final class NeoNative: NSObject {
     }
     let saved = ["url": text, "username": value["username"] ?? "", "password": value["password"] ?? ""]
     guard let data = try? JSONSerialization.data(withJSONObject: saved) else {
-      reject("keychain-\(status)", "接続設定を保存できませんでした。", nil); return
+      reject("storage", "接続設定を保存できませんでした。", nil); return
     }
     let attributes: [String: Any] = [kSecValueData as String: data,
       kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
@@ -59,7 +59,7 @@ final class NeoNative: NSObject {
       status = SecItemAdd(keychainQuery.merging(attributes) { _, new in new } as CFDictionary, nil)
     }
     guard status == errSecSuccess else {
-      reject("storage", "接続設定を保存できませんでした。", nil); return
+      reject("keychain-\(status)", "接続設定を保存できませんでした。", nil); return
     }
     resolve(prepared(saved))
   }
