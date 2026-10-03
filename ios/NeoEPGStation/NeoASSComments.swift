@@ -105,11 +105,12 @@ enum NeoASSComments {
     var styleFormat: [String] = [], eventFormat: [String] = []
     var styles: [String: CommentStyle] = [:], comments: [NativeComment] = []
     for raw in ass.components(separatedBy: .newlines) {
-      let line = raw.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\u{feff}", with: "")
-      if line.hasPrefix("[") && line.hasSuffix("]") { section = String(line.dropFirst().dropLast()).lowercased(); continue }
+      let line = String(raw.drop(while: { $0 == " " || $0 == "\t" || $0 == "\u{feff}" }))
+      let sectionLine = line.trimmingCharacters(in: .whitespaces)
+      if sectionLine.hasPrefix("[") && sectionLine.hasSuffix("]") { section = String(sectionLine.dropFirst().dropLast()).lowercased(); continue }
       guard let separator = line.firstIndex(of: ":") else { continue }
       let name = line[..<separator].lowercased()
-      let value = String(line[line.index(after: separator)...]).trimmingCharacters(in: .whitespaces)
+      let value = String(line[line.index(after: separator)...].drop(while: { $0 == " " || $0 == "\t" }))
       if section == "script info" {
         if name == "playresx" { width = try dimension(value) }
         if name == "playresy" { height = try dimension(value) }
@@ -131,7 +132,7 @@ enum NeoASSComments {
           style.shadow = try number(fields["shadow"], default: 0)
           style.scaleX = try number(fields["scalex"], default: 100) / 100
           style.scaleY = try number(fields["scaley"], default: 100) / 100
-          style.alignment = Int(try number(fields["alignment"], default: 2))
+          style.alignment = try integer(fields["alignment"], default: 2, range: 1...9)
           style.marginL = try number(fields["marginl"], default: 20)
           style.marginR = try number(fields["marginr"], default: 20)
           style.marginV = try number(fields["marginv"], default: 20)
@@ -145,12 +146,13 @@ enum NeoASSComments {
       } else if section == "events" {
         if name == "format" { eventFormat = format(value) }
         if name == "dialogue" {
+          guard eventFormat.last == "text" else { throw CommentParseError.invalid("Textフィールド") }
           let fields = try fields(value, format: eventFormat)
           let start = try timestamp(fields["start"] ?? ""), end = try timestamp(fields["end"] ?? "")
           guard end > start else { throw CommentParseError.invalid("表示時間") }
           guard let base = styles[(fields["style"] ?? "Default").lowercased()] else { throw CommentParseError.invalid("スタイル参照") }
           if !(fields["effect"] ?? "").isEmpty { throw CommentParseError.unsupported("Effect") }
-          var comment = NativeComment(id: comments.count, layer: Int(try number(fields["layer"], default: 0)),
+          var comment = NativeComment(id: comments.count, layer: try integer(fields["layer"], default: 0, range: -100000...100000),
             start: start, end: end, text: "", style: base)
           for (field, update) in [("marginl", 0), ("marginr", 1), ("marginv", 2)] {
             let margin = try number(fields[field], default: 0)
@@ -211,7 +213,7 @@ enum NeoASSComments {
     case "fs": comment.style.size = try number(value, default: comment.style.size)
     case "fscx": comment.style.scaleX = try number(value, default: 100) / 100
     case "fscy": comment.style.scaleY = try number(value, default: 100) / 100
-    case "an": comment.style.alignment = Int(try number(value, default: 2))
+    case "an": comment.style.alignment = try integer(value, default: 2, range: 1...9)
     case "bord": comment.style.outline = try number(value, default: 0)
     case "shad": comment.style.shadow = try number(value, default: 0)
     case "b", "i":
@@ -250,19 +252,25 @@ enum NeoASSComments {
     guard let result = Double(text.trimmingCharacters(in: .whitespaces)), result.isFinite else { throw CommentParseError.invalid("数値") }
     return result
   }
+  private static func integer(_ value: String?, default fallback: Int, range: ClosedRange<Int>) throws -> Int {
+    let result = try number(value, default: Double(fallback))
+    guard result >= Double(range.lowerBound), result <= Double(range.upperBound), result.rounded() == result else { throw CommentParseError.invalid("整数値") }
+    return Int(result)
+  }
   private static func format(_ value: String) -> [String] { value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() } }
   private static func fields(_ value: String, format: [String]) throws -> [String: String] {
     guard !format.isEmpty, Set(format).count == format.count else { throw CommentParseError.invalid("Format") }
     let values = value.split(separator: ",", maxSplits: format.count - 1, omittingEmptySubsequences: false)
     guard values.count == format.count else { throw CommentParseError.invalid("フィールド数") }
-    return Dictionary(uniqueKeysWithValues: zip(format, values).map { ($0.0, String($0.1).trimmingCharacters(in: .whitespaces)) })
+    return Dictionary(uniqueKeysWithValues: zip(format, values).map { ($0.0, $0.0 == "text" ? String($0.1) : String($0.1).trimmingCharacters(in: .whitespaces)) })
   }
   private static func timestamp(_ value: String) throws -> Double {
     let parts = value.split(separator: ":").map(String.init)
     guard parts.count == 3 else { throw CommentParseError.invalid("時刻") }
     let hours = try number(parts[0], default: 0), minutes = try number(parts[1], default: 0), seconds = try number(parts[2], default: 0)
     guard hours >= 0, minutes >= 0, minutes < 60, seconds >= 0, seconds < 60 else { throw CommentParseError.invalid("時刻") }
-    return hours * 3600 + minutes * 60 + seconds
+    let result = hours * 3600 + minutes * 60 + seconds
+    guard result.isFinite else { throw CommentParseError.invalid("時刻") }; return result
   }
 }
 

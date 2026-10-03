@@ -58,7 +58,7 @@ final class NeoDanmakuRenderer {
   func prepare(_ comments: [NativeComment], pixelScale: Double = 1) {
     lock.lock(); wanted = Set(comments.map { key($0, pixelScale: pixelScale) }); lock.unlock()
     for comment in comments {
-      let key = key(comment, pixelScale: pixelScale)
+      let key = self.key(comment, pixelScale: pixelScale)
       lock.lock()
       guard cache[key] == nil, !pending.contains(key), failure == nil else { lock.unlock(); continue }
       pending.insert(key)
@@ -112,7 +112,7 @@ final class NeoDanmakuRenderer {
       width: max(1, Int(clip.maxX) - Int(clip.minX)), height: max(1, Int(clip.maxY) - Int(clip.minY))))
     var drawn = 0
     for comment in visible {
-      let key = key(comment, pixelScale: pixelScale)
+      let key = self.key(comment, pixelScale: pixelScale)
       lock.lock()
       var entry = cache[key]
       if entry != nil { tick += 1; entry!.used = tick; cache[key] = entry! }
@@ -214,13 +214,13 @@ final class NeoDanmakuRenderer {
       let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 640, height: 360, mipmapped: false)
       descriptor.usage = [.renderTarget, .shaderRead]; descriptor.storageMode = .shared
       guard let target = device.makeTexture(descriptor: descriptor) else { throw CommentParseError.invalid("テスト出力") }
-      func frame(time: Double, opacity: Float) throws -> ([UInt8], Int) {
+      func frame(time: Double, opacity: Float, size: Double = 1) throws -> ([UInt8], Int) {
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = target; pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
         pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
         guard let command = renderer.queue.makeCommandBuffer(), let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { throw CommentParseError.invalid("テスト描画") }
         let count = renderer.encode(timeline: timeline, time: time, viewport: CGSize(width: 640, height: 360),
-          videoRect: CGRect(x: 0, y: 0, width: 640, height: 360), sizeMultiplier: 1, opacity: opacity, encoder: encoder)
+          videoRect: CGRect(x: 0, y: 0, width: 640, height: 360), sizeMultiplier: size, opacity: opacity, encoder: encoder)
         encoder.endEncoding(); command.commit(); command.waitUntilCompleted()
         guard command.status == .completed else { throw CommentParseError.invalid("GPU実行") }
         var pixels = [UInt8](repeating: 0, count: 640 * 360 * 4)
@@ -229,8 +229,9 @@ final class NeoDanmakuRenderer {
       }
       let first = try frame(time: 3, opacity: 1), paused = try frame(time: 3, opacity: 1)
       let moved = try frame(time: 4, opacity: 1), hidden = try frame(time: 3, opacity: 0), ended = try frame(time: 9, opacity: 1)
+      let larger = try frame(time: 3, opacity: 1, size: 1.5)
       guard first.1 == 80, first.0.contains(where: { $0 > 0 }), first.0 == paused.0,
-        first.0 != moved.0, !hidden.0.contains(where: { $0 > 0 }), !ended.0.contains(where: { $0 > 0 }) else { throw CommentParseError.invalid("描画検証") }
+        first.0 != moved.0, first.0 != larger.0, !hidden.0.contains(where: { $0 > 0 }), !ended.0.contains(where: { $0 > 0 }) else { throw CommentParseError.invalid("描画検証") }
       if let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
         let provider = CGDataProvider(data: Data(first.0) as CFData),
         let image = CGImage(width: 640, height: 360, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 640 * 4,
@@ -239,7 +240,7 @@ final class NeoDanmakuRenderer {
         try? UIImage(cgImage: image).pngData()?.write(to: directory.appendingPathComponent("danmaku-smoke.png"))
       }
       return ["success": true, "comments": first.1, "cacheBytes": renderer.cachedBytes,
-        "checks": ["textRaster", "movement", "pause", "opacity", "endTime"]]
+        "checks": ["textRaster", "movement", "pause", "size", "opacity", "endTime"]]
     } catch { return ["success": false, "error": error.localizedDescription] }
   }
 #endif

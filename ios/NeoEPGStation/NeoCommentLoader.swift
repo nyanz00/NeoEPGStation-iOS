@@ -77,6 +77,12 @@ final class NeoCommentLoader: NSObject, URLSessionTaskDelegate {
 
   func close() { session.invalidateAndCancel() }
 
+  func permitsRedirect(to target: URL) -> Bool {
+    let root = source.path + "/subtitles"
+    return target.scheme == source.scheme && target.host == source.host && target.port == source.port &&
+      (target.path == root || target.path.hasPrefix(root + "/"))
+  }
+
   private func request(_ url: URL, completion: @escaping (Result<Data, Error>) -> Void) -> URLSessionDataTask {
     var request = URLRequest(url: url)
     request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -94,9 +100,9 @@ final class NeoCommentLoader: NSObject, URLSessionTaskDelegate {
 
   func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                   newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-    let target = request.url
-    let sameOrigin = target?.scheme == source.scheme && target?.host == source.host && target?.port == source.port
-    // Restrict even same-origin redirects to the API subtree of the selected file.
-    completionHandler(sameOrigin && (target?.path.hasPrefix(source.path + "/subtitles") ?? false) ? request : nil)
+    guard let target = request.url, permitsRedirect(to: target) else { completionHandler(nil); return }
+    var redirected = request
+    if let authorization = authorization { redirected.setValue(authorization, forHTTPHeaderField: "Authorization") }
+    completionHandler(redirected)
   }
 }
