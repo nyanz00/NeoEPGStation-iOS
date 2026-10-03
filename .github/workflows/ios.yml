@@ -49,6 +49,11 @@ jobs:
           xcodebuild -version
           node --version
           bundle exec pod --version
+      - name: Native ASS parser and playback clock tests
+        run: |
+          mkdir -p build/native-tests
+          swiftc ios/NeoEPGStation/NeoASSComments.swift tests/native/main.swift -o build/native-tests/comments
+          build/native-tests/comments
       - name: Prepare simulator
         run: python3 scripts/simulator-smoke.py --prepare
       - run: npm ci

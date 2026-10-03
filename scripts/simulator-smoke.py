@@ -51,3 +51,8 @@ storage = json.loads((container / 'Documents/storage-smoke.json').read_text())
 Path('dist/storage-smoke.json').write_text(json.dumps(storage, indent=2) + '\n')
 if storage.get('success') is not True:
     raise RuntimeError(f"Keychain storage round-trip failed: {storage.get('error')}")
+danmaku = json.loads((container / 'Documents/danmaku-smoke.json').read_text())
+Path('dist/danmaku-smoke.json').write_text(json.dumps(danmaku, indent=2) + '\n')
+if danmaku.get('success') is not True:
+    raise RuntimeError(f"Native comment rendering failed: {danmaku.get('error')}")
+Path('dist/danmaku-smoke.png').write_bytes((container / 'Documents/danmaku-smoke.png').read_bytes())

@@ -1,6 +1,7 @@
 #import "NeoPlayerController.h"
 #import <AVFoundation/AVFoundation.h>
 #import <VLCKit/VLCKit.h>
+#import "NeoEPGStation-Swift.h"
 
 @interface NeoPlayerController () <VLCDrawable, VLCPictureInPictureDrawable,
   VLCPictureInPictureMediaControlling, VLCMediaPlayerDelegate, VLCCustomDialogRendererProtocol>
@@ -19,6 +20,11 @@
 @property (nonatomic) UIButton *playButton;
 @property (nonatomic) UIButton *pipButton;
 @property (nonatomic) UIButton *subtitleButton;
+@property (nonatomic) UIButton *commentButton;
+@property (nonatomic) UILabel *commentLabel;
+@property (nonatomic) NeoCommentOverlay *comments;
+@property (nonatomic) NSMutableSet<NSString *> *suppressedCommentTracks;
+@property (nonatomic) BOOL buffering;
 @property (nonatomic) UISlider *timeline;
 @property (nonatomic, weak) id<VLCPictureInPictureWindowControlling> pipController;
 @property (nonatomic) NSTimer *timer;
@@ -65,7 +71,11 @@
   self.timeLabel = [self label]; self.timeLabel.text = @"0:00";
   self.playButton = [self button:@"一時停止" action:@selector(togglePlayback)];
   self.pipButton = [self button:@"PiP" action:@selector(startPiP)]; self.pipButton.enabled = NO;
+  self.pipButton.accessibilityLabel = @"PiP（専用コメントの合成は未対応）";
   self.subtitleButton = [self button:@"字幕" action:@selector(showSubtitles)];
+  self.commentButton = [self button:@"コメント" action:@selector(showComments)];
+  self.commentLabel = [self label];
+  self.commentLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
   UIButton *back = [self button:@"−10秒" action:@selector(backward)];
   UIButton *forward = [self button:@"＋10秒" action:@selector(forward)];
   UIButton *close = [self button:@"閉じる" action:@selector(closePlayer)];
@@ -75,9 +85,9 @@
   [self.timeline addTarget:self action:@selector(cancelScrubbing) forControlEvents:UIControlEventTouchCancel];
   UIStackView *header = [[UIStackView alloc] initWithArrangedSubviews:@[title, close]];
   header.alignment = UIStackViewAlignmentCenter; header.spacing = 16;
-  UIStackView *buttons = [[UIStackView alloc] initWithArrangedSubviews:@[back, self.playButton, forward, self.subtitleButton, self.pipButton]];
+  UIStackView *buttons = [[UIStackView alloc] initWithArrangedSubviews:@[back, self.playButton, forward, self.subtitleButton, self.commentButton, self.pipButton]];
   buttons.distribution = UIStackViewDistributionFillEqually; buttons.spacing = 4;
-  UIStackView *controls = [[UIStackView alloc] initWithArrangedSubviews:@[self.statusLabel, self.timeLabel, self.timeline, buttons]];
+  UIStackView *controls = [[UIStackView alloc] initWithArrangedSubviews:@[self.statusLabel, self.commentLabel, self.timeLabel, self.timeline, buttons]];
   controls.axis = UILayoutConstraintAxisVertical; controls.spacing = 6;
   header.translatesAutoresizingMaskIntoConstraints = NO; controls.translatesAutoresizingMaskIntoConstraints = NO;
   [self.view addSubview:header]; [self.view addSubview:controls];
@@ -104,7 +114,8 @@
   self.dialogs = [[VLCDialogProvider alloc] initWithLibrary:self.player.libraryInstance customUI:YES];
   self.dialogs.customRenderer = self;
   self.player.delegate = self; self.player.drawable = self;
-  self.player.timeChangeUpdateInterval = 0.5;
+  // The comment display link samples VLC's native clock, not the 0.5s UI timer.
+  self.player.timeChangeUpdateInterval = 1.0 / 60.0;
   VLCMedia *media = [VLCMedia mediaWithURL:self.sourceURL];
   [media addOption:[NSString stringWithFormat:@":network-caching=%ld", (long)self.networkCaching]];
   self.player.media = media;
@@ -113,6 +124,17 @@
   [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(backgrounded)
     name:UIApplicationDidEnterBackgroundNotification object:nil];
   __weak typeof(self) weakSelf = self;
+  self.suppressedCommentTracks = [NSMutableSet new];
+  self.comments = [[NeoCommentOverlay alloc] initWithFrame:self.movieView.bounds];
+  self.comments.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+  self.comments.timeProvider = ^double { return weakSelf.player.time.value.doubleValue / 1000.0; };
+  self.comments.runningProvider = ^BOOL {
+    return weakSelf.player.isPlaying && !weakSelf.scrubbing && !weakSelf.buffering && !weakSelf.closing;
+  };
+  self.comments.onChange = ^{ [weakSelf updateCommentState]; };
+  [self.movieView addSubview:self.comments];
+  [self.comments configureWithSource:self.sourceURL username:self.username password:self.password];
+  [self updateCommentState];
   self.timer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer) { [weakSelf updateControls]; }];
   [self.player play];
 }
@@ -132,6 +154,10 @@
   }]];
   for (VLCMediaPlayerTrack *track in self.player.textTracks) {
     [menu addAction:[UIAlertAction actionWithTitle:track.trackName style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+      // Explicit VLC selection remains available for comparison and unsupported ASS.
+      if ([NeoCommentOverlay isCommentName:track.trackName] || [NeoCommentOverlay isCommentName:track.trackDescription ?: @""]) {
+        weakSelf.comments.enabled = NO;
+      }
       [weakSelf.player selectTextTracks:@[track]];
     }]];
   }
@@ -139,6 +165,23 @@
   menu.popoverPresentationController.sourceView = self.subtitleButton;
   menu.popoverPresentationController.sourceRect = self.subtitleButton.bounds;
   [self presentViewController:menu animated:YES completion:nil];
+}
+
+- (void)showComments { [self presentViewController:[self.comments makeSettingsController] animated:YES completion:nil]; }
+
+- (void)updateCommentState {
+  if (self.closing) { return; }
+  self.commentLabel.text = [NSString stringWithFormat:@"%@%@", self.comments.status,
+    self.comments.enabled ? (self.comments.ready ? @" · PiP合成未対応" : @"") : @" · 専用描画オフ"];
+  for (VLCMediaPlayerTrack *track in self.player.textTracks) {
+    if (![NeoCommentOverlay isCommentName:track.trackName] && ![NeoCommentOverlay isCommentName:track.trackDescription ?: @""]) { continue; }
+    if (self.comments.ready && self.comments.enabled && track.isSelected) {
+      [self.suppressedCommentTracks addObject:track.trackId]; track.selected = NO;
+    } else if (!self.comments.ready && self.comments.enabled && [self.suppressedCommentTracks containsObject:track.trackId]) {
+      // A rendering error restores the prior VLC comment track, rather than losing it.
+      track.selected = YES; [self.suppressedCommentTracks removeObject:track.trackId];
+    }
+  }
 }
 
 - (void)updateControls {
@@ -151,6 +194,13 @@
   self.timeLabel.text = [NSString stringWithFormat:@"%lld:%02lld / %lld:%02lld · %.0f × %.0f",
     current / 60, current % 60, length / 60, length % 60, self.player.videoSize.width, self.player.videoSize.height];
   self.subtitleButton.enabled = self.player.textTracks.count > 0;
+  CGSize size = self.player.videoSize;
+  VLCMediaVideoTrack *video = self.player.media.videoTracks.firstObject.video;
+  if (video.sourceAspectRatio > 0 && video.sourceAspectRatioDenominator > 0) {
+    size.width *= (double)video.sourceAspectRatio / video.sourceAspectRatioDenominator;
+  }
+  self.comments.videoSize = size;
+  [self updateCommentState];
 }
 
 - (void)mediaPlayerStateChanged:(VLCMediaPlayerState)state {
@@ -168,6 +218,7 @@
 
 - (void)mediaPlayerBufferingChanged:(float)progress {
   dispatch_async(dispatch_get_main_queue(), ^{
+    self.buffering = progress < 1;
     if (!self.closing && progress < 1) { self.statusLabel.text = [NSString stringWithFormat:@"バッファリング %.0f%%", progress * 100]; }
   });
 }
@@ -228,7 +279,10 @@
   }
 }
 
-- (void)addSubview:(UIView *)view { [self.movieView addSubview:view]; }
+- (void)addSubview:(UIView *)view {
+  [self.movieView addSubview:view];
+  if (self.comments) { [self.movieView bringSubviewToFront:self.comments]; }
+}
 - (CGRect)bounds { return self.movieView.bounds; }
 - (id<VLCPictureInPictureMediaControlling>)mediaController { return self; }
 - (void (^)(id<VLCPictureInPictureWindowControlling>))pictureInPictureReady {
@@ -242,7 +296,9 @@
     });
   };
 }
-- (void)startPiP { [self.pipController startPictureInPicture]; }
+- (void)startPiP {
+  [self.pipController startPictureInPicture];
+}
 - (void)play { [self.player play]; }
 - (void)pause { [self.player pause]; }
 - (void)seekBy:(int64_t)offset completion:(dispatch_block_t)completion {
@@ -257,6 +313,7 @@
   if (self.closing) { return; } self.closing = YES;
   self.view.userInteractionEnabled = NO;
   [self.timer invalidate]; self.timer = nil;
+  [self.comments stop];
   [NSNotificationCenter.defaultCenter removeObserver:self];
   if (self.loginReference) { [self.dialogs dismissDialogWithReference:self.loginReference]; }
   self.pipController.stateChangeEventHandler = nil; [self.pipController stopPictureInPicture]; self.pipController = nil;

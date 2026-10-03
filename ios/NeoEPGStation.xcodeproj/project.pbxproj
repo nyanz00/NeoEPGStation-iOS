@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+    BABC00000000000000000001 /* NeoASSComments.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABC00000000000000000001; };
+    BABC00000000000000000002 /* NeoDanmakuRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABC00000000000000000002; };
+    BABC00000000000000000003 /* NeoCommentLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABC00000000000000000003; };
+    BABC00000000000000000004 /* NeoCommentOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = AABC00000000000000000004; };
+    BABC00000000000000000005 /* NeoDanmaku.metal in Sources */ = {isa = PBXBuildFile; fileRef = AABC00000000000000000005; };
 		0C80B921A6F3F58F76C31292 /* libPods-NeoEPGStation.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5DCACB8F33CDC322A6C60F78 /* libPods-NeoEPGStation.a */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
@@ -17,6 +22,11 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+    AABC00000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoASSComments.swift; path = NeoEPGStation/NeoASSComments.swift; sourceTree = "<group>"; };
+    AABC00000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoDanmakuRenderer.swift; path = NeoEPGStation/NeoDanmakuRenderer.swift; sourceTree = "<group>"; };
+    AABC00000000000000000003 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoCommentLoader.swift; path = NeoEPGStation/NeoCommentLoader.swift; sourceTree = "<group>"; };
+    AABC00000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoCommentOverlay.swift; path = NeoEPGStation/NeoCommentOverlay.swift; sourceTree = "<group>"; };
+    AABC00000000000000000005 = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; name = NeoDanmaku.metal; path = NeoEPGStation/NeoDanmaku.metal; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* NeoEPGStation.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NeoEPGStation.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = NeoEPGStation/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = NeoEPGStation/Info.plist; sourceTree = "<group>"; };
@@ -49,6 +59,11 @@
 		13B07FAE1A68108700A75B9A /* NeoEPGStation */ = {
 			isa = PBXGroup;
 			children = (
+        AABC00000000000000000001,
+        AABC00000000000000000002,
+        AABC00000000000000000003,
+        AABC00000000000000000004,
+        AABC00000000000000000005,
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				761780EC2CA45674006654EE /* AppDelegate.swift */,
 				61CA7AFF8955651AF048885B /* NeoEPGStation-Bridging-Header.h */,
@@ -257,6 +272,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+        BABC00000000000000000001,
+        BABC00000000000000000002,
+        BABC00000000000000000003,
+        BABC00000000000000000004,
+        BABC00000000000000000005,
 				761780ED2CA45674006654EE /* AppDelegate.swift in Sources */,
 				C5EC3F766E24819570B97E68 /* NeoPlayerController.m in Sources */,
 				0664AE7AE5FF72C928414151 /* NeoNativeBridge.m in Sources */,

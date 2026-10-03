@@ -29,7 +29,8 @@ Actionsの `NeoEPGStation-iOS-<run number>` ArtifactからZIPをダウンロー�
 6. 閉じた後に再度再生できること、再起動・IPA更新後に接続設定が残ることを確認する。
 
 キャッシュは最初は5秒。これはPLAYの調整の出発点であり、高ビットレート動画の停止を防ぐ完成実装ではない。
-字幕のサイズ・不透明度、コメント付きPiPの合成、STREAMING、放映中は後続の実装対象。
+NicoJKコメント専用描画とサイズ・不透明度の試作は `docs/comment-rendering.md` を参照する。
+コメント付きPiPの合成、STREAMING、放映中は後続の実装対象。
 現時点のPiPはVLCKitの標準経路なので、字幕がPiPに出ることは保証しない。
 
 ## ネットワークと保存

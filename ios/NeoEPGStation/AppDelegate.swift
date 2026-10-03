@@ -17,6 +17,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 #if targetEnvironment(simulator)
     if ProcessInfo.processInfo.environment["NEO_EPG_STORAGE_SMOKE"] == "1" {
       NeoNative.runStorageSmokeTest()
+      DispatchQueue.global(qos: .userInitiated).async {
+        let result = NeoDanmakuRenderer.smokeTest()
+        if let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+          let data = try? JSONSerialization.data(withJSONObject: result) {
+          try? data.write(to: directory.appendingPathComponent("danmaku-smoke.json"))
+        }
+      }
     }
 #endif
     let delegate = ReactNativeDelegate()
