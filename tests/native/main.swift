@@ -46,6 +46,18 @@ rejects(ass(#"Dialogue: 0,0:00:00.00,0:00:08.00,Default,,0,0,0,,{\t(0,100,\fs90)
 rejects(ass(#"Dialogue: 0,0:00:00.00,0:00:08.00,Default,,0,0,0,,{\p1}m 0 0 l 1 1"#), "Do not treat ASS drawings as text")
 rejects(ass(#"Dialogue: 0,0:00:00.00,0:00:08.00,Default,,0,0,0,,first{\c&H00FF00&}second"#), "Do not flatten mid-text styling")
 rejects(ass("Dialogue: 0,broken,0:00:08.00,Default,,0,0,0,,invalid"), "Invalid timestamps")
+let emptyIntervals = try NeoASSComments.parse(ass(#"""
+Dialogue: 0,0:00:10.00,0:00:10.00,Default,,0,0,0,,{\move(1920,100,-400,100)}表示時間なし
+Dialogue: 0,0:00:12.00,0:00:11.00,Default,,0,0,0,,{\t(0,100,\fs90)}逆転した区間
+Dialogue: 0,0:00:10.00,0:00:18.00,Default,,0,0,0,,{\move(1920,100,-400,100)}表示するコメント
+"""#))
+check(emptyIntervals.comments.count == 1 && emptyIntervals.comments[0].text == "表示するコメント", "Empty intervals do not reject the whole track")
+check(emptyIntervals.visible(at: 10).count == 1 && emptyIntervals.visible(at: 18).isEmpty, "Valid comments keep their original timing")
+do {
+  _ = try NeoASSComments.parse(ass("Dialogue: 0,0:00:10.00,0:00:10.00,Default,,0,0,0,,表示時間なし"))
+  fatalError("A track containing only empty intervals must not report success")
+} catch CommentParseError.empty {} catch { fatalError("Expected an empty track: \(error)") }
+rejects(ass("Dialogue: 0,broken,broken,Default,,0,0,0,,invalid"), "Malformed timestamps are not empty intervals")
 rejects(ass(#"Dialogue: 0,0:00:00.00,0:00:08.00,Default,,0,0,0,,{\an1e300}invalid"#), "Huge alignment must not trap an Int conversion")
 rejects(header.replacingOccurrences(of: "BorderStyle, Outline", with: "Name, Outline"), "Duplicate Format fields must not crash")
 check(NeoASSComments.isCommentName("NicoJK-1080T") && !NeoASSComments.isCommentName("日本語字幕"), "Comment metadata classification")

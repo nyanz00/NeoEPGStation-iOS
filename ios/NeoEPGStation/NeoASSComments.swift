@@ -149,7 +149,10 @@ enum NeoASSComments {
           guard eventFormat.last == "text" else { throw CommentParseError.invalid("Textフィールド") }
           let fields = try fields(value, format: eventFormat)
           let start = try timestamp(fields["start"] ?? ""), end = try timestamp(fields["end"] ?? "")
-          guard end > start else { throw CommentParseError.invalid("表示時間") }
+          // Real extracted NicoJK tracks can contain zero-duration events.
+          // Their [start, end) interval is empty, so they
+          // have nothing to draw. Do not reject all other comments in the track.
+          if end <= start { continue }
           guard let base = styles[(fields["style"] ?? "Default").lowercased()] else { throw CommentParseError.invalid("スタイル参照") }
           if !(fields["effect"] ?? "").isEmpty { throw CommentParseError.unsupported("Effect") }
           var comment = NativeComment(id: comments.count, layer: try integer(fields["layer"], default: 0, range: -100000...100000),
