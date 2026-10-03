@@ -3,6 +3,8 @@
 .DS_Store
 .local/
 dist/
+__pycache__/
+*.pyc
 *.xcresult/
 
 # Xcode

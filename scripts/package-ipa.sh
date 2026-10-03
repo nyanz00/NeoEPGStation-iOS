@@ -6,6 +6,11 @@ test -d "$app/Frameworks/VLCKit.framework"
 test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app/Info.plist")" = '18.0'
 mkdir -p dist/Payload
 ditto "$app" dist/Payload/NeoEPGStation.app
+mkdir -p dist/notices
+cp THIRD_PARTY_NOTICES.md dist/notices/
+cp licenses/ReactNativeTemplate-MIT.txt dist/notices/
+find ios/Pods/VLCKit -name 'COPYING*' -type f -exec cp {} dist/notices/ \;
+ditto dist/notices dist/Payload/NeoEPGStation.app/ThirdPartyNotices
 # Ad-hoc signing is for LiveContainer import, not App Store distribution.
 codesign --force --deep --sign - dist/Payload/NeoEPGStation.app
 codesign --verify --deep --strict dist/Payload/NeoEPGStation.app

@@ -2,6 +2,7 @@
 
 The initial application skeleton comes from the MIT-licensed
 [React Native Community Template](https://github.com/react-native-community/template).
+Its notice is preserved in `licenses/ReactNativeTemplate-MIT.txt`.
 React and React Native are provided under the MIT license.
 Other JavaScript dependencies retain their respective notices in their packages.
 

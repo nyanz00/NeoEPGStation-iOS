@@ -3,13 +3,16 @@
 #import <VLCKit/VLCKit.h>
 
 @interface NeoPlayerController () <VLCDrawable, VLCPictureInPictureDrawable,
-  VLCPictureInPictureMediaControlling, VLCMediaPlayerDelegate>
+  VLCPictureInPictureMediaControlling, VLCMediaPlayerDelegate, VLCCustomDialogRendererProtocol>
 @property (nonatomic) NSURL *sourceURL;
 @property (nonatomic) NSString *mediaTitle;
 @property (nonatomic) NSString *username;
 @property (nonatomic) NSString *password;
 @property (nonatomic) NSInteger networkCaching;
 @property (nonatomic) VLCMediaPlayer *player;
+@property (nonatomic) VLCDialogProvider *dialogs;
+@property (nonatomic) NSValue *loginReference;
+@property (nonatomic) UIAlertController *loginAlert;
 @property (nonatomic) UIView *movieView;
 @property (nonatomic) UILabel *statusLabel;
 @property (nonatomic) UILabel *timeLabel;
@@ -21,6 +24,7 @@
 @property (nonatomic) NSTimer *timer;
 @property (nonatomic) BOOL pipActive;
 @property (nonatomic) BOOL closing;
+@property (nonatomic) BOOL finishedClosing;
 @property (nonatomic) BOOL scrubbing;
 @property (nonatomic) BOOL resumeAfterInterruption;
 @end
@@ -96,16 +100,13 @@
       ![audio setActive:YES error:&error]) {
     self.statusLabel.text = @"音声セッションを開始できませんでした。"; return;
   }
-  self.player = [VLCMediaPlayer new]; self.player.delegate = self; self.player.drawable = self;
+  self.player = [[VLCMediaPlayer alloc] initWithOptions:@[]];
+  self.dialogs = [[VLCDialogProvider alloc] initWithLibrary:self.player.libraryInstance customUI:YES];
+  self.dialogs.customRenderer = self;
+  self.player.delegate = self; self.player.drawable = self;
   self.player.timeChangeUpdateInterval = 0.5;
   VLCMedia *media = [VLCMedia mediaWithURL:self.sourceURL];
   [media addOption:[NSString stringWithFormat:@":network-caching=%ld", (long)self.networkCaching]];
-  if (self.username.length) {
-    [media addOption:[@":http-user=" stringByAppendingString:self.username]];
-    [media addOption:[@":http-pwd=" stringByAppendingString:self.password]];
-  }
-  // Don't keep a second application copy of the credentials after media setup.
-  self.username = @""; self.password = @"";
   self.player.media = media;
   [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(interrupted:)
     name:AVAudioSessionInterruptionNotification object:audio];
@@ -154,7 +155,10 @@
 
 - (void)mediaPlayerStateChanged:(VLCMediaPlayerState)state {
   dispatch_async(dispatch_get_main_queue(), ^{
-    if (self.closing) { return; }
+    if (self.closing) {
+      if (state == VLCMediaPlayerStateStopped) { [self finishClosing]; }
+      return;
+    }
     self.statusLabel.text = state == VLCMediaPlayerStateError
       ? @"再生エラー · 接続・ファイル形式・認証を確認してください。"
       : [NSString stringWithFormat:@"PLAY · %@ · キャッシュ %ld秒", VLCMediaPlayerStateToString(state), (long)self.networkCaching / 1000];
@@ -179,6 +183,51 @@
 }
 - (void)backgrounded { if (!self.pipActive) { [self.player pause]; } }
 
+// VLC 4's HTTP access uses authentication dialogs, not the old http-user/pwd options.
+- (void)showLoginWithTitle:(NSString *)title message:(NSString *)message defaultUsername:(NSString *)username
+         askingForStorage:(BOOL)askingForStorage withReference:(NSValue *)reference {
+  if (self.closing || self.loginReference) { [self.dialogs dismissDialogWithReference:reference]; return; }
+  self.loginReference = reference;
+  UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"再生の認証" message:message preferredStyle:UIAlertControllerStyleAlert];
+  self.loginAlert = alert;
+  [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
+    field.placeholder = @"ユーザー名"; field.text = self.username.length ? self.username : username;
+    field.autocapitalizationType = UITextAutocapitalizationTypeNone; field.autocorrectionType = UITextAutocorrectionTypeNo;
+  }];
+  [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
+    field.placeholder = @"パスワード"; field.secureTextEntry = YES; field.text = self.password;
+  }];
+  __weak typeof(self) weakSelf = self;
+  __weak UIAlertController *weakAlert = alert;
+  [alert addAction:[UIAlertAction actionWithTitle:@"認証" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    if (!weakSelf.loginReference) { return; }
+    [weakSelf.dialogs postUsername:weakAlert.textFields[0].text ?: @"" andPassword:weakAlert.textFields[1].text ?: @""
+      forDialogReference:reference store:NO];
+    weakSelf.loginReference = nil; weakSelf.loginAlert = nil;
+  }]];
+  [alert addAction:[UIAlertAction actionWithTitle:@"キャンセル" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
+    [weakSelf.dialogs dismissDialogWithReference:reference]; weakSelf.loginReference = nil; weakSelf.loginAlert = nil;
+  }]];
+  [self presentViewController:alert animated:YES completion:nil];
+}
+- (void)showErrorWithTitle:(NSString *)title message:(NSString *)message {
+  if (!self.closing) { self.statusLabel.text = @"再生エラー · 接続・ファイル形式・認証を確認してください。"; }
+}
+- (void)showQuestionWithTitle:(NSString *)title message:(NSString *)message type:(VLCDialogQuestionType)type
+                cancelString:(NSString *)cancelString action1String:(NSString *)action1String
+               action2String:(NSString *)action2String withReference:(NSValue *)reference {
+  // Never silently accept certificate exceptions or other access questions.
+  [self.dialogs dismissDialogWithReference:reference];
+}
+- (void)showProgressWithTitle:(NSString *)title message:(NSString *)message isIndeterminate:(BOOL)isIndeterminate
+                    position:(float)position cancelString:(NSString *)cancelString withReference:(NSValue *)reference {}
+- (void)updateProgressWithReference:(NSValue *)reference message:(NSString *)message position:(float)position {}
+- (void)cancelDialogWithReference:(NSValue *)reference {
+  if ([reference isEqual:self.loginReference]) {
+    [self.loginAlert dismissViewControllerAnimated:YES completion:nil]; self.loginAlert = nil; self.loginReference = nil;
+  }
+}
+
 - (void)addSubview:(UIView *)view { [self.movieView addSubview:view]; }
 - (CGRect)bounds { return self.movieView.bounds; }
 - (id<VLCPictureInPictureMediaControlling>)mediaController { return self; }
@@ -196,7 +245,9 @@
 - (void)startPiP { [self.pipController startPictureInPicture]; }
 - (void)play { [self.player play]; }
 - (void)pause { [self.player pause]; }
-- (void)seekBy:(int64_t)offset completion:(dispatch_block_t)completion { [self.player jumpWithOffset:(int)offset completion:completion]; }
+- (void)seekBy:(int64_t)offset completion:(dispatch_block_t)completion {
+  if (![self.player jumpWithOffset:(int)offset completion:completion]) { completion(); }
+}
 - (int64_t)mediaLength { return self.player.media.length.value.longLongValue; }
 - (int64_t)mediaTime { return self.player.time.value.longLongValue; }
 - (BOOL)isMediaSeekable { return self.player.isSeekable; }
@@ -204,11 +255,25 @@
 
 - (void)closePlayer {
   if (self.closing) { return; } self.closing = YES;
+  self.view.userInteractionEnabled = NO;
   [self.timer invalidate]; self.timer = nil;
   [NSNotificationCenter.defaultCenter removeObserver:self];
+  if (self.loginReference) { [self.dialogs dismissDialogWithReference:self.loginReference]; }
   self.pipController.stateChangeEventHandler = nil; [self.pipController stopPictureInPicture]; self.pipController = nil;
+  // VLC 4 stops asynchronously. Keep the drawable and player alive until stopped.
+  if (!self.player || self.player.state == VLCMediaPlayerStateStopped || self.player.state == VLCMediaPlayerStateNothingSpecial) {
+    [self finishClosing];
+  } else {
+    self.statusLabel.text = @"停止中…";
+    [self.player stop];
+  }
+}
+- (void)finishClosing {
+  if (self.finishedClosing) { return; } self.finishedClosing = YES;
   self.player.delegate = nil;
-  [self.player stop]; self.player.drawable = nil;
+  self.player.drawable = nil;
+  self.dialogs.customRenderer = nil; self.dialogs = nil;
+  self.username = @""; self.password = @"";
   self.player = nil;
   [AVAudioSession.sharedInstance setActive:NO withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
   void (^callback)(void) = self.onClose; self.onClose = nil;

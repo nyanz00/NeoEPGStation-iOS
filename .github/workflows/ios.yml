@@ -79,7 +79,12 @@ jobs:
         with:
           name: NeoEPGStation-iOS-${{ github.run_number }}
           path: |
-            dist/
+            dist/*.ipa
+            dist/*.sha256
+            dist/*.json
+            dist/*.log
+            dist/*.txt
+            dist/*.png
             ios/Podfile.lock
             Gemfile.lock
           retention-days: 7
