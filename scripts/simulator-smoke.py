@@ -2,22 +2,33 @@
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
-def run(*args):
-    return subprocess.check_output(args, text=True, timeout=120).strip()
+def run(*args, timeout=120):
+    return subprocess.check_output(args, text=True, timeout=timeout).strip()
 
-available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '--json'))['devices']
-devices = [d for runtime, items in available.items() if '.iOS-' in runtime
-           for d in items if d['isAvailable'] and d['name'].startswith('iPhone')]
-if not devices:
-    raise RuntimeError('No installed iPhone simulator is available')
-device = devices[0]
-app = Path('build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app')
-if device['state'] != 'Booted':
+Path('dist').mkdir(exist_ok=True)
+device_file = Path('dist/simulator-device.json')
+if '--prepare' in sys.argv or not device_file.exists():
+    available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '--json'))['devices']
+    devices = [(runtime, d) for runtime, items in available.items() if '.iOS-' in runtime
+               for d in items if d['isAvailable'] and d['name'].startswith('iPhone')]
+    if not devices:
+        raise RuntimeError('No installed iPhone simulator is available')
+    runtime, source = devices[0]
+    types = json.loads(run('xcrun', 'simctl', 'list', 'devicetypes', '--json'))['devicetypes']
+    device_type = next(item['identifier'] for item in types if item['name'] == source['name'])
+    device = {'name': source['name'], 'udid': run('xcrun', 'simctl', 'create', 'NeoEPGStation-CI', device_type, runtime)}
+    device_file.write_text(json.dumps(device))
     run('xcrun', 'simctl', 'boot', device['udid'])
-run('xcrun', 'simctl', 'bootstatus', device['udid'], '-b')
+    if '--prepare' in sys.argv:
+        sys.exit(0)
+else:
+    device = json.loads(device_file.read_text())
+app = Path('build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app')
+run('xcrun', 'simctl', 'bootstatus', device['udid'], '-b', timeout=600)
 run('xcrun', 'simctl', 'install', device['udid'], str(app))
 os.environ['SIMCTL_CHILD_NEO_EPG_STORAGE_SMOKE'] = '1'
 try:
