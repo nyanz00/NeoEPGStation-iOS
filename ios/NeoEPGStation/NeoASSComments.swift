@@ -41,6 +41,22 @@ struct NativeComment {
   var start: Double, end: Double
   var text: String, style: CommentStyle
   var position: CommentPoint?, motion: CommentMotion?
+  var usesDanmakuTiming = false
+
+  // Match DPlayer: right edge to completely off the left edge, using the
+  // actual rendered text width even after font substitution or resizing.
+  func scrollingX(viewportWidth: Double, textWidth: Double, elapsed: Double) -> Double? {
+    guard usesDanmakuTiming, motion != nil else { return nil }
+    let progress = min(1, max(0, elapsed / (end - start)))
+    return viewportWidth - (viewportWidth + textWidth) * progress
+  }
+}
+
+enum CommentTiming: Equatable {
+  case ass, danmaku
+  // The prototype uses a full-screen player. DPlayer's full-screen defaults
+  // are 5.5s for scrolling and 4.5s for fixed comments, at speedRate 1.
+  static let scrollingDuration = 5.5, fixedDuration = 4.5
 }
 
 struct CommentTimeline {
@@ -100,7 +116,7 @@ enum NeoASSComments {
       options: [.regularExpression, .caseInsensitive]) != nil
   }
 
-  static func parse(_ ass: String) throws -> CommentTimeline {
+  static func parse(_ ass: String, timing: CommentTiming = .ass) throws -> CommentTimeline {
     var section = "", width = 384.0, height = 288.0
     var styleFormat: [String] = [], eventFormat: [String] = []
     var styles: [String: CommentStyle] = [:], comments: [NativeComment] = []
@@ -148,11 +164,14 @@ enum NeoASSComments {
         if name == "dialogue" {
           guard eventFormat.last == "text" else { throw CommentParseError.invalid("Textフィールド") }
           let fields = try fields(value, format: eventFormat)
-          let start = try timestamp(fields["start"] ?? ""), end = try timestamp(fields["end"] ?? "")
-          // Real extracted NicoJK tracks can contain zero-duration events.
-          // Their [start, end) interval is empty, so they
-          // have nothing to draw. Do not reject all other comments in the track.
-          if end <= start { continue }
+          let start = try timestamp(fields["start"] ?? "")
+          // Like the Web comment path, danmaku uses only the emission time.
+          // CM cutting can shorten or erase the ASS duration; keep the comment
+          // and let it travel at the normal rate across the cut boundary.
+          let end: Double
+          if timing == .danmaku { end = start + CommentTiming.scrollingDuration }
+          else { end = try timestamp(fields["end"] ?? "") }
+          if timing == .ass && end <= start { continue }
           guard let base = styles[(fields["style"] ?? "Default").lowercased()] else { throw CommentParseError.invalid("スタイル参照") }
           if !(fields["effect"] ?? "").isEmpty { throw CommentParseError.unsupported("Effect") }
           var comment = NativeComment(id: comments.count, layer: try integer(fields["layer"], default: 0, range: -100000...100000),
@@ -167,6 +186,14 @@ enum NeoASSComments {
           }
           try parseText(fields["text"] ?? "", comment: &comment)
           try validate(comment.style)
+          if timing == .danmaku {
+            comment.usesDanmakuTiming = true
+            let duration = comment.motion == nil ? CommentTiming.fixedDuration : CommentTiming.scrollingDuration
+            comment.end = start + duration
+            if var motion = comment.motion {
+              motion.start = 0; motion.end = duration; comment.motion = motion
+            }
+          }
           if !comment.text.isEmpty { comments.append(comment) }
         }
       } else if section == "v4 styles" { throw CommentParseError.unsupported("旧SSAスタイル") }

@@ -126,7 +126,8 @@ final class NeoDanmakuRenderer {
       let fallback = CommentPoint(x: column == 0 ? comment.style.marginL : column == 1 ? timeline.width / 2 : timeline.width - comment.style.marginR,
         y: row == 0 ? timeline.height - comment.style.marginV : row == 1 ? timeline.height / 2 : comment.style.marginV)
       let anchor = comment.motion?.point(elapsed: time - comment.start) ?? comment.position ?? fallback
-      let x = Double(videoRect.minX) + anchor.x * scaleX - width * Double(column) / 2
+      let x = Double(videoRect.minX) + (comment.scrollingX(viewportWidth: Double(videoRect.width),
+        textWidth: width, elapsed: time - comment.start) ?? (anchor.x * scaleX - width * Double(column) / 2))
       let y = Double(videoRect.minY) + anchor.y * scaleY - height * Double(2 - row) / 2
       if x + width < Double(clip.minX) || x > Double(clip.maxX) || y + height < Double(clip.minY) || y > Double(clip.maxY) { continue }
       func point(_ x: Double, _ y: Double) -> SIMD2<Float> {
@@ -204,10 +205,10 @@ final class NeoDanmakuRenderer {
       guard let device = MTLCreateSystemDefaultDevice() else { throw CommentParseError.invalid("Metalデバイス") }
       let renderer = try NeoDanmakuRenderer(device: device)
       let style = CommentStyle(size: 24, outline: 1)
-      let comments = (0..<80).map { index in NativeComment(id: index, layer: 0, start: 0, end: 8,
+      let comments = (0..<80).map { index in NativeComment(id: index, layer: 0, start: 0, end: 5.5,
         text: "コメント \(index)", style: style,
         position: nil, motion: CommentMotion(from: CommentPoint(x: 640, y: Double(index % 10) * 32 + 32),
-          to: CommentPoint(x: -160, y: Double(index % 10) * 32 + 32), start: 0, end: 8)) }
+          to: CommentPoint(x: -160, y: Double(index % 10) * 32 + 32), start: 0, end: 5.5), usesDanmakuTiming: true) }
       let timeline = CommentTimeline(width: 640, height: 360, comments: comments)
       renderer.prepare(comments); renderer.textQueue.sync {}
       if let failure = renderer.error { throw CommentParseError.invalid(failure) }
@@ -240,7 +241,7 @@ final class NeoDanmakuRenderer {
         try? UIImage(cgImage: image).pngData()?.write(to: directory.appendingPathComponent("danmaku-smoke.png"))
       }
       return ["success": true, "comments": first.1, "cacheBytes": renderer.cachedBytes,
-        "checks": ["textRaster", "movement", "pause", "size", "opacity", "endTime"]]
+        "checks": ["textRaster", "danmakuMovement", "pause", "size", "opacity", "endTime"]]
     } catch { return ["success": false, "error": error.localizedDescription] }
   }
 #endif

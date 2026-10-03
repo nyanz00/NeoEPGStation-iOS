@@ -14,8 +14,8 @@ func ass(_ lines: String) -> String { header + "\n" + lines }
 func check(_ condition: @autoclosure () -> Bool, _ message: String) {
   if !condition() { fatalError(message) }
 }
-func rejects(_ text: String, _ message: String) {
-  do { _ = try NeoASSComments.parse(text); fatalError(message) }
+func rejects(_ text: String, _ message: String, timing: CommentTiming = .ass) {
+  do { _ = try NeoASSComments.parse(text, timing: timing); fatalError(message) }
   catch is CommentParseError {} catch { fatalError("Unexpected error: \(error)") }
 }
 
@@ -58,6 +58,22 @@ do {
   fatalError("A track containing only empty intervals must not report success")
 } catch CommentParseError.empty {} catch { fatalError("Expected an empty track: \(error)") }
 rejects(ass("Dialogue: 0,broken,broken,Default,,0,0,0,,invalid"), "Malformed timestamps are not empty intervals")
+let cutComments = try NeoASSComments.parse(ass(#"""
+Dialogue: 0,0:00:10.00,0:00:18.00,Default,,0,0,0,,{\move(1920,100,-400,100)}通常
+Dialogue: 0,0:00:10.00,0:00:10.01,Default,,0,0,0,,{\move(1920,100,-400,100,0,10)}CM直前
+Dialogue: 0,0:00:10.00,0:00:10.00,Default,,0,0,0,,{\move(1920,100,-400,100)}表示時間ゼロ
+Dialogue: 0,0:00:10.00,unused,Default,,0,0,0,,{\pos(960,100)\an8}固定
+"""#), timing: .danmaku)
+check(cutComments.comments.count == 4 && cutComments.comments.allSatisfy(\.usesDanmakuTiming), "CM-cut comments are retained in danmaku mode")
+check(cutComments.comments.prefix(3).allSatisfy { $0.end == 15.5 && $0.motion?.end == 5.5 && $0.motion?.start == 0 }, "Normal, short and zero-duration comments use the same travel time")
+check(cutComments.comments[3].end == 14.5, "Fixed comments use the DPlayer full-screen lifetime")
+check(cutComments.visible(at: 12).count == 4 && cutComments.visible(at: 15).count == 3 && cutComments.visible(at: 15.5).isEmpty, "Comments remain across the cut and expire at the new end")
+let scroll = cutComments.comments[2]
+check(scroll.scrollingX(viewportWidth: 1000, textWidth: 200, elapsed: 0) == 1000, "Enter at the right edge")
+check(scroll.scrollingX(viewportWidth: 1000, textWidth: 200, elapsed: 2.75) == 400, "Normal-speed midpoint after a zero-duration cut")
+check(scroll.scrollingX(viewportWidth: 1000, textWidth: 400, elapsed: 5.5) == -400, "Leave completely using actual resized text width")
+check(cutComments.visible(at: 11).count == 4, "Backward seek restores cut comments")
+rejects(ass("Dialogue: 0,broken,0:00:18.00,Default,,0,0,0,,invalid"), "Danmaku still requires a valid emission time", timing: .danmaku)
 rejects(ass(#"Dialogue: 0,0:00:00.00,0:00:08.00,Default,,0,0,0,,{\an1e300}invalid"#), "Huge alignment must not trap an Int conversion")
 rejects(header.replacingOccurrences(of: "BorderStyle, Outline", with: "Name, Outline"), "Duplicate Format fields must not crash")
 check(NeoASSComments.isCommentName("NicoJK-1080T") && !NeoASSComments.isCommentName("日本語字幕"), "Comment metadata classification")

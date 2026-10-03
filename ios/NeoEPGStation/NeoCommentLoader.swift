@@ -67,7 +67,7 @@ final class NeoCommentLoader: NSObject, URLSessionTaskDelegate {
         completion(result.flatMap { data in
           do {
             let response = try JSONDecoder().decode(CommentTextResponse.self, from: data)
-            return .success(try NeoASSComments.parse(response.subtitleText))
+            return .success(try NeoASSComments.parse(response.subtitleText, timing: .danmaku))
           } catch let error as CommentParseError { return .failure(error) }
           catch { return .failure(CommentLoadError.response) }
         })
