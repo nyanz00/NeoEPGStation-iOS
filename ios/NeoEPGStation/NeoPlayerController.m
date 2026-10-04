@@ -175,6 +175,7 @@
 #if TARGET_OS_SIMULATOR
   if (self.sourceURL.isFileURL && [NSProcessInfo.processInfo.environment[@"NEO_EPG_STORAGE_SMOKE"] isEqualToString:@"1"]) {
     [self.comments loadSmokeComments];
+    [self.commentPiP beginCompositionSmoke];
   } else
 #endif
   { [self.comments configureWithSource:self.sourceURL username:self.username password:self.password]; }
@@ -291,6 +292,7 @@
       ? @"再生エラー · 接続・ファイル形式・認証を確認してください。"
       : [NSString stringWithFormat:@"PLAY · %@ · キャッシュ %ld秒", VLCMediaPlayerStateToString(state), (long)self.networkCaching / 1000];
     [self.commentPiP invalidatePlaybackState]; [self updateControls];
+    if (state == VLCMediaPlayerStateStopped) { [self.commentPiP resetVideo]; }
   });
 }
 
@@ -389,9 +391,11 @@
   }];
   [landscape writeToFile:[directory stringByAppendingPathComponent:@"player-landscape-smoke.png"] atomically:YES];
   self.view.frame = saved; [self applyPlayerLayout:self.view.bounds.size]; [self.view layoutIfNeeded];
-  return @{@"success": @(full && overlay && self.frameTapInstalled && self.commentPiP.capturedFrameCount > 0),
+  return @{@"success": @(full && overlay && self.frameTapInstalled && self.commentPiP.consumedFrameCount >= 24 && self.commentPiP.composedFrameCount >= 24),
     @"landscapeFillsView": @(full), @"controlsOverlay": @(overlay), @"frameTapInstalled": @(self.frameTapInstalled),
-    @"capturedFrames": @(self.commentPiP.capturedFrameCount), @"pipPossible": @(self.commentPiP.possible),
+    @"capturedFrames": @(self.commentPiP.capturedFrameCount), @"composedFrames": @(self.commentPiP.composedFrameCount),
+    @"consumedFrames": @(self.commentPiP.consumedFrameCount),
+    @"pipPossible": @(self.commentPiP.possible),
     @"pipStatus": self.commentPiP.status ?: @"", @"commentsReady": @(self.comments.ready)};
 }
 - (BOOL)startPiPSmoke {
@@ -401,7 +405,8 @@
 - (NSDictionary<NSString *, id> *)piPSmokeState {
   return @{@"pipActive": @(self.commentPiP.active), @"pipPossible": @(self.commentPiP.possible),
     @"pipSupported": @([AVPictureInPictureController isPictureInPictureSupported]),
-    @"pipStatus": self.commentPiP.status ?: @"", @"capturedFrames": @(self.commentPiP.capturedFrameCount)};
+    @"pipStatus": self.commentPiP.status ?: @"", @"capturedFrames": @(self.commentPiP.capturedFrameCount),
+    @"composedFrames": @(self.commentPiP.composedFrameCount), @"consumedFrames": @(self.commentPiP.consumedFrameCount)};
 }
 #endif
 - (void)play { [self.player play]; }

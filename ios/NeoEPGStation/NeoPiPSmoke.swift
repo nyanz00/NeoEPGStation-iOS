@@ -64,20 +64,29 @@ enum NeoPiPSmoke {
       }
       let first = try frame(3), firstBytes = pixels(first), paused = pixels(try frame(3)), moved = pixels(try frame(4))
       let base = pixels(try frame(3, 1, 1, false))
-      guard firstBytes != base, firstBytes == paused, firstBytes != moved,
-        firstBytes != pixels(try frame(3, 1, 1.5)), base == pixels(try frame(3, 0)), base == pixels(try frame(9)),
-        base == pixels(input) else { throw CommentParseError.invalid("映像・コメント合成/向き/設定の検証") }
+      try UIImage(cgImage: NeoCommentPiP.videoImage(first)).pngData()?.write(to: directory.appendingPathComponent("pip-composition-smoke.png"))
+      let checks = ["commentsVisible": firstBytes != base, "pause": firstBytes == paused, "movement": firstBytes != moved,
+        "size": firstBytes != pixels(try frame(3, 1, 1.5)), "opacity": base == pixels(try frame(3, 0)),
+        "end": base == pixels(try frame(9)), "videoOrientation": base == pixels(input)]
+      guard checks.values.allSatisfy({ $0 }) else {
+        throw CommentParseError.invalid("PiP合成テスト: " + checks.filter { !$0.value }.keys.sorted().joined(separator: ", "))
+      }
       let sample = try NeoCommentPiP.makeSample(first, hostTime: 100)
       guard abs(CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample)) - 100) < 0.00001,
         abs(CMTimeGetSeconds(CMSampleBufferGetDuration(sample)) - 1.0 / 60) < 0.00001 else { throw CommentParseError.invalid("PiPサンプル時刻") }
       for format in [kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange] {
         let converted = try NeoCommentPiP.videoImage(colorPixel(format))
-        guard let provider = converted.dataProvider, let data = provider.data else { throw CommentParseError.invalid("YUV画像") }
-        let bytes = CFDataGetBytePtr(data)!
+        guard let normalized = try NeoCommentPiP.compose(image: converted, size: size, pool: pool, renderer: renderer,
+          state: CommentCompositionState(timeline: nil, version: 0, enabled: false, size: 1, opacity: 1), time: 0)
+          else { throw CommentParseError.invalid("色変換テストの出力") }
+        // CGImage's provider may use an optimized channel order. Test the
+        // actual BGRA output sent to AVKit, rather than assuming that order.
+        let bytes = [UInt8](pixels(normalized).prefix(4))
         guard (90...180).contains(Int(bytes[0])), abs(Int(bytes[0]) - Int(bytes[1])) < 5,
-          abs(Int(bytes[1]) - Int(bytes[2])) < 5 else { throw CommentParseError.invalid("YUV 8/10bit色変換") }
+          abs(Int(bytes[1]) - Int(bytes[2])) < 5 else {
+          throw CommentParseError.invalid("YUV \(format)色変換 BGRA=\(bytes)")
+        }
       }
-      try UIImage(cgImage: NeoCommentPiP.videoImage(first)).pngData()?.write(to: directory.appendingPathComponent("pip-composition-smoke.png"))
       save("pip-composition-smoke", ["success": true, "comments": 80, "cacheBytes": renderer.cachedBytes,
         "checks": ["videoOrientation", "movement", "pause", "size", "opacity", "onOff", "end", "hostTimestamp", "YUV8", "YUV10"]])
     } catch { save("pip-composition-smoke", ["success": false, "error": error.localizedDescription]) }

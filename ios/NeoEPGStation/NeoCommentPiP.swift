@@ -28,12 +28,13 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   AVPictureInPictureSampleBufferPlaybackDelegate, AVPictureInPictureControllerDelegate {
   @objc let view: UIView
   private let surface: NeoPiPSurface
+  private let displayLayer: AVSampleBufferDisplayLayer
   private var pip: AVPictureInPictureController?
   private var observation: NSKeyValueObservation?
   private let work = DispatchQueue(label: "neo.pip.compose", qos: .userInitiated)
   private let frameLock = NSLock()
   private var frames: [CapturedVideoFrame] = []
-  private var closed = false, received = 0
+  private var closed = false, received = 0, composed = 0, consumed = 0
   private var capturing = false
   private var timer: DispatchSourceTimer?
   private var renderer: NeoDanmakuRenderer?
@@ -58,27 +59,31 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   @objc var pauseAction: (() -> Void)?
   @objc var seekAction: ((Double, @escaping () -> Void) -> Void)?
   @objc var capturedFrameCount: Int { frameLock.lock(); defer { frameLock.unlock() }; return received }
+  @objc var composedFrameCount: Int { frameLock.lock(); defer { frameLock.unlock() }; return composed }
+  @objc var consumedFrameCount: Int { frameLock.lock(); defer { frameLock.unlock() }; return consumed }
   @objc var capturingForPiP: Bool { frameLock.lock(); defer { frameLock.unlock() }; return capturing }
 
   @objc override init() {
-    surface = NeoPiPSurface(frame: .zero); view = surface
+    let surface = NeoPiPSurface(frame: .zero)
+    self.surface = surface; view = surface; displayLayer = surface.displayLayer
     super.init()
     surface.backgroundColor = .black; surface.isUserInteractionEnabled = false
-    surface.displayLayer.videoGravity = .resizeAspect
+    displayLayer.videoGravity = .resizeAspect
     do {
       guard let device = MTLCreateSystemDefaultDevice() else { throw CommentParseError.invalid("Metalデバイス") }
       // CoreText images are cached; this instance never submits GPU commands.
       renderer = try NeoDanmakuRenderer(device: device, cpuOnly: true)
     } catch { status = "PiPのコメント描画を準備できません。"; return }
-    guard AVPictureInPictureController.isPictureInPictureSupported() else {
-      status = "この環境ではPiPを利用できません。"; return
-    }
-    let source = AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer: surface.displayLayer, playbackDelegate: self)
-    let controller = AVPictureInPictureController(contentSource: source)
-    controller.delegate = self; controller.canStartPictureInPictureAutomaticallyFromInline = false
-    pip = controller
-    observation = controller.observe(\.isPictureInPicturePossible, options: [.initial, .new]) { [weak self] controller, _ in
-      DispatchQueue.main.async { self?.possible = controller.isPictureInPicturePossible && !(self?.failed ?? true); self?.onChange?() }
+    if AVPictureInPictureController.isPictureInPictureSupported() {
+      let source = AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer: displayLayer, playbackDelegate: self)
+      let controller = AVPictureInPictureController(contentSource: source)
+      controller.delegate = self; controller.canStartPictureInPictureAutomaticallyFromInline = false
+      pip = controller
+      observation = controller.observe(\.isPictureInPicturePossible, options: [.initial, .new]) { [weak self] controller, _ in
+        DispatchQueue.main.async { self?.possible = controller.isPictureInPicturePossible && !(self?.failed ?? true); self?.onChange?() }
+      }
+    } else {
+      status = "この環境ではPiPを利用できません。"
     }
     let timer = DispatchSource.makeTimerSource(queue: work)
     timer.schedule(deadline: .now(), repeating: 1.0 / 60.0, leeway: .milliseconds(2))
@@ -116,6 +121,21 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     pip?.invalidatePlaybackState(); pip?.startPictureInPicture()
   }
   @objc func invalidatePlaybackState() { pip?.invalidatePlaybackState() }
+  @objc func resetVideo() {
+    pip?.stopPictureInPicture()
+    work.async { [weak self] in
+      guard let self = self else { return }
+      self.frameLock.lock(); self.frames.removeAll(); self.frameLock.unlock()
+      self.current = nil; self.image = nil; self.primed = false; self.dirty = true
+      self.clock = CommentPlaybackClock(); self.lastTime = -1
+      self.displayLayer.flushAndRemoveImage()
+    }
+  }
+#if targetEnvironment(simulator)
+  @objc func beginCompositionSmoke() {
+    work.async { [weak self] in self?.composing = true; self?.dirty = true }
+  }
+#endif
   @objc func stop() {
     frameLock.lock(); closed = true; capturing = false; frames.removeAll(); frameLock.unlock()
     observation = nil; pip?.stopPictureInPicture(); pip?.delegate = nil; pip?.contentSource = nil; pip = nil
@@ -123,7 +143,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     work.async { [weak self] in
       self?.timer?.cancel(); self?.timer = nil; self?.composing = false
       self?.current = nil; self?.image = nil; self?.pool = nil; self?.renderer?.reset()
-      self?.surface.displayLayer.flushAndRemoveImage()
+      self?.displayLayer.flushAndRemoveImage()
     }
   }
   deinit { timer?.cancel() }
@@ -143,6 +163,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     do {
       if let next = next, let pixel = CMSampleBufferGetImageBuffer(next.sample) {
         image = try Self.videoImage(pixel)
+        frameLock.lock(); consumed += 1; frameLock.unlock()
         current = next
         guard let format = CMSampleBufferGetFormatDescription(next.sample) else { throw CommentParseError.invalid("PiP映像形式") }
         let presentation = CMVideoFormatDescriptionGetPresentationDimensions(format, usePixelAspectRatio: true, useCleanAperture: true)
@@ -152,19 +173,23 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
         let scale = min(1, min(960 / presentation.width, 540 / presentation.height))
         let size = CGSize(width: max(2, floor(presentation.width * scale / 2) * 2),
           height: max(2, floor(presentation.height * scale / 2) * 2))
-        if size != outputSize { outputSize = size; pool = try Self.makePool(size: size); surface.displayLayer.flush() }
+        if size != outputSize { outputSize = size; pool = try Self.makePool(size: size); displayLayer.flush() }
       }
       guard let image = image, let pool = pool, let renderer = renderer else { return }
-      let layer = surface.displayLayer
+      let layer = displayLayer
       if layer.status == .failed { layer.flush() }
       guard layer.isReadyForMoreMediaData else { return }
       guard let output = try Self.compose(image: image, size: outputSize, pool: pool, renderer: renderer, state: state, time: time) else { return }
       let sample = try Self.makeSample(output, hostTime: now)
       layer.enqueue(sample)
+      frameLock.lock(); composed += 1; frameLock.unlock()
       lastTime = time; dirty = renderer.hasPendingImages
       if !primed {
         primed = true
-        DispatchQueue.main.async { [weak self] in self?.status = "PiP · コメント合成"; self?.onChange?() }
+        DispatchQueue.main.async { [weak self] in
+          if self?.pip != nil { self?.status = "PiP · コメント合成" }
+          self?.onChange?()
+        }
       }
     } catch {
       if !errorReported {
