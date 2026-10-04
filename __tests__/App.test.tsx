@@ -34,6 +34,58 @@ beforeEach(() => {
   (native.loadNavigation as jest.Mock).mockResolvedValue(null);
 });
 
+test('a late recording detail response cannot open a file dialog after navigating away', async () => {
+  (native.loadConnection as jest.Mock).mockResolvedValue({
+    url: 'https://example.com',
+  });
+  let finish: (response: unknown) => void = () => {};
+  globalThis.fetch = jest
+    .fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        records: [{ id: 1, name: '番組', startAt: 1000 }],
+        total: 1,
+      }),
+    })
+    .mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          finish = resolve;
+        }),
+    );
+  let tree: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = ReactTestRenderer.create(<App />);
+  });
+  const press = async (label: string) => {
+    await act(async () => {
+      tree!.root
+        .findAll(
+          node =>
+            node.props.accessibilityLabel === label &&
+            typeof node.props.onPress === 'function',
+        )[0]
+        .props.onPress();
+    });
+  };
+  await press('番組の再生ファイルを選択');
+  await press('ナビゲーション：番組表');
+  expect((globalThis.fetch as jest.Mock).mock.calls[1][1].signal.aborted).toBe(
+    true,
+  );
+  await act(async () => {
+    finish({
+      ok: true,
+      json: async () => ({ id: 1, name: '番組', videoFiles: [] }),
+    });
+  });
+  expect(tree!.root.findByType(Modal).props.visible).toBe(false);
+  await act(async () => {
+    tree!.unmount();
+  });
+});
+
 test('bottom shortcuts and the full menu share a route, preserve recordings, and return with back', async () => {
   (native.loadConnection as jest.Mock).mockResolvedValue({
     url: 'https://example.com',
@@ -100,12 +152,10 @@ test('customizing shortcuts persists the chosen order and updates the bottom bar
   (native.loadConnection as jest.Mock).mockResolvedValue({
     url: 'https://example.com',
   });
-  globalThis.fetch = jest
-    .fn()
-    .mockResolvedValue({
-      ok: true,
-      json: async () => ({ records: [], total: 0 }),
-    });
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ records: [], total: 0 }),
+  });
   let tree: ReactTestRenderer.ReactTestRenderer;
   await act(async () => {
     tree = ReactTestRenderer.create(<App />);

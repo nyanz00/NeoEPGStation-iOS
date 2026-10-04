@@ -28,6 +28,7 @@ export function AppShell({
   actions,
   children,
   initialMenu = false,
+  onSidebarLayout,
 }: {
   current: Destination;
   navigate: (id: Destination) => void;
@@ -37,6 +38,7 @@ export function AppShell({
   actions?: React.ReactNode;
   children: React.ReactNode;
   initialMenu?: boolean;
+  onSidebarLayout?: (width: number) => void;
 }) {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -117,7 +119,7 @@ export function AppShell({
             : null;
       } else {
         intent.current = swipeIntent(
-          gesture.x0,
+          gesture.x0 - insets.left,
           gesture.y0 - insets.top,
           width,
           height.current,
@@ -167,7 +169,14 @@ export function AppShell({
   };
 
   const menuContent = (persistent: boolean) => (
-    <View style={[styles.drawer, { width: drawerWidth }]}>
+    <View
+      style={[styles.drawer, { width: drawerWidth }]}
+      onLayout={
+        persistent
+          ? event => onSidebarLayout?.(event.nativeEvent.layout.width)
+          : undefined
+      }
+    >
       <View style={styles.brand}>
         <Image
           source={require('../../assets/nyanz-smile.png')}
@@ -346,7 +355,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   drawer: {
-    flex: 1,
+    height: '100%',
+    flexShrink: 0,
     backgroundColor: colors.paper,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderRightColor: colors.border,

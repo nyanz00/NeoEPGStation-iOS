@@ -42,10 +42,16 @@ function AppContent() {
   const [form, setForm] = useState<Connection>(empty);
   const [connected, setConnected] = useState(false);
   const [routes, setRoutes] = useState<Destination[]>(['recorded']);
+  const [sidebarWidth, setSidebarWidth] = useState<number | null>(null);
   const [shortcuts, setShortcuts] = useState<Destination[]>(defaultShortcuts);
   const current = routes[routes.length - 1];
   const settings = current === 'settings' || !connected;
   function navigate(id: Destination) {
+    if (current === id) {
+      return;
+    }
+    details.current?.abort();
+    setSelected(null);
     setRoutes(previous =>
       previous[previous.length - 1] === id
         ? previous
@@ -54,6 +60,8 @@ function AppContent() {
   }
   function back() {
     if (routes.length > 1) {
+      details.current?.abort();
+      setSelected(null);
       const next = routes.slice(0, -1);
       setRoutes(next);
     }
@@ -101,10 +109,11 @@ function AppContent() {
         shortcuts,
         theme: 'neon-teal-dark',
         recordCount: data.records.length,
+        sidebarWidth,
       });
     }, 800);
     return () => clearTimeout(timer);
-  }, [ready, current, shortcuts, data.records.length]);
+  }, [ready, current, shortcuts, data.records.length, sidebarWidth]);
   const request = useRef<AbortController | null>(null);
   const details = useRef<AbortController | null>(null);
   const mounted = useRef(true);
@@ -311,6 +320,7 @@ function AppContent() {
         back={back}
         canGoBack={routes.length > 1}
         shortcuts={shortcuts}
+        onSidebarLayout={setSidebarWidth}
         initialMenu={native.uiSmoke === 'menu'}
         actions={
           !settings && current === 'recorded' ? (

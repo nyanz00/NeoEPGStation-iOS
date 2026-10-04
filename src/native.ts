@@ -12,6 +12,7 @@ interface NeoNativeModule {
     shortcuts: string[];
     theme: string;
     recordCount: number;
+    sidebarWidth?: number | null;
   }): Promise<void>;
   loadNavigation(): Promise<string[] | null>;
   saveNavigation(items: string[]): Promise<void>;
