@@ -23,6 +23,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
           let data = try? JSONSerialization.data(withJSONObject: result) {
           try? data.write(to: directory.appendingPathComponent("danmaku-smoke.json"))
         }
+        NeoPiPSmoke.compositionTest()
       }
     }
 #endif
@@ -40,6 +41,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
       in: window,
       launchOptions: launchOptions
     )
+
+#if targetEnvironment(simulator)
+    if ProcessInfo.processInfo.environment["NEO_EPG_STORAGE_SMOKE"] == "1" {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+        if let root = self?.window?.rootViewController { NeoPiPSmoke.playerTest(root: root) }
+      }
+    }
+#endif
 
     return true
   }

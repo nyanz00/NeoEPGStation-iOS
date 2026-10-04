@@ -51,7 +51,7 @@
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
-	<false/>
+	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>ローカルネットワーク内のNeoEPGStationに接続して録画を再生します。</string>
 	<key>UIBackgroundModes</key>

@@ -40,11 +40,15 @@ except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
     Path('dist/simulator-launch-errors.log').write_text(logs)
     raise
 pid = launch.rsplit(':', 1)[1].strip()
-time.sleep(15)
+container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], 'io.github.nyanz00.NeoEPGStation', 'data'))
+for attempt in range(12):
+    time.sleep(5)
+    if (container / 'Documents/pip-player-smoke.json').exists() and (container / 'Documents/pip-composition-smoke.json').exists():
+        break
 processes = run('xcrun', 'simctl', 'spawn', device['udid'], 'launchctl', 'list')
 if not any(line.split()[0] == pid for line in processes.splitlines() if line.split()):
     raise RuntimeError('Application exited after launch; inspect simulator crash logs')
-Path('dist/simulator-launch.txt').write_text(f"{device['name']}\n{launch}\nProcess remained running after 15 seconds.\n")
+Path('dist/simulator-launch.txt').write_text(f"{device['name']}\n{launch}\nProcess remained running through native rendering tests.\n")
 run('xcrun', 'simctl', 'io', device['udid'], 'screenshot', 'dist/simulator.png')
 container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], 'io.github.nyanz00.NeoEPGStation', 'data'))
 storage = json.loads((container / 'Documents/storage-smoke.json').read_text())
@@ -56,3 +60,11 @@ Path('dist/danmaku-smoke.json').write_text(json.dumps(danmaku, indent=2) + '\n')
 if danmaku.get('success') is not True:
     raise RuntimeError(f"Native comment rendering failed: {danmaku.get('error')}")
 Path('dist/danmaku-smoke.png').write_bytes((container / 'Documents/danmaku-smoke.png').read_bytes())
+
+for name in ['pip-composition-smoke', 'pip-player-smoke']:
+    result = json.loads((container / f'Documents/{name}.json').read_text())
+    Path(f'dist/{name}.json').write_text(json.dumps(result, indent=2) + '\n')
+    if result.get('success') is not True:
+        raise RuntimeError(f"{name} failed: {result}")
+for name in ['pip-composition-smoke', 'player-landscape-smoke']:
+    Path(f'dist/{name}.png').write_bytes((container / f'Documents/{name}.png').read_bytes())

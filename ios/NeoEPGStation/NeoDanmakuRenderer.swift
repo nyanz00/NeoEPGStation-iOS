@@ -4,7 +4,7 @@ import UIKit
 
 private struct CommentTextureKey: Hashable { var text: String; var style: CommentStyle; var pixelScale: Double = 1 }
 private struct CommentTexture {
-  var texture: MTLTexture, size: CGSize, cost: Int
+  var texture: MTLTexture?, image: CGImage?, size: CGSize, cost: Int
   var used: UInt64
 }
 private struct CommentVertex { var position: SIMD2<Float>; var uv: SIMD2<Float> }
@@ -23,9 +23,11 @@ final class NeoDanmakuRenderer {
   private var generation = 0, cost = 0, tick: UInt64 = 0
   private var failure: String?
   private let budget = 48 * 1024 * 1024
+  private let cpuOnly: Bool
 
-  init(device: MTLDevice) throws {
+  init(device: MTLDevice, cpuOnly: Bool = false) throws {
     self.device = device
+    self.cpuOnly = cpuOnly
     guard let queue = device.makeCommandQueue(), let library = device.makeDefaultLibrary(),
       let vertex = library.makeFunction(name: "commentVertex"), let fragment = library.makeFunction(name: "commentFragment") else {
       throw CommentParseError.invalid("Metalシェーダー")
@@ -117,19 +119,11 @@ final class NeoDanmakuRenderer {
       var entry = cache[key]
       if entry != nil { tick += 1; entry!.used = tick; cache[key] = entry! }
       lock.unlock()
-      guard let image = entry else { continue }
-      let scaleX = Double(videoRect.width) / timeline.width, scaleY = Double(videoRect.height) / timeline.height
-      let width = Double(image.size.width) * comment.style.scaleX * sizeMultiplier * scaleX
-      let height = Double(image.size.height) * comment.style.scaleY * sizeMultiplier * scaleY
-      let alignment = comment.style.alignment
-      let column = (alignment - 1) % 3, row = (alignment - 1) / 3
-      let fallback = CommentPoint(x: column == 0 ? comment.style.marginL : column == 1 ? timeline.width / 2 : timeline.width - comment.style.marginR,
-        y: row == 0 ? timeline.height - comment.style.marginV : row == 1 ? timeline.height / 2 : comment.style.marginV)
-      let anchor = comment.motion?.point(elapsed: time - comment.start) ?? comment.position ?? fallback
-      let x = Double(videoRect.minX) + (comment.scrollingX(viewportWidth: Double(videoRect.width),
-        textWidth: width, elapsed: time - comment.start) ?? (anchor.x * scaleX - width * Double(column) / 2))
-      let y = Double(videoRect.minY) + anchor.y * scaleY - height * Double(2 - row) / 2
-      if x + width < Double(clip.minX) || x > Double(clip.maxX) || y + height < Double(clip.minY) || y > Double(clip.maxY) { continue }
+      guard let image = entry, let texture = image.texture else { continue }
+      let rect = placement(comment, imageSize: image.size, timeline: timeline, time: time,
+        videoRect: videoRect, sizeMultiplier: sizeMultiplier)
+      if !rect.intersects(clip) { continue }
+      let x = Double(rect.minX), y = Double(rect.minY), width = Double(rect.width), height = Double(rect.height)
       func point(_ x: Double, _ y: Double) -> SIMD2<Float> {
         SIMD2(Float(x / Double(viewport.width) * 2 - 1), Float(1 - y / Double(viewport.height) * 2))
       }
@@ -142,12 +136,54 @@ final class NeoDanmakuRenderer {
         CommentVertex(position: point(x + width, y + height), uv: SIMD2(1, 1)),
       ]
       vertices.withUnsafeBytes { encoder.setVertexBytes($0.baseAddress!, length: $0.count, index: 0) }
-      encoder.setFragmentTexture(image.texture, index: 0)
+      encoder.setFragmentTexture(texture, index: 0)
       encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
       drawn += 1
     }
     return drawn
   }
+
+  private func placement(_ comment: NativeComment, imageSize: CGSize, timeline: CommentTimeline,
+                         time: Double, videoRect: CGRect, sizeMultiplier: Double) -> CGRect {
+    let scaleX = Double(videoRect.width) / timeline.width, scaleY = Double(videoRect.height) / timeline.height
+    let width = Double(imageSize.width) * comment.style.scaleX * sizeMultiplier * scaleX
+    let height = Double(imageSize.height) * comment.style.scaleY * sizeMultiplier * scaleY
+    let column = (comment.style.alignment - 1) % 3, row = (comment.style.alignment - 1) / 3
+    let fallback = CommentPoint(x: column == 0 ? comment.style.marginL : column == 1 ? timeline.width / 2 : timeline.width - comment.style.marginR,
+      y: row == 0 ? timeline.height - comment.style.marginV : row == 1 ? timeline.height / 2 : comment.style.marginV)
+    let anchor = comment.motion?.point(elapsed: time - comment.start) ?? comment.position ?? fallback
+    let x = Double(videoRect.minX) + (comment.scrollingX(viewportWidth: Double(videoRect.width),
+      textWidth: width, elapsed: time - comment.start) ?? (anchor.x * scaleX - width * Double(column) / 2))
+    let y = Double(videoRect.minY) + anchor.y * scaleY - height * Double(2 - row) / 2
+    return CGRect(x: x, y: y, width: width, height: height)
+  }
+
+  // PiP may continue after the app loses foreground GPU access. Reuse the same
+  // cached CoreText images and placement, without submitting Metal commands.
+  func drawCPU(timeline: CommentTimeline, time: Double, viewport: CGSize, sizeMultiplier: Double,
+               opacity: Float, pixelScale: Double, context: CGContext) -> Int {
+    context.saveGState(); defer { context.restoreGState() }
+    context.setAlpha(CGFloat(opacity)); context.interpolationQuality = .medium
+    let videoRect = CGRect(origin: .zero, size: viewport)
+    context.clip(to: videoRect)
+    var drawn = 0
+    for comment in timeline.visible(at: time).sorted(by: { $0.layer == $1.layer ? $0.id < $1.id : $0.layer < $1.layer }) {
+      let key = key(comment, pixelScale: pixelScale)
+      lock.lock()
+      var image = cache[key]
+      if image != nil { tick += 1; image!.used = tick; cache[key] = image! }
+      lock.unlock()
+      guard let image = image, let bitmap = image.image else { continue }
+      var rect = placement(comment, imageSize: image.size, timeline: timeline, time: time,
+        videoRect: videoRect, sizeMultiplier: sizeMultiplier)
+      if !rect.intersects(videoRect) { continue }
+      rect.origin.y = viewport.height - rect.maxY
+      context.draw(bitmap, in: rect); drawn += 1
+    }
+    return drawn
+  }
+
+  func waitForPreparedImages() { textQueue.sync {} }
 
   private func rasterize(_ key: CommentTextureKey) throws -> CommentTexture {
     let style = key.style
@@ -190,11 +226,20 @@ final class NeoDanmakuRenderer {
         context.setTextDrawingMode(.fill); context.setFillColor(color(style.color)); CTLineDraw(line, context)
       }
     }
-    let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
-    descriptor.usage = .shaderRead; descriptor.storageMode = .shared
-    guard let texture = device.makeTexture(descriptor: descriptor) else { throw CommentParseError.invalid("文字テクスチャ") }
-    pixels.withUnsafeBytes { texture.replace(region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: rowBytes) }
-    return CommentTexture(texture: texture, size: CGSize(width: Double(width) / rasterScale, height: Double(height) / rasterScale), cost: rowBytes * height, used: 0)
+    guard let provider = CGDataProvider(data: Data(pixels) as CFData),
+      let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: rowBytes,
+        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
+        provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else { throw CommentParseError.invalid("文字画像") }
+    var texture: MTLTexture?
+    if !cpuOnly {
+      let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
+      descriptor.usage = .shaderRead; descriptor.storageMode = .shared
+      guard let created = device.makeTexture(descriptor: descriptor) else { throw CommentParseError.invalid("文字テクスチャ") }
+      pixels.withUnsafeBytes { created.replace(region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: rowBytes) }
+      texture = created
+    }
+    return CommentTexture(texture: texture, image: cpuOnly ? image : nil,
+      size: CGSize(width: Double(width) / rasterScale, height: Double(height) / rasterScale), cost: rowBytes * height, used: 0)
   }
 
 #if targetEnvironment(simulator)

@@ -24,6 +24,10 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   private var clock = CommentPlaybackClock()
   private var drawn = 0, lastFrame = 0.0, frameCount = 0, fps = 0.0
   private let inFlight = DispatchSemaphore(value: 3)
+  var compositionState: CommentCompositionState {
+    CommentCompositionState(timeline: timeline, version: version, enabled: enabled && ready && !closed,
+      size: sizeMultiplier, opacity: opacity)
+  }
 
   @objc override init(frame: CGRect) {
     super.init(frame: frame)
@@ -45,6 +49,13 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
   @objc static func isCommentName(_ value: String) -> Bool { NeoASSComments.isCommentName(value) }
+
+#if targetEnvironment(simulator)
+  @objc func loadSmokeComments() {
+    version += 1; timeline = NeoPiPSmoke.fixture; ready = true; status = "Synthetic comments · 80"
+    renderer?.prepare(NeoPiPSmoke.fixture.comments); refreshRendering(); onChange?()
+  }
+#endif
 
   @objc(configureWithSource:username:password:)
   func configure(source: URL, username: String, password: String) {
@@ -95,8 +106,8 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     }
   }
 
-  func setSize(_ value: Double) { sizeMultiplier = min(2, max(0.5, value)) }
-  func setOpacity(_ value: Float) { opacity = min(1, max(0, value)) }
+  func setSize(_ value: Double) { sizeMultiplier = min(2, max(0.5, value)); onChange?() }
+  func setOpacity(_ value: Float) { opacity = min(1, max(0, value)); onChange?() }
   var diagnostics: String { String(format: "描画更新 %.0ffps · 描画 %d件 · キャッシュ %.1f / 48MiB", fps, drawn, Double(renderer?.cachedBytes ?? 0) / 1048576) }
 
   @objc func stop() {
@@ -176,7 +187,7 @@ private final class NeoCommentSettings: UIViewController {
     opacitySlider.minimumValue = 0; opacitySlider.maximumValue = 1; opacitySlider.value = overlay.opacity
     opacitySlider.addTarget(self, action: #selector(changeOpacity), for: .valueChanged)
     let retry = UIButton(type: .system); retry.setTitle("コメントを再読み込み", for: .normal); retry.addTarget(self, action: #selector(reload), for: .touchUpInside)
-    let note = UILabel(); note.text = "この試作の専用コメント描画は通常画面用です。PiPのコメント合成はまだ未実装です。"; note.numberOfLines = 0; note.font = .preferredFont(forTextStyle: .footnote)
+    let note = UILabel(); note.text = "専用コメントはPiPにも合成します。サイズ・不透明度・オン／オフの設定はPiPにも反映します。"; note.numberOfLines = 0; note.font = .preferredFont(forTextStyle: .footnote)
     trackButtons.axis = .vertical; trackButtons.spacing = 6
     let content = UIStackView(arrangedSubviews: [header, status, toggleRow, sizeLabel, sizeSlider, opacityLabel, opacitySlider, diagnostics, trackButtons, retry, note])
     content.axis = .vertical; content.spacing = 10; content.translatesAutoresizingMaskIntoConstraints = false
