@@ -12,7 +12,7 @@ if not re.fullmatch(r'[0-9a-f]{40}', commit) or commit != run['headSha']:
     raise RuntimeError('Artifact commit does not match the selected build')
 if info['bundleIdentifier'] != 'io.github.nyanz00.NeoEPGStation' or info['minimumOS'] != '18.0':
     raise RuntimeError('Unexpected application identity or deployment target')
-repository = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True).strip()
+repository = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True, encoding='utf-8').strip()
 subprocess.run(['git', 'diff', '--exit-code', commit, 'HEAD', '--',
                 'App.tsx', 'src', 'ios', 'package.json', 'package-lock.json'], check=True, cwd=repository)
 for name in ['storage-smoke', 'danmaku-smoke', 'pip-composition-smoke', 'pip-player-smoke',
