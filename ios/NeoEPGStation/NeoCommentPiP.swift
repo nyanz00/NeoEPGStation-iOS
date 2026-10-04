@@ -1,4 +1,3 @@
-import Accelerate
 import AVKit
 import MetalKit
 import VideoToolbox
@@ -14,6 +13,54 @@ struct CommentCompositionState {
 private struct CapturedVideoFrame {
   let sample: CMSampleBuffer
   let hostTime: Double
+}
+
+// Decode surfaces may carry VLC-specific color attachments. Do not ask vImage
+// to construct an ICC color space from those attachments. VideoToolbox handles
+// YUV conversion; the final BGRA image has an explicit, stable channel layout.
+private final class PiPVideoConverter {
+  private var session: VTPixelTransferSession?
+  private var pool: CVPixelBufferPool?
+  private var size = CGSize.zero
+
+  deinit { if let session = session { VTPixelTransferSessionInvalidate(session) } }
+
+  func image(_ source: CVPixelBuffer) throws -> CGImage {
+    let width = CVPixelBufferGetWidth(source), height = CVPixelBufferGetHeight(source)
+    var pixel = source
+    if CVPixelBufferGetPixelFormatType(source) != kCVPixelFormatType_32BGRA {
+      if session == nil {
+        guard VTPixelTransferSessionCreate(allocator: nil, pixelTransferSessionOut: &session) == noErr else {
+          throw CommentParseError.invalid("PiP色変換セッション")
+        }
+      }
+      let nextSize = CGSize(width: width, height: height)
+      if pool == nil || nextSize != size {
+        pool = try NeoCommentPiP.makePool(size: nextSize); size = nextSize
+      }
+      var output: CVPixelBuffer?
+      guard let session = session, let pool = pool,
+        CVPixelBufferPoolCreatePixelBuffer(nil, pool, &output) == kCVReturnSuccess,
+        let output = output else { throw CommentParseError.invalid("PiP色変換バッファ") }
+      let result = VTPixelTransferSessionTransferImage(session, from: source, to: output)
+      guard result == noErr else { throw CommentParseError.invalid("PiP映像の色変換（\(result)）") }
+      pixel = output
+    }
+    guard CVPixelBufferLockBaseAddress(pixel, .readOnly) == kCVReturnSuccess else {
+      throw CommentParseError.invalid("PiP映像バッファの読み取り")
+    }
+    defer { CVPixelBufferUnlockBaseAddress(pixel, .readOnly) }
+    let stride = CVPixelBufferGetBytesPerRow(pixel)
+    guard let base = CVPixelBufferGetBaseAddress(pixel),
+      let provider = CGDataProvider(data: Data(bytes: base, count: stride * height) as CFData),
+      let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+        bytesPerRow: stride, space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
+        provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else {
+      throw CommentParseError.invalid("PiPのBGRA映像")
+    }
+    return image
+  }
 }
 
 final class NeoPiPSurface: UIView {
@@ -41,6 +88,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   private var state = CommentCompositionState(timeline: nil, version: -1, enabled: false, size: 1, opacity: 1)
   private var current: CapturedVideoFrame?
   private var image: CGImage?
+  private let videoConverter = PiPVideoConverter()
   private var outputSize = CGSize.zero
   private var pool: CVPixelBufferPool?
   private var clock = CommentPlaybackClock()
@@ -162,7 +210,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     if next == nil && !running && !dirty && time == lastTime { return }
     do {
       if let next = next, let pixel = CMSampleBufferGetImageBuffer(next.sample) {
-        image = try Self.videoImage(pixel)
+        image = try videoConverter.image(pixel)
         frameLock.lock(); consumed += 1; frameLock.unlock()
         current = next
         guard let format = CMSampleBufferGetFormatDescription(next.sample) else { throw CommentParseError.invalid("PiP映像形式") }
@@ -226,47 +274,8 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     return output
   }
 
-  static func videoImage(_ pixel: CVPixelBuffer, allowTransfer: Bool = true) throws -> CGImage {
-    let space = CGColorSpaceCreateDeviceRGB()
-    guard let cvFormat = vImageCVImageFormat_CreateWithCVPixelBuffer(pixel)?.takeRetainedValue() else {
-      throw CommentParseError.invalid("PiP映像形式")
-    }
-    if cvFormat.colorSpace == nil {
-      vImageCVImageFormat_SetColorSpace(cvFormat, space)
-    }
-    if CVPixelBufferIsPlanar(pixel) && cvFormat.chromaSiting == nil {
-      vImageCVImageFormat_SetChromaSiting(cvFormat, kCVImageBufferChromaLocation_Left)
-    }
-    var format = vImage_CGImageFormat(bitsPerComponent: 8, bitsPerPixel: 32, colorSpace: Unmanaged.passUnretained(space),
-      bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
-      version: 0, decode: nil, renderingIntent: .defaultIntent)
-    var buffer = vImage_Buffer()
-    let result = vImageBuffer_InitWithCVPixelBuffer(&buffer, &format, pixel, cvFormat, nil, vImage_Flags(kvImageNoFlags))
-    defer { free(buffer.data) }
-    // vImage does not accept every 10-bit decoder format. VideoToolbox can
-    // transfer those surfaces into BGRA without changing the decoder output.
-    if result != kvImageNoError && allowTransfer {
-      var session: VTPixelTransferSession?
-      guard VTPixelTransferSessionCreate(allocator: nil, pixelTransferSessionOut: &session) == noErr,
-        let session = session else { throw CommentParseError.invalid("PiP色変換セッション") }
-      defer { VTPixelTransferSessionInvalidate(session) }
-      var converted: CVPixelBuffer?
-      guard CVPixelBufferCreate(nil, CVPixelBufferGetWidth(pixel), CVPixelBufferGetHeight(pixel),
-        kCVPixelFormatType_32BGRA, [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &converted) == kCVReturnSuccess,
-        let converted = converted,
-        VTPixelTransferSessionTransferImage(session, from: pixel, to: converted) == noErr else {
-        throw CommentParseError.invalid("PiPの10bit映像色変換")
-      }
-      return try videoImage(converted, allowTransfer: false)
-    }
-    guard result == kvImageNoError, let data = buffer.data,
-      let provider = CGDataProvider(data: Data(bytes: data, count: buffer.rowBytes * Int(buffer.height)) as CFData),
-      let image = CGImage(width: Int(buffer.width), height: Int(buffer.height), bitsPerComponent: 8, bitsPerPixel: 32,
-        bytesPerRow: buffer.rowBytes, space: space, bitmapInfo: format.bitmapInfo,
-        provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else {
-      throw CommentParseError.invalid("PiP映像の色変換（\(result)）")
-    }
-    return image
+  static func videoImage(_ pixel: CVPixelBuffer) throws -> CGImage {
+    try PiPVideoConverter().image(pixel)
   }
 
   static func makePool(size: CGSize) throws -> CVPixelBufferPool {
