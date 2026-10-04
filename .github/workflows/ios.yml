@@ -5,6 +5,12 @@ on:
     branches: [master, 'codex/**']
   pull_request:
   workflow_dispatch:
+    inputs:
+      reuse_run:
+        description: 'Completed build run to reuse for iPad UI verification (optional)'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -15,6 +21,7 @@ concurrency:
 
 jobs:
   checks:
+    if: ${{ !inputs.reuse_run }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -29,6 +36,7 @@ jobs:
       - run: npm test -- --runInBand
 
   build:
+    if: ${{ !inputs.reuse_run }}
     needs: checks
     runs-on: macos-26
     timeout-minutes: 60
@@ -116,5 +124,42 @@ jobs:
             dist/simulator-app.zip
             ios/Podfile.lock
             Gemfile.lock
+          retention-days: 7
+          if-no-files-found: error
+
+  ipad-ui:
+    if: ${{ inputs.reuse_run != '' }}
+    runs-on: macos-26
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      REUSE_RUN: ${{ inputs.reuse_run }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Retrieve verified simulator application
+        run: |
+          [[ "$REUSE_RUN" =~ ^[0-9]+$ ]]
+          mkdir -p reused dist
+          gh run view "$REUSE_RUN" --json number,headSha > reused/run.json
+          run_number=$(python3 -c 'import json; print(json.load(open("reused/run.json"))["number"])')
+          gh run download "$REUSE_RUN" --name "NeoEPGStation-iOS-$run_number" --dir reused/artifact
+          python3 scripts/verify-reused-build.py
+          ditto -x -k reused/artifact/dist/simulator-app.zip build/simulator/Build/Products/Release-iphonesimulator
+          codesign --verify --deep --strict build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app
+      - name: Check iPad UI
+        run: |
+          python3 -u scripts/simulator-smoke.py --prepare --no-boot
+          python3 -u scripts/simulator-smoke.py --ipad-only
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NeoEPGStation-iPad-UI-${{ github.run_number }}
+          path: dist/
           retention-days: 7
           if-no-files-found: error

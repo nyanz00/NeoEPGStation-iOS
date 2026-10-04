@@ -40,12 +40,16 @@ def capture_ipad(app, device):
     pad = pad_source['udid']
     print(f"UI smoke: booting {pad_source['name']}", flush=True)
     print('UI smoke: shutting down iPhone', flush=True)
-    run('xcrun', 'simctl', 'shutdown', device['udid'], timeout=90)
+    phone_state = next(item['state'] for item in available[runtime] if item['udid'] == device['udid'])
+    if phone_state != 'Shutdown':
+        run('xcrun', 'simctl', 'shutdown', device['udid'], timeout=90)
     print('UI smoke: starting iPad boot', flush=True)
     run('xcrun', 'simctl', 'boot', pad)
     run('xcrun', 'simctl', 'bootstatus', pad, '-b', timeout=600)
     print('UI smoke: iPad boot completed', flush=True)
-    run('xcrun', 'simctl', 'install', pad, str(app))
+    print('UI smoke: installing application on iPad', flush=True)
+    run('xcrun', 'simctl', 'install', pad, str(app), timeout=600)
+    print('UI smoke: iPad installation completed', flush=True)
     capture_ui(pad, 'recorded', 'ui-ipad')
 
 Path('dist').mkdir(exist_ok=True)
@@ -61,7 +65,8 @@ if '--prepare' in sys.argv or not device_file.exists():
     device_type = next(item['identifier'] for item in types if item['name'] == source['name'])
     device = {'name': source['name'], 'udid': run('xcrun', 'simctl', 'create', 'NeoEPGStation-CI', device_type, runtime)}
     device_file.write_text(json.dumps(device))
-    run('xcrun', 'simctl', 'boot', device['udid'])
+    if '--no-boot' not in sys.argv:
+        run('xcrun', 'simctl', 'boot', device['udid'])
     if '--prepare' in sys.argv:
         sys.exit(0)
 else:
