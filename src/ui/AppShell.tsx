@@ -12,6 +12,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import type { PanResponderCallbacks } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from './Icon';
 import { destinations, swipeIntent } from './navigation';
@@ -83,9 +84,30 @@ export function AppShell({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menu, canGoBack, back]);
 
-  const responder = PanResponder.create({
+  const handlers = useRef<PanResponderCallbacks>({});
+  const [responder] = useState(() =>
+    PanResponder.create({
+      onMoveShouldSetPanResponderCapture: (event, gesture) =>
+        handlers.current.onMoveShouldSetPanResponderCapture?.(event, gesture) ??
+        false,
+      onPanResponderGrant: (event, gesture) => {
+        handlers.current.onPanResponderGrant?.(event, gesture);
+      },
+      onPanResponderMove: (event, gesture) => {
+        handlers.current.onPanResponderMove?.(event, gesture);
+      },
+      onPanResponderRelease: (event, gesture) => {
+        handlers.current.onPanResponderRelease?.(event, gesture);
+      },
+      onPanResponderTerminate: (event, gesture) => {
+        handlers.current.onPanResponderTerminate?.(event, gesture);
+      },
+      onPanResponderTerminationRequest: () => false,
+    }),
+  );
+  handlers.current = {
     onMoveShouldSetPanResponderCapture: (_, gesture) => {
-      if (isPad) {
+      if (isPad || gesture.numberActiveTouches !== 1) {
         return false;
       }
       if (menu) {
@@ -107,6 +129,7 @@ export function AppShell({
       return intent.current !== null;
     },
     onPanResponderGrant: () => {
+      progress.stopAnimation();
       if (intent.current === 'menu') {
         setMenu(true);
         progress.setValue(0);
@@ -141,7 +164,7 @@ export function AppShell({
       animateMenu(intent.current === 'close');
       intent.current = null;
     },
-  });
+  };
 
   const menuContent = (persistent: boolean) => (
     <View style={[styles.drawer, { width: drawerWidth }]}>

@@ -39,22 +39,18 @@ test('bottom shortcuts and the full menu share a route, preserve recordings, and
     url: 'https://example.com',
   });
   (native.loadNavigation as jest.Mock).mockResolvedValue(['recorded', 'guide']);
-  globalThis.fetch = jest
-    .fn()
-    .mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        records: [{ id: 1, name: '保存した番組', startAt: 1000, endAt: 2000 }],
-        total: 1,
-      }),
-    });
-  const animation = jest
-    .spyOn(Animated, 'timing')
-    .mockImplementation(() => ({
-      start: callback => callback?.({ finished: true }),
-      stop: jest.fn(),
-      reset: jest.fn(),
-    }));
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      records: [{ id: 1, name: '保存した番組', startAt: 1000, endAt: 2000 }],
+      total: 1,
+    }),
+  });
+  const animation = jest.spyOn(Animated, 'timing').mockImplementation(() => ({
+    start: callback => callback?.({ finished: true }),
+    stop: jest.fn(),
+    reset: jest.fn(),
+  }));
   let tree: ReactTestRenderer.ReactTestRenderer;
   await act(async () => {
     tree = ReactTestRenderer.create(<App />);
@@ -101,6 +97,15 @@ test('bottom shortcuts and the full menu share a route, preserve recordings, and
 });
 
 test('customizing shortcuts persists the chosen order and updates the bottom bar', async () => {
+  (native.loadConnection as jest.Mock).mockResolvedValue({
+    url: 'https://example.com',
+  });
+  globalThis.fetch = jest
+    .fn()
+    .mockResolvedValue({
+      ok: true,
+      json: async () => ({ records: [], total: 0 }),
+    });
   let tree: ReactTestRenderer.ReactTestRenderer;
   await act(async () => {
     tree = ReactTestRenderer.create(<App />);
@@ -116,6 +121,7 @@ test('customizing shortcuts persists the chosen order and updates the bottom bar
         .props.onPress();
     });
   };
+  await press('ナビゲーション：設定');
   await press('表示項目：アニメ');
   await press('表示項目：検索');
   await press('searchを上へ');
@@ -137,6 +143,8 @@ test('customizing shortcuts persists the chosen order and updates the bottom bar
       node => node.props.accessibilityLabel === 'ナビゲーション：アニメ',
     ),
   ).toHaveLength(0);
+  await press('録画一覧に戻る');
+  expect(tree!.root.findAllByType(TextInput)).toHaveLength(0);
   await act(async () => {
     tree!.unmount();
   });

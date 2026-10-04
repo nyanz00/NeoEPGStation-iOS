@@ -176,7 +176,7 @@ export async function getChannels(
 ): Promise<{ id: number; name: string }[]> {
   const items = await request<{ id: number; name: string }[]>(
     connection,
-    '/channels?isHalfWidth=true',
+    '/channels',
     signal,
   );
   if (

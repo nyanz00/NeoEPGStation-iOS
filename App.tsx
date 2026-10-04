@@ -366,18 +366,24 @@ function AppContent() {
                 button(
                   '録画一覧に戻る',
                   () => {
-                    void load(connection, offset);
+                    if (connected) {
+                      navigate('recorded');
+                    } else {
+                      void load(connection, offset);
+                    }
                   },
                   busy,
                 )}
               <Text style={[styles.hint, { color: colors.muted }]}>
                 接続先はこの端末に保存し、次回から自動で接続します。
               </Text>
-              <NavigationSettings value={shortcuts} save={saveShortcuts} />
               {!!error && (
                 <Text accessibilityRole="alert" style={styles.error}>
                   {error}
                 </Text>
+              )}
+              {connected && (
+                <NavigationSettings value={shortcuts} save={saveShortcuts} />
               )}
             </ScrollView>
           </KeyboardAvoidingView>
