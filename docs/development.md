@@ -15,6 +15,9 @@ Actionsの `NeoEPGStation-iOS-<run number>` ArtifactからZIPをダウンロー�
 シミュレーターはXcodeのad-hoc署名を使う。ReleaseビルドをMetroなしで起動し、
 接続設定のKeychainへの保存・読み戻し、直後に終了しないこととスクリーンショットを確認する。
 加えて合成動画のVLC再生、コメントのMetal/CPU合成、横画面レイアウトを検証する。
+基礎UIは実際のReleaseバンドルをiPhone・iPadシミュレーターで起動し、
+架空の録画データを使った一覧・サイドメニュー・設定の画像を生成する。
+下部ナビの項目・順番はUserDefaultsに保存する。実装範囲は `ui-foundation.md` を参照する。
 これは実サーバー接続・実機のAV1性能・バックグラウンドPiPの試験にはならない。
 依存ロックファイルはActionsで生成した内容を検証して保存する。
 

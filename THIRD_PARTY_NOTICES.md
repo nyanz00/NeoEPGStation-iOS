@@ -10,6 +10,14 @@ URL parsing uses [react-native-url-polyfill](https://github.com/charpeni/react-n
 4.0.0 under the MIT license. Its notice is preserved in
 `licenses/ReactNativeURLPolyfill-MIT.txt` and included in the IPA.
 
+SVG icons use react-native-svg 15.15.5 (MIT), copyright (c) [2015-2016] [Horcrux].
+Its full license is preserved in `licenses/ReactNativeSVG-MIT.txt`.
+Material icon paths match those used by NeoEPGStation Web: the MUI distribution
+is MIT (copyright (c) 2014 Call-Em-All), and the underlying Google Material Design
+icons are Apache-2.0. FilmstripBoxMultiple and TelevisionGuide are by the
+Pictogrammers contributors under Apache-2.0. License texts are preserved in
+`licenses/MUI-icons-MIT.txt` and `licenses/Apache-2.0.txt`.
+
 VLCKit and libVLC are VideoLAN projects distributed under LGPL-2.1-or-later;
 the bundled framework and its components have their own notices and licenses.
 The initial unmodified framework is downloaded from:

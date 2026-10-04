@@ -83,7 +83,7 @@ jobs:
             build 2>&1 | tee dist/device-build.log | xcbeautify
       - name: Package LiveContainer IPA
         run: bash scripts/package-ipa.sh
-      - name: Build and launch simulator application
+      - name: Build simulator application
         run: |
           set -o pipefail
           xcodebuild -workspace ios/NeoEPGStation.xcworkspace \
@@ -93,7 +93,14 @@ jobs:
             CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=- \
             CODE_SIGN_LOCAL_EXECUTION_IDENTITY='Ad Hoc' \
             build 2>&1 | tee dist/simulator-build.log | xcbeautify
-          python3 scripts/simulator-smoke.py
+      - name: Check native playback and iPhone UI
+        run: python3 -u scripts/simulator-smoke.py --iphone-only
+      - name: Check iPad UI
+        run: python3 -u scripts/simulator-smoke.py --ipad-only
+      - name: Preserve simulator application for UI diagnostics
+        if: always() && hashFiles('build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app/Info.plist') != ''
+        run: |
+          ditto -c -k --keepParent build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app dist/simulator-app.zip
       - name: Upload IPA and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -106,6 +113,7 @@ jobs:
             dist/*.log
             dist/*.txt
             dist/*.png
+            dist/simulator-app.zip
             ios/Podfile.lock
             Gemfile.lock
           retention-days: 7
