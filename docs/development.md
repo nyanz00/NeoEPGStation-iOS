@@ -2,9 +2,8 @@
 
 ## ビルド
 
-Windowsでは `npm ci` の後、`npm run typecheck`、`npm run lint`、`npm test -- --runInBand` を実行できる。
-ネイティブのビルドは `.github/workflows/ios.yml` のmacOSランナーで行う。
-React Nativeは0.87.1、Nodeは24.18.0、Xcodeは26.6、CocoaPodsは1.16.2に固定している。
+Swift / UIKitの型検査・テスト・ビルドは `.github/workflows/ios.yml` のmacOSランナーで行う。
+Xcodeは26.6、CocoaPodsは1.16.2に固定している。Node / Metro / React Nativeは使用しない。
 VLCKitは `ios/VLCKit.podspec` の公式ダウンロードURLとSHA-256で固定する。
 
 Actionsの `NeoEPGStation-iOS-<run number>` ArtifactからZIPをダウンロードし、
@@ -12,11 +11,13 @@ Actionsの `NeoEPGStation-iOS-<run number>` ArtifactからZIPをダウンロー�
 このIPAはad-hoc署名であり、LiveContainerでの取り込み用。通常の直接インストールやApp Store提出には使わない。
 バンドルIDを維持して更新し、接続設定が残ることも確認する。
 
-シミュレーターはXcodeのad-hoc署名を使う。ReleaseビルドをMetroなしで起動し、
+シミュレーターはXcodeのad-hoc署名を使う。Releaseビルドを起動し、
 接続設定のKeychainへの保存・読み戻し、直後に終了しないこととスクリーンショットを確認する。
 加えて合成動画のVLC再生、コメントのMetal/CPU合成、横画面レイアウトを検証する。
-基礎UIは実際のReleaseバンドルをiPhone・iPadシミュレーターで起動し、
-架空の録画データを使った一覧・サイドメニュー・設定の画像を生成する。
+基礎UIは実際のReleaseアプリをiPhone・iPadシミュレーターで起動し、
+架空の録画データを使った一覧・ページ7・詳細・サイドメニュー・設定の画像を生成する。
+モバイルの連続5ページ、iPadの省略付きページ番号、URL正規化、番組日時をSwiftのテストで検証する。
+画面切り替え時に同じ一覧インスタンスが保持されることもシミュレーターで検証する。
 下部ナビの項目・順番はUserDefaultsに保存する。実装範囲は `ui-foundation.md` を参照する。
 端末の起動・導入だけで検証が中断した場合は、Actionsの手動実行で `reuse_run` に
 生成済みビルドのrun IDを指定すると、保存したシミュレーター用アプリでiPad UIのみを再確認できる。
@@ -31,7 +32,7 @@ Actionsの `NeoEPGStation-iOS-<run number>` ArtifactからZIPをダウンロー�
    接続失敗時は保存URLを残した接続画面へ戻り、再試行・変更できる。
 2. サーバーURLだけを入力して保存・接続する。
    URLには `/api` を指定しても除去される。サブパスは保持する。
-3. 録画一覧から番組を選び、ファイルを選ぶ。
+3. 録画を検索し、一覧末尾のページ番号で移動する。番組を選び、詳細のPLAYでファイルを選ぶ。
 4. 元ファイルのPLAYで映像・音声、再生／一時停止、±10秒、シークバーを確認する。
 5. 字幕トラックの選択とオフを確認する。PiPボタンが有効になったら開始・復帰を確認する。
 6. 閉じた後に再度再生できること、再起動・IPA更新後に接続ボタンを押さずに録画一覧が開くことを確認する。

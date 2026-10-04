@@ -24,18 +24,19 @@ Custom colors and light/dark appearance selection remain future work.
 
 ## Implemented screens
 
-Server URL saving/automatic connection, recorded list, file selection and native
-PLAY are usable. Settings includes bottom shortcut customization.
+Swift / UIKit implements server URL saving/automatic connection, keyword search,
+recorded cards, scrolling page-number controls, recording details, file selection
+and native PLAY. Settings includes bottom shortcut customization.
 Other destinations show an explicit preparation screen; their functionality has
-not been ported. OAuth, record search/filters, viewer profiles and full recording
-details are separate follow-up work.
+not been ported. OAuth, advanced filters, viewer profiles and recording management
+actions are separate follow-up work. Unsupported actions are not shown as working buttons.
 
 ## Verification
 
-Jest covers menu/tab route consistency, back navigation, preference recovery and
-customization, connection failures and the native PLAY handoff. Actions exercises
-the real Swift preference methods, builds the device IPA and launches the Release
-React Native bundle with simulator-only synthetic fixtures. Public screenshots
-include the iPhone recorded list/menu/settings and iPad sidebar.
+Swift tests cover page ranges, compact Web timestamps, URL recovery and recording
+data decoding. Actions exercises real preference methods, builds the device IPA
+and launches the Release UIKit app with simulator-only synthetic fixtures.
+UI checks retain the list across tab changes and capture recorded cards, page 7,
+details, menu/settings and the iPad sidebar. No React Native runtime is shipped.
 Fixtures use invented text and code-drawn thumbnails; no private server or real
 recordings are embedded. Actual device swipes and usability still need device testing.

@@ -20,8 +20,14 @@
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 		7C7CD6B520048B87A9436634 /* NeoNative.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8DB963ADF006F5C91474E80 /* NeoNative.swift */; };
-		0664AE7AE5FF72C928414151 /* NeoNativeBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 71DD1CE287B3E938963030B3 /* NeoNativeBridge.m */; };
 		C5EC3F766E24819570B97E68 /* NeoPlayerController.m in Sources */ = {isa = PBXBuildFile; fileRef = 8A85F63ACA51CC2F817F957F /* NeoPlayerController.m */; };
+    BDEF00000000000000000001 /* NeoModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000001; };
+    BDEF00000000000000000002 /* NeoStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000002; };
+    BDEF00000000000000000003 /* NeoIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000003; };
+    BDEF00000000000000000004 /* NeoShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000004; };
+    BDEF00000000000000000005 /* NeoRecordedPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000005; };
+    BDEF00000000000000000006 /* NeoDetailPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000006; };
+    BDEF00000000000000000007 /* NeoSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000007; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -43,12 +49,17 @@
 		5DCACB8F33CDC322A6C60F78 /* libPods-NeoEPGStation.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-NeoEPGStation.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = NeoEPGStation/AppDelegate.swift; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = NeoEPGStation/LaunchScreen.storyboard; sourceTree = "<group>"; };
-		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		E8DB963ADF006F5C91474E80 /* NeoNative.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoNative.swift; path = NeoEPGStation/NeoNative.swift; sourceTree = "<group>"; };
-		71DD1CE287B3E938963030B3 /* NeoNativeBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = NeoNativeBridge.m; path = NeoEPGStation/NeoNativeBridge.m; sourceTree = "<group>"; };
 		8A85F63ACA51CC2F817F957F /* NeoPlayerController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = NeoPlayerController.m; path = NeoEPGStation/NeoPlayerController.m; sourceTree = "<group>"; };
 		D2E6EDAE12E0A01E77E05D82 /* NeoPlayerController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = NeoPlayerController.h; path = NeoEPGStation/NeoPlayerController.h; sourceTree = "<group>"; };
 		61CA7AFF8955651AF048885B /* NeoEPGStation-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = NeoEPGStation-Bridging-Header.h; path = NeoEPGStation/NeoEPGStation-Bridging-Header.h; sourceTree = "<group>"; };
+    ADEF00000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoModels.swift; path = NeoEPGStation/NeoModels.swift; sourceTree = "<group>"; };
+    ADEF00000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoStyle.swift; path = NeoEPGStation/NeoStyle.swift; sourceTree = "<group>"; };
+    ADEF00000000000000000003 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoIcon.swift; path = NeoEPGStation/NeoIcon.swift; sourceTree = "<group>"; };
+    ADEF00000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoShell.swift; path = NeoEPGStation/NeoShell.swift; sourceTree = "<group>"; };
+    ADEF00000000000000000005 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoRecordedPage.swift; path = NeoEPGStation/NeoRecordedPage.swift; sourceTree = "<group>"; };
+    ADEF00000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoDetailPage.swift; path = NeoEPGStation/NeoDetailPage.swift; sourceTree = "<group>"; };
+    ADEF00000000000000000007 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoSettingsPage.swift; path = NeoEPGStation/NeoSettingsPage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -80,8 +91,14 @@
 				61CA7AFF8955651AF048885B /* NeoEPGStation-Bridging-Header.h */,
 				D2E6EDAE12E0A01E77E05D82 /* NeoPlayerController.h */,
 				8A85F63ACA51CC2F817F957F /* NeoPlayerController.m */,
-				71DD1CE287B3E938963030B3 /* NeoNativeBridge.m */,
 				E8DB963ADF006F5C91474E80 /* NeoNative.swift */,
+        ADEF00000000000000000007,
+        ADEF00000000000000000006,
+        ADEF00000000000000000005,
+        ADEF00000000000000000004,
+        ADEF00000000000000000003,
+        ADEF00000000000000000002,
+        ADEF00000000000000000001,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */,
 				13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */,
@@ -92,7 +109,6 @@
 		2D16E6871FA4F8E400B85C8A /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
 				5DCACB8F33CDC322A6C60F78 /* libPods-NeoEPGStation.a */,
 			);
 			name = Frameworks;
@@ -147,7 +163,6 @@
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
-				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				00EEFC60759A1932668264C0 /* [CP] Embed Pods Frameworks */,
 				E235C05ADACE081382539298 /* [CP] Copy Pods Resources */,
 			);
@@ -204,22 +219,6 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-				"$(SRCROOT)/.xcode.env.local",
-				"$(SRCROOT)/.xcode.env",
-			);
-			name = "Bundle React Native code and images";
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "set -e\n\nWITH_ENVIRONMENT=\"$REACT_NATIVE_PATH/scripts/xcode/with-environment.sh\"\nREACT_NATIVE_XCODE=\"$REACT_NATIVE_PATH/scripts/react-native-xcode.sh\"\n\n/bin/sh -c \"\\\"$WITH_ENVIRONMENT\\\" \\\"$REACT_NATIVE_XCODE\\\"\"\n";
-		};
 		00EEFC60759A1932668264C0 /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -293,8 +292,14 @@
         BABC00000000000000000009,
 				761780ED2CA45674006654EE /* AppDelegate.swift in Sources */,
 				C5EC3F766E24819570B97E68 /* NeoPlayerController.m in Sources */,
-				0664AE7AE5FF72C928414151 /* NeoNativeBridge.m in Sources */,
 				7C7CD6B520048B87A9436634 /* NeoNative.swift in Sources */,
+        BDEF00000000000000000007,
+        BDEF00000000000000000006,
+        BDEF00000000000000000005,
+        BDEF00000000000000000004,
+        BDEF00000000000000000003,
+        BDEF00000000000000000002,
+        BDEF00000000000000000001,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

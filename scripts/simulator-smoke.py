@@ -142,7 +142,7 @@ for name, result in results.items():
 # A second launch checks the actual React Native Release UI (including SVG pods).
 # Fixtures are enabled only on the simulator, never in the device application.
 del os.environ['SIMCTL_CHILD_NEO_EPG_STORAGE_SMOKE']
-for stage in ['recorded', 'menu', 'settings']:
+for stage in ['recorded', 'pagination', 'detail', 'menu', 'settings']:
     capture_ui(device['udid'], stage, 'ui-iphone')
 if '--iphone-only' not in sys.argv:
     capture_ipad(app, device)

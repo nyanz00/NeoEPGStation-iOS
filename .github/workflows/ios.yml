@@ -20,34 +20,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  checks:
-    if: ${{ !inputs.reuse_run }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.18.0
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm test -- --runInBand
-
   build:
     if: ${{ !inputs.reuse_run }}
-    needs: checks
     runs-on: macos-26
     timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.18.0
-          cache: npm
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
@@ -55,27 +35,25 @@ jobs:
       - name: Environment
         run: |
           xcodebuild -version
-          node --version
           bundle exec pod --version
       - name: Native ASS parser and playback clock tests
         run: |
           mkdir -p build/native-tests
           swiftc ios/NeoEPGStation/NeoASSComments.swift ios/NeoEPGStation/NeoCommentLoader.swift tests/native/main.swift -o build/native-tests/comments
           build/native-tests/comments
+          swiftc ios/NeoEPGStation/NeoModels.swift tests/ui/main.swift -o build/native-tests/ui
+          build/native-tests/ui
       - name: Native UI type checks
         run: |
           sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
           swiftc -typecheck -target arm64-apple-ios18.0-simulator -sdk "$sdk" \
             -module-name NeoEPGStation \
             -import-objc-header ios/NeoEPGStation/NeoEPGStation-Bridging-Header.h \
-            ios/NeoEPGStation/NeoASSComments.swift ios/NeoEPGStation/NeoCommentLoader.swift \
-            ios/NeoEPGStation/NeoDanmakuRenderer.swift ios/NeoEPGStation/NeoCommentOverlay.swift \
-            ios/NeoEPGStation/NeoCommentPiP.swift ios/NeoEPGStation/NeoPiPSmoke.swift
+            ios/NeoEPGStation/*.swift
           xcrun clang -fsyntax-only -fobjc-arc -target arm64-apple-ios18.0-simulator \
             -isysroot "$sdk" ios/NeoEPGStation/NeoVLCFrameTap.m
       - name: Prepare simulator
         run: python3 scripts/simulator-smoke.py --prepare
-      - run: npm ci
       - name: Install pods
         working-directory: ios
         run: bundle exec pod install
