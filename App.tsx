@@ -27,7 +27,7 @@ import type { Recording, Recordings, VideoFile } from './src/api';
 import { native } from './src/native';
 import type { Connection } from './src/native';
 
-const empty: Connection = { url: '', username: '', password: '' };
+const empty: Connection = { url: '' };
 
 function AppContent() {
   const dark = useColorScheme() === 'dark';
@@ -70,13 +70,14 @@ function AppContent() {
     mounted.current = true;
     native
       .loadConnection()
-      .then(saved => {
+      .then(async saved => {
         if (!mounted.current) {
           return;
         }
         if (saved) {
           setConnection(saved);
           setForm(saved);
+          await load(saved, 0);
         }
       })
       .catch(() => {
@@ -184,8 +185,6 @@ function AppContent() {
     pendingPlayback.current = {
       url: apiURL(connection, `/videos/${file.id}`),
       title: selected.name,
-      username: connection.username,
-      password: connection.password,
       networkCaching: 5000,
     };
     setSelected(null);
@@ -269,37 +268,6 @@ function AppContent() {
                 { color: colors.text, borderColor: colors.border },
               ]}
             />
-            <Text style={{ color: colors.muted }}>
-              Basic認証（設定している場合）
-            </Text>
-            <TextInput
-              accessibilityLabel="Basic認証ユーザー名"
-              autoCapitalize="none"
-              autoCorrect={false}
-              placeholder="ユーザー名"
-              placeholderTextColor={colors.muted}
-              editable={!busy}
-              value={form.username}
-              onChangeText={username => setForm({ ...form, username })}
-              style={[
-                styles.input,
-                { color: colors.text, borderColor: colors.border },
-              ]}
-            />
-            <TextInput
-              accessibilityLabel="Basic認証パスワード"
-              secureTextEntry
-              autoCapitalize="none"
-              placeholder="パスワード"
-              placeholderTextColor={colors.muted}
-              editable={!busy}
-              value={form.password}
-              onChangeText={password => setForm({ ...form, password })}
-              style={[
-                styles.input,
-                { color: colors.text, borderColor: colors.border },
-              ]}
-            />
             {button(
               busy ? '接続中…' : '保存して接続',
               connect,
@@ -314,7 +282,7 @@ function AppContent() {
                 busy,
               )}
             <Text style={[styles.hint, { color: colors.muted }]}>
-              接続先と認証情報はこの端末に保存します。
+              接続先はこの端末に保存し、次回から自動で接続します。
             </Text>
             {!!error && (
               <Text accessibilityRole="alert" style={styles.error}>

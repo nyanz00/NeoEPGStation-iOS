@@ -16,15 +16,6 @@ final class NeoNative: NSObject {
      kSecAttrAccount as String: "server"]
   }
 
-  private func prepared(_ value: [String: String]) -> [String: String] {
-    var result = value
-    if let username = value["username"], !username.isEmpty {
-      let text = "\(username):\(value["password"] ?? "")"
-      result["authorization"] = "Basic " + Data(text.utf8).base64EncodedString()
-    }
-    return result
-  }
-
   @objc(loadConnection:rejecter:)
   func loadConnection(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
     var query = keychainQuery
@@ -37,7 +28,12 @@ final class NeoNative: NSObject {
       let saved = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
       reject("keychain-\(status)", "接続設定を読み込めませんでした。", nil); return
     }
-    resolve(prepared(saved))
+    // Older prototypes stored Basic credentials alongside the URL. Reuse the
+    // server address, but never restore those credentials into the new app.
+    guard let text = saved["url"] else {
+      reject("storage", "保存した接続先を読み込めませんでした。", nil); return
+    }
+    resolve(["url": text])
   }
 
   @objc(saveConnection:resolver:rejecter:)
@@ -48,7 +44,7 @@ final class NeoNative: NSObject {
       url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else {
       reject("url", "サーバーURLを確認してください。", nil); return
     }
-    let saved = ["url": text, "username": value["username"] ?? "", "password": value["password"] ?? ""]
+    let saved = ["url": text]
     guard let data = try? JSONSerialization.data(withJSONObject: saved) else {
       reject("storage", "接続設定を保存できませんでした。", nil); return
     }
@@ -61,7 +57,7 @@ final class NeoNative: NSObject {
     guard status == errSecSuccess else {
       reject("keychain-\(status)", "接続設定を保存できませんでした。", nil); return
     }
-    resolve(prepared(saved))
+    resolve(saved)
   }
 
   @objc(play:resolver:rejecter:)
@@ -108,13 +104,26 @@ final class NeoNative: NSObject {
     let module = NeoNative()
     module.service += ".ci-smoke"
     defer { SecItemDelete(module.keychainQuery as CFDictionary) }
-    let value = ["url": "https://example.com", "username": "", "password": ""]
+    let value = ["url": "https://example.com"]
     var result: [String: Any] = ["success": false]
     module.saveConnection(value, resolver: { _ in
       module.loadConnection({ saved in
-        result["success"] = (saved as? [String: String])?["url"] == value["url"]
+        let restored = saved as? [String: String]
+        result["success"] = restored == value
       }, rejecter: { code, _, _ in result["error"] = code ?? "unknown" })
     }, rejecter: { code, _, _ in result["error"] = code ?? "unknown" })
+    // Simulate a previously installed prototype. Its old credentials must
+    // not reappear in JavaScript or produce an Authorization header.
+    if result["success"] as? Bool == true,
+      let legacy = try? JSONSerialization.data(withJSONObject:
+        ["url": "https://example.com", "username": "legacy", "password": "fixture"]) {
+      let status = SecItemUpdate(module.keychainQuery as CFDictionary,
+        [kSecValueData as String: legacy] as CFDictionary)
+      result["success"] = status == errSecSuccess
+      module.loadConnection({ saved in
+        result["success"] = result["success"] as? Bool == true && (saved as? [String: String]) == value
+      }, rejecter: { code, _, _ in result["success"] = false; result["error"] = code ?? "unknown" })
+    }
     if let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
        let data = try? JSONSerialization.data(withJSONObject: result) {
       try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

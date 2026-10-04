@@ -1,10 +1,18 @@
-import { getRecordings, normalizeServerURL, apiURL } from '../src/api';
+import {
+  getRecordings,
+  normalizeServerURL,
+  apiURL,
+  requestHeaders,
+} from '../src/api';
 
 const connection = {
   url: 'https://example.com/neo',
-  username: '',
-  password: '',
 };
+
+test('does not send Basic credentials left over from an old prototype', () => {
+  const legacy = { ...connection, authorization: 'Basic fixture' };
+  expect(requestHeaders(legacy)).not.toHaveProperty('Authorization');
+});
 
 test('preserves reverse-proxy subpaths and removes the optional API suffix', () => {
   expect(normalizeServerURL(' https://example.com/neo/api/ ')).toBe(
@@ -36,7 +44,9 @@ test('normalizes bookmarks with the actual React Native URL implementation', () 
     expect(normalizeServerURL('https://recorder.example.ts.net/neo/#/')).toBe(
       'https://recorder.example.ts.net/neo',
     );
-    expect(() => normalizeServerURL('https://user:secret@example.com/#/')).toThrow();
+    expect(() =>
+      normalizeServerURL('https://user:secret@example.com/#/'),
+    ).toThrow();
   } finally {
     globalThis.URL = original;
   }

@@ -2,9 +2,6 @@ import { NativeModules } from 'react-native';
 
 export interface Connection {
   url: string;
-  username: string;
-  password: string;
-  authorization?: string;
 }
 
 interface NeoNativeModule {
@@ -13,8 +10,6 @@ interface NeoNativeModule {
   play(options: {
     url: string;
     title: string;
-    username: string;
-    password: string;
     networkCaching: number;
   }): Promise<void>;
 }

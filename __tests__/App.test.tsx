@@ -3,7 +3,7 @@
  */
 
 import React from 'react';
-import { Modal, Text } from 'react-native';
+import { Modal, Text, TextInput } from 'react-native';
 import ReactTestRenderer, { act } from 'react-test-renderer';
 import App from '../App';
 import { native } from '../src/native';
@@ -21,6 +21,58 @@ jest.mock('../src/native', () => ({
     play: jest.fn().mockResolvedValue(undefined),
   },
 }));
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  (native.loadConnection as jest.Mock).mockResolvedValue(null);
+});
+
+test('automatically opens recordings from the saved server without a connect tap', async () => {
+  (native.loadConnection as jest.Mock).mockResolvedValueOnce({
+    url: 'https://example.com/neo',
+  });
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ records: [], total: 0 }),
+  });
+  let tree: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = ReactTestRenderer.create(<App />);
+  });
+  expect(globalThis.fetch).toHaveBeenCalledWith(
+    expect.stringContaining('https://example.com/neo/api/recorded?'),
+    expect.anything(),
+  );
+  expect(tree!.root.findAllByType(TextInput)).toHaveLength(0);
+  expect(native.saveConnection).not.toHaveBeenCalled();
+  await act(async () => {
+    tree!.unmount();
+  });
+});
+
+test('keeps the saved URL editable when automatic connection fails', async () => {
+  (native.loadConnection as jest.Mock).mockResolvedValueOnce({
+    url: 'https://example.com/neo',
+  });
+  globalThis.fetch = jest.fn().mockRejectedValue(new TypeError('offline'));
+  let tree: ReactTestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = ReactTestRenderer.create(<App />);
+  });
+  const inputs = tree!.root.findAllByType(TextInput);
+  expect(inputs).toHaveLength(1);
+  expect(inputs[0].props.value).toBe('https://example.com/neo');
+  expect(
+    tree!.root
+      .findAllByType(Text)
+      .some(node =>
+        String(node.props.children).includes('サーバーに接続できません'),
+      ),
+  ).toBe(true);
+  await act(async () => {
+    tree!.unmount();
+  });
+});
 
 test('connects, selects an actual file, and hands the raw PLAY URL to native code', async () => {
   globalThis.fetch = jest

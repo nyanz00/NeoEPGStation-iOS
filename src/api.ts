@@ -46,25 +46,24 @@ export function normalizeServerURL(input: string): string {
       'URLに認証情報・クエリ・フラグメントを含めないでください。',
     );
   }
-  return url
-    .toString()
-    // Web bookmarks include the SPA route; it is not part of the server base.
-    .split('#')[0]
-    .replace(/\/+$/, '')
-    .replace(/\/api$/, '');
+  return (
+    url
+      .toString()
+      // Web bookmarks include the SPA route; it is not part of the server base.
+      .split('#')[0]
+      .replace(/\/+$/, '')
+      .replace(/\/api$/, '')
+  );
 }
 
 export function apiURL(connection: Connection, path: string): string {
   return `${connection.url}/api${path}`;
 }
 
-export function requestHeaders(connection: Connection): Record<string, string> {
+export function requestHeaders(_connection: Connection): Record<string, string> {
   return {
     Accept: 'application/json',
     'X-EPGStation-User-Id': 'master',
-    ...(connection.authorization
-      ? { Authorization: connection.authorization }
-      : {}),
   };
 }
 
