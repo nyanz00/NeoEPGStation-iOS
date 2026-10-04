@@ -9,16 +9,18 @@ from pathlib import Path
 def run(*args, timeout=120):
     return subprocess.check_output(args, text=True, timeout=timeout).strip()
 
-def capture_ui(udid, stage, prefix):
+def capture_ui(udid, stage, prefix, terminate_existing=True):
     print(f'UI smoke: starting {prefix}/{stage}', flush=True)
-    subprocess.run(['xcrun', 'simctl', 'terminate', udid, 'io.github.nyanz00.NeoEPGStation'],
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+    if terminate_existing:
+        subprocess.run(['xcrun', 'simctl', 'terminate', udid, 'io.github.nyanz00.NeoEPGStation'],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
     ui_container = Path(run('xcrun', 'simctl', 'get_app_container', udid, 'io.github.nyanz00.NeoEPGStation', 'data'))
+    (ui_container / 'Documents').mkdir(exist_ok=True)
     marker = ui_container / f'Documents/ui-{stage}-smoke.json'
     marker.unlink(missing_ok=True)
     os.environ['SIMCTL_CHILD_NEO_EPG_UI_SMOKE'] = stage
     run('xcrun', 'simctl', 'launch', udid, 'io.github.nyanz00.NeoEPGStation')
-    for _ in range(30):
+    for _ in range(90):
         if marker.exists():
             break
         time.sleep(1)
@@ -50,7 +52,7 @@ def capture_ipad(app, device):
     print('UI smoke: installing application on iPad', flush=True)
     run('xcrun', 'simctl', 'install', pad, str(app), timeout=600)
     print('UI smoke: iPad installation completed', flush=True)
-    capture_ui(pad, 'recorded', 'ui-ipad')
+    capture_ui(pad, 'recorded', 'ui-ipad', terminate_existing=False)
 
 Path('dist').mkdir(exist_ok=True)
 device_file = Path('dist/simulator-device.json')
