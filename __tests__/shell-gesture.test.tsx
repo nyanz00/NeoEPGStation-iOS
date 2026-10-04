@@ -6,16 +6,29 @@ import type {
 } from 'react-native';
 import ReactTestRenderer, { act } from 'react-test-renderer';
 import { AppShell } from '../src/ui/AppShell';
-import * as safeArea from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 jest.mock('react-native-safe-area-context', () => ({
-  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+  useSafeAreaInsets: jest.fn(() => ({ top: 0, bottom: 0, left: 0, right: 0 })),
 }));
 
+afterEach(() => {
+  jest.restoreAllMocks();
+  (useSafeAreaInsets as jest.Mock).mockReturnValue({
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+  });
+});
+
 test('the left-edge swipe uses the safe-area origin in landscape', async () => {
-  const insets = jest
-    .spyOn(safeArea, 'useSafeAreaInsets')
-    .mockReturnValue({ left: 59, right: 59, top: 0, bottom: 21 });
+  (useSafeAreaInsets as jest.Mock).mockReturnValue({
+    left: 59,
+    right: 59,
+    top: 0,
+    bottom: 21,
+  });
   const create = jest.spyOn(PanResponder, 'create');
   let tree: ReactTestRenderer.ReactTestRenderer;
   await act(async () => {
@@ -52,7 +65,6 @@ test('the left-edge swipe uses the safe-area origin in landscape', async () => {
     tree!.unmount();
   });
   create.mockRestore();
-  insets.mockRestore();
 });
 
 test('an opening gesture survives the drawer rerender and keeps its initial operation', async () => {
