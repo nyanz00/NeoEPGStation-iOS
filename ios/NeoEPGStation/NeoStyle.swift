@@ -31,7 +31,9 @@ enum NeoStyle {
 // Decoding/resizing runs off the main thread. Cache is shared across cards and
 // details; reused cells cancel requests and never display another record's image.
 final class NeoThumbnail: UIImageView {
-  private static let cache = NSCache<NSURL, UIImage>()
+  private static let cache: NSCache<NSURL, UIImage> = {
+    let cache = NSCache<NSURL, UIImage>(); cache.totalCostLimit = 48 * 1024 * 1024; cache.countLimit = 120; return cache
+  }()
   private var task: URLSessionDataTask?
   private var requested: URL?
   init() { super.init(frame: .zero); contentMode = .scaleAspectFill; clipsToBounds = true; backgroundColor = .black }
@@ -53,4 +55,17 @@ final class NeoThumbnail: UIImageView {
     }; task?.resume()
   }
   deinit { task?.cancel() }
+#if targetEnvironment(simulator)
+  func showFixture(_ index: Int) {
+    load(nil)
+    image = UIGraphicsImageRenderer(size: CGSize(width: 640, height: 360)).image { context in
+      let colors: [UIColor] = [.systemTeal, .systemIndigo, .systemBlue, .systemOrange]
+      colors[(index - 1) % colors.count].withAlphaComponent(0.35).setFill()
+      context.fill(CGRect(x: 0, y: 0, width: 640, height: 360))
+      colors[(index - 1) % colors.count].setFill()
+      context.fill(CGRect(x: 0, y: 250, width: 640, height: 110))
+      ("SAMPLE  \(index)" as NSString).draw(at: CGPoint(x: 36, y: 140), withAttributes: [.font: UIFont.boldSystemFont(ofSize: 48), .foregroundColor: UIColor.white])
+    }
+  }
+#endif
 }

@@ -11,6 +11,7 @@ final class NeoRecordedCard: UICollectionViewCell {
     super.init(frame: frame); contentView.backgroundColor = NeoStyle.paper; contentView.layer.cornerRadius = 6
     contentView.clipsToBounds = true
     [thumbnail, title, channel, time, descriptionLabel, more].forEach(contentView.addSubview)
+    more.imageView?.transform = CGAffineTransform(scaleX: 20/24, y: 20/24)
     accessibilityIdentifier = "recorded-card"
   }
   required init?(coder: NSCoder) { fatalError() }
@@ -19,18 +20,19 @@ final class NeoRecordedCard: UICollectionViewCell {
     let imageWidth = mobile ? min(190, width * 0.32) : width
     let imageHeight = mobile ? contentView.bounds.height : width * 9 / 16
     thumbnail.frame = CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight)
-    let x = mobile ? imageWidth + 8 : 8, y = mobile ? (contentView.bounds.height - 76) / 2 : imageHeight + 8
+    let x = mobile ? imageWidth + 8 : 8, y = mobile ? (contentView.bounds.height - 90) / 2 : imageHeight + 8
     let bodyWidth = width - x - 8
-    title.frame = CGRect(x: x, y: y, width: max(0, bodyWidth - 28), height: 20)
-    more.frame = CGRect(x: width - 36, y: y - 6, width: 32, height: 32)
-    channel.frame = CGRect(x: x, y: y + 22, width: bodyWidth, height: 18)
-    time.frame = CGRect(x: x, y: y + 40, width: bodyWidth, height: 18)
-    descriptionLabel.frame = CGRect(x: x, y: y + 58, width: bodyWidth, height: 18)
+    title.frame = CGRect(x: x, y: y + 5, width: max(0, bodyWidth - 32), height: 20)
+    more.frame = CGRect(x: width - 38, y: y, width: 30, height: 30)
+    channel.frame = CGRect(x: x, y: y + 30, width: bodyWidth, height: 20)
+    time.frame = CGRect(x: x, y: y + 50, width: bodyWidth, height: 20)
+    descriptionLabel.frame = CGRect(x: x, y: y + 70, width: bodyWidth, height: 20)
   }
   override func prepareForReuse() { super.prepareForReuse(); thumbnail.load(nil); onMore = nil }
   func configure(_ item: NeoRecording, channelName: String, api: NeoAPI?, mobile: Bool) {
     self.mobile = mobile; title.text = item.name; channel.text = channelName
-    time.text = NeoProgramText.interval(start: item.startAt, end: item.endAt); descriptionLabel.text = item.description
+    time.text = NeoProgramText.interval(start: item.startAt, end: item.endAt)
+    descriptionLabel.text = item.description?.replacingOccurrences(of: "\n", with: " ")
     thumbnail.load(item.thumbnails?.first.flatMap { api?.url("/thumbnails/\($0)") })
     accessibilityLabel = "\(item.name)、\(channelName)、\(time.text ?? "")"
     setNeedsLayout()
@@ -48,10 +50,16 @@ final class NeoPaginationFooter: UICollectionReusableView {
     super.layoutSubviews(); guard lastWidth != bounds.width else { return }; lastWidth = bounds.width
     subviews.forEach { $0.removeFromSuperview() }; guard count > 1 else { return }
     let values: [Int?] = mobile ? NeoPagination.mobile(page: page, count: count).map { Optional($0) } : NeoPagination.desktop(page: page, count: count, width: Double(bounds.width))
-    let side: CGFloat = mobile ? 36 : 40, gap: CGFloat = mobile ? 6 : 8, arrowGap: CGFloat = mobile ? 4 : 8
-    let total = CGFloat(values.count + 2) * side + CGFloat(values.count + 1) * gap + arrowGap * 2
+    let small = bounds.width < 600
+    let side: CGFloat = small ? 36 : 40, gap: CGFloat = small ? 6 : 8, arrowGap: CGFloat = small ? 4 : 8
+    let ellipsisWidth: CGFloat = small ? 28 : 32
+    let total = values.reduce(side * 2) { $0 + ($1 == nil ? ellipsisWidth : side) } + CGFloat(values.count + 1) * gap + arrowGap * 2
     var x = (bounds.width - total) / 2
     func add(_ value: Int?, icon: String? = nil, enabled: Bool = true) {
+      if value == nil && icon == nil {
+        let label = NeoStyle.label("…", size: 17.6); label.textAlignment = .center
+        label.frame = CGRect(x: x, y: 16, width: ellipsisWidth, height: side); addSubview(label); x += ellipsisWidth + gap; return
+      }
       let button = UIButton(type: .system)
       if let icon { button.setImage(NeoIcon.image(icon), for: .normal) }
       else { button.setTitle(value.map(String.init) ?? "…", for: .normal) }
@@ -83,8 +91,9 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   private let spinner = UIActivityIndicatorView(style: .medium)
   private let message = NeoStyle.label(size: 14, muted: true)
   private let refresh = UIRefreshControl()
-  var mobile: Bool { collection.bounds.width <= 500 }
-  var cardHeight: CGFloat { mobile ? 108 : floor(itemWidth * 9 / 16) + 92 }
+  // Card xs/sm changes at 600; pagination uses a separate 500px query in Web.
+  var mobile: Bool { collection.bounds.width < 600 }
+  var cardHeight: CGFloat { mobile ? 108 : floor(itemWidth * 9 / 16) + 106 }
   private var itemWidth: CGFloat {
     let width = max(0, collection.bounds.width - 8)
     if mobile { return width }
@@ -116,9 +125,9 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   }
   func reloadLabels() { collection.reloadData() }
   @objc private func refreshList() { reload() }
-  private func reload() {
+  private func reload(targetPage: Int? = nil) {
     task?.cancel(); spinner.startAnimating(); message.text = nil
-    let requestedPage = page, query = keyword, oldest = reverse
+    let requestedPage = targetPage ?? page, query = keyword, oldest = reverse
     let api = shell?.api
     task = Task { [weak self] in
       guard let self else { return }
@@ -132,7 +141,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
 #endif
         try Task.checkCancellation()
         guard self.shell?.api === api else { return }
-        self.records = result.records; self.total = result.total
+        self.page = requestedPage; self.records = result.records; self.total = result.total
         self.message.text = result.records.isEmpty ? "録画がありません" : nil
         self.collection.reloadData(); self.collection.setContentOffset(.zero, animated: false)
       } catch {
@@ -147,7 +156,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   }
   private func selectPage(_ value: Int) {
     guard value != page, (1...max(1, Int(ceil(Double(total) / 30)))).contains(value) else { return }
-    page = value; reload()
+    reload(targetPage: value)
   }
 #if targetEnvironment(simulator)
   func smokePageSeven() { selectPage(7) }
@@ -181,12 +190,14 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "card", for: indexPath) as! NeoRecordedCard
     let item = records[indexPath.item]
     cell.configure(item, channelName: item.channelName ?? item.channelId.flatMap { shell?.channels[$0] } ?? "", api: shell?.api, mobile: mobile)
+#if targetEnvironment(simulator)
+    if shell?.smokeStage.isEmpty == false { cell.thumbnail.showFixture(item.id) }
+#endif
     cell.onMore = { [weak self, weak cell] in self?.recordMenu(item, anchor: cell) }; return cell
   }
   private func recordMenu(_ item: NeoRecording, anchor: UIView?) {
     let menu = UIAlertController(title: item.name, message: nil, preferredStyle: .actionSheet)
     menu.addAction(UIAlertAction(title: "詳細", style: .default) { [weak self] _ in self?.shell?.openDetail(item) })
-    menu.addAction(UIAlertAction(title: "PLAY", style: .default) { [weak self] _ in self?.shell?.openDetail(item) })
     menu.addAction(UIAlertAction(title: "キャンセル", style: .cancel)); menu.popoverPresentationController?.sourceView = anchor
     menu.popoverPresentationController?.sourceRect = anchor?.bounds ?? .zero; present(menu, animated: true)
   }
@@ -204,7 +215,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   }
   func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
     let footer = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "pages", for: indexPath) as! NeoPaginationFooter
-    footer.configure(page: page, count: max(1, Int(ceil(Double(total) / 30))), mobile: mobile) { [weak self] value in self?.selectPage(value) }
+    footer.configure(page: page, count: max(1, Int(ceil(Double(total) / 30))), mobile: collection.bounds.width <= 500) { [weak self] value in self?.selectPage(value) }
     return footer
   }
   deinit { task?.cancel() }

@@ -1,4 +1,4 @@
-"""Launch the Release bundle without Metro and catch immediate native crashes."""
+"""Launch the Release UIKit application and verify playback, storage and UI."""
 import json
 import os
 import subprocess
@@ -27,6 +27,8 @@ def capture_ui(udid, stage, prefix, terminate_existing=True):
     result = json.loads(marker.read_text())
     if (result.get('success') is not True or result.get('recordCount') != 4
         or result.get('theme') != 'neon-teal-dark'
+        or result.get('uiEngine') != 'Swift / UIKit'
+        or result.get('retainedList') is not True
         or result.get('route') != ('settings' if stage == 'settings' else 'recorded')):
         raise RuntimeError(f'UI smoke failed: {result}')
     if prefix == 'ui-ipad' and result.get('sidebarWidth') != 240:
@@ -55,6 +57,7 @@ def capture_ipad(app, device):
     run('xcrun', 'simctl', 'install', pad, str(app), timeout=600)
     print('UI smoke: iPad installation completed', flush=True)
     capture_ui(pad, 'recorded', 'ui-ipad', terminate_existing=False)
+    capture_ui(pad, 'detail', 'ui-ipad')
 
 Path('dist').mkdir(exist_ok=True)
 device_file = Path('dist/simulator-device.json')

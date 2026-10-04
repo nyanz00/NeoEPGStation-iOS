@@ -2,6 +2,7 @@
 set -euo pipefail
 app='build/device/Build/Products/Release-iphoneos/NeoEPGStation.app'
 test ! -f "$app/main.jsbundle"
+test -f "$app/PrivacyInfo.xcprivacy"
 test -d "$app/Frameworks/VLCKit.framework"
 test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app/Info.plist")" = '18.0'
 mkdir -p dist/Payload

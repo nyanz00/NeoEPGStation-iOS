@@ -29,6 +29,7 @@ class NeoPage: UIViewController {
   override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
   override func viewDidLoad() {
     super.viewDidLoad(); view.backgroundColor = NeoStyle.background; header.backgroundColor = NeoStyle.paper
+    titleLabel.font = .systemFont(ofSize: 20, weight: .medium)
     view.addSubview(body); view.addSubview(header)
     menu = NeoStyle.iconButton("Menu", label: "サイドメニューを開閉") { [weak self] in self?.shell?.toggleMenu() }
     back = NeoStyle.iconButton("ArrowBack", label: "戻る") { [weak self] in self?.shell?.goBack() }
@@ -40,11 +41,12 @@ class NeoPage: UIViewController {
     let width = view.bounds.width; header.frame = CGRect(x: 0, y: 0, width: width, height: 56)
     body.frame = CGRect(x: 0, y: 56, width: width, height: max(0, view.bounds.height - 56))
     menu.frame = CGRect(x: 4, y: 6, width: 44, height: 44)
+    menu.isHidden = shell?.api == nil
     let canBack = (navigationController?.viewControllers.count ?? 1) > 1 || shell?.hasRouteHistory == true
     back.isHidden = !canBack; back.frame = CGRect(x: 48, y: 6, width: 40, height: 44)
     var right = width - 4
     for action in actions.reversed() { right -= 44; action.frame = CGRect(x: right, y: 6, width: 44, height: 44) }
-    let left: CGFloat = canBack ? 88 : 48
+    let left: CGFloat = menu.isHidden ? 16 : canBack ? 88 : 48
     titleLabel.frame = CGRect(x: left, y: 0, width: max(0, right - left - 4), height: 56)
     header.viewWithTag(701)?.frame = CGRect(x: 0, y: 55.5, width: width, height: 0.5)
   }
@@ -178,6 +180,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     active?.topViewController?.view.setNeedsLayout(); view.setNeedsLayout()
   }
   func goBack() {
+    guard active?.transitionCoordinator == nil else { return }
     if let active, active.viewControllers.count > 1 { active.popViewController(animated: true) }
     else if let id = history.popLast() { showRoute(id, remember: false) }
   }
@@ -207,7 +210,9 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   @objc private func dragMenu(_ recognizer: UIPanGestureRecognizer) {
     guard !tablet else { return }
     if recognizer.state == .began {
-      sidebar.layer.removeAllAnimations(); dim.layer.removeAllAnimations(); panStart = menuOpen ? 240 : 0
+      let x = sidebar.layer.presentation()?.frame.minX ?? sidebar.frame.minX
+      sidebar.layer.removeAllAnimations(); dim.layer.removeAllAnimations()
+      sidebar.frame.origin.x = x; panStart = min(240, max(0, x + 240)); dim.alpha = panStart / 240
     }
     let progress = min(240, max(0, panStart + recognizer.translation(in: view).x))
     if recognizer.state == .changed || recognizer.state == .began {
@@ -239,6 +244,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
       let b = UIButton(type: .system)
       var config = UIButton.Configuration.plain(); config.image = NeoIcon.image(item.icon); config.title = item.title
       config.imagePlacement = .top; config.imagePadding = 3; config.contentInsets = .zero
+      config.background = .clear()
       config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attrs in var attrs = attrs; attrs.font = .systemFont(ofSize: 10); return attrs }
       b.configuration = config; b.accessibilityLabel = item.title; b.accessibilityIdentifier = "tab-" + id
       b.addAction(UIAction { [weak self] _ in self?.showRoute(id) }, for: .touchUpInside)
@@ -249,7 +255,8 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   private func updateBottom() {
     for (i, b) in bottomButtons.enumerated() {
       b.tintColor = shortcuts[i] == route ? NeoStyle.accent : NeoStyle.muted
-      b.isSelected = shortcuts[i] == route
+      // Selection is expressed by the Web accent, not iOS 26's automatic pill.
+      b.isSelected = false
       b.accessibilityTraits = shortcuts[i] == route ? [.button, .selected] : .button
     }
   }

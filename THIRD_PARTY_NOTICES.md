@@ -3,15 +3,17 @@
 The initial application skeleton comes from the MIT-licensed
 [React Native Community Template](https://github.com/react-native-community/template).
 Its notice is preserved in `licenses/ReactNativeTemplate-MIT.txt`.
-React and React Native are provided under the MIT license.
-Other JavaScript dependencies retain their respective notices in their packages.
+The current application uses Swift / UIKit and does not ship the React Native
+runtime or JavaScript dependencies. The template notice remains for retained
+project scaffolding.
 
-URL parsing uses [react-native-url-polyfill](https://github.com/charpeni/react-native-url-polyfill)
+The retired prototype used [react-native-url-polyfill](https://github.com/charpeni/react-native-url-polyfill)
 4.0.0 under the MIT license. Its notice is preserved in
 `licenses/ReactNativeURLPolyfill-MIT.txt` and included in the IPA.
 
-SVG icons use react-native-svg 15.15.5 (MIT), copyright (c) [2015-2016] [Horcrux].
-Its full license is preserved in `licenses/ReactNativeSVG-MIT.txt`.
+The retired SVG wrapper used react-native-svg 15.15.5 (MIT), copyright (c)
+[2015-2016] [Horcrux]. Its notice is retained in `licenses/ReactNativeSVG-MIT.txt`.
+The current icon paths are drawn with UIKit and do not use that runtime.
 Material icon paths match those used by NeoEPGStation Web: the MUI distribution
 is MIT (copyright (c) 2014 Call-Em-All), and the underlying Google Material Design
 icons are Apache-2.0. FilmstripBoxMultiple and TelevisionGuide are by the

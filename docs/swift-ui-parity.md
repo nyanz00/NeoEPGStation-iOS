@@ -42,3 +42,20 @@ Webの `client/src/pages/RecordedPage.tsx` の `RecordedCard` を基準とする
 Swift版の画面画像をWebの同条件の画面と比較する。
 起動・画像の生成に加え、実機でメニューの指への追従と画面切り替えの応答を確認する。
 React Native試作の画面画像は完成デザインの基準にしない。
+
+## 現在の移植範囲と参照元
+
+| Webの参照元 | Swiftで引き継ぐ内容 |
+| --- | --- |
+| `components/PageHeader.tsx` | 56ptのヘッダー、20ptの見出し、メニュー・戻る・右側操作の配置 |
+| `components/AppLayout.tsx` | 240ptのサイドバー、60ptのブランド欄、40ptの項目、ラベル・順序・アイコン |
+| `core/theme/themePresets.ts` / `AppThemeProvider.tsx` | ターコイズ、背景・面の色、6ptの角丸 |
+| `pages/RecordedPage.tsx` | 108ptのモバイルカード、32%の画像、8ptの内側余白、14ptの太字タイトル・12ptの情報 |
+| `components/VueCompatiblePagination.tsx` | モバイルの連続5番号、iPadの省略付き番号、矢印・選択色・一覧末尾の配置 |
+| `pages/RecordedDetailPage.tsx` | 16:9の画像、番組名・局名・日時・容量・PLAY・説明、広い画面では400ptの画像と情報を横並び |
+
+現在はキーワード検索とPLAYを実装する。高度な絞り込み、ユーザー選択、
+ジャンル表示、録画管理・STREAMINGの操作は後続の機能移植に含める。
+文字は当面システムフォントを使い、WebのRoboto / Noto Sans JPとの差は残る。
+ファイル選択とキーワード入力はUIKitのダイアログを使う。
+これらを含めてWeb全機能・全画面を移植済みとは扱わない。
