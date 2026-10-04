@@ -150,7 +150,9 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     received += 1
     frames.append(CapturedVideoFrame(sample: sampleBuffer, hostTime: pts))
     // Bound retained decoder surfaces and prefer recent frames after a stall.
-    let capacity = capturing ? 8 : 1
+    // VLC submits frames ahead of their display time. Keeping only the newest
+    // frame could replace every due frame with a future frame and starve PiP.
+    let capacity = 8
     if frames.count > capacity { frames.removeFirst(frames.count - capacity) }
   }
 
