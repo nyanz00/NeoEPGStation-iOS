@@ -97,7 +97,8 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     received += 1
     frames.append(CapturedVideoFrame(sample: sampleBuffer, hostTime: pts))
     // Bound retained decoder surfaces and prefer recent frames after a stall.
-    if frames.count > 8 { frames.removeFirst(frames.count - 8) }
+    let capacity = capturing ? 8 : 1
+    if frames.count > capacity { frames.removeFirst(frames.count - capacity) }
   }
 
   @objc func updateComments(from overlay: NeoCommentOverlay) {
@@ -205,10 +206,10 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     guard let cvFormat = vImageCVImageFormat_CreateWithCVPixelBuffer(pixel)?.takeRetainedValue() else {
       throw CommentParseError.invalid("PiP映像形式")
     }
-    if vImageCVImageFormat_GetColorSpace(cvFormat) == nil {
+    if cvFormat.colorSpace == nil {
       vImageCVImageFormat_SetColorSpace(cvFormat, space)
     }
-    if CVPixelBufferIsPlanar(pixel) && vImageCVImageFormat_GetChromaSiting(cvFormat) == nil {
+    if CVPixelBufferIsPlanar(pixel) && cvFormat.chromaSiting == nil {
       vImageCVImageFormat_SetChromaSiting(cvFormat, kCVImageBufferChromaLocation_Left)
     }
     var format = vImage_CGImageFormat(bitsPerComponent: 8, bitsPerPixel: 32, colorSpace: Unmanaged.passUnretained(space),

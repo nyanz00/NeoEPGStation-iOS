@@ -54,6 +54,17 @@ jobs:
           mkdir -p build/native-tests
           swiftc ios/NeoEPGStation/NeoASSComments.swift ios/NeoEPGStation/NeoCommentLoader.swift tests/native/main.swift -o build/native-tests/comments
           build/native-tests/comments
+      - name: Native UI type checks
+        run: |
+          sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          swiftc -typecheck -target arm64-apple-ios18.0-simulator -sdk "$sdk" \
+            -module-name NeoEPGStation \
+            -import-objc-header ios/NeoEPGStation/NeoEPGStation-Bridging-Header.h \
+            ios/NeoEPGStation/NeoASSComments.swift ios/NeoEPGStation/NeoCommentLoader.swift \
+            ios/NeoEPGStation/NeoDanmakuRenderer.swift ios/NeoEPGStation/NeoCommentOverlay.swift \
+            ios/NeoEPGStation/NeoCommentPiP.swift ios/NeoEPGStation/NeoPiPSmoke.swift
+          xcrun clang -fsyntax-only -fobjc-arc -target arm64-apple-ios18.0-simulator \
+            -isysroot "$sdk" ios/NeoEPGStation/NeoVLCFrameTap.m
       - name: Prepare simulator
         run: python3 scripts/simulator-smoke.py --prepare
       - run: npm ci
