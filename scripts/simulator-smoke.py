@@ -67,6 +67,8 @@ storage = json.loads((container / 'Documents/storage-smoke.json').read_text())
 Path('dist/storage-smoke.json').write_text(json.dumps(storage, indent=2) + '\n')
 if storage.get('success') is not True:
     raise RuntimeError(f"Keychain storage round-trip failed: {storage.get('error')}")
+if storage.get('navigationSuccess') is not True:
+    raise RuntimeError('Navigation preferences round-trip or invalid-item validation failed')
 danmaku = json.loads((container / 'Documents/danmaku-smoke.json').read_text())
 Path('dist/danmaku-smoke.json').write_text(json.dumps(danmaku, indent=2) + '\n')
 if danmaku.get('success') is not True:
@@ -85,3 +87,44 @@ for name in ['pip-composition-smoke', 'pip-player-smoke']:
 for name, result in results.items():
     if result.get('success') is not True:
         raise RuntimeError(f"{name} failed: {result}")
+
+# A second launch checks the actual React Native Release UI (including SVG pods).
+# Fixtures are enabled only on the simulator, never in the device application.
+del os.environ['SIMCTL_CHILD_NEO_EPG_STORAGE_SMOKE']
+def capture_ui(udid, stage, prefix):
+    subprocess.run(['xcrun', 'simctl', 'terminate', udid, 'io.github.nyanz00.NeoEPGStation'],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    ui_container = Path(run('xcrun', 'simctl', 'get_app_container', udid, 'io.github.nyanz00.NeoEPGStation', 'data'))
+    marker = ui_container / f'Documents/ui-{stage}-smoke.json'
+    marker.unlink(missing_ok=True)
+    os.environ['SIMCTL_CHILD_NEO_EPG_UI_SMOKE'] = stage
+    run('xcrun', 'simctl', 'launch', udid, 'io.github.nyanz00.NeoEPGStation')
+    for _ in range(30):
+        if marker.exists():
+            break
+        time.sleep(1)
+    result = json.loads(marker.read_text())
+    if (result.get('success') is not True or result.get('recordCount') != 4
+        or result.get('theme') != 'neon-teal-dark'
+        or result.get('route') != ('settings' if stage == 'settings' else 'recorded')):
+        raise RuntimeError(f'UI smoke failed: {result}')
+    Path(f'dist/{prefix}-{stage}.json').write_text(json.dumps(result, indent=2) + '\n')
+    run('xcrun', 'simctl', 'io', udid, 'screenshot', f'dist/{prefix}-{stage}.png')
+
+for stage in ['recorded', 'menu', 'settings']:
+    capture_ui(device['udid'], stage, 'ui-iphone')
+
+available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '--json'))['devices']
+runtime = next(runtime for runtime, devices in available.items()
+    if any(item['udid'] == device['udid'] for item in devices))
+pad_source = next(item for item in available[runtime]
+                  if item['isAvailable'] and item['name'].startswith('iPad Pro'))
+pad_type = next(item['identifier'] for item in
+    json.loads(run('xcrun', 'simctl', 'list', 'devicetypes', '--json'))['devicetypes']
+    if item['name'] == pad_source['name'])
+pad = run('xcrun', 'simctl', 'create', 'NeoEPGStation-iPad-CI', pad_type, runtime)
+run('xcrun', 'simctl', 'shutdown', device['udid'])
+run('xcrun', 'simctl', 'boot', pad)
+run('xcrun', 'simctl', 'bootstatus', pad, '-b', timeout=300)
+run('xcrun', 'simctl', 'install', pad, str(app))
+capture_ui(pad, 'recorded', 'ui-ipad')

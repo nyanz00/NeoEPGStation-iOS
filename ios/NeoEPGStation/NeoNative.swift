@@ -10,6 +10,53 @@ final class NeoNative: NSObject {
 
   @objc static func requiresMainQueueSetup() -> Bool { true }
 
+  private var preferences = UserDefaults.standard
+  private let navigationKey = "neoepgstation.navigation.v1"
+
+  @objc func constantsToExport() -> [String: Any] {
+#if targetEnvironment(simulator)
+    return ["uiSmoke": ProcessInfo.processInfo.environment["NEO_EPG_UI_SMOKE"] ?? ""]
+#else
+    return ["uiSmoke": ""]
+#endif
+  }
+
+  @objc(loadNavigation:rejecter:)
+  func loadNavigation(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
+    if let items = preferences.stringArray(forKey: navigationKey) { resolve(items) }
+    else { resolve(NSNull()) }
+  }
+
+  @objc(reportUIReady:resolver:rejecter:)
+  func reportUIReady(_ value: [String: Any], resolver resolve: RCTPromiseResolveBlock,
+                     rejecter reject: RCTPromiseRejectBlock) {
+#if targetEnvironment(simulator)
+    let stage = ProcessInfo.processInfo.environment["NEO_EPG_UI_SMOKE"] ?? ""
+    guard ["recorded", "menu", "settings"].contains(stage), value["stage"] as? String == stage,
+      let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+      reject("smoke", "UI smoke stage mismatch", nil); return
+    }
+    do {
+      let data = try JSONSerialization.data(withJSONObject: value.merging(["success": true]) { _, new in new })
+      try data.write(to: directory.appendingPathComponent("ui-\(stage)-smoke.json"))
+    } catch { reject("smoke", "Cannot write UI smoke result", error); return }
+#endif
+    resolve(NSNull())
+  }
+
+  @objc(saveNavigation:resolver:rejecter:)
+  func saveNavigation(_ items: [String], resolver resolve: RCTPromiseResolveBlock,
+                      rejecter reject: RCTPromiseRejectBlock) {
+    let allowed = Set(["dashboard", "onair", "guide", "anime", "recording", "recorded", "encode",
+      "reserves", "search", "rule", "history", "system", "settings"])
+    guard (1...5).contains(items.count), Set(items).count == items.count,
+      items.allSatisfy({ allowed.contains($0) }) else {
+      reject("navigation", "ナビゲーションの項目を確認してください。", nil); return
+    }
+    preferences.set(items, forKey: navigationKey)
+    resolve(NSNull())
+  }
+
   private var keychainQuery: [String: Any] {
     [kSecClass as String: kSecClassGenericPassword,
      kSecAttrService as String: service,
@@ -106,6 +153,16 @@ final class NeoNative: NSObject {
     defer { SecItemDelete(module.keychainQuery as CFDictionary) }
     let value = ["url": "https://example.com"]
     var result: [String: Any] = ["success": false]
+    let suite = "io.github.nyanz00.neoepgstation.navigation.ci-smoke"
+    module.preferences = UserDefaults(suiteName: suite)!
+    defer { module.preferences.removePersistentDomain(forName: suite) }
+    var navigationSaved = false
+    module.saveNavigation(["guide", "recorded"], resolver: { _ in
+      module.loadNavigation({ items in navigationSaved = (items as? [String]) == ["guide", "recorded"] }, rejecter: { _, _, _ in })
+    }, rejecter: { _, _, _ in })
+    var rejectedInvalid = false
+    module.saveNavigation(["unknown"], resolver: { _ in }, rejecter: { _, _, _ in rejectedInvalid = true })
+    result["navigationSuccess"] = navigationSaved && rejectedInvalid
     module.saveConnection(value, resolver: { _ in
       module.loadConnection({ saved in
         let restored = saved as? [String: String]

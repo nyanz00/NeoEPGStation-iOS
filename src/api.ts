@@ -15,6 +15,9 @@ export interface Recording {
   startAt: number;
   endAt: number;
   isRecording: boolean;
+  description?: string;
+  channelName?: string;
+  channelId?: number;
   thumbnails?: number[];
   videoFiles?: VideoFile[];
 }
@@ -60,7 +63,9 @@ export function apiURL(connection: Connection, path: string): string {
   return `${connection.url}/api${path}`;
 }
 
-export function requestHeaders(_connection: Connection): Record<string, string> {
+export function requestHeaders(
+  _connection: Connection,
+): Record<string, string> {
   return {
     Accept: 'application/json',
     'X-EPGStation-User-Id': 'master',
@@ -163,4 +168,24 @@ export async function getRecording(
     throw new Error('録画情報の応答形式が一致しません。');
   }
   return item;
+}
+
+export async function getChannels(
+  connection: Connection,
+  signal?: AbortSignal,
+): Promise<{ id: number; name: string }[]> {
+  const items = await request<{ id: number; name: string }[]>(
+    connection,
+    '/channels?isHalfWidth=true',
+    signal,
+  );
+  if (
+    !Array.isArray(items) ||
+    items.some(
+      item => !Number.isSafeInteger(item.id) || typeof item.name !== 'string',
+    )
+  ) {
+    throw new Error('放送局の応答形式が一致しません。');
+  }
+  return items;
 }

@@ -5,6 +5,16 @@ export interface Connection {
 }
 
 interface NeoNativeModule {
+  uiSmoke?: string;
+  reportUIReady(value: {
+    stage: string;
+    route: string;
+    shortcuts: string[];
+    theme: string;
+    recordCount: number;
+  }): Promise<void>;
+  loadNavigation(): Promise<string[] | null>;
+  saveNavigation(items: string[]): Promise<void>;
   loadConnection(): Promise<Connection | null>;
   saveConnection(connection: Connection): Promise<Connection>;
   play(options: {
