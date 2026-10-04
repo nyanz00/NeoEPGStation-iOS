@@ -47,6 +47,18 @@ for attempt in range(12):
         break
 processes = run('xcrun', 'simctl', 'spawn', device['udid'], 'launchctl', 'list')
 if not any(line.split()[0] == pid for line in processes.splitlines() if line.split()):
+    # Keep diagnostics even if a native worker crashes before UI checks finish.
+    for name in ['storage-smoke', 'danmaku-smoke', 'pip-composition-smoke', 'pip-player-smoke']:
+        for extension in ['json', 'png']:
+            source = container / f'Documents/{name}.{extension}'
+            if source.exists():
+                Path(f'dist/{name}.{extension}').write_bytes(source.read_bytes())
+    logs = run('xcrun', 'simctl', 'spawn', device['udid'], 'log', 'show', '--last', '3m',
+               '--style', 'compact', '--predicate', 'process == "NeoEPGStation"')
+    Path('dist/simulator-crash.log').write_text(logs)
+    reports = sorted((Path.home() / 'Library/Logs/DiagnosticReports').glob('NeoEPGStation*.ips'))
+    for index, report in enumerate(reports[-3:]):
+        Path(f'dist/native-crash-{index}.log').write_bytes(report.read_bytes())
     raise RuntimeError('Application exited after launch; inspect simulator crash logs')
 Path('dist/simulator-launch.txt').write_text(f"{device['name']}\n{launch}\nProcess remained running through native rendering tests.\n")
 run('xcrun', 'simctl', 'io', device['udid'], 'screenshot', 'dist/simulator.png')

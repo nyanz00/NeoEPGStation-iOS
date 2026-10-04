@@ -10,6 +10,7 @@ NS_ASSUME_NONNULL_BEGIN
             networkCaching:(NSInteger)networkCaching;
 #if TARGET_OS_SIMULATOR
 - (NSDictionary<NSString *, id> *)runLayoutSmokeChecks;
+- (NSDictionary<NSString *, id> *)finishLayoutSmokeSnapshot;
 - (BOOL)startPiPSmoke;
 - (NSDictionary<NSString *, id> *)piPSmokeState;
 #endif

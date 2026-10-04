@@ -42,6 +42,9 @@
 @property (nonatomic) BOOL finishedClosing;
 @property (nonatomic) BOOL scrubbing;
 @property (nonatomic) BOOL resumeAfterInterruption;
+#if TARGET_OS_SIMULATOR
+@property (nonatomic) CGRect smokeSavedFrame;
+#endif
 @end
 
 @implementation NeoPlayerController
@@ -379,24 +382,34 @@
 }
 #if TARGET_OS_SIMULATOR
 - (NSDictionary<NSString *, id> *)runLayoutSmokeChecks {
-  CGRect saved = self.view.frame;
+  self.smokeSavedFrame = self.view.frame;
   self.view.frame = CGRectMake(0, 0, 844, 390);
   [self applyPlayerLayout:self.view.bounds.size]; [self.view layoutIfNeeded];
   BOOL full = CGRectEqualToRect(self.movieView.frame, self.view.bounds);
   BOOL overlay = self.header.frame.size.height < 80 && CGRectGetMaxY(self.controls.frame) <= 390;
-  NSString *directory = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-  UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:self.view.bounds.size];
-  NSData *landscape = [renderer PNGDataWithActions:^(UIGraphicsImageRendererContext *context) {
-    [self.view drawViewHierarchyInRect:self.view.bounds afterScreenUpdates:YES];
-  }];
-  [landscape writeToFile:[directory stringByAppendingPathComponent:@"player-landscape-smoke.png"] atomically:YES];
-  self.view.frame = saved; [self applyPlayerLayout:self.view.bounds.size]; [self.view layoutIfNeeded];
   return @{@"success": @(full && overlay && self.frameTapInstalled && self.commentPiP.consumedFrameCount >= 24 && self.commentPiP.composedFrameCount >= 24),
     @"landscapeFillsView": @(full), @"controlsOverlay": @(overlay), @"frameTapInstalled": @(self.frameTapInstalled),
     @"capturedFrames": @(self.commentPiP.capturedFrameCount), @"composedFrames": @(self.commentPiP.composedFrameCount),
     @"consumedFrames": @(self.commentPiP.consumedFrameCount),
     @"pipPossible": @(self.commentPiP.possible),
     @"pipStatus": self.commentPiP.status ?: @"", @"commentsReady": @(self.comments.ready)};
+}
+- (NSDictionary<NSString *, id> *)finishLayoutSmokeSnapshot {
+  NSString *directory = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+  UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:self.view.bounds.size];
+  NSData *landscape = [renderer PNGDataWithActions:^(UIGraphicsImageRendererContext *context) {
+    [self.view drawViewHierarchyInRect:self.view.bounds afterScreenUpdates:YES];
+  }];
+  [landscape writeToFile:[directory stringByAppendingPathComponent:@"player-landscape-smoke.png"] atomically:YES];
+  UIView *video = [NeoVLCFrameTap videoViewInView:self.movieView];
+  CGRect rect = video ? [video convertRect:video.bounds toView:self.movieView] : CGRectZero;
+  CGSize viewport = self.movieView.bounds.size;
+  CGFloat ratio = 640.0 / 360.0; // The synthetic fixture's known presentation ratio.
+  CGFloat width = MIN(viewport.width, viewport.height * ratio), height = width / ratio;
+  BOOL fitted = fabs(rect.size.width - width) < 2 && fabs(rect.size.height - height) < 2 &&
+    fabs(rect.origin.x - (viewport.width - width) / 2) < 2 && fabs(rect.origin.y - (viewport.height - height) / 2) < 2;
+  self.view.frame = self.smokeSavedFrame; [self applyPlayerLayout:self.view.bounds.size]; [self.view layoutIfNeeded];
+  return @{@"videoFillsFit": @(fitted), @"videoRect": NSStringFromCGRect(rect)};
 }
 - (BOOL)startPiPSmoke {
   if (!self.commentPiP.possible) { return NO; }

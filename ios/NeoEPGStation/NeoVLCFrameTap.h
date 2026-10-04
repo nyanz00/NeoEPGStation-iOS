@@ -12,5 +12,8 @@ NS_ASSUME_NONNULL_BEGIN
 @interface NeoVLCFrameTap : NSObject
 + (BOOL)install;
 + (void)bindView:(UIView *)view sink:(nullable id<NeoVideoFrameSink>)sink;
+#if TARGET_OS_SIMULATOR
++ (nullable UIView *)videoViewInView:(UIView *)view;
+#endif
 @end
 NS_ASSUME_NONNULL_END

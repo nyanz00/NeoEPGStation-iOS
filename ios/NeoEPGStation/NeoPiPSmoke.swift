@@ -123,13 +123,17 @@ enum NeoPiPSmoke {
             root.present(player, animated: false) {
               DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                 var result = player.runLayoutSmokeChecks()
-                let attempted = player.startPiPSmoke()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                  result.merge(player.piPSmokeState()) { _, new in new }
-                  result["pipStartAttempted"] = attempted
-                  let primed = result["pipSupported"] as? Bool != true || result["pipStatus"] as? String == "PiP · コメント合成"
-                  result["success"] = result["success"] as? Bool == true && primed && (!attempted || result["pipActive"] as? Bool == true)
-                  save("pip-player-smoke", result)
+                // VLC resize reporting and MTK drawable replacement are async.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                  result.merge(player.finishLayoutSmokeSnapshot()) { _, new in new }
+                  let attempted = player.startPiPSmoke()
+                  DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    result.merge(player.piPSmokeState()) { _, new in new }
+                    result["pipStartAttempted"] = attempted
+                    let primed = result["pipSupported"] as? Bool != true || result["pipStatus"] as? String == "PiP · コメント合成"
+                    result["success"] = result["success"] as? Bool == true && result["videoFillsFit"] as? Bool == true && primed && (!attempted || result["pipActive"] as? Bool == true)
+                    save("pip-player-smoke", result)
+                  }
                 }
               }
             }

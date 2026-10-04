@@ -63,4 +63,13 @@ static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideo
   }
   for (UIView *child in view.subviews) { [self bindView:child sink:sink]; }
 }
+#if TARGET_OS_SIMULATOR
++ (UIView *)videoViewInView:(UIView *)view {
+  if ([view.layer isKindOfClass:NeoTappedVideoLayer.class]) { return view; }
+  for (UIView *child in view.subviews) {
+    UIView *found = [self videoViewInView:child]; if (found) { return found; }
+  }
+  return nil;
+}
+#endif
 @end
