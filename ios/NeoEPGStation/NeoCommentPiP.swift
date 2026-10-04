@@ -205,6 +205,12 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     guard let cvFormat = vImageCVImageFormat_CreateWithCVPixelBuffer(pixel)?.takeRetainedValue() else {
       throw CommentParseError.invalid("PiP映像形式")
     }
+    if vImageCVImageFormat_GetColorSpace(cvFormat) == nil {
+      vImageCVImageFormat_SetColorSpace(cvFormat, space)
+    }
+    if CVPixelBufferIsPlanar(pixel) && vImageCVImageFormat_GetChromaSiting(cvFormat) == nil {
+      vImageCVImageFormat_SetChromaSiting(cvFormat, kCVImageBufferChromaLocation_Left)
+    }
     var format = vImage_CGImageFormat(bitsPerComponent: 8, bitsPerPixel: 32, colorSpace: Unmanaged.passUnretained(space),
       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
       version: 0, decode: nil, renderingIntent: .defaultIntent)
