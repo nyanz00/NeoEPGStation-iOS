@@ -19,6 +19,7 @@ Actionsの `NeoEPGStation-iOS-<run number>` ArtifactからZIPをダウンロー�
 モバイルの連続5ページ、iPadの省略付きページ番号、URL正規化、番組日時をSwiftのテストで検証する。
 画面切り替え時に同じ一覧インスタンスが保持されることもシミュレーターで検証する。
 下部ナビの項目・順番はUserDefaultsに保存する。実装範囲は `ui-foundation.md` を参照する。
+Swift / UIKit版のビルド32の検証結果は `swift-ui-verification.md` を参照する。
 端末の起動・導入だけで検証が中断した場合は、Actionsの手動実行で `reuse_run` に
 生成済みビルドのrun IDを指定すると、保存したシミュレーター用アプリでiPad UIのみを再確認できる。
 アプリ・ネイティブコード・依存ロックが同一で、元ビルドの保存・再生・コメント合成・iPhone UIの
