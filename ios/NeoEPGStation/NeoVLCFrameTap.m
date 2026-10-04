@@ -4,15 +4,38 @@
 
 @interface NeoTappedVideoLayer : AVSampleBufferDisplayLayer
 @property (atomic, weak) id<NeoVideoFrameSink> frameSink;
+@property (atomic) BOOL appBackground;
 @end
 @implementation NeoTappedVideoLayer
+- (instancetype)init {
+  self = [super init];
+  if (self) {
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(backgrounded)
+      name:UIApplicationDidEnterBackgroundNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(foregrounded)
+      name:UIApplicationDidBecomeActiveNotification object:nil];
+  }
+  return self;
+}
+- (void)backgrounded { self.appBackground = YES; }
+- (void)foregrounded { self.appBackground = NO; [super flush]; }
+- (AVQueuedSampleBufferRenderingStatus)status {
+  AVQueuedSampleBufferRenderingStatus status = super.status;
+  // The inactive inline layer can lose renderer resources in the background.
+  // VLC must still deliver decoded frames to the separate active PiP source.
+  if (status == AVQueuedSampleBufferRenderingStatusFailed && self.frameSink.capturingForPiP) {
+    return AVQueuedSampleBufferRenderingStatusUnknown;
+  }
+  return status;
+}
 - (void)enqueueSampleBuffer:(CMSampleBufferRef)sampleBuffer {
   id<NeoVideoFrameSink> sink = self.frameSink;
   if (sink && CMSampleBufferGetImageBuffer(sampleBuffer)) {
     [sink receiveVideoSampleBuffer:sampleBuffer];
   }
-  [super enqueueSampleBuffer:sampleBuffer];
+  if (!self.appBackground || !sink.capturingForPiP) { [super enqueueSampleBuffer:sampleBuffer]; }
 }
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
 @end
 
 static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideoLayer.class; }

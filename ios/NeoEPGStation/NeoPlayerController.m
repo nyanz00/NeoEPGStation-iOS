@@ -1,5 +1,6 @@
 #import "NeoPlayerController.h"
 #import <AVFoundation/AVFoundation.h>
+#import <AVKit/AVKit.h>
 #import <VLCKit/VLCKit.h>
 #import "NeoEPGStation-Swift.h"
 #import "NeoVLCFrameTap.h"
@@ -87,6 +88,8 @@
   UIButton *back = [self button:@"−10秒" action:@selector(backward)];
   UIButton *forward = [self button:@"＋10秒" action:@selector(forward)];
   UIButton *close = [self button:@"閉じる" action:@selector(closePlayer)];
+  [close setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+  [close setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
   self.timeline = [UISlider new]; self.timeline.accessibilityLabel = @"再生位置";
   [self.timeline addTarget:self action:@selector(beginScrubbing) forControlEvents:UIControlEventTouchDown];
   [self.timeline addTarget:self action:@selector(endScrubbing) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside];
@@ -373,7 +376,7 @@
   [self showControls]; [self.commentPiP start];
 }
 #if TARGET_OS_SIMULATOR
-- (NSDictionary *)runLayoutSmokeChecks {
+- (NSDictionary<NSString *, id> *)runLayoutSmokeChecks {
   CGRect saved = self.view.frame;
   self.view.frame = CGRectMake(0, 0, 844, 390);
   [self applyPlayerLayout:self.view.bounds.size]; [self.view layoutIfNeeded];
@@ -390,6 +393,15 @@
     @"landscapeFillsView": @(full), @"controlsOverlay": @(overlay), @"frameTapInstalled": @(self.frameTapInstalled),
     @"capturedFrames": @(self.commentPiP.capturedFrameCount), @"pipPossible": @(self.commentPiP.possible),
     @"pipStatus": self.commentPiP.status ?: @"", @"commentsReady": @(self.comments.ready)};
+}
+- (BOOL)startPiPSmoke {
+  if (!self.commentPiP.possible) { return NO; }
+  [self.commentPiP start]; return YES;
+}
+- (NSDictionary<NSString *, id> *)piPSmokeState {
+  return @{@"pipActive": @(self.commentPiP.active), @"pipPossible": @(self.commentPiP.possible),
+    @"pipSupported": @([AVPictureInPictureController isPictureInPictureSupported]),
+    @"pipStatus": self.commentPiP.status ?: @"", @"capturedFrames": @(self.commentPiP.capturedFrameCount)};
 }
 #endif
 - (void)play { [self.player play]; }

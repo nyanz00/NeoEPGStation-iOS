@@ -34,6 +34,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   private let frameLock = NSLock()
   private var frames: [CapturedVideoFrame] = []
   private var closed = false, received = 0
+  private var capturing = false
   private var timer: DispatchSourceTimer?
   private var renderer: NeoDanmakuRenderer?
   private var state = CommentCompositionState(timeline: nil, version: -1, enabled: false, size: 1, opacity: 1)
@@ -45,6 +46,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   private var composing = false, primed = false, dirty = true
   private var lastTime = -1.0
   private var errorReported = false
+  private var failed = false
   @objc private(set) var active = false
   @objc private(set) var possible = false
   @objc private(set) var status = "PiP · 映像待ち"
@@ -56,6 +58,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   @objc var pauseAction: (() -> Void)?
   @objc var seekAction: ((Double, @escaping () -> Void) -> Void)?
   @objc var capturedFrameCount: Int { frameLock.lock(); defer { frameLock.unlock() }; return received }
+  @objc var capturingForPiP: Bool { frameLock.lock(); defer { frameLock.unlock() }; return capturing }
 
   @objc override init() {
     surface = NeoPiPSurface(frame: .zero); view = surface
@@ -75,7 +78,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     controller.delegate = self; controller.canStartPictureInPictureAutomaticallyFromInline = false
     pip = controller
     observation = controller.observe(\.isPictureInPicturePossible, options: [.initial, .new]) { [weak self] controller, _ in
-      DispatchQueue.main.async { self?.possible = controller.isPictureInPicturePossible; self?.onChange?() }
+      DispatchQueue.main.async { self?.possible = controller.isPictureInPicturePossible && !(self?.failed ?? true); self?.onChange?() }
     }
     let timer = DispatchSource.makeTimerSource(queue: work)
     timer.schedule(deadline: .now(), repeating: 1.0 / 60.0, leeway: .milliseconds(2))
@@ -113,7 +116,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   }
   @objc func invalidatePlaybackState() { pip?.invalidatePlaybackState() }
   @objc func stop() {
-    frameLock.lock(); closed = true; frames.removeAll(); frameLock.unlock()
+    frameLock.lock(); closed = true; capturing = false; frames.removeAll(); frameLock.unlock()
     observation = nil; pip?.stopPictureInPicture(); pip?.delegate = nil; pip?.contentSource = nil; pip = nil
     active = false; possible = false; onChange = nil
     work.async { [weak self] in
@@ -157,15 +160,18 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
       guard let output = try Self.compose(image: image, size: outputSize, pool: pool, renderer: renderer, state: state, time: time) else { return }
       let sample = try Self.makeSample(output, hostTime: now)
       layer.enqueue(sample)
-      lastTime = time; dirty = false
+      lastTime = time; dirty = renderer.hasPendingImages
       if !primed {
         primed = true
         DispatchQueue.main.async { [weak self] in self?.status = "PiP · コメント合成"; self?.onChange?() }
       }
     } catch {
       if !errorReported {
-        errorReported = true
-        DispatchQueue.main.async { [weak self] in self?.status = error.localizedDescription; self?.onChange?() }
+        errorReported = true; composing = false; primed = true
+        DispatchQueue.main.async { [weak self] in
+          self?.failed = true; self?.possible = false; self?.status = error.localizedDescription
+          self?.pip?.stopPictureInPicture(); self?.onChange?()
+        }
       }
     }
   }
@@ -272,12 +278,15 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, didTransitionToRenderSize newRenderSize: CMVideoDimensions) {}
   func pictureInPictureControllerShouldProhibitBackgroundAudioPlayback(_ pictureInPictureController: AVPictureInPictureController) -> Bool { false }
   func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+    frameLock.lock(); capturing = true; frameLock.unlock()
     active = true; work.async { [weak self] in self?.composing = true; self?.dirty = true }; onChange?()
   }
   func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+    frameLock.lock(); capturing = false; frameLock.unlock()
     active = false; work.async { [weak self] in self?.composing = false }; onChange?()
   }
   func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
+    frameLock.lock(); capturing = false; frameLock.unlock()
     active = false; status = "PiPを開始できませんでした。"; work.async { [weak self] in self?.composing = false }; onChange?()
   }
   func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController,

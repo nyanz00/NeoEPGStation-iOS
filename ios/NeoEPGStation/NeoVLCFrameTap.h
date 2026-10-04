@@ -3,6 +3,7 @@
 
 NS_ASSUME_NONNULL_BEGIN
 @protocol NeoVideoFrameSink <NSObject>
+@property (nonatomic, readonly) BOOL capturingForPiP;
 - (void)receiveVideoSampleBuffer:(CMSampleBufferRef)sampleBuffer;
 @end
 

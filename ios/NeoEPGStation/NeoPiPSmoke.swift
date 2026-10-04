@@ -112,7 +112,17 @@ enum NeoPiPSmoke {
             let player = NeoPlayerController(url: url, title: "Synthetic PiP test", username: "", password: "", networkCaching: 100)
             player.modalPresentationStyle = .fullScreen
             root.present(player, animated: false) {
-              DispatchQueue.main.asyncAfter(deadline: .now() + 3) { save("pip-player-smoke", player.runLayoutSmokeChecks()) }
+              DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                var result = player.runLayoutSmokeChecks()
+                let attempted = player.startPiPSmoke()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                  result.merge(player.piPSmokeState()) { _, new in new }
+                  result["pipStartAttempted"] = attempted
+                  let primed = result["pipSupported"] as? Bool != true || result["pipStatus"] as? String == "PiP · コメント合成"
+                  result["success"] = result["success"] as? Bool == true && primed && (!attempted || result["pipActive"] as? Bool == true)
+                  save("pip-player-smoke", result)
+                }
+              }
             }
           }
         }

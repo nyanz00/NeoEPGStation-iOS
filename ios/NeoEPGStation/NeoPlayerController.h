@@ -9,7 +9,9 @@ NS_ASSUME_NONNULL_BEGIN
                   username:(NSString *)username password:(NSString *)password
             networkCaching:(NSInteger)networkCaching;
 #if TARGET_OS_SIMULATOR
-- (NSDictionary *)runLayoutSmokeChecks;
+- (NSDictionary<NSString *, id> *)runLayoutSmokeChecks;
+- (BOOL)startPiPSmoke;
+- (NSDictionary<NSString *, id> *)piPSmokeState;
 #endif
 @end
 NS_ASSUME_NONNULL_END

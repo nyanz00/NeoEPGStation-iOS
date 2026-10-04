@@ -50,6 +50,7 @@ final class NeoDanmakuRenderer {
 
   var error: String? { lock.lock(); defer { lock.unlock() }; return failure }
   var cachedBytes: Int { lock.lock(); defer { lock.unlock() }; return cost }
+  var hasPendingImages: Bool { lock.lock(); defer { lock.unlock() }; return !pending.isEmpty }
 
   // Only newly visible or imminent comments are rasterized, away from the main
   // thread. Textures stay immutable once published to the render thread.
