@@ -25,6 +25,7 @@ def capture_ui(udid, stage, prefix, terminate_existing=True):
             break
         time.sleep(1)
     result = json.loads(marker.read_text())
+    Path(f'dist/{prefix}-{stage}.json').write_text(json.dumps(result, indent=2) + '\n')
     if (result.get('success') is not True or result.get('recordCount') != 4
         or result.get('theme') != 'neon-teal-dark'
         or result.get('uiEngine') != 'Swift / UIKit'
@@ -33,7 +34,6 @@ def capture_ui(udid, stage, prefix, terminate_existing=True):
         raise RuntimeError(f'UI smoke failed: {result}')
     if prefix == 'ui-ipad' and result.get('sidebarWidth') != 240:
         raise RuntimeError(f"Unexpected iPad sidebar width: {result.get('sidebarWidth')}")
-    Path(f'dist/{prefix}-{stage}.json').write_text(json.dumps(result, indent=2) + '\n')
     run('xcrun', 'simctl', 'io', udid, 'screenshot', f'dist/{prefix}-{stage}.png')
     print(f'UI smoke: captured {prefix}/{stage}', flush=True)
 

@@ -400,6 +400,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) { showRoute(NeoDestination.all[indexPath.row].id) }
 
 #if targetEnvironment(simulator)
+  private var backSmokeDetails: [String: Any] = [:]
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
     guard !smokeStage.isEmpty else { return }
@@ -425,7 +426,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
             "stage": "gestures", "route": self.route, "recordCount": recorded.records.count,
             "theme": "neon-teal-dark", "uiEngine": "Swift / UIKit", "retainedList": retained,
             "shortcuts": self.shortcuts, "brandGap": gap, "interactiveBack": correct, "thumbnailLoading": thumbnails,
-            "freshFade": freshFade, "cachedFade": cachedFade])
+            "freshFade": freshFade, "cachedFade": cachedFade, "backDetails": self.backSmokeDetails])
         }
       }
       return
@@ -448,31 +449,37 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     }
   }
   private func runBackSmoke(_ recorded: NeoRecordedPage, completion: @escaping (Bool) -> Void) {
-    func later(_ action: @escaping () -> Void) { DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: action) }
+    func later(_ delay: TimeInterval = 0.45, _ action: @escaping () -> Void) {
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: action)
+    }
+    func perform(cancel: Bool, done: @escaping () -> Void) {
+      updateBack(state: .began, translation: 0, velocity: 100)
+      // UIKit must have a run-loop turn to create the transition context,
+      // just as it does between actual began/changed touch events.
+      later(0.05) { [self] in
+        updateBack(state: .changed, translation: content.bounds.width * 0.4, velocity: 100)
+        later(0.05) { [self] in
+          updateBack(state: cancel ? .cancelled : .ended, translation: content.bounds.width * 0.4, velocity: 500)
+          later(done)
+        }
+      }
+    }
     openDetail(NeoRecordedPage.fixtures.records[0])
     later { [self] in
-      updateBack(state: .began, translation: 0, velocity: 100)
-      updateBack(state: .changed, translation: content.bounds.width * 0.4, velocity: 100)
-      updateBack(state: .cancelled, translation: content.bounds.width * 0.4, velocity: 100)
-      later { [self] in
+      perform(cancel: true) { [self] in
         let cancelled = active?.viewControllers.count == 2 && popInteraction == nil
-        updateBack(state: .began, translation: 0, velocity: 100)
-        updateBack(state: .changed, translation: content.bounds.width * 0.4, velocity: 100)
-        updateBack(state: .ended, translation: content.bounds.width * 0.4, velocity: 500)
-        later { [self] in
+        backSmokeDetails["detailCancelled"] = cancelled; backSmokeDetails["stackAfterCancel"] = active?.viewControllers.count ?? 0
+        perform(cancel: false) { [self] in
           let finished = active?.viewControllers.count == 1 && active?.topViewController === recorded
+          backSmokeDetails["detailFinished"] = finished; backSmokeDetails["stackAfterFinish"] = active?.viewControllers.count ?? 0
           showRoute("settings"); view.layoutIfNeeded()
-          updateBack(state: .began, translation: 0, velocity: 100)
-          updateBack(state: .changed, translation: content.bounds.width * 0.4, velocity: 100)
-          updateBack(state: .cancelled, translation: content.bounds.width * 0.4, velocity: 100)
-          later { [self] in
+          perform(cancel: true) { [self] in
             let routeCancelled = route == "settings" && returningRoute == nil
-            updateBack(state: .began, translation: 0, velocity: 100)
-            updateBack(state: .changed, translation: content.bounds.width * 0.4, velocity: 100)
-            updateBack(state: .ended, translation: content.bounds.width * 0.4, velocity: 500)
-            later { [self] in
-              completion(cancelled && finished && routeCancelled && route == "recorded"
-                && returningRoute == nil && active?.topViewController === recorded)
+            backSmokeDetails["routeCancelled"] = routeCancelled
+            perform(cancel: false) { [self] in
+              let routeFinished = route == "recorded" && returningRoute == nil && active?.topViewController === recorded
+              backSmokeDetails["routeFinished"] = routeFinished
+              completion(cancelled && finished && routeCancelled && routeFinished)
             }
           }
         }
