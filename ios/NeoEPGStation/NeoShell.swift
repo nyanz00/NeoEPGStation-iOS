@@ -482,7 +482,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
       }
     }
     openDetail(NeoRecordedPage.fixtures.records[0])
-    settled { [self] in
+    later(0.6) { [self] in
       perform(cancel: true) { [self] in
         let cancelled = active?.viewControllers.count == 2 && popInteraction == nil
         backSmokeDetails["detailCancelled"] = cancelled; backSmokeDetails["stackAfterCancel"] = active?.viewControllers.count ?? 0
