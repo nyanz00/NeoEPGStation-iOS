@@ -460,7 +460,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
         updateBack(state: .changed, translation: content.bounds.width * 0.4, velocity: 100)
         later(0.05) { [self] in
           updateBack(state: cancel ? .cancelled : .ended, translation: content.bounds.width * 0.4, velocity: 500)
-          later(done)
+          later { done() }
         }
       }
     }
