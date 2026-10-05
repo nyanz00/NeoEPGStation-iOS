@@ -472,11 +472,17 @@
       [self setOrientation:@"landscape"];
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         BOOL locked = self.orientationMask == UIInterfaceOrientationMaskLandscapeRight && self.view.window.windowScene.interfaceOrientation == UIInterfaceOrientationLandscapeRight;
+        [self.chrome showSmokePanel:@"program"]; [self.chrome snapshot:@"player-info-landscape"];
+        [self.chrome showSmokePanel:@"controls"]; [self.chrome snapshot:@"player-controls-landscape"];
         [self setOrientation:@"portrait"];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
           BOOL portrait = self.orientationMask == UIInterfaceOrientationMaskPortrait && self.view.window.windowScene.interfaceOrientation == UIInterfaceOrientationPortrait;
+          [self.chrome showSmokePanel:@"program"]; [self.chrome snapshot:@"player-info-portrait"];
+          [self.chrome showSmokePanel:@"rules"]; [self.chrome snapshot:@"player-rules-portrait"];
+          [self.chrome showSmokePanel:@"settings"]; [self.chrome snapshot:@"player-settings-portrait"];
+          [self.chrome showSmokePanel:@"controls"]; [self.chrome snapshot:@"player-controls-portrait"];
           [self setOrientation:@"auto"];
-          completion(@{@"success": @(locked && portrait), @"pausedReload": @YES, @"playingReload": @YES, @"positionPreserved": @(position), @"ratePreserved": @(settings), @"commentsPreserved": @(self.comments.ready), @"landscapeLock": @(locked), @"portraitLock": @(portrait), @"autoOrientation": @(self.orientationMask == UIInterfaceOrientationMaskAllButUpsideDown)});
+          completion(@{@"success": locked && portrait ? @YES : @NO, @"pausedReload": @YES, @"playingReload": @YES, @"positionPreserved": @(position), @"ratePreserved": @(settings), @"commentsPreserved": @(self.comments.ready), @"landscapeLock": @(locked), @"portraitLock": @(portrait), @"autoOrientation": self.orientationMask == UIInterfaceOrientationMaskAllButUpsideDown ? @YES : @NO});
         });
       });
     }

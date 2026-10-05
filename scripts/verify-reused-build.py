@@ -15,8 +15,11 @@ if info['bundleIdentifier'] != 'io.github.nyanz00.NeoEPGStation' or info['minimu
 repository = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True, encoding='utf-8').strip()
 subprocess.run(['git', 'diff', '--exit-code', commit, 'HEAD', '--',
                 'App.tsx', 'src', 'ios', 'package.json', 'package-lock.json'], check=True, cwd=repository)
-for name in ['storage-smoke', 'danmaku-smoke', 'pip-composition-smoke', 'pip-player-smoke',
-             'ui-iphone-recorded', 'ui-iphone-menu', 'ui-iphone-settings']:
+required = ['storage-smoke', 'danmaku-smoke', 'pip-composition-smoke', 'pip-player-smoke',
+            'ui-iphone-recorded', 'ui-iphone-menu', 'ui-iphone-settings']
+if Path('ios/NeoEPGStation/NeoPlayerChrome.swift').exists():
+    required += ['player-ui-smoke', 'player-playback-smoke']
+for name in required:
     result = json.loads((artifact / f'{name}.json').read_text())
     if result.get('success') is not True:
         raise RuntimeError(f'Cannot reuse an unverified build: {name}')

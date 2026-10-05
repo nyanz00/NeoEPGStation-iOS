@@ -413,8 +413,16 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     frame = original; autoHide = originalHide; setNeedsLayout(); layoutIfNeeded()
     return ["success": full && centered && side && below && routing && time, "fullVideo": full, "centerControls": centered, "landscapePanel": side, "portraitPanel": below, "buttonRouting": routing, "timeToggle": time]
   }
+  @objc func showSmokePanel(_ id: String) {
+    tab = id == "controls" ? "program" : id; panelOpen = id != "controls"; panel.isHidden = !panelOpen; panel.alpha = 1
+    if id == "rules" {
+      rulesLoaded = true; ruleHeading = "サンプルルール"
+      records = (1...3).map { i in NeoRecording(id: i, name: "サンプル番組 #\(i)", startAt: 1791042600000, endAt: 1791044400000, isRecording: false, description: "関連する番組の説明", extended: nil, channelId: nil, channelName: nil, thumbnails: nil, videoFiles: nil) }
+    }
+    renderPanel(); showControls(true); setNeedsLayout(); layoutIfNeeded()
+  }
   @objc func snapshot(_ name: String) {
-    layoutIfNeeded(); let image = UIGraphicsImageRenderer(size: bounds.size).image { _ in drawHierarchy(in: bounds, afterScreenUpdates: true) }
+    layoutIfNeeded(); let image = UIGraphicsImageRenderer(size: bounds.size).image { context in layer.render(in: context.cgContext) }
     if let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first { try? image.pngData()?.write(to: directory.appendingPathComponent(name + ".png")) }
   }
 #endif
