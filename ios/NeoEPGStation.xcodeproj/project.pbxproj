@@ -29,6 +29,7 @@
     BDEF00000000000000000005 /* NeoRecordedPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000005; };
     BDEF00000000000000000006 /* NeoDetailPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000006; };
     BDEF00000000000000000007 /* NeoSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000007; };
+    BDEF00000000000000000008 /* NeoMenus.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000008; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -61,6 +62,7 @@
     ADEF00000000000000000005 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoRecordedPage.swift; path = NeoEPGStation/NeoRecordedPage.swift; sourceTree = "<group>"; };
     ADEF00000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoDetailPage.swift; path = NeoEPGStation/NeoDetailPage.swift; sourceTree = "<group>"; };
     ADEF00000000000000000007 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoSettingsPage.swift; path = NeoEPGStation/NeoSettingsPage.swift; sourceTree = "<group>"; };
+    ADEF00000000000000000008 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoMenus.swift; path = NeoEPGStation/NeoMenus.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -94,6 +96,7 @@
 				8A85F63ACA51CC2F817F957F /* NeoPlayerController.m */,
 				E8DB963ADF006F5C91474E80 /* NeoNative.swift */,
         ADEF00000000000000000007,
+        ADEF00000000000000000008,
         ADEF00000000000000000006,
         ADEF00000000000000000005,
         ADEF00000000000000000004,
@@ -296,6 +299,7 @@
 				C5EC3F766E24819570B97E68 /* NeoPlayerController.m in Sources */,
 				7C7CD6B520048B87A9436634 /* NeoNative.swift in Sources */,
         BDEF00000000000000000007,
+        BDEF00000000000000000008,
         BDEF00000000000000000006,
         BDEF00000000000000000005,
         BDEF00000000000000000004,

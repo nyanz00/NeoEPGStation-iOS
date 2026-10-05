@@ -5,8 +5,10 @@ final class NeoRecordedCard: UICollectionViewCell {
   let channel = NeoStyle.label(size: 12, muted: true), time = NeoStyle.label(size: 12, muted: true)
   let descriptionLabel = NeoStyle.label(size: 12)
   var mobile = true
-  var onMore: (() -> Void)?
-  private lazy var more = NeoStyle.iconButton("MoreVert", label: "録画メニュー") { [weak self] in self?.onMore?() }
+  var onMore: ((UIView) -> Void)?
+  private lazy var more = NeoStyle.iconButton("MoreVert", label: "録画メニュー") { [weak self] in
+    guard let self else { return }; self.onMore?(self.more)
+  }
   override init(frame: CGRect) {
     super.init(frame: frame); contentView.backgroundColor = NeoStyle.paper; contentView.layer.cornerRadius = 6
     contentView.clipsToBounds = true
@@ -227,13 +229,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
 #if targetEnvironment(simulator)
     if shell?.smokeStage.isEmpty == false { cell.thumbnail.showFixture(item.id) }
 #endif
-    cell.onMore = { [weak self, weak cell] in self?.recordMenu(item, anchor: cell) }; return cell
-  }
-  private func recordMenu(_ item: NeoRecording, anchor: UIView?) {
-    let menu = UIAlertController(title: item.name, message: nil, preferredStyle: .actionSheet)
-    menu.addAction(UIAlertAction(title: "詳細", style: .default) { [weak self] _ in self?.shell?.openDetail(item) })
-    menu.addAction(UIAlertAction(title: "キャンセル", style: .cancel)); menu.popoverPresentationController?.sourceView = anchor
-    menu.popoverPresentationController?.sourceRect = anchor?.bounds ?? .zero; present(menu, animated: true)
+    cell.onMore = { [weak self] anchor in self?.showRecordingMenu(item, anchor: anchor, detail: false) }; return cell
   }
   func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) { shell?.openDetail(records[indexPath.item]) }
   func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize { CGSize(width: itemWidth, height: cardHeight) }
@@ -254,12 +250,19 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   }
   deinit { task?.cancel() }
 #if targetEnvironment(simulator)
+  func smokeOpenFirstMenu() {
+    collection.layoutIfNeeded()
+    if let cell = collection.cellForItem(at: IndexPath(item: 0, section: 0)) as? NeoRecordedCard,
+      let button = cell.contentView.subviews.compactMap({ $0 as? UIButton }).first { cell.onMore?(button) }
+  }
   static let fixtures = NeoRecords(records: (1...4).map { index in
     NeoRecording(id: index, name: ["サンプル番組 第12話「新しい朝」", "週末の映画劇場「旅のはじまり」", "ニュースと天気", "音楽の時間"][index - 1],
       startAt: 1791021600000 - Double(index - 1) * 3600000, endAt: 1791023400000 - Double(index - 1) * 3600000,
       isRecording: false, description: "録画カードのレイアウト確認用データです。長い説明は一行で省略します。", extended: "番組内容\n詳細画面の表示確認用データです。",
       channelId: 1, channelName: "サンプル放送 BS", thumbnails: nil,
-      videoFiles: [.init(id: index, name: "AV1 / MKV", type: "encoded", size: 352200000, filename: nil)])
+      videoFiles: [.init(id: index, name: "TS", type: "ts", size: 1073741824, filename: nil),
+        .init(id: index + 10, name: "AV1 / MKV", type: "encoded", size: 352200000, filename: nil)],
+      ruleId: 1, dropLogFile: .init(id: index, errorCnt: 0, dropCnt: 2, scramblingCnt: 0))
   }, total: 300)
 #endif
 }

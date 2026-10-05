@@ -27,6 +27,32 @@ struct NeoRecording: Decodable {
   let id: Int; let name: String; let startAt: Double; let endAt: Double; let isRecording: Bool
   let description: String?; let extended: String?; let channelId: Int?; let channelName: String?
   let thumbnails: [Int]?; let videoFiles: [NeoVideoFile]?
+  var ruleId: Int? = nil
+  var isProtected: Bool? = nil
+  var isEncoding: Bool? = nil
+  var dropLogFile: NeoDropLog? = nil
+}
+struct NeoDropLog: Decodable {
+  let id: Int; let errorCnt: Int; let dropCnt: Int; let scramblingCnt: Int
+  var hasErrors: Bool { dropCnt > 0 || errorCnt > 0 || scramblingCnt > 0 }
+}
+struct NeoServerConfig: Decodable { let encode: [String]; let developerMode: Bool? }
+enum NeoRecordingCommand: String {
+  case download, rule, search, user, encode, info = "Info", protect, unprotect, subtitle, delete
+}
+enum NeoRecordingMenu {
+  static func commands(item: NeoRecording, detail: Bool, config: NeoServerConfig?) -> [NeoRecordingCommand] {
+    var result: [NeoRecordingCommand] = detail ? [.download] : []
+    if item.ruleId != nil { result.append(.rule) }
+    result += [.search, .user]
+    if !item.isRecording && !(config?.encode ?? []).isEmpty { result.append(.encode) }
+    if detail && config?.developerMode == true { result.append(.subtitle) }
+    if !item.isRecording && !(item.videoFiles ?? []).isEmpty { result.append(.info) }
+    result.append(item.isProtected == true ? .unprotect : .protect)
+    if !detail && config?.developerMode == true { result.append(.subtitle) }
+    result.append(.delete)
+    return result
+  }
 }
 struct NeoRecords: Decodable { let records: [NeoRecording]; let total: Int }
 struct NeoChannel: Decodable { let id: Int; let name: String }
@@ -84,6 +110,12 @@ enum NeoProgramText {
     if size >= 1048576 { return String(format: "%.1f MB", size / 1048576) }
     return String(format: "%.0f KB", max(0, size / 1024))
   }
+  static func dropSummary(_ item: NeoRecording) -> String {
+    let drop = item.dropLogFile
+    let total = (item.videoFiles ?? []).reduce(0) { $0 + $1.size }
+    return "drop: \(drop?.dropCnt ?? 0), error: \(drop?.errorCnt ?? 0), scrambling: \(drop?.scramblingCnt ?? 0)"
+      + (total > 0 ? " \(bytes(total))" : "")
+  }
 }
 final class NeoAPI {
   let base: URL; let session: URLSession
@@ -104,6 +136,18 @@ final class NeoAPI {
     return value
   }
   func channels() async throws -> [NeoChannel] { try await request(url("/channels")) }
+  func configuration() async throws -> NeoServerConfig { try await request(url("/config")) }
+  func dropLog(_ id: Int) async throws -> String {
+    var request = URLRequest(url: url("/dropLogs/\(id)?maxsize=512")); request.timeoutInterval = 20
+    request.setValue("text/plain", forHTTPHeaderField: "Accept")
+    request.setValue("master", forHTTPHeaderField: "X-EPGStation-User-Id")
+    let (data, response) = try await session.data(for: request)
+    guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+      http.mimeType?.lowercased() != "text/html", let text = String(data: data, encoding: .utf8) else {
+      throw NeoError("ドロップログを取得できませんでした。接続・認証設定を確認してください。")
+    }
+    return text
+  }
   private func request<T: Decodable>(_ url: URL) async throws -> T {
     var request = URLRequest(url: url); request.timeoutInterval = 20
     request.setValue("application/json", forHTTPHeaderField: "Accept")

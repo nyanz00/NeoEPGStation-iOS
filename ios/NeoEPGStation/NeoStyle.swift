@@ -122,7 +122,8 @@ final class NeoThumbnail: UIImageView {
   static func runSmoke() async -> Bool {
     let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [NeoThumbnailFixtureProtocol.self]
     let session = URLSession(configuration: configuration); fixtureSession = session
-    defer { session.invalidateAndCancel(); fixtureSession = nil }
+    NeoThumbnailFixtureProtocol.holdSlowResponses()
+    defer { NeoThumbnailFixtureProtocol.releaseSlowResponses(); session.invalidateAndCancel(); fixtureSession = nil }
     let url = URL(string: "https://thumbnail-fixture.invalid/slow-shared")!
     let old = URL(string: "https://thumbnail-fixture.invalid/slow-reused")!
     let replacement = URL(string: "https://thumbnail-fixture.invalid/fast")!
@@ -135,12 +136,19 @@ final class NeoThumbnail: UIImageView {
       let first = NeoThumbnail(), second = NeoThumbnail(), reused = NeoThumbnail()
       first.load(url, fadeIn: true); second.load(url, fadeIn: true)
       reused.load(old, fadeIn: true); reused.load(replacement)
-      try await Task.sleep(nanoseconds: 800_000_000)
+      // Gate responses rather than racing a 650ms delay against a busy runner's
+      // 400ms readiness window. Exercise the same late/shared/reused path.
+      NeoThumbnailFixtureProtocol.releaseSlowResponses()
+      for _ in 0..<100 {
+        if first.image != nil && second.image != nil && reused.image != nil && downloads[failed] == nil { break }
+        try await Task.sleep(nanoseconds: 50_000_000)
+      }
       let cached = NeoThumbnail(); cached.load(url, fadeIn: true)
-      return late == [url] && first.image != nil && second.image === first.image && cached.image === first.image
+      return late.contains(url) && first.image != nil && second.image === first.image && cached.image === first.image
         && cached.alpha == 1 && cached.layer.animationKeys() == nil
         && reused.image != nil && reused.image === cache.object(forKey: replacement as NSURL)
         && NeoThumbnailFixtureProtocol.count(for: "/slow-shared") == 1
+        && NeoThumbnailFixtureProtocol.count(for: "/failed") == 1 && downloads[failed] == nil && cache.object(forKey: failed as NSURL) == nil
     } catch { return false }
   }
   func showFixture(_ index: Int) {
@@ -162,18 +170,29 @@ private final class NeoThumbnailFixtureProtocol: URLProtocol {
   static var imageData = Data()
   private static let lock = NSLock()
   private static var counts: [String: Int] = [:]
+  private static var holdingSlowResponses = false
+  private static var pendingResponses: [() -> Void] = []
+  static func holdSlowResponses() { lock.lock(); holdingSlowResponses = true; counts.removeAll(); lock.unlock() }
+  static func releaseSlowResponses() {
+    lock.lock(); holdingSlowResponses = false; let responses = pendingResponses; pendingResponses.removeAll(); lock.unlock()
+    responses.forEach { $0() }
+  }
   static func count(for path: String) -> Int { lock.lock(); defer { lock.unlock() }; return counts[path] ?? 0 }
   override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "thumbnail-fixture.invalid" }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
   override func startLoading() {
     let url = request.url!
     Self.lock.lock(); Self.counts[url.path, default: 0] += 1; Self.lock.unlock()
-    DispatchQueue.global().asyncAfter(deadline: .now() + (url.path.hasPrefix("/slow") ? 0.65 : 0.01)) { [self] in
+    let respond = { [self] in
       let status = url.path == "/failed" ? 500 : 200
       client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
       if status == 200 { client?.urlProtocol(self, didLoad: Self.imageData) }
       client?.urlProtocolDidFinishLoading(self)
     }
+    Self.lock.lock()
+    if url.path.hasPrefix("/slow") && Self.holdingSlowResponses {
+      Self.pendingResponses.append(respond); Self.lock.unlock()
+    } else { Self.lock.unlock(); respond() }
   }
   override func stopLoading() {}
 }

@@ -40,9 +40,15 @@ Custom colors and light/dark appearance selection remain future work.
 Swift / UIKit implements server URL saving/automatic connection, keyword search,
 recorded cards, scrolling page-number controls, recording details, file selection
 and native PLAY. Settings includes bottom shortcut customization.
+Recorded and detail overflow menus use the Web action names, icons and order.
+Management operations inside these menus still show a preparation notice.
+PLAY shows file names in a compact popup directly below its button, without sizes
+or explanatory headings. Popups close on outside taps without a modal transition.
+Details show drop/error/scrambling counters and the combined file size; available
+drop logs can be opened from this line. Nonzero counters use the error color.
 Other destinations show an explicit preparation screen; their functionality has
 not been ported. OAuth, advanced filters, viewer profiles and recording management
-actions are separate follow-up work. Unsupported actions are not shown as working buttons.
+actions are separate follow-up work.
 
 ## Verification
 

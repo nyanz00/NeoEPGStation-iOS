@@ -145,7 +145,7 @@ for name, result in results.items():
 # Further launches check the actual UIKit Release UI and interactive transitions.
 # Fixtures are enabled only on the simulator, never in the device application.
 del os.environ['SIMCTL_CHILD_NEO_EPG_STORAGE_SMOKE']
-for stage in ['recorded', 'pagination', 'detail', 'menu', 'settings', 'gestures']:
+for stage in ['recorded', 'pagination', 'detail', 'record-actions', 'detail-actions', 'play-popup', 'menu', 'settings', 'gestures']:
     capture_ui(device['udid'], stage, 'ui-iphone')
 if '--iphone-only' not in sys.argv:
     capture_ipad(app, device)

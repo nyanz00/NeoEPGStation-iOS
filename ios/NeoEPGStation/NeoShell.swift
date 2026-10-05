@@ -89,6 +89,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   let storage = NeoNative()
   private(set) var api: NeoAPI?
   private(set) var channels: [Int: String] = [:]
+  private(set) var serverConfig: NeoServerConfig?
   private(set) var route = "recorded"
   // Each destination keeps its own stack. Switching tabs never adds a back target.
   private var controllers: [String: UINavigationController] = [:]
@@ -100,7 +101,10 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   private var shortcuts: [String] = []
   private var bottomButtons: [UIButton] = []
   private var menuOpen = false, tabletExpanded = true
-  private var contentPan: UIPanGestureRecognizer!, closingPan: UIPanGestureRecognizer!
+  private var contentPan: UIPanGestureRecognizer!, closingPan: UIPanGestureRecognizer!, backdropPan: UIPanGestureRecognizer!
+  private weak var closingScroll: UIScrollView?
+  private var closingScrollWasEnabled = false
+  private var popup: NeoAnchoredMenu?
   private var swipeStart = CGPoint.zero
   private var swipeAction: NeoSwipeAction?
   private weak var swipeScroll: UIScrollView?
@@ -133,10 +137,14 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     contentPan = UIPanGestureRecognizer(target: self, action: #selector(dragContent(_:))); contentPan.delegate = self
     contentPan.maximumNumberOfTouches = 1; content.addGestureRecognizer(contentPan)
     closingPan = UIPanGestureRecognizer(target: self, action: #selector(dragMenu(_:))); closingPan.delegate = self
+    closingPan.maximumNumberOfTouches = 1
     sidebar.addGestureRecognizer(closingPan)
+    backdropPan = UIPanGestureRecognizer(target: self, action: #selector(dragMenu(_:))); backdropPan.delegate = self
+    backdropPan.maximumNumberOfTouches = 1; dim.addGestureRecognizer(backdropPan)
     rebuildBottom()
     if !smokeStage.isEmpty {
       api = NeoAPI(base: URL(string: "https://example.com")!); channels = [1: "サンプル放送 BS"]
+      serverConfig = NeoServerConfig(encode: ["Sample"], developerMode: false)
       showRoute("recorded")
     } else {
       do {
@@ -169,13 +177,17 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     menuList.frame = CGRect(x: 0, y: safe.top + 60, width: 240, height: max(0, view.bounds.height - safe.top - 60 - safe.bottom))
     sidebar.layer.borderColor = NeoStyle.border.cgColor; sidebar.layer.borderWidth = 0.5
     bottom.layer.borderColor = NeoStyle.border.cgColor; bottom.layer.borderWidth = 0.5
+    popup?.setNeedsLayout()
   }
   func connect(_ url: URL) {
-    api = NeoAPI(base: url); channels = [:]
+    dismissPopup(); api = NeoAPI(base: url); channels = [:]; serverConfig = nil
     for controller in controllers.values { controller.willMove(toParent: nil); controller.view.removeFromSuperview(); controller.removeFromParent() }
     controllers.removeAll(); active = nil
     showRoute("recorded")
     let api = self.api!
+    Task { [weak self] in
+      if let config = try? await api.configuration(), self?.api === api { self?.serverConfig = config }
+    }
     Task { [weak self] in
       if let channels = try? await api.channels(), self?.api === api {
         self?.channels = Dictionary(channels.map { ($0.id, $0.name) }, uniquingKeysWith: { _, new in new })
@@ -184,6 +196,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     }
   }
   func showConnection(message: String? = nil) {
+    dismissPopup()
     api = nil; menuOpen = false; route = "connection"
     let page = NeoConnectionPage(shell: self)
     page.initialMessage = message
@@ -192,6 +205,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   }
   func showRoute(_ id: String) {
     guard api != nil, popInteraction == nil else { return }
+    dismissPopup()
     route = id
     let nav: UINavigationController
     if let cached = controllers[id] { nav = cached }
@@ -218,9 +232,11 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   }
   func goBack() {
     guard active?.transitionCoordinator == nil else { return }
+    dismissPopup()
     if let active, active.viewControllers.count > 1 { active.popViewController(animated: true) }
   }
   func openDetail(_ recording: NeoRecording) {
+    dismissPopup()
     active?.pushViewController(NeoDetailPage(item: recording, shell: self), animated: true)
   }
   func play(_ file: NeoVideoFile, title: String) {
@@ -230,6 +246,13 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     controller.onClose = { [weak self] in self?.player = nil }
     present(controller, animated: true)
   }
+  func showPopup(anchor: UIView, entries: [NeoMenuEntry], appearance: NeoAnchoredMenu.Appearance) {
+    dismissPopup(); guard !entries.isEmpty, anchor.window != nil else { return }
+    let menu = NeoAnchoredMenu(anchor: anchor, entries: entries, appearance: appearance)
+    menu.onDismiss = { [weak self] in self?.popup = nil }
+    popup = menu; menu.show(in: view)
+  }
+  func dismissPopup() { popup?.dismiss() }
   func toggleMenu() {
     if tablet { tabletExpanded.toggle(); view.setNeedsLayout(); view.layoutIfNeeded() }
     else { setMenu(!menuOpen, animated: true) }
@@ -237,6 +260,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   @objc private func closeMenu() { setMenu(false, animated: true) }
   private func setMenu(_ open: Bool, animated: Bool) {
     guard !tablet else { return }
+    if open { dismissPopup() }
     menuOpen = open
     let changes = { self.sidebar.frame.origin.x = open ? 0 : -240; self.dim.alpha = open ? 1 : 0 }
     if animated { UIView.animate(withDuration: 0.22, delay: 0, options: [.beginFromCurrentState, .curveEaseOut], animations: changes) }
@@ -245,20 +269,30 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   }
   @objc private func dragMenu(_ recognizer: UIPanGestureRecognizer) {
     guard !tablet else { return }
-    if recognizer.state == .began {
+    if recognizer === closingPan || recognizer === backdropPan {
+      if recognizer.state == .began {
+        closingScrollWasEnabled = closingScroll?.isScrollEnabled == true; closingScroll?.isScrollEnabled = false
+      }
+      if [.ended, .cancelled, .failed].contains(recognizer.state) {
+        if closingScrollWasEnabled { closingScroll?.isScrollEnabled = true }; closingScroll = nil
+      }
+    }
+    updateMenu(state: recognizer.state, translation: recognizer.translation(in: view).x, velocity: recognizer.velocity(in: view).x)
+  }
+  private func updateMenu(state: UIGestureRecognizer.State, translation: CGFloat, velocity: CGFloat) {
+    if state == .began {
       menuDragging = true
       let x = sidebar.layer.presentation()?.frame.minX ?? sidebar.frame.minX
       sidebar.layer.removeAllAnimations(); dim.layer.removeAllAnimations()
       sidebar.frame.origin.x = x; panStart = min(240, max(0, x + 240)); dim.alpha = panStart / 240
     }
-    let progress = min(240, max(0, panStart + recognizer.translation(in: view).x))
-    if recognizer.state == .changed || recognizer.state == .began {
+    let progress = min(240, max(0, panStart + translation))
+    if state == .changed || state == .began {
       sidebar.frame.origin.x = progress - 240; dim.alpha = progress / 240
-    } else if recognizer.state == .ended {
+    } else if state == .ended {
       menuDragging = false
-      let velocity = recognizer.velocity(in: view).x
       setMenu(abs(velocity) > 350 ? velocity > 0 : progress > 120, animated: true)
-    } else if recognizer.state == .cancelled { menuDragging = false; setMenu(menuOpen, animated: true) }
+    } else if state == .cancelled || state == .failed { menuDragging = false; setMenu(menuOpen, animated: true) }
   }
   private var canGoBack: Bool { (active?.viewControllers.count ?? 1) > 1 }
   @objc private func dragContent(_ recognizer: UIPanGestureRecognizer) {
@@ -322,6 +356,15 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     popInteraction = nil; viewController.view.setNeedsLayout()
   }
   func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    if recognizer === closingPan || recognizer === backdropPan {
+      closingScroll = nil
+      var candidate = touch.view
+      while let current = candidate, current !== sidebar && current !== dim {
+        if let scroll = current as? UIScrollView { closingScroll = scroll; break }
+        candidate = current.superview
+      }
+      return true
+    }
     if recognizer !== contentPan { return true }
     swipeStart = touch.location(in: view); swipeScroll = nil
     var candidate = touch.view
@@ -339,14 +382,15 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
     // Allow vertical scrolling to start naturally; freeze it only after a
     // horizontal drawer/back drag has actually been recognized.
-    recognizer === contentPan && other === swipeScroll?.panGestureRecognizer
+    (recognizer === contentPan && other === swipeScroll?.panGestureRecognizer)
+      || (recognizer === closingPan && other === closingScroll?.panGestureRecognizer)
   }
   func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
     let pan = recognizer as? UIPanGestureRecognizer
     let velocity = pan?.velocity(in: view) ?? .zero
     guard abs(velocity.x) >= abs(velocity.y), abs(velocity.x) > 0 else { return false }
-    if recognizer === closingPan { return menuOpen && !tablet && velocity.x < 0 }
-    guard recognizer === contentPan, api != nil, !menuOpen, presentedViewController == nil,
+    if recognizer === closingPan || recognizer === backdropPan { return menuOpen && !tablet && velocity.x < 0 }
+    guard recognizer === contentPan, api != nil, !menuOpen, popup == nil, presentedViewController == nil,
       popInteraction == nil, active?.transitionCoordinator == nil else { return false }
     swipeAction = NeoNavigationGesture.action(startY: Double(swipeStart.y), height: Double(view.bounds.height),
       canGoBack: canGoBack, tablet: tablet, horizontal: Double(velocity.x), vertical: Double(velocity.y))
@@ -404,6 +448,14 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     let retained = original === recorded.collection
     if smokeStage == "gestures" {
       Task { [self] in
+        let popupCycles = NeoAnchoredMenu.runSmoke(in: view)
+        setMenu(true, animated: false)
+        updateMenu(state: .began, translation: 0, velocity: -100)
+        updateMenu(state: .changed, translation: -150, velocity: -100)
+        let drawerFollowed = sidebar.frame.minX == -150 && dim.alpha == 0.375
+        updateMenu(state: .ended, translation: -150, velocity: -500)
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        let drawerClosed = drawerFollowed && !menuOpen && sidebar.frame.minX == -240 && dim.alpha == 0
         let thumbnails = await NeoThumbnail.runSmoke()
         recorded.smokePageSeven(); try? await Task.sleep(nanoseconds: 100_000_000)
         let freshFade = recorded.lastFadeDuration
@@ -412,30 +464,51 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
         runBackSmoke(recorded) { [weak self] correct in
           guard let self else { return }
           let gap = self.logo.frame.minX - self.brand.frame.maxX
-          NeoNative.writeSmoke("ui-gestures-smoke", ["success": correct && gap == 7 && thumbnails && freshFade == 0.5 && cachedFade == 0.32,
+          NeoNative.writeSmoke("ui-gestures-smoke", ["success": correct && drawerClosed && popupCycles && gap == 7 && thumbnails && freshFade == 0.5 && cachedFade == 0.32,
             "stage": "gestures", "route": self.route, "recordCount": recorded.records.count,
             "theme": "neon-teal-dark", "uiEngine": "Swift / UIKit", "retainedList": retained,
             "shortcuts": self.shortcuts, "brandGap": gap, "interactiveBack": correct, "thumbnailLoading": thumbnails,
-            "freshFade": freshFade, "cachedFade": cachedFade, "backDetails": self.backSmokeDetails])
+            "freshFade": freshFade, "cachedFade": cachedFade, "backDetails": self.backSmokeDetails,
+            "drawerClosedByLeftSwipe": drawerClosed, "popupCycles": popupCycles])
         }
       }
       return
     }
     if smokeStage == "menu" { setMenu(true, animated: false) }
     if smokeStage == "settings" { showRoute("settings") }
-    if smokeStage == "detail" { openDetail(NeoRecordedPage.fixtures.records[0]) }
+    if ["detail", "detail-actions", "play-popup"].contains(smokeStage) { openDetail(NeoRecordedPage.fixtures.records[0]) }
     if smokeStage == "pagination" { recorded.smokePageSeven() }
     view.layoutIfNeeded()
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
       guard let self else { return }
       let cardHeight = recorded.cardHeight
       let pages = recorded.renderedPages
-      let correct = retained && (self.tablet || cardHeight == 108) && self.controllers["recorded"]?.viewControllers.first === recorded
+      var popupCorrect = true
+      var dropText = ""
+      if self.smokeStage == "record-actions" {
+        recorded.smokeOpenFirstMenu()
+        popupCorrect = self.popup?.titles == ["rule", "search", "user", "encode", "Info", "protect", "delete"]
+      }
+      if let detail = self.active?.topViewController as? NeoDetailPage {
+        detail.view.layoutIfNeeded(); dropText = detail.smokeDropText
+        popupCorrect = dropText == "drop: 2, error: 0, scrambling: 0 1.33 GB"
+        if self.smokeStage == "detail-actions" {
+          detail.smokeOpenMenu()
+          popupCorrect = popupCorrect && self.popup?.titles == ["download", "rule", "search", "user", "encode", "Info", "protect", "delete"]
+        }
+        if self.smokeStage == "play-popup" {
+          detail.smokeOpenPlay()
+          popupCorrect = popupCorrect && self.popup?.titles == ["TS", "AV1 / MKV"]
+            && self.popup?.menuFrame.minY == detail.smokePlayFrame.maxY
+            && self.popup?.menuFrame.minX == detail.smokePlayFrame.minX
+        }
+      }
+      let correct = popupCorrect && retained && (self.tablet || cardHeight == 108) && self.controllers["recorded"]?.viewControllers.first === recorded
         && (self.smokeStage != "pagination" || pages == ["5", "6", "7", "8", "9"])
       NeoNative.writeSmoke("ui-\(self.smokeStage)-smoke", ["success": correct, "stage": self.smokeStage,
         "route": self.route, "recordCount": recorded.records.count, "theme": "neon-teal-dark", "sidebarWidth": self.tablet ? 240 : 0,
         "uiEngine": "Swift / UIKit", "retainedList": retained, "cardHeight": cardHeight,
-        "pagination": pages, "shortcuts": self.shortcuts])
+        "pagination": pages, "shortcuts": self.shortcuts, "popupTitles": self.popup?.titles ?? [], "dropSummary": dropText])
     }
   }
   private func runBackSmoke(_ recorded: NeoRecordedPage, completion: @escaping (Bool) -> Void) {

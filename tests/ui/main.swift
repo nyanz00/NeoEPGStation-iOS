@@ -26,6 +26,15 @@ let decoded = try JSONDecoder().decode(NeoRecords.self, from: Data(#"{"total":1,
 expect(decoded.records[0].videoFiles?[0].id == 2, "PLAY file data decoded")
 print("Native pagination, server URL, timestamp and recording model tests passed")
 
+let menuRecording = try JSONDecoder().decode(NeoRecording.self, from: Data(#"{"id":1,"name":"Sample","startAt":1,"endAt":2,"isRecording":false,"ruleId":2,"isProtected":true,"dropLogFile":{"id":3,"dropCnt":2,"errorCnt":0,"scramblingCnt":1},"videoFiles":[{"id":2,"name":"TS","type":"ts","size":1073741824},{"id":3,"name":"AV1","type":"encoded","size":1073741824}]}"#.utf8))
+let capabilities = NeoServerConfig(encode: ["Sample"], developerMode: false)
+expect(NeoRecordingMenu.commands(item: menuRecording, detail: false, config: capabilities) == [.rule, .search, .user, .encode, .info, .unprotect, .delete], "Web list menu order and protection state")
+expect(NeoRecordingMenu.commands(item: menuRecording, detail: true, config: capabilities) == [.download, .rule, .search, .user, .encode, .info, .unprotect, .delete], "Web detail download menu")
+expect(NeoRecordingMenu.commands(item: decoded.records[0], detail: false, config: nil) == [.search, .user, .info, .protect, .delete], "Missing rule and config do not invent actions")
+expect(NeoProgramText.dropSummary(menuRecording) == "drop: 2, error: 0, scrambling: 1 2.00 GB", "Drop counters and total file size decoded")
+expect(menuRecording.dropLogFile?.hasErrors == true && decoded.records[0].dropLogFile == nil, "Drop presence and error state")
+print("Recorded menu metadata and drop summary tests passed")
+
 // Test the behavioral boundaries, including diagonal input, the 40/60 split,
 // root fallback and vertical/right-to-left rejection. X never enters the
 // policy: horizontal swipes must work even when starting at screen center.
@@ -73,6 +82,14 @@ Task.detached {
     }
     let result = try await api.recordings(page: 7, keyword: "アニメ & 日曜")
     expect(result.total == 300, "List response decoded")
+    FixtureProtocol.handler = { request in
+      expect(request.url?.path == "/epg/api/dropLogs/3" && request.url?.query == "maxsize=512", "Drop log endpoint and limit")
+      expect(request.value(forHTTPHeaderField: "X-EPGStation-User-Id") == "master", "Drop log viewer header")
+      return (200, Data("sample drop log".utf8))
+    }
+    expect(try await api.dropLog(3) == "sample drop log", "Plain text drop log returned")
+    FixtureProtocol.handler = { _ in (403, Data()) }
+    do { _ = try await api.dropLog(3); fatalError("Accepted unauthorized drop log") } catch is NeoError {}
     for status in [401, 403, 500] {
       FixtureProtocol.handler = { _ in (status, Data()) }
       do { _ = try await api.recordings(page: 1); fatalError("Accepted HTTP error") } catch is NeoError {}
