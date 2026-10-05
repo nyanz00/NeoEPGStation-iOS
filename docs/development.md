@@ -25,6 +25,7 @@ iPadシミュレーター検証は手動実行の `check_ipad` で追加でき�
 下部ナビの項目・順番はUserDefaultsに保存する。実装範囲は `ui-foundation.md` を参照する。
 Swift / UIKit版のビルド32の検証結果は `swift-ui-verification.md` を参照する。
 スワイプ・フェード・配色等の修正を含むビルド39の結果は `navigation-polish-verification.md` を参照する。
+タブ内の戻る操作・40％／60％判定のビルド40の結果は `tab-navigation-verification.md` を参照する。
 端末の起動・導入だけで検証が中断した場合は、Actionsの手動実行で `reuse_run` に
 生成済みビルドのrun IDを指定すると、保存したシミュレーター用アプリでiPad UIのみを再確認できる。
 アプリ・ネイティブコード・依存ロックが同一で、元ビルドの保存・再生・コメント合成・iPhone UIの
