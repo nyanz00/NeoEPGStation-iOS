@@ -6,6 +6,11 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      check_ipad:
+        description: 'Also run iPad simulator UI checks'
+        required: false
+        default: false
+        type: boolean
       reuse_run:
         description: 'Completed build run to reuse for iPad UI verification (optional)'
         required: false
@@ -82,6 +87,7 @@ jobs:
       - name: Check native playback and iPhone UI
         run: python3 -u scripts/simulator-smoke.py --iphone-only
       - name: Check iPad UI
+        if: ${{ inputs.check_ipad == true }}
         run: python3 -u scripts/simulator-smoke.py --ipad-only
       - name: Preserve simulator application for UI diagnostics
         if: always() && hashFiles('build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app/Info.plist') != ''

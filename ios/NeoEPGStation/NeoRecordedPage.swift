@@ -29,11 +29,11 @@ final class NeoRecordedCard: UICollectionViewCell {
     descriptionLabel.frame = CGRect(x: x, y: y + 70, width: bodyWidth, height: 20)
   }
   override func prepareForReuse() { super.prepareForReuse(); thumbnail.load(nil); onMore = nil }
-  func configure(_ item: NeoRecording, channelName: String, api: NeoAPI?, mobile: Bool) {
+  func configure(_ item: NeoRecording, channelName: String, api: NeoAPI?, mobile: Bool, fadeThumbnail: Bool) {
     self.mobile = mobile; title.text = item.name; channel.text = channelName
     time.text = NeoProgramText.interval(start: item.startAt, end: item.endAt)
     descriptionLabel.text = item.description?.replacingOccurrences(of: "\n", with: " ")
-    thumbnail.load(item.thumbnails?.first.flatMap { api?.url("/thumbnails/\($0)") })
+    thumbnail.load(item.thumbnails?.first.flatMap { api?.url("/thumbnails/\($0)") }, fadeIn: fadeThumbnail)
     accessibilityLabel = "\(item.name)、\(channelName)、\(time.text ?? "")"
     setNeedsLayout()
   }
@@ -88,6 +88,10 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   private(set) var records: [NeoRecording] = []
   private var total = 0, page = 1, keyword = "", reverse = false
   private var task: Task<Void, Never>?
+  private var cache: [NeoRecordingQuery: (result: NeoRecords, stored: Date)] = [:]
+  private var cacheOrder: [NeoRecordingQuery] = []
+  private var lateThumbnails: Set<URL> = []
+  private(set) var lastFadeDuration: TimeInterval = 0
   private let spinner = UIActivityIndicatorView(style: .medium)
   private let message = NeoStyle.label(size: 14, muted: true)
   private let refresh = UIRefreshControl()
@@ -124,29 +128,50 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     message.frame = body.bounds.insetBy(dx: 24, dy: 48); spinner.center = CGPoint(x: body.bounds.midX, y: 70)
   }
   func reloadLabels() { collection.reloadData() }
-  @objc private func refreshList() { reload() }
+  @objc private func refreshList() { cache.removeAll(); cacheOrder.removeAll(); reload() }
   private func reload(targetPage: Int? = nil) {
     task?.cancel(); spinner.startAnimating(); message.text = nil
     let requestedPage = targetPage ?? page, query = keyword, oldest = reverse
+    let key = NeoRecordingQuery(page: requestedPage, keyword: query, reverse: oldest)
+    let entry = cache[key]
+    let cached = entry.flatMap { Date().timeIntervalSince($0.stored) < 30 ? $0.result : nil }
+    collection.layer.removeAllAnimations(); collection.alpha = 0
     let api = shell?.api
     task = Task { [weak self] in
       guard let self else { return }
       do {
         let result: NeoRecords
+        if let cached { result = cached }
+        else {
 #if targetEnvironment(simulator)
         if self.shell?.smokeStage.isEmpty == false { result = Self.fixtures }
         else { guard let api else { return }; result = try await api.recordings(page: requestedPage, keyword: query, reverse: oldest) }
 #else
         guard let api else { return }; result = try await api.recordings(page: requestedPage, keyword: query, reverse: oldest)
 #endif
+          self.cache[key] = (result, Date()); self.cacheOrder.removeAll { $0 == key }; self.cacheOrder.append(key)
+          if self.cacheOrder.count > 12 { self.cache.removeValue(forKey: self.cacheOrder.removeFirst()) }
+        }
+        try Task.checkCancellation()
+        let urls = result.records.compactMap { $0.thumbnails?.first.flatMap { api?.url("/thumbnails/\($0)") } }
+        let late = try await NeoThumbnail.prepare(urls)
         try Task.checkCancellation()
         guard self.shell?.api === api else { return }
         self.page = requestedPage; self.records = result.records; self.total = result.total
+        self.lateThumbnails = late
         self.message.text = result.records.isEmpty ? "録画がありません" : nil
         self.collection.reloadData(); self.collection.setContentOffset(.zero, animated: false)
+        self.collection.layoutIfNeeded()
+        self.lastFadeDuration = UIAccessibility.isReduceMotionEnabled ? 0 : cached == nil ? 0.5 : 0.32
+        // CSS `ease` in RecordedPage.tsx, applied once to the entire list/footer.
+        let fade = CABasicAnimation(keyPath: "opacity"); fade.fromValue = 0; fade.toValue = 1
+        fade.duration = self.lastFadeDuration; fade.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
+        self.collection.alpha = 1
+        if self.lastFadeDuration > 0 { self.collection.layer.add(fade, forKey: "recorded-list-fade-in") }
       } catch {
         if Task.isCancelled { return }
         guard self.shell?.api === api else { return }
+        self.collection.alpha = 1
         if self.records.isEmpty && requestedPage == 1 && query.isEmpty && self.shell?.smokeStage.isEmpty == true {
           self.shell?.showConnection(message: error.localizedDescription)
         } else { self.alert(error.localizedDescription) }
@@ -160,6 +185,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   }
 #if targetEnvironment(simulator)
   func smokePageSeven() { selectPage(7) }
+  func smokePageOne() { selectPage(1) }
   var renderedPages: [String] {
     collection.layoutIfNeeded()
     return collection.visibleSupplementaryViews(ofKind: UICollectionView.elementKindSectionFooter).flatMap { footer in
@@ -181,7 +207,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
       self?.reverse.toggle(); self?.page = 1; self?.reload()
     })
     menu.addAction(UIAlertAction(title: "検索を解除", style: .default) { [weak self] _ in self?.keyword = ""; self?.page = 1; self?.reload() })
-    menu.addAction(UIAlertAction(title: "更新", style: .default) { [weak self] _ in self?.reload() })
+    menu.addAction(UIAlertAction(title: "更新", style: .default) { [weak self] _ in self?.refreshList() })
     menu.addAction(UIAlertAction(title: "キャンセル", style: .cancel))
     menu.popoverPresentationController?.sourceView = actions.last; present(menu, animated: true)
   }
@@ -189,7 +215,9 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
     let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "card", for: indexPath) as! NeoRecordedCard
     let item = records[indexPath.item]
-    cell.configure(item, channelName: item.channelName ?? item.channelId.flatMap { shell?.channels[$0] } ?? "", api: shell?.api, mobile: mobile)
+    let thumbnailURL = item.thumbnails?.first.flatMap { shell?.api?.url("/thumbnails/\($0)") }
+    cell.configure(item, channelName: item.channelName ?? item.channelId.flatMap { shell?.channels[$0] } ?? "", api: shell?.api,
+      mobile: mobile, fadeThumbnail: thumbnailURL.map { lateThumbnails.contains($0) } ?? false)
 #if targetEnvironment(simulator)
     if shell?.smokeStage.isEmpty == false { cell.thumbnail.showFixture(item.id) }
 #endif

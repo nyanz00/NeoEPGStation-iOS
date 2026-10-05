@@ -18,6 +18,27 @@ struct NeoDestination {
     .init(id: "settings", title: "設定", icon: "SettingsOutlined")]
 }
 
+// A public UIKit interactive transition, rather than forwarding touches into
+// UINavigationController's private edge-gesture implementation.
+final class NeoSwipeBackAnimator: NSObject, UIViewControllerAnimatedTransitioning {
+  func transitionDuration(using transitionContext: UIViewControllerContextTransitioning?) -> TimeInterval {
+    UIAccessibility.isReduceMotionEnabled ? 0.01 : 0.3
+  }
+  func animateTransition(using context: UIViewControllerContextTransitioning) {
+    guard let from = context.view(forKey: .from), let to = context.view(forKey: .to),
+      let target = context.viewController(forKey: .to) else { context.completeTransition(false); return }
+    let container = context.containerView, width = container.bounds.width
+    to.frame = context.finalFrame(for: target); container.insertSubview(to, belowSubview: from)
+    to.transform = CGAffineTransform(translationX: -width * 0.25, y: 0)
+    UIView.animate(withDuration: transitionDuration(using: context), delay: 0, options: .curveLinear, animations: {
+      from.transform = CGAffineTransform(translationX: width, y: 0); to.transform = .identity
+    }, completion: { _ in
+      from.transform = .identity; to.transform = .identity
+      context.completeTransition(!context.transitionWasCancelled)
+    })
+  }
+}
+
 class NeoPage: UIViewController {
   weak var shell: NeoShell?
   let header = UIView(), body = UIView()
@@ -56,7 +77,7 @@ class NeoPage: UIViewController {
   }
 }
 
-final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelegate, UIGestureRecognizerDelegate {
+final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelegate, UIGestureRecognizerDelegate, UINavigationControllerDelegate {
   let storage = NeoNative()
   private(set) var api: NeoAPI?
   private(set) var channels: [Int: String] = [:]
@@ -72,8 +93,14 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   private var shortcuts: [String] = []
   private var bottomButtons: [UIButton] = []
   private var menuOpen = false, tabletExpanded = true
-  private var openingPan: UIScreenEdgePanGestureRecognizer!, closingPan: UIPanGestureRecognizer!
-  private var rootBackPan: UIScreenEdgePanGestureRecognizer!
+  private var contentPan: UIPanGestureRecognizer!, closingPan: UIPanGestureRecognizer!
+  private var swipeStart = CGPoint.zero
+  private var swipeAction: NeoSwipeAction?
+  private weak var swipeScroll: UIScrollView?
+  private var scrollWasEnabled = false
+  private var popInteraction: UIPercentDrivenInteractiveTransition?
+  private var returningRoute: UINavigationController?
+  private var routeBackAnimating = false
   private var panStart: CGFloat = 0
   private var player: NeoPlayerController?
   var tablet: Bool { traitCollection.userInterfaceIdiom == .pad }
@@ -86,7 +113,8 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   }
   override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
   override func viewDidLoad() {
-    super.viewDidLoad(); overrideUserInterfaceStyle = .dark; view.backgroundColor = NeoStyle.background
+    super.viewDidLoad(); overrideUserInterfaceStyle = .dark; view.backgroundColor = NeoStyle.paper
+    content.clipsToBounds = true
     shortcuts = storage.shortcuts
     view.addSubview(content); view.addSubview(bottom); view.addSubview(dim); view.addSubview(sidebar)
     sidebar.backgroundColor = NeoStyle.paper; bottom.backgroundColor = NeoStyle.paper
@@ -96,12 +124,10 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     menuList.register(UITableViewCell.self, forCellReuseIdentifier: "menu")
     dim.backgroundColor = UIColor.black.withAlphaComponent(0.5); dim.alpha = 0
     dim.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(closeMenu)))
-    openingPan = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(dragMenu(_:))); openingPan.edges = .left; openingPan.delegate = self
-    view.addGestureRecognizer(openingPan)
+    contentPan = UIPanGestureRecognizer(target: self, action: #selector(dragContent(_:))); contentPan.delegate = self
+    contentPan.maximumNumberOfTouches = 1; content.addGestureRecognizer(contentPan)
     closingPan = UIPanGestureRecognizer(target: self, action: #selector(dragMenu(_:))); closingPan.delegate = self
     sidebar.addGestureRecognizer(closingPan)
-    rootBackPan = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(dragRootBack(_:))); rootBackPan.edges = .left; rootBackPan.delegate = self
-    view.addGestureRecognizer(rootBackPan)
     rebuildBottom()
     if !smokeStage.isEmpty {
       api = NeoAPI(base: URL(string: "https://example.com")!); channels = [1: "サンプル放送 BS"]
@@ -129,8 +155,10 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     dim.frame = view.bounds; dim.isHidden = tablet || api == nil
     sidebar.isHidden = api == nil || tablet && !tabletExpanded
     sidebar.frame = CGRect(x: tablet || menuOpen ? 0 : -240, y: 0, width: 240, height: view.bounds.height)
-    brand.frame = CGRect(x: 16, y: safe.top, width: 177, height: 60)
-    logo.frame = CGRect(x: 198, y: safe.top + 16, width: 28, height: 28); logo.contentMode = .scaleAspectFit
+    let brandWidth = min(173, ceil(brand.intrinsicContentSize.width))
+    brand.frame = CGRect(x: 16, y: safe.top, width: brandWidth, height: 60)
+    let logoWidth = (logo.image?.size.width ?? 28) / max(1, logo.image?.size.height ?? 28) * 28
+    logo.frame = CGRect(x: brand.frame.maxX + 7, y: safe.top + 16, width: logoWidth, height: 28); logo.contentMode = .scaleAspectFit
     menuList.frame = CGRect(x: 0, y: safe.top + 60, width: 240, height: max(0, view.bounds.height - safe.top - 60 - safe.bottom))
     sidebar.layer.borderColor = NeoStyle.border.cgColor; sidebar.layer.borderWidth = 0.5
     bottom.layer.borderColor = NeoStyle.border.cgColor; bottom.layer.borderWidth = 0.5
@@ -156,7 +184,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     attach(nav); view.setNeedsLayout()
   }
   func showRoute(_ id: String, remember: Bool = true) {
-    guard api != nil else { return }
+    guard api != nil, popInteraction == nil, !routeBackAnimating else { return }
     if remember && route != id { history.append(route) }
     route = id
     let nav: UINavigationController
@@ -167,7 +195,8 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
       else if id == "settings" { page = NeoSettingsPage(shell: self) }
       else { page = NeoPlaceholderPage(id: id, shell: self) }
       nav = UINavigationController(rootViewController: page); nav.setNavigationBarHidden(true, animated: false)
-      nav.interactivePopGestureRecognizer?.delegate = self; nav.interactivePopGestureRecognizer?.isEnabled = true
+      nav.delegate = self
+      nav.interactivePopGestureRecognizer?.isEnabled = false
       controllers[id] = nav
     }
     attach(nav); menuList.reloadData(); updateBottom(); setMenu(false, animated: true)
@@ -180,7 +209,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     active?.topViewController?.view.setNeedsLayout(); view.setNeedsLayout()
   }
   func goBack() {
-    guard active?.transitionCoordinator == nil else { return }
+    guard active?.transitionCoordinator == nil, !routeBackAnimating else { return }
     if let active, active.viewControllers.count > 1 { active.popViewController(animated: true) }
     else if let id = history.popLast() { showRoute(id, remember: false) }
   }
@@ -222,19 +251,112 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
       setMenu(abs(velocity) > 350 ? velocity > 0 : progress > 120, animated: true)
     } else if recognizer.state == .cancelled { setMenu(menuOpen, animated: true) }
   }
-  @objc private func dragRootBack(_ recognizer: UIPanGestureRecognizer) {
-    if recognizer.state == .ended && (recognizer.translation(in: view).x > 60 || recognizer.velocity(in: view).x > 400) { goBack() }
+  private var canGoBack: Bool { (active?.viewControllers.count ?? 1) > 1 || hasRouteHistory }
+  @objc private func dragContent(_ recognizer: UIPanGestureRecognizer) {
+    if recognizer.state == .began {
+      scrollWasEnabled = swipeScroll?.isScrollEnabled == true
+      swipeScroll?.isScrollEnabled = false
+    }
+    if swipeAction == .menu { dragMenu(recognizer) }
+    else if swipeAction == .back { dragBack(recognizer) }
+    if [.ended, .cancelled, .failed].contains(recognizer.state) {
+      if scrollWasEnabled { swipeScroll?.isScrollEnabled = true }
+      swipeScroll = nil; swipeAction = nil
+    }
+  }
+  private func dragBack(_ recognizer: UIPanGestureRecognizer) {
+    updateBack(state: recognizer.state, translation: recognizer.translation(in: content).x, velocity: recognizer.velocity(in: content).x)
+  }
+  private func updateBack(state: UIGestureRecognizer.State, translation: CGFloat, velocity: CGFloat) {
+    guard let active else { return }
+    let width = max(1, content.bounds.width)
+    let progress = min(1, max(0, translation / width))
+    switch state {
+    case .began:
+      if active.viewControllers.count > 1 {
+        let interaction = UIPercentDrivenInteractiveTransition(); interaction.completionCurve = .easeOut
+        popInteraction = interaction; active.popViewController(animated: true)
+        active.transitionCoordinator?.animate(alongsideTransition: nil) { [weak self] _ in self?.popInteraction = nil }
+      } else if let id = history.last, let previous = controllers[id], previous !== active {
+        returningRoute = previous
+        addChild(previous); previous.view.frame = content.bounds
+        content.insertSubview(previous.view, belowSubview: active.view); previous.didMove(toParent: self)
+        previous.view.transform = CGAffineTransform(translationX: -width * 0.25, y: 0)
+      }
+    case .changed:
+      if let interaction = popInteraction { interaction.update(progress) }
+      else if let previous = returningRoute {
+        active.view.transform = CGAffineTransform(translationX: width * progress, y: 0)
+        previous.view.transform = CGAffineTransform(translationX: -width * 0.25 * (1 - progress), y: 0)
+      }
+    case .ended, .cancelled:
+      let finish = state == .ended && (progress > 0.28 || velocity > 450)
+      if let interaction = popInteraction {
+        if finish { interaction.finish() } else { interaction.cancel() }
+      } else if let previous = returningRoute {
+        routeBackAnimating = true
+        UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.22, delay: 0,
+          options: [.beginFromCurrentState, .curveEaseOut], animations: {
+            active.view.transform = CGAffineTransform(translationX: finish ? width : 0, y: 0)
+            previous.view.transform = CGAffineTransform(translationX: finish ? 0 : -width * 0.25, y: 0)
+          }, completion: { [weak self] _ in
+            guard let self else { return }
+            if finish {
+              active.willMove(toParent: nil); active.view.removeFromSuperview(); active.removeFromParent()
+              self.active = previous; self.route = self.history.removeLast()
+              self.menuList.reloadData(); self.updateBottom(); previous.topViewController?.view.setNeedsLayout()
+            } else {
+              previous.willMove(toParent: nil); previous.view.removeFromSuperview(); previous.removeFromParent()
+            }
+            active.view.transform = .identity; previous.view.transform = .identity
+            self.returningRoute = nil; self.routeBackAnimating = false
+          })
+      }
+    default: break
+    }
+  }
+  func navigationController(_ navigationController: UINavigationController,
+    animationControllerFor operation: UINavigationController.Operation,
+    from fromVC: UIViewController, to toVC: UIViewController) -> UIViewControllerAnimatedTransitioning? {
+    operation == .pop && popInteraction != nil ? NeoSwipeBackAnimator() : nil
+  }
+  func navigationController(_ navigationController: UINavigationController,
+    interactionControllerFor animationController: UIViewControllerAnimatedTransitioning) -> UIViewControllerInteractiveTransitioning? {
+    popInteraction
+  }
+  func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
+    popInteraction = nil; viewController.view.setNeedsLayout()
+  }
+  func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    if recognizer !== contentPan { return true }
+    swipeStart = touch.location(in: view); swipeScroll = nil
+    var candidate = touch.view
+    while let current = candidate, current !== content {
+      if current is UISlider || current is UISwitch || current is UITextField || current is UITextView { return false }
+      if let scroll = current as? UIScrollView {
+        if scroll.contentSize.width > scroll.bounds.width + 1 { return false }
+        if swipeScroll == nil { swipeScroll = scroll }
+      }
+      candidate = current.superview
+    }
+    return true
+  }
+  func gestureRecognizer(_ recognizer: UIGestureRecognizer,
+    shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+    // Allow vertical scrolling to start naturally; freeze it only after a
+    // horizontal drawer/back drag has actually been recognized.
+    recognizer === contentPan && other === swipeScroll?.panGestureRecognizer
   }
   func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
     let pan = recognizer as? UIPanGestureRecognizer
     let velocity = pan?.velocity(in: view) ?? .zero
-    guard abs(velocity.x) > abs(velocity.y) * 1.6 else { return false }
+    guard abs(velocity.x) >= abs(velocity.y), abs(velocity.x) > 0 else { return false }
     if recognizer === closingPan { return menuOpen && !tablet && velocity.x < 0 }
-    let upper = recognizer.location(in: view).y < view.bounds.height / 2
-    if recognizer === openingPan { return api != nil && !tablet && !menuOpen && upper && velocity.x > 0 }
-    if recognizer === rootBackPan { return !menuOpen && !upper && hasRouteHistory && active?.viewControllers.count == 1 && velocity.x > 0 }
-    // UINavigationController drives an interactive native back transition.
-    return !menuOpen && !upper && (active?.viewControllers.count ?? 0) > 1 && velocity.x > 0
+    guard recognizer === contentPan, api != nil, !menuOpen, presentedViewController == nil,
+      popInteraction == nil, !routeBackAnimating, active?.transitionCoordinator == nil else { return false }
+    swipeAction = NeoNavigationGesture.action(startY: Double(swipeStart.y), height: Double(view.bounds.height),
+      canGoBack: canGoBack, tablet: tablet, horizontal: Double(velocity.x), vertical: Double(velocity.y))
+    return swipeAction != nil
   }
   func saveShortcuts(_ values: [String]) throws { try storage.saveShortcuts(values); shortcuts = values; rebuildBottom(); view.setNeedsLayout() }
   private func rebuildBottom() {
@@ -285,6 +407,25 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     showRoute("settings"); showRoute("recorded")
     let retained = original === recorded.collection
     history.removeAll()
+    if smokeStage == "gestures" {
+      Task { [self] in
+        let thumbnails = await NeoThumbnail.runSmoke()
+        recorded.smokePageSeven(); try? await Task.sleep(nanoseconds: 100_000_000)
+        let freshFade = recorded.lastFadeDuration
+        recorded.smokePageOne(); try? await Task.sleep(nanoseconds: 400_000_000)
+        let cachedFade = recorded.lastFadeDuration
+        runBackSmoke(recorded) { [weak self] correct in
+          guard let self else { return }
+          let gap = self.logo.frame.minX - self.brand.frame.maxX
+          NeoNative.writeSmoke("ui-gestures-smoke", ["success": correct && gap == 7 && thumbnails && freshFade == 0.5 && cachedFade == 0.32,
+            "stage": "gestures", "route": self.route, "recordCount": recorded.records.count,
+            "theme": "neon-teal-dark", "uiEngine": "Swift / UIKit", "retainedList": retained,
+            "shortcuts": self.shortcuts, "brandGap": gap, "interactiveBack": correct, "thumbnailLoading": thumbnails,
+            "freshFade": freshFade, "cachedFade": cachedFade])
+        }
+      }
+      return
+    }
     if smokeStage == "menu" { setMenu(true, animated: false) }
     if smokeStage == "settings" { showRoute("settings", remember: false) }
     if smokeStage == "detail" { openDetail(NeoRecordedPage.fixtures.records[0]) }
@@ -300,6 +441,38 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
         "route": self.route, "recordCount": recorded.records.count, "theme": "neon-teal-dark", "sidebarWidth": self.tablet ? 240 : 0,
         "uiEngine": "Swift / UIKit", "retainedList": retained, "cardHeight": cardHeight,
         "pagination": pages, "shortcuts": self.shortcuts])
+    }
+  }
+  private func runBackSmoke(_ recorded: NeoRecordedPage, completion: @escaping (Bool) -> Void) {
+    func later(_ action: @escaping () -> Void) { DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: action) }
+    openDetail(NeoRecordedPage.fixtures.records[0])
+    later { [self] in
+      updateBack(state: .began, translation: 0, velocity: 100)
+      updateBack(state: .changed, translation: content.bounds.width * 0.4, velocity: 100)
+      updateBack(state: .cancelled, translation: content.bounds.width * 0.4, velocity: 100)
+      later { [self] in
+        let cancelled = active?.viewControllers.count == 2 && popInteraction == nil
+        updateBack(state: .began, translation: 0, velocity: 100)
+        updateBack(state: .changed, translation: content.bounds.width * 0.4, velocity: 100)
+        updateBack(state: .ended, translation: content.bounds.width * 0.4, velocity: 500)
+        later { [self] in
+          let finished = active?.viewControllers.count == 1 && active?.topViewController === recorded
+          showRoute("settings"); view.layoutIfNeeded()
+          updateBack(state: .began, translation: 0, velocity: 100)
+          updateBack(state: .changed, translation: content.bounds.width * 0.4, velocity: 100)
+          updateBack(state: .cancelled, translation: content.bounds.width * 0.4, velocity: 100)
+          later { [self] in
+            let routeCancelled = route == "settings" && returningRoute == nil
+            updateBack(state: .began, translation: 0, velocity: 100)
+            updateBack(state: .changed, translation: content.bounds.width * 0.4, velocity: 100)
+            updateBack(state: .ended, translation: content.bounds.width * 0.4, velocity: 500)
+            later { [self] in
+              completion(cancelled && finished && routeCancelled && route == "recorded"
+                && returningRoute == nil && active?.topViewController === recorded)
+            }
+          }
+        }
+      }
     }
   }
 #endif

@@ -614,23 +614,26 @@ enum NeoIcon {
       path.addLine(to: CGPoint(x: 13, y: 11))
       path.close()
     case "AlphaA":
-      path.move(to: CGPoint(x: 9, y: 17))
-      path.addLine(to: CGPoint(x: 7, y: 17))
-      path.addLine(to: CGPoint(x: 11, y: 7))
-      path.addLine(to: CGPoint(x: 13, y: 7))
-      path.addLine(to: CGPoint(x: 17, y: 17))
-      path.addLine(to: CGPoint(x: 15, y: 17))
-      path.addLine(to: CGPoint(x: 14.2, y: 15))
-      path.addLine(to: CGPoint(x: 9.8, y: 15))
-      path.addLine(to: CGPoint(x: 9, y: 17))
-      path.move(to: CGPoint(x: 10.6, y: 13))
-      path.addLine(to: CGPoint(x: 13.4, y: 13))
-      path.addLine(to: CGPoint(x: 12, y: 9.5))
-      path.addLine(to: CGPoint(x: 10.6, y: 13))
+      // MDI alpha-a: same path and 1.8x center transform as AlphaAIcon.tsx.
+      path.move(to: CGPoint(x: 11, y: 7))
+      path.addCurve(to: CGPoint(x: 9, y: 9), controlPoint1: CGPoint(x: 9.89543, y: 7), controlPoint2: CGPoint(x: 9, y: 7.89543))
+      path.addLine(to: CGPoint(x: 9, y: 17)); path.addLine(to: CGPoint(x: 11, y: 17))
+      path.addLine(to: CGPoint(x: 11, y: 13)); path.addLine(to: CGPoint(x: 13, y: 13))
+      path.addLine(to: CGPoint(x: 13, y: 17)); path.addLine(to: CGPoint(x: 15, y: 17))
+      path.addLine(to: CGPoint(x: 15, y: 9))
+      path.addCurve(to: CGPoint(x: 13, y: 7), controlPoint1: CGPoint(x: 15, y: 7.89543), controlPoint2: CGPoint(x: 14.10457, y: 7))
       path.close()
+      path.move(to: CGPoint(x: 11, y: 9)); path.addLine(to: CGPoint(x: 13, y: 9))
+      path.addLine(to: CGPoint(x: 13, y: 11)); path.addLine(to: CGPoint(x: 11, y: 11))
+      path.close()
+      path.usesEvenOddFillRule = true
+      path.apply(CGAffineTransform(a: 1.8, b: 0, c: 0, d: 1.8, tx: -9.6, ty: -9.6))
     default: break
     }
-    let image = UIGraphicsImageRenderer(size: CGSize(width: 24, height: 24)).image { _ in
+    let side: CGFloat = name == "AlphaA" ? 27 : 24
+    let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { context in
+      context.cgContext.scaleBy(x: side / 24, y: side / 24)
+      if name == "AlphaA" { context.cgContext.translateBy(x: -1 / (side / 24), y: 0) }
       UIColor.white.setFill(); path.fill()
     }.withRenderingMode(.alwaysTemplate)
     cache[name] = image; return image

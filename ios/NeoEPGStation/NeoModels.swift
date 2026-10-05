@@ -30,6 +30,20 @@ struct NeoRecording: Decodable {
 }
 struct NeoRecords: Decodable { let records: [NeoRecording]; let total: Int }
 struct NeoChannel: Decodable { let id: Int; let name: String }
+
+enum NeoSwipeAction { case menu, back }
+enum NeoNavigationGesture {
+  // The starting half fixes the action for the whole drag. No edge restriction.
+  static func action(startY: Double, height: Double, canGoBack: Bool, tablet: Bool,
+    horizontal: Double, vertical: Double) -> NeoSwipeAction? {
+    guard horizontal > 0, horizontal >= abs(vertical) else { return nil }
+    if startY >= height / 2 && canGoBack { return .back }
+    return tablet ? nil : .menu
+  }
+}
+struct NeoRecordingQuery: Hashable {
+  let page: Int; let keyword: String; let reverse: Bool
+}
 enum NeoPagination {
   // VueCompatiblePagination.tsx: five consecutive mobile buttons.
   static func mobile(page: Int, count: Int) -> [Int] {

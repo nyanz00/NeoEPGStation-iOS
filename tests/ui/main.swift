@@ -26,6 +26,17 @@ let decoded = try JSONDecoder().decode(NeoRecords.self, from: Data(#"{"total":1,
 expect(decoded.records[0].videoFiles?[0].id == 2, "PLAY file data decoded")
 print("Native pagination, server URL, timestamp and recording model tests passed")
 
+// Test the behavioral boundaries, including diagonal input, both screen halves,
+// no-history fallback and vertical/right-to-left rejection. X never enters the
+// policy: horizontal swipes must work even when starting at screen center.
+expect(NeoNavigationGesture.action(startY: 100, height: 800, canGoBack: true, tablet: false, horizontal: 110, vertical: 100) == .menu, "Diagonal upper swipe opens menu")
+expect(NeoNavigationGesture.action(startY: 650, height: 800, canGoBack: false, tablet: false, horizontal: 100, vertical: -100) == .menu, "Lower swipe opens menu without history")
+expect(NeoNavigationGesture.action(startY: 650, height: 800, canGoBack: true, tablet: false, horizontal: 100, vertical: 20) == .back, "Lower swipe returns when possible")
+expect(NeoNavigationGesture.action(startY: 650, height: 800, canGoBack: true, tablet: false, horizontal: 20, vertical: 100) == nil, "Vertical scrolling preserved")
+expect(NeoNavigationGesture.action(startY: 100, height: 800, canGoBack: false, tablet: false, horizontal: -100, vertical: 20) == nil, "Left drag never opens menu")
+expect(NeoNavigationGesture.action(startY: 100, height: 800, canGoBack: false, tablet: true, horizontal: 100, vertical: 20) == nil, "Persistent iPad menu is not dragged")
+print("Full-screen navigation gesture policy tests passed")
+
 final class FixtureProtocol: URLProtocol {
   static var handler: ((URLRequest) throws -> (Int, Data))!
   override class func canInit(with request: URLRequest) -> Bool { true }
