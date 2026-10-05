@@ -15,17 +15,19 @@ Custom colors and light/dark appearance selection remain future work.
   The menu always includes all destinations and shares the same route state.
 - iPad: persistent sidebar with a button to collapse it; no bottom bar.
   Detailed split-view/adaptive layout behavior remains to be designed.
-- A right swipe can start anywhere in the content area. The upper half opens
-  the menu; the lower half goes back if history exists, otherwise opens the menu.
-  The starting half fixes the action for the entire drag. Diagonals up to 45
+- A right swipe can start anywhere in the content area. The upper 40% of screen
+  height opens the menu; the lower 60% goes back within the current tab if possible,
+  otherwise opens the menu. The starting region fixes the action for the entire drag. Diagonals up to 45
   degrees are accepted; predominantly vertical motion stays with scrolling.
   Sliders, text input and horizontal scrolling take priority over navigation.
-  Detail and route back transitions follow the finger and can be cancelled.
+  Detail/search back transitions follow the finger and can be cancelled.
   Search results are pushed on the native navigation stack, so returning restores
   the original list and its scroll position instead of clearing it and refetching.
   Menu/back buttons remain available. A left swipe or backdrop tap closes the drawer.
-- Screen history, fetched recordings and list position remain available across
-  route changes. The app does not refetch recordings merely for changing tabs.
+- Each tab retains its own navigation stack, fetched recordings and list position
+  across tab changes. Back buttons and swipes stop at the current tab's root;
+  switching tabs never adds a back target. The app does not refetch recordings
+  merely for changing tabs.
 - Recorded page changes fade in over 500ms, or 320ms for a page cached within
   30 seconds (up to 12 page/filter combinations). Manual refresh bypasses this
   cache. Thumbnails are warmed up for at most 400ms; late images fade in over
@@ -48,7 +50,8 @@ Swift tests cover page ranges, compact Web timestamps, URL recovery and recordin
 data decoding. Actions exercises real preference methods, builds the device IPA
 and launches the Release UIKit app with simulator-only synthetic fixtures.
 UI checks retain the list across tab changes and capture recorded cards, page 7,
-details, menu/settings, interactive back completion/cancellation, page fade
+details, menu/settings, interactive back completion/cancellation, isolation of
+tab roots and retained detail stacks across tabs, returning from search, page fade
 durations and delayed/shared thumbnail loading. iPad simulator checks are
 optional (`check_ipad` or `reuse_run` on workflow_dispatch). No React Native runtime is shipped.
 Fixtures use invented text and code-drawn thumbnails; no private server or real

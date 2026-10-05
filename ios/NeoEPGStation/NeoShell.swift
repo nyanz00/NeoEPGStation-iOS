@@ -71,7 +71,7 @@ class NeoPage: UIViewController {
     body.frame = CGRect(x: 0, y: 56, width: width, height: max(0, view.bounds.height - 56))
     menu.frame = CGRect(x: 4, y: 6, width: 44, height: 44)
     menu.isHidden = shell?.api == nil
-    let canBack = (navigationController?.viewControllers.count ?? 1) > 1 || shell?.hasRouteHistory == true
+    let canBack = (navigationController?.viewControllers.count ?? 1) > 1
     back.isHidden = !canBack; back.frame = CGRect(x: 48, y: 6, width: 40, height: 44)
     var right = width - 4
     for action in actions.reversed() { right -= 44; action.frame = CGRect(x: right, y: 6, width: 44, height: 44) }
@@ -90,8 +90,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   private(set) var api: NeoAPI?
   private(set) var channels: [Int: String] = [:]
   private(set) var route = "recorded"
-  private var history: [String] = []
-  var hasRouteHistory: Bool { !history.isEmpty }
+  // Each destination keeps its own stack. Switching tabs never adds a back target.
   private var controllers: [String: UINavigationController] = [:]
   private var active: UINavigationController?
   private let content = UIView(), sidebar = UIView(), bottom = UIView(), dim = UIView()
@@ -107,8 +106,6 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   private weak var swipeScroll: UIScrollView?
   private var scrollWasEnabled = false
   private var popInteraction: UIPercentDrivenInteractiveTransition?
-  private var returningRoute: UINavigationController?
-  private var routeBackAnimating = false
   private var panStart: CGFloat = 0
   private var menuDragging = false
   private var player: NeoPlayerController?
@@ -140,7 +137,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     rebuildBottom()
     if !smokeStage.isEmpty {
       api = NeoAPI(base: URL(string: "https://example.com")!); channels = [1: "サンプル放送 BS"]
-      showRoute("recorded", remember: false)
+      showRoute("recorded")
     } else {
       do {
         if let url = try storage.loadConnection() { connect(url) }
@@ -174,10 +171,10 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     bottom.layer.borderColor = NeoStyle.border.cgColor; bottom.layer.borderWidth = 0.5
   }
   func connect(_ url: URL) {
-    api = NeoAPI(base: url); channels = [:]; history = []
+    api = NeoAPI(base: url); channels = [:]
     for controller in controllers.values { controller.willMove(toParent: nil); controller.view.removeFromSuperview(); controller.removeFromParent() }
     controllers.removeAll(); active = nil
-    showRoute("recorded", remember: false)
+    showRoute("recorded")
     let api = self.api!
     Task { [weak self] in
       if let channels = try? await api.channels(), self?.api === api {
@@ -193,9 +190,8 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     let nav = UINavigationController(rootViewController: page); nav.setNavigationBarHidden(true, animated: false)
     attach(nav); view.setNeedsLayout()
   }
-  func showRoute(_ id: String, remember: Bool = true) {
-    guard api != nil, popInteraction == nil, !routeBackAnimating else { return }
-    if remember && route != id { history.append(route) }
+  func showRoute(_ id: String) {
+    guard api != nil, popInteraction == nil else { return }
     route = id
     let nav: UINavigationController
     if let cached = controllers[id] { nav = cached }
@@ -221,9 +217,8 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     active?.topViewController?.view.setNeedsLayout(); view.setNeedsLayout()
   }
   func goBack() {
-    guard active?.transitionCoordinator == nil, !routeBackAnimating else { return }
+    guard active?.transitionCoordinator == nil else { return }
     if let active, active.viewControllers.count > 1 { active.popViewController(animated: true) }
-    else if let id = history.popLast() { showRoute(id, remember: false) }
   }
   func openDetail(_ recording: NeoRecording) {
     active?.pushViewController(NeoDetailPage(item: recording, shell: self), animated: true)
@@ -265,7 +260,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
       setMenu(abs(velocity) > 350 ? velocity > 0 : progress > 120, animated: true)
     } else if recognizer.state == .cancelled { menuDragging = false; setMenu(menuOpen, animated: true) }
   }
-  private var canGoBack: Bool { (active?.viewControllers.count ?? 1) > 1 || hasRouteHistory }
+  private var canGoBack: Bool { (active?.viewControllers.count ?? 1) > 1 }
   @objc private func dragContent(_ recognizer: UIPanGestureRecognizer) {
     if recognizer.state == .began {
       scrollWasEnabled = swipeScroll?.isScrollEnabled == true
@@ -294,46 +289,19 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
         backSmokeDetails["detailContextInteractive"] = active.transitionCoordinator?.isInteractive == true
 #endif
         active.transitionCoordinator?.animate(alongsideTransition: nil) { [weak self] _ in self?.popInteraction = nil }
-      } else if let id = history.last, let previous = controllers[id], previous !== active {
-        returningRoute = previous
-        addChild(previous); previous.view.frame = content.bounds
-        content.insertSubview(previous.view, belowSubview: active.view); previous.didMove(toParent: self)
-        previous.view.transform = CGAffineTransform(translationX: -width * 0.25, y: 0)
       }
     case .changed:
 #if targetEnvironment(simulator)
       if active.viewControllers.count > 1 || popInteraction != nil { backSmokeDetails["detailDriverOnChange"] = popInteraction != nil }
 #endif
       if let interaction = popInteraction { interaction.update(progress) }
-      else if let previous = returningRoute {
-        active.view.transform = CGAffineTransform(translationX: width * progress, y: 0)
-        previous.view.transform = CGAffineTransform(translationX: -width * 0.25 * (1 - progress), y: 0)
-      }
     case .ended, .cancelled:
 #if targetEnvironment(simulator)
-      if state == .cancelled && returningRoute == nil { backSmokeDetails["detailDriverOnCancel"] = popInteraction != nil }
+      if state == .cancelled { backSmokeDetails["detailDriverOnCancel"] = popInteraction != nil }
 #endif
       let finish = state == .ended && (progress > 0.28 || velocity > 450)
       if let interaction = popInteraction {
         if finish { interaction.finish() } else { interaction.cancel() }
-      } else if let previous = returningRoute {
-        routeBackAnimating = true
-        UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.22, delay: 0,
-          options: [.beginFromCurrentState, .curveEaseOut], animations: {
-            active.view.transform = CGAffineTransform(translationX: finish ? width : 0, y: 0)
-            previous.view.transform = CGAffineTransform(translationX: finish ? 0 : -width * 0.25, y: 0)
-          }, completion: { [weak self] _ in
-            guard let self else { return }
-            if finish {
-              active.willMove(toParent: nil); active.view.removeFromSuperview(); active.removeFromParent()
-              self.active = previous; self.route = self.history.removeLast()
-              self.menuList.reloadData(); self.updateBottom(); previous.topViewController?.view.setNeedsLayout()
-            } else {
-              previous.willMove(toParent: nil); previous.view.removeFromSuperview(); previous.removeFromParent()
-            }
-            active.view.transform = .identity; previous.view.transform = .identity
-            self.returningRoute = nil; self.routeBackAnimating = false
-          })
       }
     default: break
     }
@@ -379,7 +347,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     guard abs(velocity.x) >= abs(velocity.y), abs(velocity.x) > 0 else { return false }
     if recognizer === closingPan { return menuOpen && !tablet && velocity.x < 0 }
     guard recognizer === contentPan, api != nil, !menuOpen, presentedViewController == nil,
-      popInteraction == nil, !routeBackAnimating, active?.transitionCoordinator == nil else { return false }
+      popInteraction == nil, active?.transitionCoordinator == nil else { return false }
     swipeAction = NeoNavigationGesture.action(startY: Double(swipeStart.y), height: Double(view.bounds.height),
       canGoBack: canGoBack, tablet: tablet, horizontal: Double(velocity.x), vertical: Double(velocity.y))
     return swipeAction != nil
@@ -434,7 +402,6 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     let original = recorded.collection
     showRoute("settings"); showRoute("recorded")
     let retained = original === recorded.collection
-    history.removeAll()
     if smokeStage == "gestures" {
       Task { [self] in
         let thumbnails = await NeoThumbnail.runSmoke()
@@ -455,7 +422,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
       return
     }
     if smokeStage == "menu" { setMenu(true, animated: false) }
-    if smokeStage == "settings" { showRoute("settings", remember: false) }
+    if smokeStage == "settings" { showRoute("settings") }
     if smokeStage == "detail" { openDetail(NeoRecordedPage.fixtures.records[0]) }
     if smokeStage == "pagination" { recorded.smokePageSeven() }
     view.layoutIfNeeded()
@@ -500,17 +467,42 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
       perform(cancel: true) { [self] in
         let cancelled = active?.viewControllers.count == 2 && popInteraction == nil
         backSmokeDetails["detailCancelled"] = cancelled; backSmokeDetails["stackAfterCancel"] = active?.viewControllers.count ?? 0
+        let detail = active?.topViewController
+        showRoute("settings"); view.layoutIfNeeded()
+        let settings = active
+        let settingsRoot = !canGoBack
+        goBack()
+        // Even a direct back-transition request at a tab root must not switch tabs.
+        updateBack(state: .began, translation: 0, velocity: 100)
+        updateBack(state: .changed, translation: content.bounds.width * 0.4, velocity: 100)
+        updateBack(state: .ended, translation: content.bounds.width * 0.4, velocity: 500)
+        let isolated = settingsRoot && route == "settings" && active === settings && !canGoBack && popInteraction == nil
+        backSmokeDetails["settingsRootIsolated"] = isolated
+        showRoute("recorded"); view.layoutIfNeeded()
+        let retainedDetail = canGoBack && active?.topViewController === detail && active?.viewControllers.count == 2
+        backSmokeDetails["retainedDetailAcrossTabs"] = retainedDetail
         perform(cancel: false) { [self] in
-          let finished = active?.viewControllers.count == 1 && active?.topViewController === recorded
+          let finished = route == "recorded" && active?.viewControllers.count == 1 && active?.topViewController === recorded && !canGoBack
           backSmokeDetails["detailFinished"] = finished; backSmokeDetails["stackAfterFinish"] = active?.viewControllers.count ?? 0
-          showRoute("settings"); view.layoutIfNeeded()
-          perform(cancel: true) { [self] in
-            let routeCancelled = route == "settings" && returningRoute == nil
-            backSmokeDetails["routeCancelled"] = routeCancelled
-            perform(cancel: false) { [self] in
-              let routeFinished = route == "recorded" && returningRoute == nil && active?.topViewController === recorded
-              backSmokeDetails["routeFinished"] = routeFinished
-              completion(cancelled && finished && routeCancelled && routeFinished)
+          goBack()
+          let recordedRoot = route == "recorded" && active?.topViewController === recorded
+          backSmokeDetails["recordedRootIsolated"] = recordedRoot
+          let rootMenu = NeoNavigationGesture.action(startY: Double(view.bounds.height) * 0.8,
+            height: Double(view.bounds.height), canGoBack: canGoBack, tablet: false, horizontal: 100, vertical: 0) == .menu
+          backSmokeDetails["rootLowerSwipeOpensMenu"] = rootMenu
+          let search = NeoRecordedPage(shell: self, keyword: "サンプル")
+          active?.pushViewController(search, animated: true)
+          later(0.6) { [self] in
+            settled { [self] in
+              let searchOpened = route == "recorded" && canGoBack && active?.topViewController === search
+              goBack()
+              later(0.6) { [self] in
+                settled { [self] in
+                  let searchReturned = searchOpened && route == "recorded" && !canGoBack && active?.topViewController === recorded
+                  backSmokeDetails["searchReturnedWithinTab"] = searchReturned
+                  completion(cancelled && isolated && retainedDetail && finished && recordedRoot && rootMenu && searchReturned)
+                }
+              }
             }
           }
         }

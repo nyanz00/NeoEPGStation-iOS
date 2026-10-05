@@ -26,11 +26,15 @@ let decoded = try JSONDecoder().decode(NeoRecords.self, from: Data(#"{"total":1,
 expect(decoded.records[0].videoFiles?[0].id == 2, "PLAY file data decoded")
 print("Native pagination, server URL, timestamp and recording model tests passed")
 
-// Test the behavioral boundaries, including diagonal input, both screen halves,
-// no-history fallback and vertical/right-to-left rejection. X never enters the
+// Test the behavioral boundaries, including diagonal input, the 40/60 split,
+// root fallback and vertical/right-to-left rejection. X never enters the
 // policy: horizontal swipes must work even when starting at screen center.
 expect(NeoNavigationGesture.action(startY: 100, height: 800, canGoBack: true, tablet: false, horizontal: 110, vertical: 100) == .menu, "Diagonal upper swipe opens menu")
-expect(NeoNavigationGesture.action(startY: 650, height: 800, canGoBack: false, tablet: false, horizontal: 100, vertical: -100) == .menu, "Lower swipe opens menu without history")
+expect(NeoNavigationGesture.action(startY: 319.9, height: 800, canGoBack: true, tablet: false, horizontal: 100, vertical: 0) == .menu, "Upper 40 percent opens menu")
+expect(NeoNavigationGesture.action(startY: 320, height: 800, canGoBack: true, tablet: false, horizontal: 100, vertical: 0) == .back, "40 percent boundary begins back region")
+expect(NeoNavigationGesture.action(startY: 360, height: 800, canGoBack: true, tablet: false, horizontal: 100, vertical: 0) == .back, "Former upper-half area now goes back")
+expect(NeoNavigationGesture.action(startY: 320, height: 800, canGoBack: false, tablet: false, horizontal: 100, vertical: 0) == .menu, "Boundary opens menu at tab root")
+expect(NeoNavigationGesture.action(startY: 650, height: 800, canGoBack: false, tablet: false, horizontal: 100, vertical: -100) == .menu, "Lower swipe opens menu without back target")
 expect(NeoNavigationGesture.action(startY: 650, height: 800, canGoBack: true, tablet: false, horizontal: 100, vertical: 20) == .back, "Lower swipe returns when possible")
 expect(NeoNavigationGesture.action(startY: 650, height: 800, canGoBack: true, tablet: false, horizontal: 20, vertical: 100) == nil, "Vertical scrolling preserved")
 expect(NeoNavigationGesture.action(startY: 100, height: 800, canGoBack: false, tablet: false, horizontal: -100, vertical: 20) == nil, "Left drag never opens menu")
