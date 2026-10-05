@@ -271,11 +271,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       let start = recording?.startAt ?? (context["startAt"] as? Double) ?? 0, end = recording?.endAt ?? (context["endAt"] as? Double) ?? 0
       if start > 0 { append(programDate(start, end), muted: true) }
       append(recording?.description ?? (context["description"] as? String) ?? "", lineHeight: 1.75)
-      if let recording { for genre in NeoPlayerGenres.labels(recording) {
-        let badge = UIButton(type: .custom); badge.setTitle(genre, for: .normal); badge.titleLabel?.font = .systemFont(ofSize: 12, weight: .bold)
-        badge.backgroundColor = .white.withAlphaComponent(0.16); badge.layer.cornerRadius = 6; badge.contentEdgeInsets = UIEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
-        let row = UIStackView(arrangedSubviews: [badge, UIView()]); stack.addArrangedSubview(row)
-      } }
+      if let recording {
+        let genres = NeoPlayerGenres.labels(recording)
+        if !genres.isEmpty { stack.addArrangedSubview(NeoPlayerGenreBadges(genres)) }
+      }
       let extended = recording?.extended ?? context["extended"] as? String ?? ""
       if !extended.isEmpty { append("番組内容", size: 16, bold: true); append(extended, muted: true, lineHeight: 1.75) }
     case "rules":
@@ -359,7 +358,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     if gesture.state == .changed { drawer.frame.origin.x = min(0, max(-drawer.bounds.width, drawerStart + translation)); drawerDim.alpha = 1 + drawer.frame.minX / drawer.bounds.width }
     if [.ended, .cancelled].contains(gesture.state) { setDrawer(gesture.state == .cancelled || (translation > -drawer.bounds.width * 0.25 && gesture.velocity(in: self).x > -350)) }
   }
-  func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+  override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
     guard let pan = gesture as? UIPanGestureRecognizer else { return true }; let v = pan.velocity(in: self); return v.x < 0 && abs(v.x) >= abs(v.y)
   }
   func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
@@ -419,6 +418,31 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     if let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first { try? image.pngData()?.write(to: directory.appendingPathComponent(name + ".png")) }
   }
 #endif
+}
+
+private final class NeoPlayerGenreBadges: UIView {
+  private var badges: [UILabel] = []
+  private var measuredHeight: CGFloat = 24
+  init(_ genres: [String]) {
+    super.init(frame: .zero)
+    for genre in genres {
+      let label = NeoStyle.label(genre, size: 12, bold: true); label.textAlignment = .center
+      label.backgroundColor = .white.withAlphaComponent(0.16); label.layer.cornerRadius = 4; label.clipsToBounds = true
+      addSubview(label); badges.append(label)
+    }
+  }
+  required init?(coder: NSCoder) { fatalError() }
+  override var intrinsicContentSize: CGSize { CGSize(width: UIView.noIntrinsicMetric, height: measuredHeight) }
+  override func layoutSubviews() {
+    super.layoutSubviews(); guard bounds.width > 0 else { return }
+    var x: CGFloat = 0, y: CGFloat = 0
+    for badge in badges {
+      let width = min(bounds.width, ceil(badge.intrinsicContentSize.width) + 16)
+      if x > 0 && x + width > bounds.width { x = 0; y += 28 }
+      badge.frame = CGRect(x: x, y: y, width: width, height: 24); x += width + 6
+    }
+    if measuredHeight != y + 24 { measuredHeight = y + 24; invalidateIntrinsicContentSize() }
+  }
 }
 
 private final class NeoPlayerRecordRow: UIControl {
