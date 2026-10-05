@@ -53,3 +53,4 @@ durations and delayed/shared thumbnail loading. iPad simulator checks are
 optional (`check_ipad` or `reuse_run` on workflow_dispatch). No React Native runtime is shipped.
 Fixtures use invented text and code-drawn thumbnails; no private server or real
 recordings are embedded. Actual device swipes and usability still need device testing.
+Build 39 results are recorded in `navigation-polish-verification.md`.
