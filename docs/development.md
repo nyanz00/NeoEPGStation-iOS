@@ -27,6 +27,7 @@ Swift / UIKit版のビルド32の検証結果は `swift-ui-verification.md` を�
 スワイプ・フェード・配色等の修正を含むビルド39の結果は `navigation-polish-verification.md` を参照する。
 タブ内の戻る操作・40％／60％判定のビルド40の結果は `tab-navigation-verification.md` を参照する。
 録画メニュー・PLAY選択欄・ドロップ表示・サイドメニューを閉じる操作のビルド44の結果は `recorded-menus-verification.md` を参照する。
+録画操作ボタン・THUMB設定・一覧メニュー・ログダイアログと設定取得のビルド45の結果は `recording-ui-parity-verification.md` を参照する。
 端末の起動・導入だけで検証が中断した場合は、Actionsの手動実行で `reuse_run` に
 生成済みビルドのrun IDを指定すると、保存したシミュレーター用アプリでiPad UIのみを再確認できる。
 アプリ・ネイティブコード・依存ロックが同一で、元ビルドの保存・再生・コメント合成・iPhone UIの
