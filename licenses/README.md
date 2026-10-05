@@ -1,6 +1,6 @@
 # Icons
 
-Material icon path data in `src/ui/Icon.tsx` was taken from the same MUI icons
+Material icon path data in `ios/NeoEPGStation/NeoIcon.swift` was taken from the same MUI icons
 used by NeoEPGStation Web. The MUI distribution is licensed under MIT;
 see `MUI-icons-MIT.txt`. The underlying Google Material Design icons are
 licensed under Apache License 2.0 (see `Apache-2.0.txt`).

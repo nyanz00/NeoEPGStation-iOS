@@ -29,7 +29,7 @@
     BDEF00000000000000000005 /* NeoRecordedPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000005; };
     BDEF00000000000000000006 /* NeoDetailPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000006; };
     BDEF00000000000000000007 /* NeoSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000007; };
-    BDEF00000000000000000008 /* NeoMenus.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000008; };
+    BDEF00000000000000000009 /* NeoMenus.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000008; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -299,7 +299,7 @@
 				C5EC3F766E24819570B97E68 /* NeoPlayerController.m in Sources */,
 				7C7CD6B520048B87A9436634 /* NeoNative.swift in Sources */,
         BDEF00000000000000000007,
-        BDEF00000000000000000008,
+        BDEF00000000000000000009,
         BDEF00000000000000000006,
         BDEF00000000000000000005,
         BDEF00000000000000000004,
