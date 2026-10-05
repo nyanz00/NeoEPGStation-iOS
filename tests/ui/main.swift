@@ -29,8 +29,15 @@ print("Native pagination, server URL, timestamp and recording model tests passed
 let menuRecording = try JSONDecoder().decode(NeoRecording.self, from: Data(#"{"id":1,"name":"Sample","startAt":1,"endAt":2,"isRecording":false,"ruleId":2,"isProtected":true,"dropLogFile":{"id":3,"dropCnt":2,"errorCnt":0,"scramblingCnt":1},"videoFiles":[{"id":2,"name":"TS","type":"ts","size":1073741824},{"id":3,"name":"AV1","type":"encoded","size":1073741824}]}"#.utf8))
 let capabilities = NeoServerConfig(encode: ["Sample"], developerMode: false)
 expect(NeoRecordingMenu.commands(item: menuRecording, detail: false, config: capabilities) == [.rule, .search, .user, .encode, .info, .unprotect, .delete], "Web list menu order and protection state")
-expect(NeoRecordingMenu.commands(item: menuRecording, detail: true, config: capabilities) == [.download, .rule, .search, .user, .encode, .info, .unprotect, .delete], "Web detail download menu")
-expect(NeoRecordingMenu.commands(item: decoded.records[0], detail: false, config: nil) == [.search, .user, .info, .protect, .delete], "Missing rule and config do not invent actions")
+expect(NeoRecordingMenu.commands(item: menuRecording, detail: true, config: capabilities) == [.download, .rule, .search, .user, .encode, .thumbnail, .info, .unprotect, .delete], "Web detail hidden THUMB menu position")
+expect(NeoRecordingMenu.commands(item: decoded.records[0], detail: false, config: nil) == [.search, .user, .encode, .info, .protect, .delete], "Encode placeholder remains without config")
+let developer = try JSONDecoder().decode(NeoServerConfig.self, from: Data(#"{"encode":[null,123,"",{},"Sample"],"developerMode":true,"isEnableTSRecordedStream":true}"#.utf8))
+expect(developer.encode == ["Sample"] && developer.developerMode == true && developer.isEnableTSRecordedStream == true, "Web encode normalization preserves developer capabilities")
+let noModes = try JSONDecoder().decode(NeoServerConfig.self, from: Data(#"{"developerMode":true,"encode":null}"#.utf8))
+expect(noModes.encode.isEmpty && noModes.developerMode == true, "Missing encode modes do not discard developer mode")
+expect(NeoRecordingMenu.commands(item: menuRecording, detail: true, config: developer) == [.download, .rule, .search, .user, .encode, .thumbnail, .subtitle, .info, .unprotect, .delete], "Detail developer subtitle follows thumbnail")
+expect(NeoRecordingMenu.commands(item: menuRecording, detail: false, config: developer) == [.rule, .search, .user, .encode, .info, .unprotect, .subtitle, .delete], "List developer subtitle follows protection")
+expect(!NeoRecordingMenu.commands(item: menuRecording, detail: true, config: developer, hideThumbnailButton: false).contains(.thumbnail), "Visible THUMB is not duplicated in menu")
 expect(NeoProgramText.dropSummary(menuRecording) == "drop: 2, error: 0, scrambling: 1 2.00 GB", "Drop counters and total file size decoded")
 expect(menuRecording.dropLogFile?.hasErrors == true && decoded.records[0].dropLogFile == nil, "Drop presence and error state")
 print("Recorded menu metadata and drop summary tests passed")
@@ -82,6 +89,12 @@ Task.detached {
     }
     let result = try await api.recordings(page: 7, keyword: "アニメ & 日曜")
     expect(result.total == 300, "List response decoded")
+    FixtureProtocol.handler = { request in
+      expect(request.url?.path == "/epg/api/config", "Config uses same reverse-proxy API path")
+      return (200, Data(#"{"encode":null,"developerMode":true,"isEnableEncodedRecordedStream":true}"#.utf8))
+    }
+    let config = try await api.configuration()
+    expect(config.developerMode == true && config.isEnableEncodedRecordedStream == true, "Config capabilities survive absent encode modes")
     FixtureProtocol.handler = { request in
       expect(request.url?.path == "/epg/api/dropLogs/3" && request.url?.query == "maxsize=512", "Drop log endpoint and limit")
       expect(request.value(forHTTPHeaderField: "X-EPGStation-User-Id") == "master", "Drop log viewer header")

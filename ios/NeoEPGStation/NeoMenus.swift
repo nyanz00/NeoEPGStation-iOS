@@ -9,7 +9,7 @@ struct NeoMenuEntry {
 // A lightweight UIKit overlay: no system sheet, blur, navigation transition,
 // or waiting for a modal dismissal before presenting the player.
 final class NeoAnchoredMenu: UIView {
-  enum Appearance { case actions, files }
+  enum Appearance { case actions, files, pageActions }
   private weak var anchor: UIView?
   private let surface = UIView(), scroll = UIScrollView()
   private let entries: [NeoMenuEntry]
@@ -19,6 +19,13 @@ final class NeoAnchoredMenu: UIView {
   var onDismiss: (() -> Void)?
   private(set) var menuFrame = CGRect.zero
   var titles: [String] { entries.map(\.title) }
+#if targetEnvironment(simulator)
+  var smokeFileStyle: Bool {
+    appearance == .files && buttons.allSatisfy {
+      $0.backgroundColor == NeoStyle.success && $0.tintColor == NeoStyle.successText && $0.bounds.width >= 64 && $0.bounds.height == 31
+    }
+  }
+#endif
 
   init(anchor: UIView, entries: [NeoMenuEntry], appearance: Appearance) {
     self.anchor = anchor; self.entries = entries; self.appearance = appearance
@@ -34,12 +41,12 @@ final class NeoAnchoredMenu: UIView {
     for (index, entry) in entries.enumerated() {
       let button = UIButton(type: .system)
       button.setTitle(entry.title, for: .normal)
-      button.titleLabel?.font = .systemFont(ofSize: appearance == .files ? 14 : 16)
+      button.titleLabel?.font = .systemFont(ofSize: appearance == .files ? 13 : 16, weight: appearance == .files ? .medium : .regular)
       button.titleLabel?.lineBreakMode = .byTruncatingTail
       button.tintColor = .white
       button.contentHorizontalAlignment = .left
       if let icon = entry.icon { button.setImage(NeoIcon.image(icon), for: .normal) }
-      if appearance == .files { button.backgroundColor = UIColor(red: 46/255, green: 125/255, blue: 50/255, alpha: 1); button.layer.cornerRadius = 4 }
+      if appearance == .files { button.backgroundColor = NeoStyle.success; button.tintColor = NeoStyle.successText; button.layer.cornerRadius = 4 }
       button.accessibilityIdentifier = "anchored-menu-item-\(index)"
       button.addAction(UIAction { [weak self] _ in self?.select(index) }, for: .touchUpInside)
       scroll.addSubview(button); buttons.append(button)
@@ -54,16 +61,16 @@ final class NeoAnchoredMenu: UIView {
     let safe = host.safeAreaInsets
     let available = bounds.inset(by: UIEdgeInsets(top: safe.top + 8, left: safe.left + 8, bottom: safe.bottom + 8, right: safe.right + 8))
     let rect = anchor.convert(anchor.bounds, to: self)
-    let textWidth = entries.map { ($0.title as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: 14)]).width }.max() ?? 0
-    let desiredWidth: CGFloat = appearance == .files ? min(220, max(anchor.bounds.width, ceil(textWidth) + 36)) : 180
+    let textWidth = entries.map { ($0.title as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: appearance == .files ? 13 : 16, weight: appearance == .files ? .medium : .regular)]).width }.max() ?? 0
+    let desiredWidth: CGFloat = appearance == .files ? min(220, max(64, ceil(textWidth) + 20) + 16) : max(180, ceil(textWidth) + 68)
     let width = min(desiredWidth, available.width)
-    let rowHeight: CGFloat = appearance == .files ? 32 : 48
+    let rowHeight: CGFloat = appearance == .files ? 31 : 48
     let gap: CGFloat = appearance == .files ? 8 : 0
     let contentHeight = 16 + CGFloat(entries.count) * rowHeight + CGFloat(max(0, entries.count - 1)) * gap
     let height = min(contentHeight, available.height)
     let x = min(max(available.minX, appearance == .files ? rect.minX : rect.maxX - width), available.maxX - width)
     // Keep PLAY directly under the button; move upward only if it cannot fit.
-    let y = min(max(available.minY, rect.maxY), available.maxY - height)
+    let y = min(max(available.minY, appearance == .pageActions ? rect.minY : rect.maxY), available.maxY - height)
     surface.frame = CGRect(x: x, y: y, width: width, height: height); menuFrame = surface.frame
     surface.layer.shadowPath = UIBezierPath(roundedRect: surface.bounds, cornerRadius: 6).cgPath
     scroll.frame = surface.bounds; scroll.contentSize = CGSize(width: width, height: contentHeight)
@@ -72,7 +79,7 @@ final class NeoAnchoredMenu: UIView {
       let entry = entries[index]
       if appearance == .files {
         let textWidth = (entry.title as NSString).size(withAttributes: [.font: button.titleLabel!.font!]).width
-        button.frame = CGRect(x: 8, y: rowY, width: min(width - 16, max(44, ceil(textWidth) + 20)), height: rowHeight)
+        button.frame = CGRect(x: 8, y: rowY, width: min(width - 16, max(64, ceil(textWidth) + 20)), height: rowHeight)
         button.contentEdgeInsets = UIEdgeInsets(top: 0, left: 10, bottom: 0, right: 10)
       } else {
         button.frame = CGRect(x: 0, y: rowY, width: width, height: rowHeight)
@@ -127,6 +134,7 @@ extension NeoRecordingCommand {
     case .search: return "SearchOutlined"
     case .user: return "AccountCircleOutlined"
     case .encode: return "SyncOutlined"
+    case .thumbnail: return "ImageOutlined"
     case .info: return "InfoOutlined"
     case .protect: return "LockOutlined"
     case .unprotect: return "LockOpenOutlined"
@@ -139,7 +147,15 @@ extension NeoRecordingCommand {
 extension NeoPage {
   func showRecordingMenu(_ item: NeoRecording, anchor: UIView, detail: Bool) {
     guard let shell else { return }
-    let commands = NeoRecordingMenu.commands(item: item, detail: detail, config: shell.serverConfig)
+    if shell.serverConfig == nil {
+      Task { [weak shell] in await shell?.refreshServerConfig() }
+    }
+    presentRecordingMenu(item, anchor: anchor, detail: detail)
+  }
+  private func presentRecordingMenu(_ item: NeoRecording, anchor: UIView, detail: Bool) {
+    guard let shell else { return }
+    let commands = NeoRecordingMenu.commands(item: item, detail: detail, config: shell.serverConfig,
+      hideThumbnailButton: shell.storage.hideRecordedThumbnailButton)
     shell.showPopup(anchor: anchor, entries: commands.map { command in
       NeoMenuEntry(title: command.rawValue, icon: command.icon) { [weak self] in
         // Operation dialogs will be ported separately; never run a destructive

@@ -144,7 +144,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     rebuildBottom()
     if !smokeStage.isEmpty {
       api = NeoAPI(base: URL(string: "https://example.com")!); channels = [1: "サンプル放送 BS"]
-      serverConfig = NeoServerConfig(encode: ["Sample"], developerMode: false)
+      serverConfig = NeoServerConfig(encode: ["Sample"], developerMode: true, isEnableTSRecordedStream: true, isEnableEncodedRecordedStream: true)
       showRoute("recorded")
     } else {
       do {
@@ -185,14 +185,20 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     controllers.removeAll(); active = nil
     showRoute("recorded")
     let api = self.api!
-    Task { [weak self] in
-      if let config = try? await api.configuration(), self?.api === api { self?.serverConfig = config }
-    }
+    Task { [weak self] in await self?.refreshServerConfig() }
     Task { [weak self] in
       if let channels = try? await api.channels(), self?.api === api {
         self?.channels = Dictionary(channels.map { ($0.id, $0.name) }, uniquingKeysWith: { _, new in new })
         (self?.controllers["recorded"]?.viewControllers.first as? NeoRecordedPage)?.reloadLabels()
       }
+    }
+  }
+  func refreshServerConfig() async {
+    guard let api, serverConfig == nil else { return }
+    guard let config = try? await api.configuration(), self.api === api else { return }
+    serverConfig = config
+    for nav in controllers.values {
+      for case let detail as NeoDetailPage in nav.viewControllers where detail.isViewLoaded { detail.refreshCapabilities() }
     }
   }
   func showConnection(message: String? = nil) {
@@ -479,7 +485,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     }
     if smokeStage == "menu" { setMenu(true, animated: false) }
     if smokeStage == "settings" { showRoute("settings") }
-    if ["detail", "detail-actions", "play-popup"].contains(smokeStage) { openDetail(NeoRecordedPage.fixtures.records[0]) }
+    if ["detail", "detail-actions", "play-popup", "drop-dialog"].contains(smokeStage) { openDetail(NeoRecordedPage.fixtures.records[0]) }
     if smokeStage == "pagination" { recorded.smokePageSeven() }
     view.layoutIfNeeded()
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -490,20 +496,30 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
       var dropText = ""
       if self.smokeStage == "record-actions" {
         recorded.smokeOpenFirstMenu()
-        popupCorrect = self.popup?.titles == ["rule", "search", "user", "encode", "Info", "protect", "delete"]
+        popupCorrect = self.popup?.titles == ["rule", "search", "user", "encode", "Info", "protect", "subtitle", "delete"]
+      }
+      if self.smokeStage == "list-actions" {
+        recorded.smokeOpenListMenu()
+        popupCorrect = self.popup?.titles == ["編集", "クリーンアップ", "アップロード"]
       }
       if let detail = self.active?.topViewController as? NeoDetailPage {
         detail.view.layoutIfNeeded(); dropText = detail.smokeDropText
         popupCorrect = dropText == "drop: 2, error: 0, scrambling: 0 1.33 GB"
+          && detail.smokeButtonsInOneRow && detail.smokeButtonTitles == ["PLAY", "STREAMING", "ENCODE"]
         if self.smokeStage == "detail-actions" {
           detail.smokeOpenMenu()
-          popupCorrect = popupCorrect && self.popup?.titles == ["download", "rule", "search", "user", "encode", "Info", "protect", "delete"]
+          popupCorrect = popupCorrect && self.popup?.titles == ["download", "rule", "search", "user", "encode", "thumbnail", "subtitle", "Info", "protect", "delete"]
         }
         if self.smokeStage == "play-popup" {
           detail.smokeOpenPlay()
           popupCorrect = popupCorrect && self.popup?.titles == ["TS", "AV1 / MKV"]
             && self.popup?.menuFrame.minY == detail.smokePlayFrame.maxY
             && self.popup?.menuFrame.minX == detail.smokePlayFrame.minX
+            && self.popup?.smokeFileStyle == true
+        }
+        if self.smokeStage == "drop-dialog" {
+          detail.smokeOpenDropLog(); detail.presentedViewController?.view.layoutIfNeeded()
+          popupCorrect = popupCorrect && detail.smokeDropDialogVisible && self.active?.viewControllers.count == 2
         }
       }
       let correct = popupCorrect && retained && (self.tablet || cardHeight == 108) && self.controllers["recorded"]?.viewControllers.first === recorded
@@ -511,7 +527,9 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
       NeoNative.writeSmoke("ui-\(self.smokeStage)-smoke", ["success": correct, "stage": self.smokeStage,
         "route": self.route, "recordCount": recorded.records.count, "theme": "neon-teal-dark", "sidebarWidth": self.tablet ? 240 : 0,
         "uiEngine": "Swift / UIKit", "retainedList": retained, "cardHeight": cardHeight,
-        "pagination": pages, "shortcuts": self.shortcuts, "popupTitles": self.popup?.titles ?? [], "dropSummary": dropText])
+        "pagination": pages, "shortcuts": self.shortcuts, "popupTitles": self.popup?.titles ?? [], "dropSummary": dropText,
+        "detailButtons": (self.active?.topViewController as? NeoDetailPage)?.smokeButtonTitles ?? [],
+        "dropDialogVisible": (self.active?.topViewController as? NeoDetailPage)?.smokeDropDialogVisible ?? false])
     }
   }
   private func runBackSmoke(_ recorded: NeoRecordedPage, completion: @escaping (Bool) -> Void) {

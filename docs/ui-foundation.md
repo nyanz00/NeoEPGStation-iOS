@@ -40,12 +40,23 @@ Custom colors and light/dark appearance selection remain future work.
 Swift / UIKit implements server URL saving/automatic connection, keyword search,
 recorded cards, scrolling page-number controls, recording details, file selection
 and native PLAY. Settings includes bottom shortcut customization.
+THUMB visibility is saved in settings and defaults to hidden. PLAY, STREAMING and
+ENCODE fit one mobile row. The latter two actions are preparation placeholders;
+STREAMING file choices follow the server's TS/encoded streaming capabilities.
 Recorded and detail overflow menus use the Web action names, icons and order.
 Management operations inside these menus still show a preparation notice.
+The list header menu contains edit, cleanup and upload placeholders. Encode stays
+in both recording menus as requested, even if encode modes have not loaded.
+Detail's hidden-thumbnail action follows encode; developer-only subtitle follows
+thumbnail in detail and protection in the list, matching RecordedItemActions.
 PLAY shows file names in a compact popup directly below its button, without sizes
 or explanatory headings. Popups close on outside taps without a modal transition.
+Its small buttons use MUI dark success green[400], black contrast text, minimum
+64pt width and 13pt type. PLAY uses the Web's outlined triangle icon inside a
+contained theme-color button, not a text triangle or an outlined button border.
 Details show drop/error/scrambling counters and the combined file size; available
-drop logs can be opened from this line. Nonzero counters use the error color.
+drop logs open in a centered dialog with a recording title, scrollable monospace
+body, dividers and close button. Nonzero counters use the error color.
 Other destinations show an explicit preparation screen; their functionality has
 not been ported. OAuth, advanced filters, viewer profiles and recording management
 actions are separate follow-up work.

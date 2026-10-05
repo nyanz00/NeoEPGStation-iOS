@@ -209,15 +209,11 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     }); present(dialog, animated: true)
   }
   private func showOptions() {
-    let menu = UIAlertController(title: "録画済み", message: nil, preferredStyle: .actionSheet)
-    menu.addAction(UIAlertAction(title: reverse ? "新しい録画から表示" : "古い録画から表示", style: .default) { [weak self] _ in
-      self?.reverse.toggle(); self?.page = 1; self?.reload()
-    })
-    let clearSearch = UIAlertAction(title: "検索を解除", style: .default) { [weak self] _ in self?.navigationController?.popToRootViewController(animated: true) }
-    clearSearch.isEnabled = !keyword.isEmpty; menu.addAction(clearSearch)
-    menu.addAction(UIAlertAction(title: "更新", style: .default) { [weak self] _ in self?.refreshList() })
-    menu.addAction(UIAlertAction(title: "キャンセル", style: .cancel))
-    menu.popoverPresentationController?.sourceView = actions.last; present(menu, animated: true)
+    guard let anchor = actions.last else { return }
+    let items = [("編集", "EditOutlined"), ("クリーンアップ", "DeleteSweepOutlined"), ("アップロード", "UploadOutlined")]
+    shell?.showPopup(anchor: anchor, entries: items.map { title, icon in
+      NeoMenuEntry(title: title, icon: icon) { [weak self] in self?.alert("\(title) の操作は準備中です。") }
+    }, appearance: .pageActions)
   }
   func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int { records.count }
   func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
@@ -250,6 +246,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   }
   deinit { task?.cancel() }
 #if targetEnvironment(simulator)
+  func smokeOpenListMenu() { showOptions() }
   func smokeOpenFirstMenu() {
     collection.layoutIfNeeded()
     if let cell = collection.cellForItem(at: IndexPath(item: 0, section: 0)) as? NeoRecordedCard,

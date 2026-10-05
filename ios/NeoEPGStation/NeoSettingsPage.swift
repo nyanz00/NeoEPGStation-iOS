@@ -69,9 +69,18 @@ final class NeoSettingsPage: NeoPage {
       button.contentHorizontalAlignment = .left; button.heightAnchor.constraint(equalToConstant: 48).isActive = true
       button.backgroundColor = NeoStyle.paper; stack.addArrangedSubview(button)
     }
+    let thumbnail = UIStackView(); thumbnail.axis = .horizontal; thumbnail.spacing = 8; thumbnail.alignment = .center
+    let label = NeoStyle.label("THUMBボタンを表示しない"); label.numberOfLines = 0
+    let toggle = UISwitch(); toggle.isOn = shell?.storage.hideRecordedThumbnailButton ?? true; toggle.onTintColor = NeoStyle.accent
+    toggle.accessibilityLabel = "THUMBボタンを表示しない"
+    toggle.addAction(UIAction { [weak self, weak toggle] _ in
+      guard let toggle else { return }; self?.shell?.storage.hideRecordedThumbnailButton = toggle.isOn
+    }, for: .valueChanged)
+    thumbnail.addArrangedSubview(label); thumbnail.addArrangedSubview(toggle)
+    thumbnail.heightAnchor.constraint(equalToConstant: 48).isActive = true; stack.addArrangedSubview(thumbnail)
     let text = NeoStyle.label("テーマ：ターコイズ・ダーク", muted: true); stack.addArrangedSubview(text)
   }
-  override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); stack.frame = CGRect(x: 12, y: 16, width: body.bounds.width - 24, height: 210) }
+  override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); stack.frame = CGRect(x: 12, y: 16, width: body.bounds.width - 24, height: 270) }
 }
 
 final class NeoShortcutPage: NeoPage, UITableViewDataSource, UITableViewDelegate {

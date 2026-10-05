@@ -7,6 +7,25 @@ enum NeoStyle {
   static let accent = UIColor(red: 32/255, green: 168/255, blue: 154/255, alpha: 1)
   static let muted = UIColor.white.withAlphaComponent(0.7)
   static let border = UIColor.white.withAlphaComponent(0.12)
+  // MUI default success.main in dark mode (green[400]), with its contrast text.
+  static let success = UIColor(red: 129/255, green: 199/255, blue: 132/255, alpha: 1)
+  static let successText = UIColor.black.withAlphaComponent(0.87)
+  static func recordingButton(_ title: String, icon: String, success: Bool = false, action: @escaping () -> Void) -> UIButton {
+    let button = UIButton(type: .system)
+    var config = UIButton.Configuration.filled()
+    config.title = title
+    config.image = UIGraphicsImageRenderer(size: CGSize(width: 20, height: 20)).image { _ in
+      NeoIcon.image(icon).draw(in: CGRect(x: 0, y: 0, width: 20, height: 20))
+    }.withRenderingMode(.alwaysTemplate)
+    config.imagePadding = 8; config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
+    config.baseBackgroundColor = success ? self.success : accent; config.baseForegroundColor = successText
+    config.background.cornerRadius = 4
+    config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+      var attributes = attributes; attributes.font = UIFont.systemFont(ofSize: 14, weight: .medium); return attributes
+    }
+    button.configuration = config; button.titleLabel?.adjustsFontSizeToFitWidth = true; button.titleLabel?.minimumScaleFactor = 0.8
+    button.addAction(UIAction { _ in action() }, for: .touchUpInside); return button
+  }
   static func label(_ text: String = "", size: CGFloat = 14, bold: Bool = false, muted: Bool = false) -> UILabel {
     let label = UILabel(); label.text = text; label.textColor = muted ? self.muted : .white
     label.font = .systemFont(ofSize: size, weight: bold ? .bold : .regular)

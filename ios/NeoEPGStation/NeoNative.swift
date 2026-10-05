@@ -5,6 +5,10 @@ final class NeoNative {
   private var service = "io.github.nyanz00.neoepgstation.connection"
   private var preferences = UserDefaults.standard
   private let navigationKey = "neoepgstation.navigation.v1"
+  var hideRecordedThumbnailButton: Bool {
+    get { preferences.object(forKey: "neoepgstation.hideRecordedThumbnailButton") as? Bool ?? true }
+    set { preferences.set(newValue, forKey: "neoepgstation.hideRecordedThumbnailButton") }
+  }
   var shortcuts: [String] {
     let saved = preferences.stringArray(forKey: navigationKey) ?? []
     return Self.validShortcuts(saved) ? saved : ["recorded", "onair", "guide", "anime", "settings"]
@@ -53,7 +57,13 @@ final class NeoNative {
       let legacy = try JSONSerialization.data(withJSONObject: ["url":"https://example.com", "username":"legacy", "password":"fixture"])
       let status = SecItemUpdate(storage.query as CFDictionary, [kSecValueData as String: legacy] as CFDictionary)
       let migrated = try storage.loadConnection()
+      let thumbnailDefault = storage.hideRecordedThumbnailButton
+      storage.hideRecordedThumbnailButton = false
+      let thumbnailSaved = !storage.hideRecordedThumbnailButton
+      storage.hideRecordedThumbnailButton = true
+      result["thumbnailPreferenceSuccess"] = thumbnailDefault && thumbnailSaved && storage.hideRecordedThumbnailButton
       result["success"] = status == errSecSuccess && loaded == URL(string: "https://example.com") && migrated == loaded
+        && thumbnailDefault && thumbnailSaved && storage.hideRecordedThumbnailButton
       try storage.saveShortcuts(["guide","recorded"])
       let saved = storage.shortcuts == ["guide","recorded"]
       do { try storage.saveShortcuts(["unknown"]) } catch { result["navigationSuccess"] = saved }

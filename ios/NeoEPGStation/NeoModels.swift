@@ -36,16 +36,42 @@ struct NeoDropLog: Decodable {
   let id: Int; let errorCnt: Int; let dropCnt: Int; let scramblingCnt: Int
   var hasErrors: Bool { dropCnt > 0 || errorCnt > 0 || scramblingCnt > 0 }
 }
-struct NeoServerConfig: Decodable { let encode: [String]; let developerMode: Bool? }
+struct NeoServerConfig: Decodable {
+  let encode: [String]; let developerMode: Bool?
+  var isEnableTSRecordedStream: Bool? = nil
+  var isEnableEncodedRecordedStream: Bool? = nil
+  init(encode: [String], developerMode: Bool?, isEnableTSRecordedStream: Bool? = nil, isEnableEncodedRecordedStream: Bool? = nil) {
+    self.encode = encode; self.developerMode = developerMode
+    self.isEnableTSRecordedStream = isEnableTSRecordedStream; self.isEnableEncodedRecordedStream = isEnableEncodedRecordedStream
+  }
+  private enum CodingKeys: String, CodingKey { case encode, developerMode, isEnableTSRecordedStream, isEnableEncodedRecordedStream }
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    // queries.ts normalizes missing/non-string encode modes independently of capabilities.
+    var modes: [String] = []
+    if var array = try? values.nestedUnkeyedContainer(forKey: .encode) {
+      while !array.isAtEnd {
+        let value = try array.superDecoder().singleValueContainer()
+        if let mode = try? value.decode(String.self), !mode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { modes.append(mode) }
+      }
+    }
+    encode = modes
+    developerMode = try values.decodeIfPresent(Bool.self, forKey: .developerMode)
+    isEnableTSRecordedStream = try values.decodeIfPresent(Bool.self, forKey: .isEnableTSRecordedStream)
+    isEnableEncodedRecordedStream = try values.decodeIfPresent(Bool.self, forKey: .isEnableEncodedRecordedStream)
+  }
+}
 enum NeoRecordingCommand: String {
-  case download, rule, search, user, encode, info = "Info", protect, unprotect, subtitle, delete
+  case download, rule, search, user, encode, thumbnail, info = "Info", protect, unprotect, subtitle, delete
 }
 enum NeoRecordingMenu {
-  static func commands(item: NeoRecording, detail: Bool, config: NeoServerConfig?) -> [NeoRecordingCommand] {
+  static func commands(item: NeoRecording, detail: Bool, config: NeoServerConfig?, hideThumbnailButton: Bool = true) -> [NeoRecordingCommand] {
     var result: [NeoRecordingCommand] = detail ? [.download] : []
     if item.ruleId != nil { result.append(.rule) }
     result += [.search, .user]
-    if !item.isRecording && !(config?.encode ?? []).isEmpty { result.append(.encode) }
+    // Keep the requested encode placeholder even before server capabilities load.
+    if !item.isRecording { result.append(.encode) }
+    if detail && hideThumbnailButton && !(item.videoFiles ?? []).isEmpty { result.append(.thumbnail) }
     if detail && config?.developerMode == true { result.append(.subtitle) }
     if !item.isRecording && !(item.videoFiles ?? []).isEmpty { result.append(.info) }
     result.append(item.isProtected == true ? .unprotect : .protect)
