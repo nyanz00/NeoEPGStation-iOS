@@ -216,6 +216,8 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
       active?.willMove(toParent: nil); active?.view.removeFromSuperview(); active?.removeFromParent()
       addChild(nav); content.addSubview(nav.view); nav.view.frame = content.bounds; nav.didMove(toParent: self); active = nav
     }
+    // The built-in edge recognizer may not exist until the navigation view loads.
+    nav.interactivePopGestureRecognizer?.isEnabled = false
     active?.topViewController?.view.setNeedsLayout(); view.setNeedsLayout()
   }
   func goBack() {
@@ -288,6 +290,9 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
       if active.viewControllers.count > 1 {
         let interaction = UIPercentDrivenInteractiveTransition(); interaction.completionCurve = .easeOut
         popInteraction = interaction; active.popViewController(animated: true)
+#if targetEnvironment(simulator)
+        backSmokeDetails["detailContextInteractive"] = active.transitionCoordinator?.isInteractive == true
+#endif
         active.transitionCoordinator?.animate(alongsideTransition: nil) { [weak self] _ in self?.popInteraction = nil }
       } else if let id = history.last, let previous = controllers[id], previous !== active {
         returningRoute = previous
@@ -296,12 +301,18 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
         previous.view.transform = CGAffineTransform(translationX: -width * 0.25, y: 0)
       }
     case .changed:
+#if targetEnvironment(simulator)
+      if active.viewControllers.count > 1 || popInteraction != nil { backSmokeDetails["detailDriverOnChange"] = popInteraction != nil }
+#endif
       if let interaction = popInteraction { interaction.update(progress) }
       else if let previous = returningRoute {
         active.view.transform = CGAffineTransform(translationX: width * progress, y: 0)
         previous.view.transform = CGAffineTransform(translationX: -width * 0.25 * (1 - progress), y: 0)
       }
     case .ended, .cancelled:
+#if targetEnvironment(simulator)
+      if state == .cancelled && returningRoute == nil { backSmokeDetails["detailDriverOnCancel"] = popInteraction != nil }
+#endif
       let finish = state == .ended && (progress > 0.28 || velocity > 450)
       if let interaction = popInteraction {
         if finish { interaction.finish() } else { interaction.cancel() }
@@ -334,7 +345,10 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   }
   func navigationController(_ navigationController: UINavigationController,
     interactionControllerFor animationController: UIViewControllerAnimatedTransitioning) -> UIViewControllerInteractiveTransitioning? {
-    popInteraction
+#if targetEnvironment(simulator)
+    backSmokeDetails["interactionControllerRequested"] = true
+#endif
+    return popInteraction
   }
   func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
     popInteraction = nil; viewController.view.setNeedsLayout()
