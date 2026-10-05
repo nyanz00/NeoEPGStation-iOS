@@ -8,7 +8,7 @@ Actionsの[ビルド45](https://github.com/nyanz00/NeoEPGStation-iOS/actions/run
 
 - `RecordedDetailPage.tsx` とMUIのButton・createPaletteを参照した。
   PLAYは同じ中抜きの三角アイコンを使う。背景はWebのcontainedボタンを引き継ぐ。
-  ファイル選択は13pt・最小幅64pt・31pt高、ダークテーマのsuccess色 `#81c784` と黒文字に修正した。
+  ファイル選択は13pt・最小幅64pt・31pt高と黒文字にした。ただし、このビルドの緑 `#81c784` はgreen[300]であり、Webのdark success.main（green[400]、`#66bb6a`）と異なっていた。後続の色・配置修正で訂正する。
 - PLAY・STREAMING・ENCODEをモバイルで一行に収める。STREAMING・ENCODEは準備中の操作。
   「THUMBボタンを表示しない」は既定でオンにし、設定から切り替えて保存する。
 - `RecordedItemActions.tsx` の順序に合わせ、詳細のthumbnailはencode直後、developer mode時のsubtitleはその次に置く。

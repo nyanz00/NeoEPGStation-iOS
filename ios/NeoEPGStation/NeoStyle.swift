@@ -8,8 +8,12 @@ enum NeoStyle {
   static let muted = UIColor.white.withAlphaComponent(0.7)
   static let border = UIColor.white.withAlphaComponent(0.12)
   // MUI default success.main in dark mode (green[400]), with its contrast text.
-  static let success = UIColor(red: 129/255, green: 199/255, blue: 132/255, alpha: 1)
+  static let success = UIColor(red: 102/255, green: 187/255, blue: 106/255, alpha: 1) // #66BB6A
   static let successText = UIColor.black.withAlphaComponent(0.87)
+  // MUI Popover uses Paper elevation 8: #191E23 with a white overlay at 0.119.
+  // Preserve the composited components instead of rounding to an approximate hex.
+  static let popupPaper = UIColor(red: (25/255) * 0.881 + 0.119,
+    green: (30/255) * 0.881 + 0.119, blue: (35/255) * 0.881 + 0.119, alpha: 1)
   static func recordingButton(_ title: String, icon: String, success: Bool = false, action: @escaping () -> Void) -> UIButton {
     let button = UIButton(type: .system)
     var config = UIButton.Configuration.filled()

@@ -51,8 +51,11 @@ Detail's hidden-thumbnail action follows encode; developer-only subtitle follows
 thumbnail in detail and protection in the list, matching RecordedItemActions.
 PLAY shows file names in a compact popup directly below its button, without sizes
 or explanatory headings. Popups close on outside taps without a modal transition.
-Its small buttons use MUI dark success green[400], black contrast text, minimum
-64pt width and 13pt type. PLAY uses the Web's outlined triangle icon inside a
+Its small buttons use MUI dark success green[400] (`#66BB6A`), black text at 0.87
+opacity, centered titles, minimum 64pt width, 10pt horizontal padding and 13pt type.
+The popup has 8pt padding and gaps, a 220pt maximum width and 6pt corners. Its
+background matches dark Paper elevation 8 (#191E23 plus white at 0.119 opacity).
+PLAY uses the Web's outlined triangle icon inside a
 contained theme-color button, not a text triangle or an outlined button border.
 Details show drop/error/scrambling counters and the combined file size; available
 drop logs open in a centered dialog with a recording title, scrollable monospace

@@ -21,8 +21,14 @@ final class NeoAnchoredMenu: UIView {
   var titles: [String] { entries.map(\.title) }
 #if targetEnvironment(simulator)
   var smokeFileStyle: Bool {
-    appearance == .files && buttons.allSatisfy {
-      $0.backgroundColor == NeoStyle.success && $0.tintColor == NeoStyle.successText && $0.bounds.width >= 64 && $0.bounds.height == 31
+    buttons.forEach { $0.layoutIfNeeded() }
+    let webSuccess = UIColor(red: 102/255, green: 187/255, blue: 106/255, alpha: 1)
+    return appearance == .files && surface.backgroundColor == NeoStyle.popupPaper && buttons.allSatisfy {
+      $0.backgroundColor == webSuccess && $0.tintColor == NeoStyle.successText
+        && $0.bounds.width >= 64 && $0.bounds.height == 31 && $0.layer.cornerRadius == 6
+        && $0.contentHorizontalAlignment == .center
+        && abs(($0.titleLabel?.frame.midX ?? 0) - $0.bounds.midX) < 1
+        && $0.frame.minX == 8 && menuFrame.width <= 220
     }
   }
 #endif
@@ -34,7 +40,7 @@ final class NeoAnchoredMenu: UIView {
     backdrop.accessibilityLabel = "メニューを閉じる"
     backdrop.addAction(UIAction { [weak self] _ in self?.dismiss() }, for: .touchUpInside)
     addSubview(backdrop); addSubview(surface); surface.addSubview(scroll)
-    surface.backgroundColor = UIColor(red: 49/255, green: 54/255, blue: 59/255, alpha: 1)
+    surface.backgroundColor = NeoStyle.popupPaper
     surface.layer.cornerRadius = 6; surface.layer.shadowColor = UIColor.black.cgColor
     surface.layer.shadowOpacity = 0.3; surface.layer.shadowRadius = 5; surface.layer.shadowOffset = CGSize(width: 0, height: 3)
     scroll.clipsToBounds = true; scroll.layer.cornerRadius = 6
@@ -44,9 +50,9 @@ final class NeoAnchoredMenu: UIView {
       button.titleLabel?.font = .systemFont(ofSize: appearance == .files ? 13 : 16, weight: appearance == .files ? .medium : .regular)
       button.titleLabel?.lineBreakMode = .byTruncatingTail
       button.tintColor = .white
-      button.contentHorizontalAlignment = .left
+      button.contentHorizontalAlignment = appearance == .files ? .center : .left
       if let icon = entry.icon { button.setImage(NeoIcon.image(icon), for: .normal) }
-      if appearance == .files { button.backgroundColor = NeoStyle.success; button.tintColor = NeoStyle.successText; button.layer.cornerRadius = 4 }
+      if appearance == .files { button.backgroundColor = NeoStyle.success; button.tintColor = NeoStyle.successText; button.layer.cornerRadius = 6 }
       button.accessibilityIdentifier = "anchored-menu-item-\(index)"
       button.addAction(UIAction { [weak self] _ in self?.select(index) }, for: .touchUpInside)
       scroll.addSubview(button); buttons.append(button)
@@ -117,7 +123,9 @@ final class NeoAnchoredMenu: UIView {
     for _ in 0..<10 {
       let menu = NeoAnchoredMenu(anchor: anchor, entries: [NeoMenuEntry(title: "TS") { selected += 1 }], appearance: .files)
       menu.show(in: host, animated: false)
-      guard menu.menuFrame.minX == 12, menu.menuFrame.minY == anchor.frame.maxY, menu.titles == ["TS"] else { menu.dismiss(); return false }
+      menu.layoutIfNeeded(); menu.buttons.forEach { $0.layoutIfNeeded() }
+      guard menu.menuFrame.minX == 12, menu.menuFrame.minY == anchor.frame.maxY, menu.titles == ["TS"],
+        menu.menuFrame.width == 80, menu.buttons.first?.bounds.width == 64, menu.smokeFileStyle else { menu.dismiss(); return false }
       menu.select(0)
       guard menu.superview == nil else { return false }
     }
