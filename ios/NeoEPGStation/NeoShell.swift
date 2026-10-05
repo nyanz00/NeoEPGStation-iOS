@@ -450,6 +450,9 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
       Task { [self] in
         let popupCycles = NeoAnchoredMenu.runSmoke(in: view)
         setMenu(true, animated: false)
+        // Commit the open frame before reading the presentation layer, as a
+        // real user's next touch would. Otherwise the smoke drag starts closed.
+        try? await Task.sleep(nanoseconds: 100_000_000)
         updateMenu(state: .began, translation: 0, velocity: -100)
         updateMenu(state: .changed, translation: -150, velocity: -100)
         let drawerFollowed = sidebar.frame.minX == -150 && dim.alpha == 0.375
