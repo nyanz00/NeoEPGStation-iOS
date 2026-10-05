@@ -21,6 +21,8 @@ Custom colors and light/dark appearance selection remain future work.
   degrees are accepted; predominantly vertical motion stays with scrolling.
   Sliders, text input and horizontal scrolling take priority over navigation.
   Detail and route back transitions follow the finger and can be cancelled.
+  Search results are pushed on the native navigation stack, so returning restores
+  the original list and its scroll position instead of clearing it and refetching.
   Menu/back buttons remain available. A left swipe or backdrop tap closes the drawer.
 - Screen history, fetched recordings and list position remain available across
   route changes. The app does not refetch recordings merely for changing tabs.

@@ -104,8 +104,9 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     let columns = max(1, Int((width + 8) / 288))
     return min(300, floor((width - CGFloat(columns - 1) * 8) / CGFloat(columns)))
   }
-  init(shell: NeoShell) {
+  init(shell: NeoShell, keyword: String = "", reverse: Bool = false) {
     let layout = UICollectionViewFlowLayout(); collection = UICollectionView(frame: .zero, collectionViewLayout: layout)
+    self.keyword = keyword; self.reverse = reverse
     super.init(title: "録画済み", shell: shell)
   }
   required init?(coder: NSCoder) { fatalError() }
@@ -198,7 +199,11 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     dialog.addTextField { [keyword] field in field.placeholder = "キーワード"; field.text = keyword; field.clearButtonMode = .whileEditing }
     dialog.addAction(UIAlertAction(title: "キャンセル", style: .cancel))
     dialog.addAction(UIAlertAction(title: "検索", style: .default) { [weak self, weak dialog] _ in
-      self?.keyword = dialog?.textFields?.first?.text ?? ""; self?.page = 1; self?.reload()
+      guard let self, let shell = self.shell else { return }
+      let query = dialog?.textFields?.first?.text ?? ""
+      guard query != self.keyword else { return }
+      if query.isEmpty { self.navigationController?.popToRootViewController(animated: true) }
+      else { self.navigationController?.pushViewController(NeoRecordedPage(shell: shell, keyword: query, reverse: self.reverse), animated: true) }
     }); present(dialog, animated: true)
   }
   private func showOptions() {
@@ -206,7 +211,8 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     menu.addAction(UIAlertAction(title: reverse ? "新しい録画から表示" : "古い録画から表示", style: .default) { [weak self] _ in
       self?.reverse.toggle(); self?.page = 1; self?.reload()
     })
-    menu.addAction(UIAlertAction(title: "検索を解除", style: .default) { [weak self] _ in self?.keyword = ""; self?.page = 1; self?.reload() })
+    let clearSearch = UIAlertAction(title: "検索を解除", style: .default) { [weak self] _ in self?.navigationController?.popToRootViewController(animated: true) }
+    clearSearch.isEnabled = !keyword.isEmpty; menu.addAction(clearSearch)
     menu.addAction(UIAlertAction(title: "更新", style: .default) { [weak self] _ in self?.refreshList() })
     menu.addAction(UIAlertAction(title: "キャンセル", style: .cancel))
     menu.popoverPresentationController?.sourceView = actions.last; present(menu, animated: true)

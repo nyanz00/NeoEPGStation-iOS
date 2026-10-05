@@ -102,6 +102,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   private var returningRoute: UINavigationController?
   private var routeBackAnimating = false
   private var panStart: CGFloat = 0
+  private var menuDragging = false
   private var player: NeoPlayerController?
   var tablet: Bool { traitCollection.userInterfaceIdiom == .pad }
   var smokeStage: String {
@@ -154,7 +155,8 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     }
     dim.frame = view.bounds; dim.isHidden = tablet || api == nil
     sidebar.isHidden = api == nil || tablet && !tabletExpanded
-    sidebar.frame = CGRect(x: tablet || menuOpen ? 0 : -240, y: 0, width: 240, height: view.bounds.height)
+    let sidebarX: CGFloat = menuDragging ? sidebar.frame.minX : tablet || menuOpen ? 0 : -240
+    sidebar.frame = CGRect(x: sidebarX, y: 0, width: 240, height: view.bounds.height)
     let brandWidth = min(173, ceil(brand.intrinsicContentSize.width))
     brand.frame = CGRect(x: 16, y: safe.top, width: brandWidth, height: 60)
     let logoWidth = (logo.image?.size.width ?? 28) / max(1, logo.image?.size.height ?? 28) * 28
@@ -239,6 +241,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   @objc private func dragMenu(_ recognizer: UIPanGestureRecognizer) {
     guard !tablet else { return }
     if recognizer.state == .began {
+      menuDragging = true
       let x = sidebar.layer.presentation()?.frame.minX ?? sidebar.frame.minX
       sidebar.layer.removeAllAnimations(); dim.layer.removeAllAnimations()
       sidebar.frame.origin.x = x; panStart = min(240, max(0, x + 240)); dim.alpha = panStart / 240
@@ -247,9 +250,10 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     if recognizer.state == .changed || recognizer.state == .began {
       sidebar.frame.origin.x = progress - 240; dim.alpha = progress / 240
     } else if recognizer.state == .ended {
+      menuDragging = false
       let velocity = recognizer.velocity(in: view).x
       setMenu(abs(velocity) > 350 ? velocity > 0 : progress > 120, animated: true)
-    } else if recognizer.state == .cancelled { setMenu(menuOpen, animated: true) }
+    } else if recognizer.state == .cancelled { menuDragging = false; setMenu(menuOpen, animated: true) }
   }
   private var canGoBack: Bool { (active?.viewControllers.count ?? 1) > 1 || hasRouteHistory }
   @objc private func dragContent(_ recognizer: UIPanGestureRecognizer) {

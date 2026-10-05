@@ -52,10 +52,13 @@ final class NeoThumbnail: UIImageView {
     if let cached = Self.cache.object(forKey: url as NSURL) { image = cached; return }
     subscription = Self.request(url) { [weak self] image in
       guard let self, self.requested == url else { return }
-      self.image = image; self.subscription = nil
       if fadeIn && image != nil && !UIAccessibility.isReduceMotionEnabled {
-        self.alpha = 0; UIView.animate(withDuration: 0.18, delay: 0, options: [.beginFromCurrentState, .curveEaseInOut]) { self.alpha = 1 }
+        // Fade the image contents, keeping the thumbnail's black backing solid.
+        let fade = CATransition(); fade.type = .fade; fade.duration = 0.18
+        fade.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
+        self.layer.add(fade, forKey: "late-thumbnail-fade-in")
       }
+      self.image = image; self.subscription = nil
     }
   }
   private static func request(_ url: URL, completion: @escaping (UIImage?) -> Void) -> UUID? {
