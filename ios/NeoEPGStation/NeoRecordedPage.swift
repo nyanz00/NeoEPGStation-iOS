@@ -6,7 +6,7 @@ final class NeoRecordedCard: UICollectionViewCell {
   let descriptionLabel = NeoStyle.label(size: 12)
   var mobile = true
   var onMore: ((UIView) -> Void)?
-  private lazy var more = NeoStyle.iconButton("MoreVert", label: "録画メニュー") { [weak self] in
+  private lazy var more: UIButton = NeoStyle.iconButton("MoreVert", label: "録画メニュー") { [weak self] in
     guard let self else { return }; self.onMore?(self.more)
   }
   override init(frame: CGRect) {

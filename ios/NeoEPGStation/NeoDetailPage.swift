@@ -9,7 +9,7 @@ final class NeoDetailPage: NeoPage {
   private var task: Task<Void, Never>?
   private let dropStatus = NeoStyle.label(size: 14, muted: true)
   private lazy var playButton = NeoStyle.button("▶  PLAY", filled: true) { [weak self] in self?.selectFile() }
-  private lazy var moreButton = NeoStyle.iconButton("MoreVert", label: "詳細メニューを開く") { [weak self] in
+  private lazy var moreButton: UIButton = NeoStyle.iconButton("MoreVert", label: "詳細メニューを開く") { [weak self] in
     guard let self else { return }; self.showRecordingMenu(self.item, anchor: self.moreButton, detail: true)
   }
   init(item: NeoRecording, shell: NeoShell) { self.item = item; super.init(title: "録画詳細", shell: shell) }
