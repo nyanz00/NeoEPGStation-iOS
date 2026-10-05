@@ -29,12 +29,19 @@
 @property (nonatomic) UISlider *timeline;
 @property (nonatomic) NeoCommentPiP *commentPiP;
 @property (nonatomic) BOOL frameTapInstalled;
-@property (nonatomic) UIStackView *header;
-@property (nonatomic) UIStackView *controls;
-@property (nonatomic) NSArray<NSLayoutConstraint *> *portraitMovieConstraints;
-@property (nonatomic) NSArray<NSLayoutConstraint *> *landscapeMovieConstraints;
+@property (nonatomic) UIView *header;
+@property (nonatomic) NeoPlayerChrome *chrome;
+@property (nonatomic) UIInterfaceOrientationMask orientationMask;
+@property (nonatomic) BOOL reloading;
+@property (nonatomic) BOOL restoringReload;
+@property (nonatomic) int64_t reloadTime;
+@property (nonatomic) BOOL reloadPlaying;
+@property (nonatomic) float playbackRate;
+@property (nonatomic) NSArray<NSString *> *reloadTextTracks;
+@property (nonatomic, copy) NSString *pendingRoute;
+@property (nonatomic) NSInteger pendingRecording;
+@property (nonatomic) UIView *controls;
 @property (nonatomic) BOOL landscape;
-@property (nonatomic) BOOL layoutConfigured;
 @property (nonatomic) CFTimeInterval lastControlsInteraction;
 @property (nonatomic) NSTimer *timer;
 @property (nonatomic) BOOL pipActive;
@@ -54,81 +61,27 @@
   if (self) {
     _sourceURL = url; _mediaTitle = title; _username = username;
     _password = password; _networkCaching = networkCaching;
+    _orientationMask = UIInterfaceOrientationMaskAllButUpsideDown; _playbackRate = 1;
   }
   return self;
 }
 
-- (UIButton *)button:(NSString *)title action:(SEL)action {
-  UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
-  [button setTitle:title forState:UIControlStateNormal];
-  button.tintColor = [UIColor colorWithRed:0.13 green:0.59 blue:0.95 alpha:1];
-  [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
-  [button.heightAnchor constraintGreaterThanOrEqualToConstant:44].active = YES;
-  return button;
-}
-
-- (UILabel *)label {
-  UILabel *label = [UILabel new]; label.textColor = UIColor.whiteColor;
-  label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
-  label.numberOfLines = 0; return label;
-}
 
 - (void)viewDidLoad {
   [super viewDidLoad]; self.view.backgroundColor = UIColor.blackColor;
-  self.movieView = [UIView new]; self.movieView.backgroundColor = UIColor.blackColor;
-  self.movieView.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.view addSubview:self.movieView];
-  UILabel *title = [self label]; title.text = self.mediaTitle; title.numberOfLines = 1;
-  self.statusLabel = [self label]; self.statusLabel.text = @"PLAY · 準備中";
-  self.timeLabel = [self label]; self.timeLabel.text = @"0:00";
-  self.playButton = [self button:@"一時停止" action:@selector(togglePlayback)];
-  self.pipButton = [self button:@"PiP" action:@selector(startPiP)]; self.pipButton.enabled = NO;
-  self.pipButton.accessibilityLabel = @"コメント付きPiP";
-  self.subtitleButton = [self button:@"字幕" action:@selector(showSubtitles)];
-  self.commentButton = [self button:@"コメント" action:@selector(showComments)];
-  self.commentLabel = [self label];
-  self.commentLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
-  UIButton *back = [self button:@"−10秒" action:@selector(backward)];
-  UIButton *forward = [self button:@"＋10秒" action:@selector(forward)];
-  UIButton *close = [self button:@"閉じる" action:@selector(closePlayer)];
-  [close setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-  [close setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-  self.timeline = [UISlider new]; self.timeline.accessibilityLabel = @"再生位置";
-  [self.timeline addTarget:self action:@selector(beginScrubbing) forControlEvents:UIControlEventTouchDown];
-  [self.timeline addTarget:self action:@selector(endScrubbing) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside];
-  [self.timeline addTarget:self action:@selector(cancelScrubbing) forControlEvents:UIControlEventTouchCancel];
-  UIStackView *header = [[UIStackView alloc] initWithArrangedSubviews:@[title, close]];
-  header.alignment = UIStackViewAlignmentCenter; header.spacing = 16;
-  UIStackView *buttons = [[UIStackView alloc] initWithArrangedSubviews:@[back, self.playButton, forward, self.subtitleButton, self.commentButton, self.pipButton]];
-  buttons.distribution = UIStackViewDistributionFillEqually; buttons.spacing = 4;
-  UIStackView *controls = [[UIStackView alloc] initWithArrangedSubviews:@[self.statusLabel, self.commentLabel, self.timeLabel, self.timeline, buttons]];
-  controls.axis = UILayoutConstraintAxisVertical; controls.spacing = 6;
-  self.header = header; self.controls = controls;
-  header.backgroundColor = [UIColor colorWithWhite:0 alpha:0.45]; header.layer.cornerRadius = 8;
-  controls.backgroundColor = [UIColor colorWithWhite:0 alpha:0.45]; controls.layer.cornerRadius = 8;
-  header.translatesAutoresizingMaskIntoConstraints = NO; controls.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.view addSubview:header]; [self.view addSubview:controls];
-  UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
-  [NSLayoutConstraint activateConstraints:@[
-    [header.topAnchor constraintEqualToAnchor:safe.topAnchor constant:8],
-    [header.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:16],
-    [header.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
-    [controls.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:16],
-    [controls.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
-    [controls.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-8],
-  ]];
-  self.portraitMovieConstraints = @[
-    [self.movieView.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor],
-    [self.movieView.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor],
-    [self.movieView.topAnchor constraintEqualToAnchor:header.bottomAnchor constant:8],
-    [self.movieView.bottomAnchor constraintEqualToAnchor:controls.topAnchor constant:-8],
-  ];
-  self.landscapeMovieConstraints = @[
-    [self.movieView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-    [self.movieView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-    [self.movieView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-    [self.movieView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
-  ];
+  self.chrome = [[NeoPlayerChrome alloc] initWithTitle:self.mediaTitle];
+  self.chrome.frame = self.view.bounds; self.chrome.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+  [self.view addSubview:self.chrome];
+  if (self.recordingContext) { [self.chrome configure:self.recordingContext]; }
+  self.movieView = self.chrome.videoView;
+  self.statusLabel = self.chrome.statusLabel; self.statusLabel.text = @"PLAY · 準備中";
+  self.timeLabel = self.chrome.timeLabel; self.commentLabel = self.chrome.commentLabel;
+  self.playButton = self.chrome.playButton; self.pipButton = self.chrome.pipButton;
+  self.subtitleButton = self.chrome.subtitleButton; self.commentButton = self.chrome.commentButton;
+  self.timeline = self.chrome.timeline; self.header = self.chrome.header; self.controls = self.chrome.controls;
+  self.pipButton.enabled = NO;
+  __weak typeof(self) uiSelf = self;
+  self.chrome.onAction = ^(NSString *action) { [uiSelf performPlayerAction:action]; };
   [self applyPlayerLayout:self.view.bounds.size];
   UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleControls)];
   tap.cancelsTouchesInView = NO; [self.movieView addGestureRecognizer:tap];
@@ -157,7 +110,7 @@
   self.comments.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   self.comments.timeProvider = ^double { return weakSelf.player.time.value.doubleValue / 1000.0; };
   self.comments.runningProvider = ^BOOL {
-    return weakSelf.player.isPlaying && !weakSelf.scrubbing && !weakSelf.buffering && !weakSelf.closing;
+    return weakSelf.player.isPlaying && !weakSelf.scrubbing && !weakSelf.buffering && !weakSelf.closing && !weakSelf.reloading;
   };
   self.comments.onChange = ^{ [weakSelf updateCommentState]; };
   [self.movieView addSubview:self.comments];
@@ -184,63 +137,126 @@
   { [self.comments configureWithSource:self.sourceURL username:self.username password:self.password]; }
   [self updateCommentState];
   self.timer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer) { [weakSelf updateControls]; }];
-  [self.player play];
+  [self showControls]; [self.player play];
 }
 
 - (void)applyPlayerLayout:(CGSize)size {
-  BOOL landscape = size.width > size.height;
-  if (self.layoutConfigured && landscape == self.landscape) { return; }
-  [NSLayoutConstraint deactivateConstraints:self.landscape ? self.landscapeMovieConstraints : self.portraitMovieConstraints];
-  self.landscape = landscape; self.layoutConfigured = YES;
-  [NSLayoutConstraint activateConstraints:landscape ? self.landscapeMovieConstraints : self.portraitMovieConstraints];
-  self.statusLabel.hidden = landscape; self.commentLabel.hidden = landscape;
-  self.timeLabel.numberOfLines = 1;
-  [self showControls]; [self setNeedsStatusBarAppearanceUpdate];
+  BOOL changed = self.landscape != (size.width > size.height);
+  self.landscape = size.width > size.height;
+  self.chrome.frame = CGRectMake(0, 0, size.width, size.height);
+  [self.chrome setNeedsLayout]; [self.chrome layoutIfNeeded];
+  if (changed) { [self setNeedsStatusBarAppearanceUpdate]; }
 }
 - (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; [self applyPlayerLayout:self.view.bounds.size]; }
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
   [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
   [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context) {
-    [self applyPlayerLayout:size]; [self.view layoutIfNeeded];
+    [self applyPlayerLayout:size];
   } completion:nil];
 }
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations { return self.orientationMask; }
+- (BOOL)shouldAutorotate { return YES; }
 - (BOOL)prefersStatusBarHidden { return self.landscape; }
-- (BOOL)prefersHomeIndicatorAutoHidden { return self.landscape && self.controls.alpha == 0; }
+- (UIStatusBarStyle)preferredStatusBarStyle { return UIStatusBarStyleLightContent; }
+- (BOOL)prefersHomeIndicatorAutoHidden { return self.landscape && !self.chrome.controlsVisible; }
 - (void)showControls {
   self.lastControlsInteraction = CACurrentMediaTime();
-  self.header.alpha = 1; self.controls.alpha = 1; [self setNeedsUpdateOfHomeIndicatorAutoHidden];
+  [self.chrome showControls:YES]; [self setNeedsUpdateOfHomeIndicatorAutoHidden];
 }
 - (void)toggleControls {
-  if (!self.landscape || self.controls.alpha < 1) { [self showControls]; }
-  else { self.header.alpha = 0; self.controls.alpha = 0; [self setNeedsUpdateOfHomeIndicatorAutoHidden]; }
+  if (self.chrome.interactionOpen) { [self showControls]; return; }
+  [self.chrome showControls:!self.chrome.controlsVisible];
+  self.lastControlsInteraction = CACurrentMediaTime(); [self setNeedsUpdateOfHomeIndicatorAutoHidden];
+}
+- (void)performPlayerAction:(NSString *)action {
+  if (self.closing) { return; }
+  [self showControls];
+  if ([action isEqualToString:@"back"]) { [self closePlayer]; }
+  else if ([action isEqualToString:@"play"]) { [self togglePlayback]; }
+  else if ([action isEqualToString:@"pip"]) { [self startPiP]; }
+  else if ([action isEqualToString:@"subtitles"]) { [self showSubtitles]; }
+  else if ([action isEqualToString:@"comments-settings"]) { [self showComments]; }
+  else if ([action isEqualToString:@"scrub-begin"]) { [self beginScrubbing]; }
+  else if ([action isEqualToString:@"scrub-end"]) { [self endScrubbing]; }
+  else if ([action isEqualToString:@"scrub-cancel"]) { [self cancelScrubbing]; }
+  else if ([action isEqualToString:@"reload"]) { [self reloadPlayback]; }
+  else if ([action isEqualToString:@"rotate"]) { [self setOrientation:self.landscape ? @"portrait" : @"landscape"]; }
+  else if ([action hasPrefix:@"orientation:"]) { [self setOrientation:[action substringFromIndex:12]]; }
+  else if ([action hasPrefix:@"jump:"]) { [self seekBy:[action substringFromIndex:5].longLongValue * 1000 completion:^{}]; }
+  else if ([action hasPrefix:@"seekto:"]) {
+    int64_t target = (int64_t)([action substringFromIndex:7].doubleValue * 1000);
+    [self seekBy:target - self.player.time.value.longLongValue completion:^{}];
+  } else if ([action hasPrefix:@"rate:"]) {
+    self.playbackRate = [action substringFromIndex:5].floatValue; self.player.rate = self.playbackRate;
+  } else if ([action hasPrefix:@"cache:"]) { self.networkCaching = MAX(1000, MIN(30000, [action substringFromIndex:6].integerValue * 1000)); }
+  else if ([action hasPrefix:@"subtitle:"]) {
+    NSInteger index = [action substringFromIndex:9].integerValue;
+    if (index < 0) { [self.player deselectAllTextTracks]; }
+    else if (index < self.player.textTracks.count) {
+      VLCMediaPlayerTrack *track = self.player.textTracks[index];
+      if ([NeoCommentOverlay isCommentName:track.trackName] || [NeoCommentOverlay isCommentName:track.trackDescription ?: @""]) { self.comments.enabled = NO; }
+      [self.player selectTextTracks:@[track]];
+    }
+  } else if ([action hasPrefix:@"navigate:"]) { self.pendingRoute = [action substringFromIndex:9]; [self closePlayer]; }
+  else if ([action hasPrefix:@"recording:"]) { self.pendingRecording = [action substringFromIndex:10].integerValue; [self closePlayer]; }
+}
+- (void)setOrientation:(NSString *)mode {
+  self.orientationMask = [mode isEqualToString:@"portrait"] ? UIInterfaceOrientationMaskPortrait
+    : [mode isEqualToString:@"landscape"] ? UIInterfaceOrientationMaskLandscapeRight : UIInterfaceOrientationMaskAllButUpsideDown;
+  [self setNeedsUpdateOfSupportedInterfaceOrientations];
+  UIWindowScene *scene = self.view.window.windowScene;
+  if (!scene) { return; }
+  UIWindowSceneGeometryPreferencesIOS *preferences = [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:self.orientationMask];
+  __weak typeof(self) weakSelf = self;
+  [scene requestGeometryUpdateWithPreferences:preferences errorHandler:^(NSError *error) {
+    dispatch_async(dispatch_get_main_queue(), ^{ weakSelf.statusLabel.text = @"画面回転エラー · この表示環境では向きを変更できません。"; [weakSelf.chrome updateDiagnostics]; });
+  }];
+}
+- (void)reloadPlayback {
+  if (self.reloading) { return; }
+  if (self.pipActive) {
+    self.statusLabel.text = @"再読み込み · PiPを閉じてから実行してください。"; [self.chrome updateDiagnostics]; return;
+  }
+  self.reloadTime = MAX(0, self.player.time.value.longLongValue); self.reloadPlaying = self.player.isPlaying;
+  NSMutableArray *tracks = [NSMutableArray new];
+  for (VLCMediaPlayerTrack *track in self.player.textTracks) { if (track.isSelected) { [tracks addObject:track.trackId]; } }
+  self.reloadTextTracks = tracks; self.reloading = YES; self.restoringReload = NO;
+  self.statusLabel.text = @"プレイヤーを再読み込みしています…"; [self.chrome updateDiagnostics];
+  [self.commentPiP resetVideo];
+  if (self.player.state == VLCMediaPlayerStateStopped || self.player.state == VLCMediaPlayerStateNothingSpecial) { [self restartMedia]; }
+  else { [self.player stop]; }
+}
+- (void)restartMedia {
+  VLCMedia *media = [VLCMedia mediaWithURL:self.sourceURL];
+  [media addOption:[NSString stringWithFormat:@":network-caching=%ld", (long)self.networkCaching]];
+  self.player.media = media; [self.player play];
+}
+- (void)restoreReloadIfReady {
+  if (!self.reloading || self.restoringReload || !self.player.isSeekable || self.player.state != VLCMediaPlayerStatePlaying) { return; }
+  self.restoringReload = YES;
+  __weak typeof(self) weakSelf = self;
+  dispatch_block_t restore = ^{
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (weakSelf.closing) { return; }
+      weakSelf.player.rate = weakSelf.playbackRate;
+      [weakSelf.player deselectAllTextTracks];
+      for (VLCMediaPlayerTrack *track in weakSelf.player.textTracks) { if ([weakSelf.reloadTextTracks containsObject:track.trackId]) { track.selected = YES; } }
+      if (!weakSelf.reloadPlaying) { [weakSelf.player pause]; }
+      weakSelf.reloading = NO; weakSelf.restoringReload = NO;
+      [weakSelf.commentPiP invalidatePlaybackState]; [weakSelf updateControls];
+    });
+  };
+  [self seekBy:self.reloadTime - self.player.time.value.longLongValue completion:restore];
 }
 - (void)togglePlayback { [self showControls]; if (self.player.isPlaying) { [self.player pause]; } else { [self.player play]; } }
-- (void)backward { [self showControls]; [self.player jumpWithOffset:-10000 completion:^{}]; }
-- (void)forward { [self showControls]; [self.player jumpWithOffset:10000 completion:^{}]; }
 - (void)beginScrubbing { [self showControls]; self.scrubbing = YES; }
 - (void)cancelScrubbing { self.scrubbing = NO; }
 - (void)endScrubbing { if (self.player.isSeekable) { self.player.position = self.timeline.value; } self.scrubbing = NO; }
 
 - (void)showSubtitles {
-  [self showControls];
-  UIAlertController *menu = [UIAlertController alertControllerWithTitle:@"字幕トラック" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-  __weak typeof(self) weakSelf = self;
-  [menu addAction:[UIAlertAction actionWithTitle:@"オフ" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-    [weakSelf.player deselectAllTextTracks];
-  }]];
-  for (VLCMediaPlayerTrack *track in self.player.textTracks) {
-    [menu addAction:[UIAlertAction actionWithTitle:track.trackName style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-      // Explicit VLC selection remains available for comparison and unsupported ASS.
-      if ([NeoCommentOverlay isCommentName:track.trackName] || [NeoCommentOverlay isCommentName:track.trackDescription ?: @""]) {
-        weakSelf.comments.enabled = NO;
-      }
-      [weakSelf.player selectTextTracks:@[track]];
-    }]];
-  }
-  [menu addAction:[UIAlertAction actionWithTitle:@"キャンセル" style:UIAlertActionStyleCancel handler:nil]];
-  menu.popoverPresentationController.sourceView = self.subtitleButton;
-  menu.popoverPresentationController.sourceRect = self.subtitleButton.bounds;
-  [self presentViewController:menu animated:YES completion:nil];
+  [self showControls]; NSMutableArray *names = [NSMutableArray new];
+  for (VLCMediaPlayerTrack *track in self.player.textTracks) { [names addObject:track.trackName ?: @"字幕"]; }
+  [self.chrome showSubtitleChoices:names];
 }
 
 - (void)showComments { [self showControls]; [self presentViewController:[self.comments makeSettingsController] animated:YES completion:nil]; }
@@ -251,6 +267,8 @@
     self.frameTapInstalled ? self.commentPiP.status ?: @"PiP · 準備中" : @"PiP · VLCの映像出力を取得できません。",
     self.comments.enabled ? @"" : @" · 専用描画オフ"];
   [self.commentPiP updateCommentsFrom:self.comments];
+  if (self.chrome.commentVersion != self.comments.panelVersion) { [self.chrome setCommentRows:[self.comments panelComments] version:self.comments.panelVersion]; }
+  [self.chrome updateDiagnostics];
   for (VLCMediaPlayerTrack *track in self.player.textTracks) {
     if (![NeoCommentOverlay isCommentName:track.trackName] && ![NeoCommentOverlay isCommentName:track.trackDescription ?: @""]) { continue; }
     if (self.comments.ready && self.comments.enabled && track.isSelected) {
@@ -264,13 +282,12 @@
 
 - (void)updateControls {
   if (self.closing) { return; }
-  [self.playButton setTitle:self.player.isPlaying ? @"一時停止" : @"再生" forState:UIControlStateNormal];
+  [self restoreReloadIfReady];
   self.timeline.enabled = self.player.isSeekable;
   if (!self.scrubbing) { self.timeline.value = self.player.position; }
   int64_t current = MAX(0, self.player.time.value.longLongValue / 1000);
   int64_t length = MAX(0, self.player.media.length.value.longLongValue / 1000);
-  self.timeLabel.text = [NSString stringWithFormat:@"%lld:%02lld / %lld:%02lld · %.0f × %.0f",
-    current / 60, current % 60, length / 60, length % 60, self.player.videoSize.width, self.player.videoSize.height];
+  [self.chrome updatePlayback:self.player.isPlaying current:current duration:length];
   self.subtitleButton.enabled = self.player.textTracks.count > 0;
   CGSize size = self.player.videoSize;
   VLCMediaVideoTrack *video = self.player.media.videoTracks.firstObject.video;
@@ -279,9 +296,9 @@
   }
   self.comments.videoSize = size;
   [self updateCommentState];
-  if (self.landscape && self.player.isPlaying && !self.scrubbing && !self.presentedViewController &&
+  if (self.chrome.autoHide && !self.chrome.interactionOpen && self.player.isPlaying && !self.scrubbing && !self.presentedViewController &&
       CACurrentMediaTime() - self.lastControlsInteraction > 4) {
-    self.header.alpha = 0; self.controls.alpha = 0; [self setNeedsUpdateOfHomeIndicatorAutoHidden];
+    [self.chrome showControls:NO]; [self setNeedsUpdateOfHomeIndicatorAutoHidden];
   }
 }
 
@@ -291,6 +308,8 @@
       if (state == VLCMediaPlayerStateStopped) { [self finishClosing]; }
       return;
     }
+    if (self.reloading && state == VLCMediaPlayerStateStopped && !self.restoringReload) { [self restartMedia]; return; }
+    if (state == VLCMediaPlayerStateError) { self.reloading = NO; self.restoringReload = NO; }
     self.statusLabel.text = state == VLCMediaPlayerStateError
       ? @"再生エラー · 接続・ファイル形式・認証を確認してください。"
       : [NSString stringWithFormat:@"PLAY · %@ · キャッシュ %ld秒", VLCMediaPlayerStateToString(state), (long)self.networkCaching / 1000];
@@ -303,6 +322,7 @@
   dispatch_async(dispatch_get_main_queue(), ^{
     self.buffering = progress < 1;
     if (!self.closing && progress < 1) { self.statusLabel.text = [NSString stringWithFormat:@"バッファリング %.0f%%", progress * 100]; }
+    [self.chrome updateDiagnostics];
   });
 }
 - (void)mediaPlayerLengthChanged:(int64_t)length { dispatch_async(dispatch_get_main_queue(), ^{ [self.commentPiP invalidatePlaybackState]; }); }
@@ -382,11 +402,15 @@
 }
 #if TARGET_OS_SIMULATOR
 - (NSDictionary<NSString *, id> *)runLayoutSmokeChecks {
+  self.chrome.autoHide = NO; [self showControls];
   self.smokeSavedFrame = self.view.frame;
   self.view.frame = CGRectMake(0, 0, 844, 390);
   [self applyPlayerLayout:self.view.bounds.size]; [self.view layoutIfNeeded];
   BOOL full = CGRectEqualToRect(self.movieView.frame, self.view.bounds);
   BOOL overlay = self.header.frame.size.height < 80 && CGRectGetMaxY(self.controls.frame) <= 390;
+  NSDictionary *layout = [self.chrome runLayoutChecks];
+  NSString *directory = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+  [[NSJSONSerialization dataWithJSONObject:layout options:0 error:nil] writeToFile:[directory stringByAppendingPathComponent:@"player-ui-smoke.json"] atomically:YES];
   return @{@"success": @(full && overlay && self.frameTapInstalled && self.commentPiP.consumedFrameCount >= 24 && self.commentPiP.composedFrameCount >= 24),
     @"landscapeFillsView": @(full), @"controlsOverlay": @(overlay), @"frameTapInstalled": @(self.frameTapInstalled),
     @"capturedFrames": @(self.commentPiP.capturedFrameCount), @"composedFrames": @(self.commentPiP.composedFrameCount),
@@ -410,6 +434,46 @@
     fabs(rect.origin.x - (viewport.width - width) / 2) < 2 && fabs(rect.origin.y - (viewport.height - height) / 2) < 2;
   self.view.frame = self.smokeSavedFrame; [self applyPlayerLayout:self.view.bounds.size]; [self.view layoutIfNeeded];
   return @{@"videoFillsFit": @(fitted), @"videoRect": NSStringFromCGRect(rect)};
+}
+- (void)runReloadSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  if (self.pipActive) { [self.commentPiP stop]; }
+  [self.player pause]; [self performPlayerAction:@"rate:1.25"]; [self performPlayerAction:@"cache:7"];
+  __weak typeof(self) weakSelf = self;
+  [self seekBy:3000 - self.player.time.value.longLongValue completion:^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      [weakSelf reloadPlayback]; [weakSelf pollReloadSmoke:0 expectedPlaying:NO completion:completion];
+    });
+  }];
+}
+- (void)pollReloadSmoke:(NSInteger)attempt expectedPlaying:(BOOL)playing completion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  if (!self.reloading && !self.restoringReload && self.player.isPlaying == playing && self.player.isSeekable) {
+    int64_t restored = self.player.time.value.longLongValue;
+    BOOL position = llabs(restored - self.reloadTime) < 1000;
+    BOOL settings = fabs(self.player.rate - 1.25) < 0.01 && self.networkCaching == 7000;
+    if (!position || !settings || !self.comments.ready) {
+      completion(@{@"success": @NO, @"phase": playing ? @"playing" : @"paused", @"position": @(restored), @"expected": @(self.reloadTime), @"rate": @(self.player.rate)}); return;
+    }
+    if (!playing) {
+      [self.player play];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self reloadPlayback]; [self pollReloadSmoke:0 expectedPlaying:YES completion:completion];
+      });
+    } else {
+      [self setOrientation:@"landscape"];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        BOOL locked = self.orientationMask == UIInterfaceOrientationMaskLandscapeRight && self.view.window.windowScene.interfaceOrientation == UIInterfaceOrientationLandscapeRight;
+        [self setOrientation:@"portrait"];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+          BOOL portrait = self.orientationMask == UIInterfaceOrientationMaskPortrait && self.view.window.windowScene.interfaceOrientation == UIInterfaceOrientationPortrait;
+          [self setOrientation:@"auto"];
+          completion(@{@"success": @(locked && portrait), @"pausedReload": @YES, @"playingReload": @YES, @"positionPreserved": @(position), @"ratePreserved": @(settings), @"commentsPreserved": @(self.comments.ready), @"landscapeLock": @(locked), @"portraitLock": @(portrait), @"autoOrientation": @(self.orientationMask == UIInterfaceOrientationMaskAllButUpsideDown)});
+        });
+      });
+    }
+    return;
+  }
+  if (attempt >= 30 || self.player.state == VLCMediaPlayerStateError) { completion(@{@"success": @NO, @"error": @"reload timed out", @"reloading": @(self.reloading), @"restoring": @(self.restoringReload), @"state": VLCMediaPlayerStateToString(self.player.state)}); return; }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self pollReloadSmoke:attempt + 1 expectedPlaying:playing completion:completion]; });
 }
 - (BOOL)startPiPSmoke {
   if (!self.commentPiP.possible) { return NO; }
@@ -436,7 +500,8 @@
   if (self.closing) { return; } self.closing = YES;
   self.view.userInteractionEnabled = NO;
   [self.timer invalidate]; self.timer = nil;
-  [self.comments stop];
+  [self.comments stop]; [self.chrome shutdown];
+  self.orientationMask = UIInterfaceOrientationMaskAllButUpsideDown; [self setNeedsUpdateOfSupportedInterfaceOrientations];
   [NSNotificationCenter.defaultCenter removeObserver:self];
   if (self.loginReference) { [self.dialogs dismissDialogWithReference:self.loginReference]; }
   [NeoVLCFrameTap bindView:self.movieView sink:nil]; [self.commentPiP stop];
@@ -457,7 +522,14 @@
   self.player = nil;
   [AVAudioSession.sharedInstance setActive:NO withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
   void (^callback)(void) = self.onClose; self.onClose = nil;
-  [self dismissViewControllerAnimated:YES completion:^{ if (callback) { callback(); } }];
+  void (^navigate)(NSString *) = self.onNavigate; self.onNavigate = nil;
+  void (^recording)(NSInteger) = self.onRecording; self.onRecording = nil;
+  NSString *route = self.pendingRoute; NSInteger recordingID = self.pendingRecording;
+  [self dismissViewControllerAnimated:YES completion:^{
+    if (callback) { callback(); }
+    if (route && navigate) { navigate(route); }
+    else if (recordingID > 0 && recording) { recording(recordingID); }
+  }];
 }
 - (void)dealloc { [self.timer invalidate]; [NSNotificationCenter.defaultCenter removeObserver:self]; }
 @end

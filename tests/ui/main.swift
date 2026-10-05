@@ -70,6 +70,11 @@ final class FixtureProtocol: URLProtocol {
   }
   override func stopLoading() {}
 }
+expect(NeoRelatedSearch.keyword("[新]【全12話】サンプル (字) #01「初回」") == "サンプル", "Related keyword removes broadcast marks and episode number")
+expect(NeoRelatedSearch.keyword("番組「初回」") == "番組", "Related keyword strips quoted episode")
+expect(NeoRelatedSearch.keyword("番組(特別版)") == "番組(特別版)", "Related keyword preserves multi-character parentheses")
+expect(NeoRelatedSearch.keyword("[字] #01") == "#01", "Empty title fallback follows Web")
+
 let completion = DispatchSemaphore(value: 0)
 Task.detached {
   let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [FixtureProtocol.self]
@@ -95,6 +100,23 @@ Task.detached {
     }
     let config = try await api.configuration()
     expect(config.developerMode == true && config.isEnableEncodedRecordedStream == true, "Config capabilities survive absent encode modes")
+    FixtureProtocol.handler = { request in
+      expect(request.url?.path == "/epg/api/rules/7", "Rule metadata uses API prefix")
+      return (200, Data(#"{"id":7,"searchOption":{"keyword":"サンプル"}}"#.utf8))
+    }
+    expect(try await api.rule(7).searchOption.keyword == "サンプル", "Rule keyword decoded")
+    for ruleId in [Int?(7), nil] {
+      FixtureProtocol.handler = { request in
+        let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
+        expect(request.url?.path == "/epg/api/recorded", "Related recording endpoint")
+        expect(query.contains(URLQueryItem(name: "limit", value: "100")) && query.contains(URLQueryItem(name: "isReverse", value: "true")), "Related panel uses Web's limit and order")
+        expect(query.contains(URLQueryItem(name: "ruleId", value: "7")) == (ruleId != nil), "Rule filter used when available")
+        expect(query.contains(URLQueryItem(name: "keyword", value: "サンプル & 番組")) == (ruleId == nil), "Keyword fallback is exclusive and encoded")
+        return (200, Data(#"{"total":1,"records":[{"id":1,"name":"Sample","startAt":1,"endAt":2,"isRecording":false,"genre1":7,"subGenre1":0}]}"#.utf8))
+      }
+      let related = try await api.relatedRecordings(ruleId: ruleId, keyword: "サンプル & 番組")
+      expect(related.records.first?.genre1 == 7 && related.records.first?.subGenre1 == 0, "Player genre metadata decoded")
+    }
     FixtureProtocol.handler = { request in
       expect(request.url?.path == "/epg/api/dropLogs/3" && request.url?.query == "maxsize=512", "Drop log endpoint and limit")
       expect(request.value(forHTTPHeaderField: "X-EPGStation-User-Id") == "master", "Drop log viewer header")

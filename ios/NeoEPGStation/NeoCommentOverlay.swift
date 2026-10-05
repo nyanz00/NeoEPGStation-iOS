@@ -21,6 +21,10 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   private var task: URLSessionDataTask?
   private var version = 0, closed = false, background = false
   private var timeline: CommentTimeline?
+  @objc var panelVersion: Int { version * 2 + (ready ? 1 : 0) }
+  @objc func panelComments() -> [[String: Any]] {
+    (timeline?.comments ?? []).map { ["time": $0.start, "text": $0.text] }
+  }
   private var clock = CommentPlaybackClock()
   private var drawn = 0, lastFrame = 0.0, frameCount = 0, fps = 0.0
   private let inFlight = DispatchSemaphore(value: 3)

@@ -245,11 +245,23 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     dismissPopup()
     active?.pushViewController(NeoDetailPage(item: recording, shell: self), animated: true)
   }
-  func play(_ file: NeoVideoFile, title: String) {
+  func play(_ file: NeoVideoFile, recording: NeoRecording) {
     guard player == nil, let api else { return }
-    let controller = NeoPlayerController(url: api.url("/videos/\(file.id)"), title: title, username: "", password: "", networkCaching: 5000)
+    let controller = NeoPlayerController(url: api.url("/videos/\(file.id)"), title: recording.name, username: "", password: "", networkCaching: 5000)
+    controller.recordingContext = ["baseURL": api.base.absoluteString, "id": recording.id,
+      "channelId": recording.channelId ?? 0, "channelName": recording.channelName ?? recording.channelId.flatMap { channels[$0] } ?? "",
+      "name": recording.name, "startAt": recording.startAt, "endAt": recording.endAt,
+      "description": recording.description ?? "", "extended": recording.extended ?? "", "ruleId": recording.ruleId ?? 0]
     controller.modalPresentationStyle = .fullScreen; player = controller
     controller.onClose = { [weak self] in self?.player = nil }
+    controller.onNavigate = { [weak self] route in self?.showRoute(route) }
+    controller.onRecording = { [weak self, weak api] id in
+      Task { [weak self] in
+        guard let self, let api else { return }
+        do { let item = try await api.recording(id); guard self.api === api else { return }; self.openDetail(item) }
+        catch { self.active?.topViewController.flatMap { $0 as? NeoPage }?.alert(error.localizedDescription) }
+      }
+    }
     present(controller, animated: true)
   }
   func showPopup(anchor: UIView, entries: [NeoMenuEntry], appearance: NeoAnchoredMenu.Appearance) {

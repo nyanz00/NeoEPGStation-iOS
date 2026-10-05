@@ -31,6 +31,9 @@ struct NeoRecording: Decodable {
   var isProtected: Bool? = nil
   var isEncoding: Bool? = nil
   var dropLogFile: NeoDropLog? = nil
+  var genre1: Int? = nil; var subGenre1: Int? = nil
+  var genre2: Int? = nil; var subGenre2: Int? = nil
+  var genre3: Int? = nil; var subGenre3: Int? = nil
 }
 struct NeoDropLog: Decodable {
   let id: Int; let errorCnt: Int; let dropCnt: Int; let scramblingCnt: Int
@@ -82,6 +85,24 @@ enum NeoRecordingMenu {
 }
 struct NeoRecords: Decodable { let records: [NeoRecording]; let total: Int }
 struct NeoChannel: Decodable { let id: Int; let name: String }
+struct NeoRule: Decodable {
+  struct Search: Decodable { let keyword: String? }
+  let id: Int; let searchOption: Search
+}
+
+enum NeoRelatedSearch {
+  // core/media/recorded.ts createRecordedRelatedSearchOption.
+  static func keyword(_ name: String) -> String {
+    var title = name
+    for pattern in [#"\[.+?\]"#, #"【.+?】"#, #"\(.\)"#, #" +"#] {
+      title = title.replacingOccurrences(of: pattern, with: " ", options: .regularExpression)
+    }
+    title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+    let delimiter = title.contains(" #") ? " #" : title.contains("「") ? "「" : ""
+    let keyword = delimiter.isEmpty ? title : title.components(separatedBy: delimiter)[0]
+    return keyword.isEmpty ? title : keyword
+  }
+}
 
 enum NeoSwipeAction { case menu, back }
 enum NeoNavigationGesture {
@@ -162,6 +183,15 @@ final class NeoAPI {
     return value
   }
   func channels() async throws -> [NeoChannel] { try await request(url("/channels")) }
+  func rule(_ id: Int) async throws -> NeoRule { try await request(url("/rules/\(id)")) }
+  func relatedRecordings(ruleId: Int?, keyword: String) async throws -> NeoRecords {
+    var parts = URLComponents(url: url("/recorded"), resolvingAgainstBaseURL: false)!
+    parts.queryItems = [URLQueryItem(name: "isHalfWidth", value: "true"), URLQueryItem(name: "isReverse", value: "true"),
+      URLQueryItem(name: "limit", value: "100"), URLQueryItem(name: "offset", value: "0")]
+    if let ruleId { parts.queryItems!.append(URLQueryItem(name: "ruleId", value: String(ruleId))) }
+    else { parts.queryItems!.append(URLQueryItem(name: "keyword", value: keyword)) }
+    return try await request(parts.url!)
+  }
   func configuration() async throws -> NeoServerConfig { try await request(url("/config")) }
   func dropLog(_ id: Int) async throws -> String {
     var request = URLRequest(url: url("/dropLogs/\(id)?maxsize=512")); request.timeoutInterval = 20

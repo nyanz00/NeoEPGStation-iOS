@@ -97,7 +97,7 @@ final class NeoDetailPage: NeoPage {
   private func selectFile() {
     shell?.showPopup(anchor: playButton, entries: (item.videoFiles ?? []).map { file in
       NeoMenuEntry(title: file.name) { [weak self] in
-        guard let self else { return }; self.shell?.play(file, title: self.item.name)
+        guard let self else { return }; self.shell?.play(file, recording: self.item)
       }
     }, appearance: .files)
   }
