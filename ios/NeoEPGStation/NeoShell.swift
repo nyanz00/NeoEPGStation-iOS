@@ -21,22 +21,30 @@ struct NeoDestination {
 // A public UIKit interactive transition, rather than forwarding touches into
 // UINavigationController's private edge-gesture implementation.
 final class NeoSwipeBackAnimator: NSObject, UIViewControllerAnimatedTransitioning {
+  private var animator: UIViewPropertyAnimator?
   func transitionDuration(using transitionContext: UIViewControllerContextTransitioning?) -> TimeInterval {
     UIAccessibility.isReduceMotionEnabled ? 0.01 : 0.3
   }
   func animateTransition(using context: UIViewControllerContextTransitioning) {
+    interruptibleAnimator(using: context).startAnimation()
+  }
+  func interruptibleAnimator(using context: UIViewControllerContextTransitioning) -> UIViewImplicitlyAnimating {
+    if let animator { return animator }
     guard let from = context.view(forKey: .from), let to = context.view(forKey: .to),
-      let target = context.viewController(forKey: .to) else { context.completeTransition(false); return }
+      let target = context.viewController(forKey: .to) else { fatalError("Missing native navigation transition views") }
     let container = context.containerView, width = container.bounds.width
     to.frame = context.finalFrame(for: target); container.insertSubview(to, belowSubview: from)
     to.transform = CGAffineTransform(translationX: -width * 0.25, y: 0)
-    UIView.animate(withDuration: transitionDuration(using: context), delay: 0, options: .curveLinear, animations: {
+    let animator = UIViewPropertyAnimator(duration: transitionDuration(using: context), curve: .linear) {
       from.transform = CGAffineTransform(translationX: width, y: 0); to.transform = .identity
-    }, completion: { _ in
+    }
+    animator.addCompletion { position in
       from.transform = .identity; to.transform = .identity
-      context.completeTransition(!context.transitionWasCancelled)
-    })
+      context.completeTransition(position == .end && !context.transitionWasCancelled)
+    }
+    self.animator = animator; return animator
   }
+  func animationEnded(_ transitionCompleted: Bool) { animator = nil }
 }
 
 class NeoPage: UIViewController {
@@ -391,7 +399,8 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     let cell = tableView.dequeueReusableCell(withIdentifier: "menu", for: indexPath), item = NeoDestination.all[indexPath.row]
     var config = cell.defaultContentConfiguration(); config.text = item.title; config.image = NeoIcon.image(item.icon)
     config.textProperties.font = .systemFont(ofSize: 14); config.textProperties.color = .white
-    config.imageProperties.tintColor = NeoStyle.muted; config.imageToTextPadding = 16
+    config.imageProperties.tintColor = NeoStyle.muted
+    config.imageToTextPadding = item.icon == "AlphaA" ? 13 : 16
     config.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
     cell.contentConfiguration = config
     cell.backgroundColor = item.id == route ? NeoStyle.accent.withAlphaComponent(0.16) : .clear
@@ -452,20 +461,28 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     func later(_ delay: TimeInterval = 0.45, _ action: @escaping () -> Void) {
       DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: action)
     }
+    func settled(_ attempts: Int = 0, _ action: @escaping () -> Void) {
+      if active?.transitionCoordinator != nil && attempts < 50 {
+        later(0.1) { settled(attempts + 1, action) }
+      } else { action() }
+    }
     func perform(cancel: Bool, done: @escaping () -> Void) {
-      updateBack(state: .began, translation: 0, velocity: 100)
+      settled { [self] in
+        backSmokeDetails[cancel ? "transitionBeforeCancel" : "transitionBeforeFinish"] = active?.transitionCoordinator != nil
+        updateBack(state: .began, translation: 0, velocity: 100)
       // UIKit must have a run-loop turn to create the transition context,
       // just as it does between actual began/changed touch events.
       later(0.05) { [self] in
         updateBack(state: .changed, translation: content.bounds.width * 0.4, velocity: 100)
         later(0.05) { [self] in
           updateBack(state: cancel ? .cancelled : .ended, translation: content.bounds.width * 0.4, velocity: 500)
-          later { done() }
+          later { settled { done() } }
         }
+      }
       }
     }
     openDetail(NeoRecordedPage.fixtures.records[0])
-    later { [self] in
+    settled { [self] in
       perform(cancel: true) { [self] in
         let cancelled = active?.viewControllers.count == 2 && popInteraction == nil
         backSmokeDetails["detailCancelled"] = cancelled; backSmokeDetails["stackAfterCancel"] = active?.viewControllers.count ?? 0
