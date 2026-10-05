@@ -221,7 +221,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   }
   @objc func updateDiagnostics() {
     let status = statusLabel.text ?? ""
-    statusLabel.isHidden = !status.contains("エラー") && !status.contains("バッファリング") && !status.contains("再読み込み")
+    statusLabel.isHidden = !status.contains("エラー") && !status.contains("できません") && !status.contains("バッファリング") && !status.contains("再読み込み")
     diagnostic = status; commentDiagnostic = commentLabel.text ?? ""
   }
   @objc func setCommentRows(_ rows: [[String: Any]], version: Int) {
@@ -298,7 +298,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
         let b = NeoStyle.button("\(rate)×") { [weak self] in self?.speed = rate; self?.onAction?("rate:\(rate)"); self?.renderPanel() }
         b.tintColor = rate == speed ? NeoStyle.accent : .white; b.titleLabel?.font = .systemFont(ofSize: 11); speeds.addArrangedSubview(b)
       }; speeds.heightAnchor.constraint(equalToConstant: 40).isActive = true; stack.addArrangedSubview(speeds)
-      append("PLAYのバッファ：\(cacheSeconds) 秒", bold: true)
+      append("PLAYのネットワークキャッシュ：\(cacheSeconds) 秒", bold: true)
       let cache = UIStepper(); cache.minimumValue = 1; cache.maximumValue = 30; cache.value = Double(cacheSeconds)
       cache.addAction(UIAction { [weak self, weak cache] _ in guard let self, let cache else { return }; self.cacheSeconds = Int(cache.value); self.onAction?("cache:\(self.cacheSeconds)"); self.renderPanel() }, for: .valueChanged)
       stack.addArrangedSubview(cache); append("次のリロードから適用します。", size: 12, muted: true)

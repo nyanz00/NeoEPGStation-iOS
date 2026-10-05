@@ -171,6 +171,7 @@
 - (void)performPlayerAction:(NSString *)action {
   if (self.closing) { return; }
   [self showControls];
+  if (self.reloading && ([action isEqualToString:@"play"] || [action hasPrefix:@"jump:"] || [action hasPrefix:@"seekto:"] || [action hasPrefix:@"scrub-"])) { return; }
   if ([action isEqualToString:@"back"]) { [self closePlayer]; }
   else if ([action isEqualToString:@"play"]) { [self togglePlayback]; }
   else if ([action isEqualToString:@"pip"]) { [self startPiP]; }
@@ -220,7 +221,7 @@
   self.reloadTime = MAX(0, self.player.time.value.longLongValue); self.reloadPlaying = self.player.isPlaying;
   NSMutableArray *tracks = [NSMutableArray new];
   for (VLCMediaPlayerTrack *track in self.player.textTracks) { if (track.isSelected) { [tracks addObject:track.trackId]; } }
-  self.reloadTextTracks = tracks; self.reloading = YES; self.restoringReload = NO;
+  self.scrubbing = NO; self.reloadTextTracks = tracks; self.reloading = YES; self.restoringReload = NO;
   self.statusLabel.text = @"プレイヤーを再読み込みしています…"; [self.chrome updateDiagnostics];
   [self.commentPiP resetVideo];
   if (self.player.state == VLCMediaPlayerStateStopped || self.player.state == VLCMediaPlayerStateNothingSpecial) { [self restartMedia]; }
@@ -232,7 +233,13 @@
   self.player.media = media; [self.player play];
 }
 - (void)restoreReloadIfReady {
-  if (!self.reloading || self.restoringReload || !self.player.isSeekable || self.player.state != VLCMediaPlayerStatePlaying) { return; }
+  if (!self.reloading || self.restoringReload || self.player.state != VLCMediaPlayerStatePlaying) { return; }
+  if (!self.player.isSeekable) {
+    if (!self.reloadPlaying) { [self.player pause]; }
+    self.player.rate = self.playbackRate; self.reloading = NO;
+    self.statusLabel.text = @"再読み込み · このファイルは再生位置を復元できません。";
+    [self.chrome updateDiagnostics]; [self.commentPiP invalidatePlaybackState]; return;
+  }
   self.restoringReload = YES;
   __weak typeof(self) weakSelf = self;
   dispatch_block_t restore = ^{
@@ -283,12 +290,12 @@
 - (void)updateControls {
   if (self.closing) { return; }
   [self restoreReloadIfReady];
-  self.timeline.enabled = self.player.isSeekable;
+  self.timeline.enabled = self.player.isSeekable && !self.reloading; self.playButton.enabled = !self.reloading;
   if (!self.scrubbing) { self.timeline.value = self.player.position; }
   int64_t current = MAX(0, self.player.time.value.longLongValue / 1000);
   int64_t length = MAX(0, self.player.media.length.value.longLongValue / 1000);
   [self.chrome updatePlayback:self.player.isPlaying current:current duration:length];
-  self.subtitleButton.enabled = self.player.textTracks.count > 0;
+  self.subtitleButton.enabled = self.player.textTracks.count > 0 && !self.reloading;
   CGSize size = self.player.videoSize;
   VLCMediaVideoTrack *video = self.player.media.videoTracks.firstObject.video;
   if (video.sourceAspectRatio > 0 && video.sourceAspectRatioDenominator > 0) {
@@ -321,7 +328,10 @@
 - (void)mediaPlayerBufferingChanged:(float)progress {
   dispatch_async(dispatch_get_main_queue(), ^{
     self.buffering = progress < 1;
-    if (!self.closing && progress < 1) { self.statusLabel.text = [NSString stringWithFormat:@"バッファリング %.0f%%", progress * 100]; }
+    if (!self.closing) {
+      self.statusLabel.text = progress < 1 ? [NSString stringWithFormat:@"バッファリング %.0f%%", progress * 100]
+        : self.reloading ? @"プレイヤーを再読み込みしています…" : @"PLAY · 再生準備完了";
+    }
     [self.chrome updateDiagnostics];
   });
 }
