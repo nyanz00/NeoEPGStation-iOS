@@ -12,6 +12,7 @@ NS_ASSUME_NONNULL_BEGIN
                   username:(NSString *)username password:(NSString *)password
             networkCaching:(NSInteger)networkCaching;
 #if TARGET_OS_SIMULATOR
+- (void)runControlsSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runControlsSmoke(completion:));
 - (NSDictionary<NSString *, id> *)runLayoutSmokeChecks;
 - (NSDictionary<NSString *, id> *)finishLayoutSmokeSnapshot;
 - (BOOL)startPiPSmoke;

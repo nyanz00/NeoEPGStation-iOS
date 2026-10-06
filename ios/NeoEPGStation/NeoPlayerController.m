@@ -42,7 +42,7 @@
 @property (nonatomic) NSInteger pendingRecording;
 @property (nonatomic) UIView *controls;
 @property (nonatomic) BOOL landscape;
-@property (nonatomic) CFTimeInterval lastControlsInteraction;
+@property (nonatomic) NSTimer *controlsHideTimer;
 @property (nonatomic) NSTimer *timer;
 @property (nonatomic) BOOL pipActive;
 @property (nonatomic) BOOL closing;
@@ -84,8 +84,6 @@
   __weak typeof(self) uiSelf = self;
   self.chrome.onAction = ^(NSString *action) { [uiSelf performPlayerAction:action]; };
   [self applyPlayerLayout:self.view.bounds.size];
-  UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggleControls)];
-  tap.cancelsTouchesInView = NO; [self.movieView addGestureRecognizer:tap];
   AVAudioSession *audio = AVAudioSession.sharedInstance;
   NSError *error;
   if (![audio setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeMoviePlayback options:0 error:&error] ||
@@ -160,17 +158,37 @@
 - (BOOL)prefersStatusBarHidden { return self.landscape; }
 - (UIStatusBarStyle)preferredStatusBarStyle { return UIStatusBarStyleLightContent; }
 - (BOOL)prefersHomeIndicatorAutoHidden { return self.landscape && !self.chrome.controlsVisible; }
+- (void)scheduleControlsHide {
+  [self.controlsHideTimer invalidate]; self.controlsHideTimer = nil;
+  if (self.closing || !self.chrome.controlsVisible || !self.chrome.autoHide) { return; }
+  __weak typeof(self) weakSelf = self;
+  self.controlsHideTimer = [NSTimer timerWithTimeInterval:2 repeats:NO block:^(NSTimer *timer) {
+    typeof(self) self = weakSelf;
+    if (!self || self.closing) { return; }
+    self.controlsHideTimer = nil;
+    if (!self.chrome.autoHide) { return; }
+    if (self.scrubbing || self.chrome.interactionOpen || self.chrome.controlTracking || self.presentedViewController) {
+      [self scheduleControlsHide]; return;
+    }
+    [self hideControls];
+  }];
+  [NSRunLoop.mainRunLoop addTimer:self.controlsHideTimer forMode:NSRunLoopCommonModes];
+}
+- (void)hideControls {
+  [self.controlsHideTimer invalidate]; self.controlsHideTimer = nil;
+  [self.chrome showControls:NO]; [self setNeedsUpdateOfHomeIndicatorAutoHidden];
+}
 - (void)showControls {
-  self.lastControlsInteraction = CACurrentMediaTime();
   [self.chrome showControls:YES]; [self setNeedsUpdateOfHomeIndicatorAutoHidden];
+  [self scheduleControlsHide];
 }
 - (void)toggleControls {
-  if (self.chrome.interactionOpen) { [self showControls]; return; }
-  [self.chrome showControls:!self.chrome.controlsVisible];
-  self.lastControlsInteraction = CACurrentMediaTime(); [self setNeedsUpdateOfHomeIndicatorAutoHidden];
+  if (self.chrome.controlsVisible) { [self hideControls]; }
+  else { [self showControls]; }
 }
 - (void)performPlayerAction:(NSString *)action {
   if (self.closing) { return; }
+  if ([action isEqualToString:@"toggle-controls"]) { [self toggleControls]; return; }
   [self showControls];
   if (self.reloading && ([action isEqualToString:@"play"] || [action hasPrefix:@"jump:"] || [action hasPrefix:@"seekto:"] || [action hasPrefix:@"scrub-"])) { return; }
   if ([action isEqualToString:@"back"]) { [self closePlayer]; }
@@ -259,8 +277,8 @@
 }
 - (void)togglePlayback { [self showControls]; if (self.player.isPlaying) { [self.player pause]; } else { [self.player play]; } }
 - (void)beginScrubbing { [self showControls]; self.scrubbing = YES; }
-- (void)cancelScrubbing { self.scrubbing = NO; }
-- (void)endScrubbing { if (self.player.isSeekable) { self.player.position = self.timeline.value; } self.scrubbing = NO; }
+- (void)cancelScrubbing { self.scrubbing = NO; [self showControls]; }
+- (void)endScrubbing { if (self.player.isSeekable) { self.player.position = self.timeline.value; } self.scrubbing = NO; [self showControls]; }
 
 - (void)showSubtitles {
   [self showControls]; NSMutableArray *names = [NSMutableArray new];
@@ -305,10 +323,6 @@
   }
   self.comments.videoSize = size;
   [self updateCommentState];
-  if (self.chrome.autoHide && !self.chrome.interactionOpen && self.player.isPlaying && !self.scrubbing && !self.presentedViewController &&
-      CACurrentMediaTime() - self.lastControlsInteraction > 4) {
-    [self.chrome showControls:NO]; [self setNeedsUpdateOfHomeIndicatorAutoHidden];
-  }
 }
 
 - (void)mediaPlayerStateChanged:(VLCMediaPlayerState)state {
@@ -413,6 +427,35 @@
   [self showControls]; [self.commentPiP start];
 }
 #if TARGET_OS_SIMULATOR
+- (void)runControlsSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  BOOL playing = self.player.isPlaying; [self.player pause];
+  NSMutableDictionary *checks = [[self.chrome runInteractionChecks] mutableCopy];
+  self.chrome.autoHide = YES; [self hideControls];
+  BOOL showTap = [self.chrome smokeTapVideoBackground] && self.chrome.controlsVisible;
+  BOOL hideTap = [self.chrome smokeTapVideoBackground] && !self.chrome.controlsVisible;
+  checks[@"tapShows"] = @(showTap); checks[@"tapHides"] = @(hideTap);
+  [self.chrome smokeTapVideoBackground];
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [self performPlayerAction:@"interaction"];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      checks[@"interactionRestartsTwoSeconds"] = @(self.chrome.controlsVisible);
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        checks[@"pausedIdleHides"] = @(!self.chrome.controlsVisible);
+        [self beginScrubbing];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+          checks[@"scrubbingStaysVisible"] = @(self.chrome.controlsVisible);
+          [self cancelScrubbing];
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            checks[@"scrubbingEndRestartsHide"] = @(!self.chrome.controlsVisible);
+            checks[@"success"] = @([[checks allValues] indexOfObject:@NO] == NSNotFound);
+            if (playing) { [self.player play]; }
+            completion(checks);
+          });
+        });
+      });
+    });
+  });
+}
 - (NSDictionary<NSString *, id> *)runLayoutSmokeChecks {
   self.chrome.autoHide = NO; [self showControls];
   BOOL initialPortrait = [self.chrome checkInitialPortrait];
@@ -525,6 +568,7 @@
   if (self.closing) { return; } self.closing = YES;
   self.view.userInteractionEnabled = NO;
   [self.timer invalidate]; self.timer = nil;
+  [self.controlsHideTimer invalidate]; self.controlsHideTimer = nil;
   [self.comments stop]; [self.chrome shutdown];
   self.orientationMask = UIInterfaceOrientationMaskAllButUpsideDown; [self setNeedsUpdateOfSupportedInterfaceOrientations];
   [NSNotificationCenter.defaultCenter removeObserver:self];
@@ -556,5 +600,5 @@
     else if (recordingID > 0 && recording) { recording(recordingID); }
   }];
 }
-- (void)dealloc { [self.timer invalidate]; [NSNotificationCenter.defaultCenter removeObserver:self]; }
+- (void)dealloc { [self.timer invalidate]; [self.controlsHideTimer invalidate]; [NSNotificationCenter.defaultCenter removeObserver:self]; }
 @end

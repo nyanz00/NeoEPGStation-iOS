@@ -108,7 +108,7 @@ enum NeoPiPSmoke {
         writer.startSession(atSourceTime: .zero)
         let pixel = try colorPixel(kCVPixelFormatType_32BGRA)
         let deadline = Date().addingTimeInterval(20)
-        for frame in 0..<240 {
+        for frame in 0..<480 {
           while !input.isReadyForMoreMediaData && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
           guard Date() < deadline, adaptor.append(pixel, withPresentationTime: CMTime(value: Int64(frame), timescale: 24)) else {
             throw CommentParseError.invalid("合成動画の書き込み")
@@ -124,19 +124,22 @@ enum NeoPiPSmoke {
             player.modalPresentationStyle = .fullScreen
             root.present(player, animated: false) {
               DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                var result = player.runLayoutSmokeChecks()
-                // VLC resize reporting and MTK drawable replacement are async.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                  result.merge(player.finishLayoutSmokeSnapshot()) { _, new in new }
-                  let attempted = player.startPiPSmoke()
-                  DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    result.merge(player.piPSmokeState()) { _, new in new }
-                    result["pipStartAttempted"] = attempted
-                    let primed = result["pipSupported"] as? Bool != true || result["pipStatus"] as? String == "PiP · コメント合成"
-                    result["success"] = result["success"] as? Bool == true && result["videoFillsFit"] as? Bool == true && primed && (!attempted || result["pipActive"] as? Bool == true)
-                    player.runReloadSmoke { playback in
-                      save("player-playback-smoke", playback)
-                      save("pip-player-smoke", result)
+                player.runControlsSmoke { controls in
+                  save("player-controls-smoke", controls)
+                  var result = player.runLayoutSmokeChecks()
+                  // VLC resize reporting and MTK drawable replacement are async.
+                  DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    result.merge(player.finishLayoutSmokeSnapshot()) { _, new in new }
+                    let attempted = player.startPiPSmoke()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                      result.merge(player.piPSmokeState()) { _, new in new }
+                      result["pipStartAttempted"] = attempted
+                      let primed = result["pipSupported"] as? Bool != true || result["pipStatus"] as? String == "PiP · コメント合成"
+                      result["success"] = result["success"] as? Bool == true && result["videoFillsFit"] as? Bool == true && primed && (!attempted || result["pipActive"] as? Bool == true)
+                      player.runReloadSmoke { playback in
+                        save("player-playback-smoke", playback)
+                        save("pip-player-smoke", result)
+                      }
                     }
                   }
                 }

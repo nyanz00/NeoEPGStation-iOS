@@ -16,6 +16,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   @objc var autoHide = true
   private let logo = UIImageView(), channel = NeoStyle.label(size: 11), title = NeoStyle.label(size: 15, bold: true)
   private let leftHeader = UIView(), rightHeader = UIView(), videoDim = UIView()
+  private let videoTap = UITapGestureRecognizer()
   private let settingsSubtitles = UIButton(type: .system)
   private var isWide: Bool { bounds.width > bounds.height }
   private var panelVisible: Bool { !isWide || panelOpen }
@@ -51,7 +52,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     [infoButton, pipButton, commentButton, settingsButton].forEach(rightHeader.addSubview)
     [timeButton, timeline, rotationButton, reloadButton, ruleButton, subtitleButton].forEach(controls.addSubview)
     timeButton.addSubview(timeLabel); timeButton.accessibilityLabel = "再生時間表示を切り替える"
-    timeButton.addAction(UIAction { [weak self] _ in self?.remainingTime.toggle(); self?.updateTime() }, for: .touchUpInside)
+    timeButton.addAction(UIAction { [weak self] _ in self?.onAction?("interaction"); self?.remainingTime.toggle(); self?.updateTime() }, for: .touchUpInside)
     configure(menuButton, icon: "Menu", label: "サイドメニュー", action: "menu")
     configure(backButton, icon: "ArrowBack", label: "録画詳細へ戻る", action: "back")
     configure(infoButton, icon: "InfoOutlined", label: "番組情報", action: "program")
@@ -122,6 +123,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     drawer.isHidden = true; drawerDim.isHidden = true
     let pan = UIPanGestureRecognizer(target: self, action: #selector(dragDrawer)); pan.delegate = self
     drawer.addGestureRecognizer(pan)
+    // The HUD and VLC drawable are siblings. Observe their common ancestor so
+    // empty HUD regions and VLC/Metal subviews receive the same background tap.
+    videoTap.addTarget(self, action: #selector(tapVideo)); videoTap.delegate = self
+    videoTap.cancelsTouchesInView = false; addGestureRecognizer(videoTap)
     header.backgroundColor = .clear; controls.backgroundColor = .clear
     renderPanel()
     statusLabel.backgroundColor = .clear; statusLabel.numberOfLines = 2; statusLabel.isHidden = true
@@ -242,7 +247,26 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     [header, controls, centerControls].forEach { $0.alpha = visible ? 1 : 0; $0.isUserInteractionEnabled = visible }
   }
   @objc var controlsVisible: Bool { controls.alpha > 0 }
-  @objc var interactionOpen: Bool { (isWide && panelOpen) || drawerOpen || popup != nil }
+  @objc var interactionOpen: Bool { drawerOpen || popup != nil }
+  @objc var controlTracking: Bool {
+    func tracking(_ view: UIView) -> Bool {
+      (view as? UIControl)?.isTracking == true || view.subviews.contains(where: tracking)
+    }
+    return tracking(self)
+  }
+  @objc private func tapVideo() { onAction?("toggle-controls") }
+  private func acceptsVideoTap(_ point: CGPoint, target: UIView?) -> Bool {
+    guard videoView.frame.contains(point), !interactionOpen, let target else { return false }
+    var ancestor: UIView? = target
+    while let view = ancestor, view !== self {
+      if view is UIControl || view === panel || view === drawer { return false }
+      ancestor = view.superview
+    }
+    return ancestor === self
+  }
+  func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    gesture !== videoTap || acceptsVideoTap(touch.location(in: self), target: touch.view)
+  }
   @objc func updatePlayback(_ running: Bool, current: Int64, duration: Int64) {
     self.current = current; self.duration = duration
     playButton.setImage(playerIcon(running ? "Pause" : "PlayArrow", side: 60), for: .normal)
@@ -269,13 +293,20 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     if id == "rules" { loadRelated() }
   }
   private func setPanel(_ open: Bool) {
+    let changesVideoWidth = isWide && panelOpen != open
     popup?.dismiss(); panelOpen = open; panel.isHidden = false
     if !open && !isWide { tab = "program"; renderPanel() }
     infoButton.tintColor = open && tab == "program" ? NeoStyle.accent : .white
     ruleButton.tintColor = open && tab == "rules" ? NeoStyle.accent : .white
     settingsButton.tintColor = open && tab == "settings" ? NeoStyle.accent : .white
     setNeedsLayout()
-    UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.16, animations: { self.layoutIfNeeded(); self.panel.alpha = self.panelVisible ? 1 : 0 }) { _ in self.panel.isHidden = !self.panelVisible }
+    if changesVideoWidth {
+      UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.16, animations: { self.layoutIfNeeded(); self.panel.alpha = self.panelVisible ? 1 : 0 }) { _ in self.panel.isHidden = !self.panelVisible }
+    } else {
+      // Switching tabs replaces content immediately; only opening/closing the
+      // landscape panel changes the video layout with an animation.
+      UIView.performWithoutAnimation { self.layoutIfNeeded() }
+    }
   }
   private func append(_ text: String, size: CGFloat = 14, bold: Bool = false, muted: Bool = false, lineHeight: CGFloat = 1) {
     let label = NeoStyle.label(text, size: size, bold: bold, muted: muted); label.numberOfLines = 0; label.lineBreakMode = .byWordWrapping
@@ -292,6 +323,11 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     return "\(first) - \(formatter.string(from: Date(timeIntervalSince1970: end / 1000)))（\(Int((end - start) / 60000))分）"
   }
   private func renderPanel() {
+    UIView.performWithoutAnimation {
+      self.buildPanelContents(); self.setNeedsLayout(); self.layoutIfNeeded()
+    }
+  }
+  private func buildPanelContents() {
     stack.arrangedSubviews.forEach { $0.removeFromSuperview() }; scroll.setContentOffset(.zero, animated: false)
     scroll.isHidden = tab == "comments"; commentList.isHidden = tab != "comments"; followButton.isHidden = tab != "comments"
     panelTitle.text = ["program":"番組情報", "rules":"ルール", "comments":"コメント", "twitter":"Twitter", "settings":"プレイヤー設定"][tab]
@@ -349,7 +385,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       cache.addAction(UIAction { [weak self, weak cache] _ in guard let self, let cache else { return }; self.cacheSeconds = Int(cache.value); self.onAction?("cache:\(self.cacheSeconds)"); self.renderPanel() }, for: .valueChanged)
       stack.addArrangedSubview(cache); append("次のリロードから適用します。", size: 12, muted: true)
       let row = UIStackView(); row.addArrangedSubview(NeoStyle.label("操作ボタンを自動で隠す")); let toggle = UISwitch(); toggle.isOn = autoHide; toggle.onTintColor = NeoStyle.accent
-      toggle.addAction(UIAction { [weak self, weak toggle] _ in self?.autoHide = toggle?.isOn == true }, for: .valueChanged); row.addArrangedSubview(toggle); stack.addArrangedSubview(row)
+      toggle.addAction(UIAction { [weak self, weak toggle] _ in self?.autoHide = toggle?.isOn == true; self?.onAction?("interaction") }, for: .valueChanged); row.addArrangedSubview(toggle); stack.addArrangedSubview(row)
       append("画面の向き", bold: true)
       for (id, text) in [("auto", "端末の向きに合わせる"), ("portrait", "縦に固定"), ("landscape", "横に固定")] {
         stack.addArrangedSubview(NeoStyle.button(text) { [weak self] in self?.onAction?("orientation:\(id)") })
@@ -432,6 +468,46 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   deinit { task?.cancel(); relatedTask?.cancel(); logoTask?.cancel() }
 
 #if targetEnvironment(simulator)
+  // Exercise the same hit-test/ancestor filter used by the real recognizer.
+  @objc func smokeTapVideoBackground() -> Bool {
+    layoutIfNeeded()
+    let point = CGPoint(x: videoView.frame.midX, y: videoView.frame.minY + 56)
+    guard let target = hitTest(point, with: nil), acceptsVideoTap(point, target: target),
+      videoTap.view === self else { return false }
+    tapVideo(); return true
+  }
+  @objc func runInteractionChecks() -> [String: Any] {
+    layoutIfNeeded()
+    func accepted(_ view: UIView) -> Bool {
+      let point = view.convert(CGPoint(x: view.bounds.midX, y: view.bounds.midY), to: self)
+      return acceptsVideoTap(point, target: hitTest(point, with: nil))
+    }
+    showControls(false)
+    let hiddenPlayIsBackground = accepted(playButton)
+    showControls(true)
+    let buttonsExcluded = !accepted(playButton) && !accepted(timeButton) && !accepted(timeline)
+    let blankHeader = CGPoint(x: header.frame.minX + 100, y: header.frame.midY)
+    let hudBackground = acceptsVideoTap(blankHeader, target: hitTest(blankHeader, with: nil))
+    let panelExcluded = !accepted(panelTabs)
+    func animatedGeometry(_ view: UIView) -> Bool {
+      let keys = view.layer.animationKeys() ?? []
+      return keys.contains { $0.contains("position") || $0.contains("bounds") || $0.contains("transform") } ||
+        view.subviews.contains(where: animatedGeometry)
+    }
+    var immediate = true
+    for button in tabButtons {
+      button.sendActions(for: .touchUpInside)
+      if tab != "comments" {
+        immediate = immediate && stack.arrangedSubviews.first.map { $0.bounds.width > 0 && $0.bounds.height > 0 } == true
+      }
+      immediate = immediate && !animatedGeometry(panel)
+    }
+    panelOpen = false; tab = "program"; renderPanel()
+    let checks = ["rootTapRecognizer": videoTap.view === self, "hiddenButtonRevealsOnly": hiddenPlayIsBackground,
+      "buttonsAndSliderExcluded": buttonsExcluded, "emptyHUDTap": hudBackground,
+      "panelTapExcluded": panelExcluded, "tabsImmediateWithoutGeometryAnimation": immediate]
+    return checks.merging(["success": checks.values.allSatisfy { $0 }]) { _, new in new }
+  }
   @objc func checkInitialPortrait() -> Bool {
     layoutIfNeeded()
     let buttons = [jumps[0], jumps[1], playButton, jumps[2], jumps[3]]
