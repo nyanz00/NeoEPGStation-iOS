@@ -522,26 +522,35 @@
       });
     } else {
       [self setOrientation:@"landscape"];
-      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        BOOL locked = self.orientationMask == UIInterfaceOrientationMaskLandscapeRight && self.view.window.windowScene.interfaceOrientation == UIInterfaceOrientationLandscapeRight;
+      [self waitForSmokeOrientation:UIInterfaceOrientationLandscapeRight attempt:0 completion:^(BOOL locked) {
         [self.chrome showSmokePanel:@"program"]; [self.chrome snapshot:@"player-info-landscape"];
         [self.chrome showSmokePanel:@"controls"]; [self.chrome snapshot:@"player-controls-landscape"];
         [self setOrientation:@"portrait"];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-          BOOL portrait = self.orientationMask == UIInterfaceOrientationMaskPortrait && self.view.window.windowScene.interfaceOrientation == UIInterfaceOrientationPortrait;
+        [self waitForSmokeOrientation:UIInterfaceOrientationPortrait attempt:0 completion:^(BOOL portrait) {
           [self.chrome showSmokePanel:@"program"]; [self.chrome snapshot:@"player-info-portrait"];
           [self.chrome showSmokePanel:@"rules"]; [self.chrome snapshot:@"player-rules-portrait"];
           [self.chrome showSmokePanel:@"settings"]; [self.chrome snapshot:@"player-settings-portrait"];
           [self.chrome showSmokePanel:@"controls"]; [self.chrome snapshot:@"player-controls-portrait"];
           [self setOrientation:@"auto"];
           completion(@{@"success": locked && portrait ? @YES : @NO, @"reloadStatusCleared": @(statusCleared), @"pausedReload": @YES, @"playingReload": @YES, @"positionPreserved": @(position), @"ratePreserved": @(settings), @"commentsPreserved": @(self.comments.ready), @"landscapeLock": @(locked), @"portraitLock": @(portrait), @"autoOrientation": self.orientationMask == UIInterfaceOrientationMaskAllButUpsideDown ? @YES : @NO});
-        });
-      });
+        }];
+      }];
     }
     return;
   }
   if (attempt >= 30 || self.player.state == VLCMediaPlayerStateError) { completion(@{@"success": @NO, @"error": @"reload timed out", @"reloading": @(self.reloading), @"restoring": @(self.restoringReload), @"state": VLCMediaPlayerStateToString(self.player.state)}); return; }
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self pollReloadSmoke:attempt + 1 expectedPlaying:playing completion:completion]; });
+}
+// The simulator's scene rotation can outlast a fixed delay under CI load.
+- (void)waitForSmokeOrientation:(UIInterfaceOrientation)orientation attempt:(NSInteger)attempt completion:(void (^)(BOOL))completion {
+  UIInterfaceOrientationMask mask = orientation == UIInterfaceOrientationPortrait ? UIInterfaceOrientationMaskPortrait : UIInterfaceOrientationMaskLandscapeRight;
+  BOOL wide = orientation != UIInterfaceOrientationPortrait;
+  BOOL settled = self.orientationMask == mask && self.view.window.windowScene.interfaceOrientation == orientation &&
+    (self.view.bounds.size.width > self.view.bounds.size.height) == wide && !self.transitionCoordinator;
+  if (settled || attempt >= 30) { [self.view layoutIfNeeded]; completion(settled); return; }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [self waitForSmokeOrientation:orientation attempt:attempt + 1 completion:completion];
+  });
 }
 - (BOOL)startPiPSmoke {
   if (!self.commentPiP.possible) { return NO; }

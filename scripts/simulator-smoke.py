@@ -95,7 +95,7 @@ except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
     raise
 pid = launch.rsplit(':', 1)[1].strip()
 container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], 'io.github.nyanz00.NeoEPGStation', 'data'))
-for attempt in range(12):
+for attempt in range(18):
     time.sleep(5)
     if (container / 'Documents/pip-player-smoke.json').exists() and (container / 'Documents/pip-composition-smoke.json').exists():
         break
