@@ -93,7 +93,12 @@ final class NeoSidebar: UIView, UITableViewDataSource, UITableViewDelegate {
   let list = UITableView(frame: .zero, style: .plain)
   var onSelect: ((String) -> Void)?
   var selected = "recorded" { didSet { if oldValue != selected { list.reloadData() } } }
-  var contentSafeArea = UIEdgeInsets.zero { didSet { setNeedsLayout() } }
+  var contentSafeArea = UIEdgeInsets.zero {
+    didSet {
+      if oldValue.left != contentSafeArea.left { list.reloadData() }
+      if oldValue != contentSafeArea { setNeedsLayout() }
+    }
+  }
   override init(frame: CGRect) {
     super.init(frame: frame); backgroundColor = NeoStyle.paper
     [brand, logo, list].forEach(addSubview); logo.contentMode = .scaleAspectFit

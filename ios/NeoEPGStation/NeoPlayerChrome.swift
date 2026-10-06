@@ -46,7 +46,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private var popup: NeoAnchoredMenu?, remainingTime = false, current: Int64 = 0, duration: Int64 = 0
   private var cacheSeconds = 5, speed: Float = 1
   private let drawer = NeoSidebar(), drawerDim = UIButton(type: .custom)
-  private var drawerOpen = false, drawerStart: CGFloat = 0
+  private var drawerOpen = false, drawerDragging = false, drawerStart: CGFloat = 0
   private var diagnostic = "", commentDiagnostic = ""
 
   @objc(initWithTitle:)
@@ -254,7 +254,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       width: max(0, videoWidth - safe.left - rightInset - 24), height: 32)
     drawerDim.frame = bounds
     let drawerWidth = min(240 + safe.left, bounds.width * 0.8)
-    drawer.frame = CGRect(x: drawerOpen ? 0 : -drawerWidth, y: 0, width: drawerWidth, height: bounds.height)
+    drawer.frame = CGRect(x: drawerDragging ? drawer.frame.minX : drawerOpen ? 0 : -drawerWidth, y: 0, width: drawerWidth, height: bounds.height)
     drawer.contentSafeArea = safe
 
   }
@@ -519,15 +519,23 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   }
   private func setDrawer(_ open: Bool) {
     drawerOpen = open; drawer.isHidden = false; drawerDim.isHidden = false; setNeedsLayout()
-    UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.2, animations: { self.layoutIfNeeded(); self.drawerDim.alpha = open ? 1 : 0 }) { _ in
+    drawer.accessibilityViewIsModal = open
+    UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.2, delay: 0,
+      options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut], animations: { self.layoutIfNeeded(); self.drawerDim.alpha = open ? 1 : 0 }) { _ in
       self.drawer.isHidden = !self.drawerOpen; self.drawerDim.isHidden = !self.drawerOpen
     }
   }
   @objc private func dragDrawer(_ gesture: UIPanGestureRecognizer) {
     let translation = gesture.translation(in: self).x
-    if gesture.state == .began { drawerStart = drawer.frame.minX }
+    if gesture.state == .began {
+      drawerDragging = true; drawerStart = drawer.layer.presentation()?.frame.minX ?? drawer.frame.minX
+      drawer.layer.removeAllAnimations(); drawerDim.layer.removeAllAnimations(); drawer.frame.origin.x = drawerStart
+    }
     if gesture.state == .changed { drawer.frame.origin.x = min(0, max(-drawer.bounds.width, drawerStart + translation)); drawerDim.alpha = 1 + drawer.frame.minX / drawer.bounds.width }
-    if [.ended, .cancelled].contains(gesture.state) { setDrawer(gesture.state == .cancelled || (translation > -drawer.bounds.width * 0.25 && gesture.velocity(in: self).x > -350)) }
+    if [.ended, .cancelled, .failed].contains(gesture.state) {
+      drawerDragging = false
+      setDrawer(gesture.state != .ended || (translation > -drawer.bounds.width * 0.25 && gesture.velocity(in: self).x > -350))
+    }
   }
   override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
     guard let pan = gesture as? UIPanGestureRecognizer else { return true }; let v = pan.velocity(in: self); return v.x < 0 && abs(v.x) >= abs(v.y)
