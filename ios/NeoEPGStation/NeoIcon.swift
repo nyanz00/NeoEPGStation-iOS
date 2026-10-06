@@ -3,8 +3,9 @@ import UIKit
 
 enum NeoIcon {
   private static var cache: [String: UIImage] = [:]
-  static func image(_ name: String) -> UIImage {
-    if let image = cache[name] { return image }
+  static func image(_ name: String, strokeWidth: CGFloat = 0) -> UIImage {
+    let cacheKey = strokeWidth == 0 ? name : "\(name):\(strokeWidth)"
+    if let image = cache[cacheKey] { return image }
     let path = UIBezierPath()
     switch name {
     case "Menu":
@@ -1116,7 +1117,10 @@ enum NeoIcon {
       context.cgContext.scaleBy(x: side / 24, y: side / 24)
       if name == "AlphaA" { context.cgContext.translateBy(x: -1 / (side / 24), y: 0) }
       UIColor.white.setFill(); path.fill()
+      if strokeWidth > 0 {
+        UIColor.white.setStroke(); path.lineWidth = strokeWidth; path.lineJoinStyle = .round; path.stroke()
+      }
     }.withRenderingMode(.alwaysTemplate)
-    cache[name] = image; return image
+    cache[cacheKey] = image; return image
   }
 }

@@ -56,6 +56,14 @@ class NeoPage: UIViewController {
   init(title: String, shell: NeoShell) { super.init(nibName: nil, bundle: nil); self.shell = shell; titleLabel.text = title }
   required init?(coder: NSCoder) { fatalError() }
   override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
+  override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .portrait }
+  override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { .portrait }
+  override func viewDidAppear(_ animated: Bool) {
+    super.viewDidAppear(animated)
+    guard presentedViewController == nil else { return }
+    setNeedsUpdateOfSupportedInterfaceOrientations()
+    view.window?.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
+  }
   override func viewDidLoad() {
     super.viewDidLoad(); view.backgroundColor = NeoStyle.background; header.backgroundColor = NeoStyle.paper
     titleLabel.font = .systemFont(ofSize: 20, weight: .medium)

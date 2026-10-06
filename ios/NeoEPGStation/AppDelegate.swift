@@ -3,6 +3,14 @@ import UIKit
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
   var window: UIWindow?
+  func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+    var controller = (window ?? self.window)?.rootViewController
+    while let current = controller {
+      if let player = current as? NeoPlayerController { return player.supportedInterfaceOrientations }
+      controller = current.presentedViewController
+    }
+    return .portrait
+  }
   func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
     let window = UIWindow(frame: UIScreen.main.bounds)
     window.rootViewController = NeoShell(); self.window = window; window.makeKeyAndVisible()

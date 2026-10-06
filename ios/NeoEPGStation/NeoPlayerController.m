@@ -476,7 +476,7 @@
   [self applyPlayerLayout:self.view.bounds.size]; [self.view layoutIfNeeded];
   UIEdgeInsets safe = self.view.safeAreaInsets;
   BOOL full = CGRectGetMinX(self.movieView.frame) >= safe.left && CGRectGetMaxX(self.movieView.frame) <= self.view.bounds.size.width - safe.right &&
-    CGRectGetMinY(self.movieView.frame) >= safe.top && CGRectGetMaxY(self.movieView.frame) <= self.view.bounds.size.height - safe.bottom;
+    CGRectGetMinY(self.movieView.frame) >= safe.top && CGRectGetMaxY(self.movieView.frame) == self.view.bounds.size.height;
   BOOL overlay = self.header.frame.size.height < 80 && CGRectGetMaxY(self.controls.frame) <= 390;
   NSMutableDictionary *layout = [[self.chrome runLayoutChecks] mutableCopy];
   layout[@"initialPortrait"] = @(initialPortrait);
@@ -576,6 +576,29 @@
   if (!self.commentPiP.possible) { return NO; }
   [self.commentPiP start]; return YES;
 }
+- (void)runExitSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  [self setOrientation:@"landscape"];
+  [self waitForSmokeOrientation:UIInterfaceOrientationLandscapeRight attempt:0 completion:^(BOOL locked) {
+    if (!locked) { completion(@{@"success": @NO, @"landscapeBeforeExit": @NO}); return; }
+    UIViewController *host = self.presentingViewController;
+    self.onNavigate = ^(NSString *route) {
+      [self waitForHostPortrait:host attempt:0 completion:^(BOOL portrait) {
+        completion(@{@"success": @(portrait && [route isEqualToString:@"recorded"]), @"landscapeBeforeExit": @YES,
+          @"sidebarRouteDelivered": @([route isEqualToString:@"recorded"]), @"hostPortraitAfterExit": @(portrait),
+          @"hostPortraitOnly": @(host.supportedInterfaceOrientations == UIInterfaceOrientationMaskPortrait)});
+      }];
+    };
+    [self performPlayerAction:@"navigate:recorded"];
+  }];
+}
+- (void)waitForHostPortrait:(UIViewController *)host attempt:(NSInteger)attempt completion:(void (^)(BOOL))completion {
+  BOOL portrait = host.presentedViewController == nil && host.view.window.windowScene.interfaceOrientation == UIInterfaceOrientationPortrait &&
+    host.view.bounds.size.height > host.view.bounds.size.width && host.supportedInterfaceOrientations == UIInterfaceOrientationMaskPortrait && !host.transitionCoordinator;
+  if (portrait || attempt >= 30) { completion(portrait); return; }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [self waitForHostPortrait:host attempt:attempt + 1 completion:completion];
+  });
+}
 - (NSDictionary<NSString *, id> *)piPSmokeState {
   return @{@"pipActive": @(self.commentPiP.active), @"pipPossible": @(self.commentPiP.possible),
     @"pipSupported": @([AVPictureInPictureController isPictureInPictureSupported]),
@@ -599,7 +622,7 @@
   [self.timer invalidate]; self.timer = nil;
   [self.controlsHideTimer invalidate]; self.controlsHideTimer = nil;
   [self.comments stop]; [self.chrome shutdown];
-  self.orientationMask = UIInterfaceOrientationMaskAllButUpsideDown; [self setNeedsUpdateOfSupportedInterfaceOrientations];
+  self.orientationMask = UIInterfaceOrientationMaskPortrait; [self setNeedsUpdateOfSupportedInterfaceOrientations];
   [NSNotificationCenter.defaultCenter removeObserver:self];
   if (self.loginReference) { [self.dialogs dismissDialogWithReference:self.loginReference]; }
   [NeoVLCFrameTap bindView:self.movieView sink:nil]; [self.commentPiP stop];
@@ -623,7 +646,13 @@
   void (^navigate)(NSString *) = self.onNavigate; self.onNavigate = nil;
   void (^recording)(NSInteger) = self.onRecording; self.onRecording = nil;
   NSString *route = self.pendingRoute; NSInteger recordingID = self.pendingRecording;
+  UIViewController *presenter = self.presentingViewController;
+  UIWindowScene *scene = self.view.window.windowScene;
   [self dismissViewControllerAnimated:YES completion:^{
+    // Reset the scene as well as the mask: a manually locked landscape scene
+    // can otherwise stay horizontal after the player has been dismissed.
+    [presenter setNeedsUpdateOfSupportedInterfaceOrientations];
+    [scene requestGeometryUpdateWithPreferences:[[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:UIInterfaceOrientationMaskPortrait] errorHandler:nil];
     if (callback) { callback(); }
     if (route && navigate) { navigate(route); }
     else if (recordingID > 0 && recording) { recording(recordingID); }

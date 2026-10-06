@@ -138,7 +138,10 @@ enum NeoPiPSmoke {
                       result["success"] = result["success"] as? Bool == true && result["videoFillsFit"] as? Bool == true && primed && (!attempted || result["pipActive"] as? Bool == true)
                       player.runReloadSmoke { playback in
                         save("player-playback-smoke", playback)
-                        save("pip-player-smoke", result)
+                        player.runExitSmoke { exit in
+                          save("player-exit-smoke", exit)
+                          save("pip-player-smoke", result)
+                        }
                       }
                     }
                   }
