@@ -124,7 +124,9 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     drawer.addGestureRecognizer(pan)
     header.backgroundColor = .clear; controls.backgroundColor = .clear
     renderPanel()
-    statusLabel.backgroundColor = .black.withAlphaComponent(0.6); statusLabel.numberOfLines = 2; statusLabel.isHidden = true
+    statusLabel.backgroundColor = .clear; statusLabel.numberOfLines = 2; statusLabel.isHidden = true
+    statusLabel.layer.shadowColor = UIColor.black.cgColor; statusLabel.layer.shadowOpacity = 1
+    statusLabel.layer.shadowRadius = 2; statusLabel.layer.shadowOffset = .zero
   }
   required init?(coder: NSCoder) { fatalError() }
   private func configure(_ button: UIButton, icon: String? = nil, symbol: String? = nil, label: String, action: String) {
@@ -442,7 +444,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let original = frame, originalHide = autoHide; autoHide = false; showControls(true)
     frame = CGRect(x: 0, y: 0, width: 844, height: 390); setNeedsLayout(); layoutIfNeeded()
     let full = videoView.frame == bounds
-    let noBands = header.backgroundColor == UIColor.clear && controls.backgroundColor == UIColor.clear
+    let noBands = header.backgroundColor == UIColor.clear && controls.backgroundColor == UIColor.clear && statusLabel.backgroundColor == UIColor.clear
     let smallThumb = timeline.thumbImage(for: .normal)?.size.width == 12
     let filledPlay = playerIcon("PlayArrow", side: 60).size.width == 60
     let centered = centerControls.frame.midX == videoView.frame.midX && centerControls.frame.midY == videoView.frame.midY

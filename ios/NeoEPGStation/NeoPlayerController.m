@@ -69,6 +69,7 @@
 
 - (void)viewDidLoad {
   [super viewDidLoad]; self.view.backgroundColor = UIColor.blackColor;
+  self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
   self.chrome = [[NeoPlayerChrome alloc] initWithTitle:self.mediaTitle];
   self.chrome.frame = self.view.bounds; self.chrome.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   [self.view addSubview:self.chrome];
@@ -250,6 +251,7 @@
       for (VLCMediaPlayerTrack *track in weakSelf.player.textTracks) { if ([weakSelf.reloadTextTracks containsObject:track.trackId]) { track.selected = YES; } }
       if (!weakSelf.reloadPlaying) { [weakSelf.player pause]; }
       weakSelf.reloading = NO; weakSelf.restoringReload = NO;
+      weakSelf.statusLabel.text = weakSelf.reloadPlaying ? @"PLAY · 再生中" : @"PLAY · 一時停止";
       [weakSelf.commentPiP invalidatePlaybackState]; [weakSelf updateControls];
     });
   };
@@ -464,7 +466,8 @@
     int64_t restored = self.player.time.value.longLongValue;
     BOOL position = llabs(restored - self.reloadTime) < 1000;
     BOOL settings = fabs(self.player.rate - 1.25) < 0.01 && self.networkCaching == 7000;
-    if (!position || !settings || !self.comments.ready) {
+    BOOL statusCleared = self.statusLabel.isHidden && ![self.statusLabel.text containsString:@"再読み込み"];
+    if (!position || !settings || !self.comments.ready || !statusCleared) {
       completion(@{@"success": @NO, @"phase": playing ? @"playing" : @"paused", @"position": @(restored), @"expected": @(self.reloadTime), @"rate": @(self.player.rate)}); return;
     }
     if (!playing) {
@@ -488,7 +491,7 @@
           [self.chrome showSmokePanel:@"settings"]; [self.chrome snapshot:@"player-settings-portrait"];
           [self.chrome showSmokePanel:@"controls"]; [self.chrome snapshot:@"player-controls-portrait"];
           [self setOrientation:@"auto"];
-          completion(@{@"success": locked && portrait ? @YES : @NO, @"pausedReload": @YES, @"playingReload": @YES, @"positionPreserved": @(position), @"ratePreserved": @(settings), @"commentsPreserved": @(self.comments.ready), @"landscapeLock": @(locked), @"portraitLock": @(portrait), @"autoOrientation": self.orientationMask == UIInterfaceOrientationMaskAllButUpsideDown ? @YES : @NO});
+          completion(@{@"success": locked && portrait ? @YES : @NO, @"reloadStatusCleared": @(statusCleared), @"pausedReload": @YES, @"playingReload": @YES, @"positionPreserved": @(position), @"ratePreserved": @(settings), @"commentsPreserved": @(self.comments.ready), @"landscapeLock": @(locked), @"portraitLock": @(portrait), @"autoOrientation": self.orientationMask == UIInterfaceOrientationMaskAllButUpsideDown ? @YES : @NO});
         });
       });
     }
