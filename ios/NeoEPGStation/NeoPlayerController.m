@@ -440,14 +440,14 @@
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
       checks[@"interactionRestartsTwoSeconds"] = @(self.chrome.controlsVisible);
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        checks[@"pausedIdleHides"] = @(!self.chrome.controlsVisible);
+        checks[@"pausedIdleHides"] = self.chrome.controlsVisible ? @NO : @YES;
         [self beginScrubbing];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
           checks[@"scrubbingStaysVisible"] = @(self.chrome.controlsVisible);
           [self cancelScrubbing];
           dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            checks[@"scrubbingEndRestartsHide"] = @(!self.chrome.controlsVisible);
-            checks[@"success"] = @([[checks allValues] indexOfObject:@NO] == NSNotFound);
+            checks[@"scrubbingEndRestartsHide"] = self.chrome.controlsVisible ? @NO : @YES;
+            checks[@"success"] = [[checks allValues] indexOfObject:@NO] == NSNotFound ? @YES : @NO;
             if (playing) { [self.player play]; }
             completion(checks);
           });
