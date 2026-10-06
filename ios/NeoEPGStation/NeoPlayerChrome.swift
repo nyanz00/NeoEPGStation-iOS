@@ -587,7 +587,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let cell = drawer.tableView(drawer.list, cellForRowAt: IndexPath(row: 0, section: 0))
     let config = cell.contentConfiguration as? UIListContentConfiguration
     let shared = drawer.brand.frame.minX == drawer.contentSafeArea.left + 16 && drawer.logo.frame.minX - drawer.brand.frame.maxX == 7
-      && config?.imageProperties.reservedLayoutSize == CGSize(width: 27, height: 24)
+      && config?.imageProperties.reservedLayoutSize == CGSize(width: 27, height: 27)
     onAction = handler; subtitleTracks = oldTracks; subtitleKey = ""; settingsCategory = oldCategory
     return ["settingsStayInPanel": returns, "commentSettingsApplyToComposition": applied, "slidersRetainedDuringUpdates": stable,
       "danmakuExcludedFromSubtitles": filtered, "filteredSubtitleKeepsOriginalIndex": routed,
@@ -694,7 +694,12 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     updatePiP(true); snapshot(name); updatePiP(false)
   }
   @objc func snapshot(_ name: String) {
-    layoutIfNeeded(); let image = UIGraphicsImageRenderer(size: bounds.size).image { _ in drawHierarchy(in: bounds, afterScreenUpdates: true) }
+    // Capture the settled layout, independently of the fade/resize phase.
+    // Interaction tests above exercise the actual animated presentation.
+    layoutIfNeeded()
+    func settle(_ view: UIView) { view.layer.removeAllAnimations(); view.subviews.forEach(settle) }
+    settle(self)
+    let image = UIGraphicsImageRenderer(size: bounds.size).image { _ in drawHierarchy(in: bounds, afterScreenUpdates: true) }
     if let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first { try? image.pngData()?.write(to: directory.appendingPathComponent(name + ".png")) }
   }
 #endif

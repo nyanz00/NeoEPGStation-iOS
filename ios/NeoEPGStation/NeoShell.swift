@@ -123,8 +123,8 @@ final class NeoSidebar: UIView, UITableViewDataSource, UITableViewDelegate {
     var config = cell.defaultContentConfiguration(); config.text = item.title; config.image = NeoIcon.image(item.icon)
     config.textProperties.font = .systemFont(ofSize: 14); config.textProperties.color = .white
     config.imageProperties.tintColor = NeoStyle.muted
-    config.imageProperties.maximumSize = CGSize(width: 27, height: 24)
-    config.imageProperties.reservedLayoutSize = CGSize(width: 27, height: 24)
+    config.imageProperties.maximumSize = CGSize(width: 27, height: 27)
+    config.imageProperties.reservedLayoutSize = CGSize(width: 27, height: 27)
     config.imageToTextPadding = item.icon == "AlphaA" ? 13 : 16
     config.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: contentSafeArea.left + 16, bottom: 0, trailing: 16)
     cell.contentConfiguration = config; cell.backgroundColor = item.id == selected ? NeoStyle.accent.withAlphaComponent(0.16) : .clear
