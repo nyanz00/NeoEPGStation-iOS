@@ -163,7 +163,7 @@
   [self.controlsHideTimer invalidate]; self.controlsHideTimer = nil;
   if (self.closing || !self.chrome.controlsVisible || !self.chrome.autoHide) { return; }
   __weak typeof(self) weakSelf = self;
-  self.controlsHideTimer = [NSTimer timerWithTimeInterval:2 repeats:NO block:^(NSTimer *timer) {
+  self.controlsHideTimer = [NSTimer timerWithTimeInterval:2.5 repeats:NO block:^(NSTimer *timer) {
     typeof(self) self = weakSelf;
     if (!self || self.closing) { return; }
     self.controlsHideTimer = nil;
@@ -448,19 +448,23 @@
     checks[@"fadeInCompletes"] = self.chrome.controls.layer.presentationLayer.opacity > 0.99 ? @YES : @NO;
     [self performPlayerAction:@"interaction"];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-      checks[@"interactionRestartsTwoSeconds"] = @(self.chrome.controlsVisible);
+      checks[@"interactionRestartsHideTimer"] = @(self.chrome.controlsVisible);
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        checks[@"pausedIdleHides"] = self.chrome.controlsVisible ? @NO : @YES;
-        checks[@"fadeOutCompletes"] = self.chrome.controls.layer.presentationLayer.opacity < 0.01 ? @YES : @NO;
-        [self beginScrubbing];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-          checks[@"scrubbingStaysVisible"] = @(self.chrome.controlsVisible);
-          [self cancelScrubbing];
-          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            checks[@"scrubbingEndRestartsHide"] = self.chrome.controlsVisible ? @NO : @YES;
-            checks[@"success"] = [[checks allValues] indexOfObject:@NO] == NSNotFound ? @YES : @NO;
-            if (playing) { [self.player play]; }
-            completion(checks);
+        // Still visible at 2.2 seconds: this detects the previous 2s timeout.
+        checks[@"visibleBeforeTwoPointFiveSeconds"] = self.chrome.controlsVisible ? @YES : @NO;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+          checks[@"pausedIdleHides"] = self.chrome.controlsVisible ? @NO : @YES;
+          checks[@"fadeOutCompletes"] = self.chrome.controls.layer.presentationLayer.opacity < 0.01 ? @YES : @NO;
+          [self beginScrubbing];
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            checks[@"scrubbingStaysVisible"] = @(self.chrome.controlsVisible);
+            [self cancelScrubbing];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+              checks[@"scrubbingEndRestartsHide"] = self.chrome.controlsVisible ? @NO : @YES;
+              checks[@"success"] = [[checks allValues] indexOfObject:@NO] == NSNotFound ? @YES : @NO;
+              if (playing) { [self.player play]; }
+              completion(checks);
+            });
           });
         });
       });

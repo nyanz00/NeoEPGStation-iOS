@@ -40,7 +40,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private var categoryButtons: [UIButton] = [], categoryDividers: [UIView] = []
   private let scroll = UIScrollView(), stack = UIStackView()
   private let commentList = UITableView(frame: .zero, style: .plain), followButton = UIButton(type: .system)
-  private var tabButtons: [UIButton] = [], tab = "program", followsComments = true, lastCommentIndex = -1
+  private var tabButtons: [NeoPlayerPanelTab] = [], tab = "program", followsComments = true, lastCommentIndex = -1
   private var comments: [(time: Double, text: String)] = []
   private var context: [String: Any] = [:], api: NeoAPI?, recording: NeoRecording?
   private var records: [NeoRecording] = [], rulesLoaded = false, ruleHeading = "関連する録画", ruleError: String?
@@ -68,11 +68,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     configure(backButton, icon: "ArrowBack", label: "録画詳細へ戻る", action: "back")
     configure(infoButton, icon: "InfoOutlined", label: "番組情報", action: "program")
     configure(pipButton, symbol: "pip.enter", label: "コメント付きPiP", action: "pip")
-    pipButton.setImage(UIImage(systemName: "pip.enter", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium))?.withRenderingMode(.alwaysTemplate), for: .normal)
+    pipButton.setImage(fittedSymbol("pip.enter"), for: .normal)
     configure(commentButton, icon: "ChatBubbleOutlineOutlined", label: "コメント設定", action: "comments-settings")
     configure(settingsButton, icon: "SettingsOutlined", label: "プレイヤー設定", action: "settings")
-    configure(rotationButton, icon: "ScreenRotation", label: "画面の向きを切り替えて固定", action: "rotate")
-    rotationButton.setImage(NeoIcon.image("ScreenRotation", strokeWidth: 0.6), for: .normal)
+    configure(rotationButton, icon: "ScreenRotationRounded", label: "画面の向きを切り替えて固定", action: "rotate")
     configure(reloadButton, icon: "Refresh", label: "再読み込み", action: "reload")
     configure(ruleButton, icon: "RuleOutlined", label: "ルール・関連録画", action: "rules")
     configure(subtitleButton, icon: "SubtitlesOutlined", label: "字幕", action: "subtitles")
@@ -136,12 +135,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     followButton.addAction(UIAction { [weak self] _ in self?.followsComments = true; self?.lastCommentIndex = -1; self?.followCurrentComment() }, for: .touchUpInside)
     for (id, label, icon) in [("program", "番組情報", "InfoOutlined"), ("rules", "ルール", "RuleOutlined"),
       ("comments", "コメント", "ChatBubbleOutlineOutlined"), ("settings", "設定", "SettingsOutlined")] {
-      let b = UIButton(type: .system); b.accessibilityLabel = label
-      var config = UIButton.Configuration.plain(); config.title = label
-      config.image = NeoIcon.image(icon)
-      config.imagePlacement = .top; config.imagePadding = 4; config.contentInsets = .zero
-      config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { a in var a = a; a.font = .systemFont(ofSize: 12); return a }
-      b.configuration = config; b.addAction(UIAction { [weak self] _ in
+      let b = NeoPlayerPanelTab(label: label, icon: icon)
+      b.addAction(UIAction { [weak self] _ in
         if id == "settings" { self?.showSettings("general") } else { self?.selectPanel(id, toggle: false) }
       }, for: .touchUpInside)
       panelTabs.addSubview(b); tabButtons.append(b)
@@ -171,6 +166,15 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private func playerIcon(_ name: String, side: CGFloat) -> UIImage {
     UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
       NeoIcon.image(name).draw(in: CGRect(x: 0, y: 0, width: side, height: side))
+    }.withRenderingMode(.alwaysTemplate)
+  }
+  private func fittedSymbol(_ name: String) -> UIImage? {
+    guard let symbol = UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)) else { return nil }
+    let scale = 20 / max(symbol.size.width, symbol.size.height)
+    let size = CGSize(width: symbol.size.width * scale, height: symbol.size.height * scale)
+    return UIGraphicsImageRenderer(size: CGSize(width: 24, height: 24)).image { _ in
+      symbol.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in:
+        CGRect(x: (24 - size.width) / 2, y: (24 - size.height) / 2, width: size.width, height: size.height))
     }.withRenderingMode(.alwaysTemplate)
   }
   private func perform(_ action: String) {
@@ -231,7 +235,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     }
     let controlsHeight: CGFloat = wide ? 80 : 50
     let bottom = wide ? bounds.height - safe.bottom : videoView.frame.maxY
-    controls.frame = CGRect(x: safe.left + 8, y: bottom - controlsHeight, width: header.bounds.width, height: controlsHeight)
+    let controlsOffset: CGFloat = wide ? min(10, max(0, safe.bottom - 4)) : 2
+    controls.frame = CGRect(x: safe.left + 8, y: bottom - controlsHeight + controlsOffset, width: header.bounds.width, height: controlsHeight)
     let timeWidth = min(controls.bounds.width - 48, max(90, timeLabel.intrinsicContentSize.width + 16))
     timeButton.frame = CGRect(x: 4, y: 0, width: max(0, timeWidth), height: 26); timeLabel.frame = timeButton.bounds
     rotationButton.frame = CGRect(x: controls.bounds.width - 44, y: -6, width: 44, height: 40)
@@ -243,7 +248,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     }
     let centerWidth = min(wide ? 400 : 340, max(0, videoWidth - safe.left - rightInset - 16))
     let centerHeight: CGFloat = 64
-    let centerY = wide ? (safe.top + bounds.height - safe.bottom) / 2 + 6 : videoView.frame.midY
+    let centerY = wide ? (safe.top + bounds.height - safe.bottom) / 2 + 11 : videoView.frame.midY + 5
     centerControls.frame = CGRect(x: videoView.frame.midX - centerWidth / 2, y: centerY - centerHeight / 2, width: centerWidth, height: centerHeight)
     for (index, button) in [jumps[0], jumps[1], playButton, jumps[2], jumps[3]].enumerated() {
       let side: CGFloat = button === playButton ? 64 : 46
@@ -257,8 +262,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let panelHeaderHeight: CGFloat = wide || tab == "settings" ? 44 : 0
     panelHeader.isHidden = panelHeaderHeight == 0
     panelHeader.frame = CGRect(x: 0, y: panelTop, width: panel.bounds.width, height: panelHeaderHeight)
-    panelTitle.frame = CGRect(x: 14, y: 0, width: max(0, panel.bounds.width - 62), height: 44)
-    panelClose.frame = CGRect(x: panel.bounds.width - (wide ? safe.right : 0) - 56, y: 0, width: 44, height: 44)
+    // Align the close glyph with the subtitle tab, rather than subtracting
+    // landscape safe-area insets twice inside the already separate panel.
+    panelClose.frame = CGRect(x: panel.bounds.width * 5 / 6 - 22, y: 0, width: 44, height: 44)
+    panelTitle.frame = CGRect(x: 14, y: 0, width: max(0, panelClose.frame.minX - 18), height: 44)
     let tabsHeight: CGFloat = 72
     panelTabs.isHidden = false
     panelTabs.frame = CGRect(x: 0, y: panel.bounds.height - panelBottom - tabsHeight, width: panel.bounds.width, height: tabsHeight)
@@ -388,10 +395,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     }
     for (i, b) in tabButtons.enumerated() {
       let selected = ["program", "rules", "comments", "settings"][i] == tab
-      b.tintColor = selected ? NeoStyle.accent : NeoStyle.muted
-      b.configuration?.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { a in
-        var a = a; a.font = .systemFont(ofSize: selected ? 14 : 12); return a
-      }
+      b.setActive(selected)
     }
     switch tab {
     case "program":
@@ -627,6 +631,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   }
   @objc func runInteractionChecks() -> [String: Any] {
     layoutIfNeeded()
+    let initiallyAligned = panelTabRowsAligned()
     func accepted(_ view: UIView) -> Bool {
       let point = view.convert(CGPoint(x: view.bounds.midX, y: view.bounds.midY), to: self)
       return acceptsVideoTap(point, target: hitTest(point, with: nil))
@@ -643,19 +648,30 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       return keys.contains { $0.contains("position") || $0.contains("bounds") || $0.contains("transform") } ||
         view.subviews.contains(where: animatedGeometry)
     }
-    var immediate = true
+    var immediate = true, tabsAligned = true
     for button in tabButtons {
       button.sendActions(for: .touchUpInside)
       if tab != "comments" {
         immediate = immediate && stack.arrangedSubviews.first.map { $0.bounds.width > 0 && $0.bounds.height > 0 } == true
       }
       immediate = immediate && !animatedGeometry(panel)
+      tabsAligned = tabsAligned && panelTabRowsAligned()
     }
     panelOpen = false; tab = "program"; renderPanel()
     let checks = ["rootTapRecognizer": videoTap.view === self, "hiddenButtonRevealsOnly": hiddenPlayIsBackground,
       "buttonsAndSliderExcluded": buttonsExcluded, "emptyHUDTap": hudBackground,
-      "panelTapExcluded": panelExcluded, "tabsImmediateWithoutGeometryAnimation": immediate]
+      "panelTapExcluded": panelExcluded, "tabsImmediateWithoutGeometryAnimation": immediate,
+      "panelTabsAlignedInitially": initiallyAligned, "panelTabsStayAlignedAfterSelection": tabsAligned]
     return checks.merging(["success": checks.values.allSatisfy { $0 }]) { _, new in new }
+  }
+  private func panelTabRowsAligned() -> Bool {
+    tabButtons.forEach { $0.layoutIfNeeded() }
+    guard let first = tabButtons.first else { return false }
+    return tabButtons.allSatisfy {
+      $0.bounds.width > 0 && $0.glyph.frame.size == CGSize(width: 24, height: 24) &&
+      $0.glyph.frame.midY == first.glyph.frame.midY && $0.caption.frame.midY == first.caption.frame.midY &&
+      $0.caption.frame.width == $0.bounds.width && $0.configuration == nil
+    }
   }
   @objc func checkInitialPortrait() -> Bool {
     layoutIfNeeded()
@@ -672,15 +688,20 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let noBands = header.backgroundColor == UIColor.clear && controls.backgroundColor == UIColor.clear && statusLabel.backgroundColor == UIColor.clear
     let smallThumb = timeline.thumbImage(for: .normal)?.size.width == 12
     let filledPlay = playerIcon("PlayArrow", side: 60).size.width == 60
-    let centered = centerControls.frame.midX == videoView.frame.midX && centerControls.frame.midY == (safeAreaInsets.top + bounds.height - safeAreaInsets.bottom) / 2 + 6
+    let centered = centerControls.frame.midX == videoView.frame.midX && centerControls.frame.midY == (safeAreaInsets.top + bounds.height - safeAreaInsets.bottom) / 2 + 11
+    let lowerHUD = controls.frame.minY >= bounds.height - safeAreaInsets.bottom - 80 &&
+      controls.frame.maxY <= bounds.maxY && videoView.frame.maxY == bounds.maxY
     let hudShadows = [menuButton, backButton, infoButton, pipButton, commentButton, settingsButton, rotationButton, reloadButton, ruleButton, subtitleButton].allSatisfy { $0.layer.shadowOpacity > 0 && $0.backgroundColor == UIColor.clear }
 
-    tab = "program"; panelOpen = true; panel.isHidden = false; panel.alpha = 1; renderPanel(); setNeedsLayout(); layoutIfNeeded()
+    showSettings("general"); setNeedsLayout(); layoutIfNeeded()
     let side = abs(panel.frame.width / bounds.width - 1/3) < 0.01 && panel.frame.minX == videoView.frame.maxX
-    let closeInset = panelClose.frame.maxX <= panel.bounds.maxX - safeAreaInsets.right - 12
+    let closeAligned = abs(panelClose.frame.midX - categoryButtons[2].frame.midX) < 0.5
+    let landscapeTabs = panelTabRowsAligned()
 
     frame = CGRect(x: 0, y: 0, width: 390, height: 844); setNeedsLayout(); layoutIfNeeded()
     let below = panel.frame.minY >= videoView.frame.maxY && panel.frame.maxY == bounds.maxY && rightHeader.frame.minY == 0 && title.isHidden && reloadButton.isHidden
+    let portraitTabs = panelTabRowsAligned()
+    let portraitThumbFits = controls.frame.minY + timeline.frame.midY + 6 <= videoView.frame.maxY
 
     tab = "rules"; rulesLoaded = true; ruleHeading = "サンプルルール"
     records = (1...3).map { i in NeoRecording(id: i, name: "サンプル番組 #\(i)", startAt: 1791042600000, endAt: 1791044400000, isRecording: false, description: "関連する番組の説明", extended: nil, channelId: nil, channelName: nil, thumbnails: nil, videoFiles: nil) }
@@ -698,7 +719,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
 
     frame = original; autoHide = originalHide; setNeedsLayout(); layoutIfNeeded()
     let noCircles = ([playButton] + jumps).allSatisfy { $0.backgroundColor == UIColor.clear && $0.layer.shadowOpacity > 0 }
-    return ["success": full && centered && side && closeInset && hudShadows && below && routing && time && noBands && smallThumb && filledPlay && noCircles && settings.values.allSatisfy { $0 }, "noBands": noBands, "noCentralBackgrounds": noCircles, "hudIconShadows": hudShadows, "panelCloseInset": closeInset, "smallThumb": smallThumb, "fullVideo": full, "centerControls": centered, "landscapePanel": side, "portraitPanel": below, "buttonRouting": routing, "timeToggle": time]
+    return ["success": full && centered && lowerHUD && side && closeAligned && landscapeTabs && portraitTabs && portraitThumbFits && hudShadows && below && routing && time && noBands && smallThumb && filledPlay && noCircles && settings.values.allSatisfy { $0 }, "noBands": noBands, "noCentralBackgrounds": noCircles, "hudIconShadows": hudShadows, "panelCloseAlignedWithSubtitle": closeAligned, "panelTabsAlignedAcrossOrientations": landscapeTabs && portraitTabs, "lowerHUDWithoutMovingVideo": lowerHUD, "portraitSeekThumbFits": portraitThumbFits, "smallThumb": smallThumb, "fullVideo": full, "centerControls": centered, "landscapePanel": side, "portraitPanel": below, "buttonRouting": routing, "timeToggle": time]
   }
   @objc func showSmokePanel(_ id: String) {
     if id == "settings" { settingsCategory = "general" }
@@ -729,6 +750,32 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     if let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first { try? image.pngData()?.write(to: directory.appendingPathComponent(name + ".png")) }
   }
 #endif
+}
+
+// Fixed icon and caption slots keep the four tabs aligned on their first
+// appearance, independent of UIKit's deferred configuration/font updates.
+private final class NeoPlayerPanelTab: UIButton {
+  let glyph = UIImageView(), caption = NeoStyle.label(size: 12)
+  init(label: String, icon: String) {
+    super.init(frame: .zero)
+    accessibilityLabel = label; caption.text = label; caption.textAlignment = .center
+    glyph.image = NeoIcon.image(icon); glyph.contentMode = .scaleAspectFit
+    [glyph, caption].forEach { $0.isUserInteractionEnabled = false; $0.isAccessibilityElement = false; addSubview($0) }
+  }
+  required init?(coder: NSCoder) { fatalError() }
+  func setActive(_ active: Bool) {
+    tintColor = active ? NeoStyle.accent : NeoStyle.muted
+    glyph.tintColor = tintColor; caption.textColor = tintColor
+    caption.font = .systemFont(ofSize: active ? 14 : 12)
+    accessibilityTraits = active ? [.button, .selected] : .button
+    setNeedsLayout()
+  }
+  override var isHighlighted: Bool { didSet { alpha = isHighlighted ? 0.6 : 1 } }
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    glyph.frame = CGRect(x: bounds.midX - 12, y: 8, width: 24, height: 24)
+    caption.frame = CGRect(x: 0, y: 36, width: bounds.width, height: 24)
+  }
 }
 
 private final class NeoPlayerGenreBadges: UIView {

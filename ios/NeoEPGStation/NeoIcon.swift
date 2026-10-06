@@ -1048,6 +1048,23 @@ enum NeoIcon {
       path.addLine(to: CGPoint(x: 18.0, y: 19.0))
       path.addLine(to: CGPoint(x: 18.0, y: 5.0))
       path.close()
+    case "ScreenRotationRounded":
+      // The approved rotation sketch: a rounded diagonal phone, curved
+      // shafts and open chevron arrowheads, all with the same round stroke.
+      let phone = UIBezierPath(roundedRect: CGRect(x: -3.7, y: -7, width: 7.4, height: 14), cornerRadius: 1.1)
+      phone.apply(CGAffineTransform(rotationAngle: -.pi / 4))
+      phone.apply(CGAffineTransform(translationX: 12, y: 12))
+      path.append(phone)
+      path.move(to: CGPoint(x: 13.2, y: 3.5))
+      path.addCurve(to: CGPoint(x: 20.1, y: 9.9), controlPoint1: CGPoint(x: 17.3, y: 3.5), controlPoint2: CGPoint(x: 20.1, y: 6.1))
+      path.move(to: CGPoint(x: 17.9, y: 7.8))
+      path.addLine(to: CGPoint(x: 20.1, y: 9.9))
+      path.addLine(to: CGPoint(x: 22.2, y: 7.8))
+      path.move(to: CGPoint(x: 10.8, y: 20.5))
+      path.addCurve(to: CGPoint(x: 3.9, y: 14.1), controlPoint1: CGPoint(x: 6.7, y: 20.5), controlPoint2: CGPoint(x: 3.9, y: 17.9))
+      path.move(to: CGPoint(x: 1.8, y: 16.2))
+      path.addLine(to: CGPoint(x: 3.9, y: 14.1))
+      path.addLine(to: CGPoint(x: 6.1, y: 16.2))
     case "ScreenRotation":
       path.move(to: CGPoint(x: 16.48, y: 2.52))
       path.addCurve(to: CGPoint(x: 22.45, y: 11), controlPoint1: CGPoint(x: 19.75, y: 4.07), controlPoint2: CGPoint(x: 22.09, y: 7.24))
@@ -1116,8 +1133,13 @@ enum NeoIcon {
     let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { context in
       context.cgContext.scaleBy(x: side / 24, y: side / 24)
       if name == "AlphaA" { context.cgContext.translateBy(x: -1 / (side / 24), y: 0) }
-      UIColor.white.setFill(); path.fill()
-      if strokeWidth > 0 {
+      if name == "ScreenRotationRounded" {
+        UIColor.white.setStroke(); path.lineWidth = 1.25
+        path.lineCapStyle = .round; path.lineJoinStyle = .round; path.stroke()
+      } else {
+        UIColor.white.setFill(); path.fill()
+      }
+      if strokeWidth > 0 && name != "ScreenRotationRounded" {
         UIColor.white.setStroke(); path.lineWidth = strokeWidth; path.lineJoinStyle = .round; path.stroke()
       }
     }.withRenderingMode(.alwaysTemplate)
