@@ -129,7 +129,7 @@ if danmaku.get('success') is not True:
     raise RuntimeError(f"Native comment rendering failed: {danmaku.get('error')}")
 Path('dist/danmaku-smoke.png').write_bytes((container / 'Documents/danmaku-smoke.png').read_bytes())
 
-for name in ['pip-composition-smoke', 'player-landscape-smoke', 'player-controls-landscape', 'player-controls-portrait', 'player-info-landscape', 'player-info-portrait', 'player-rules-portrait', 'player-settings-portrait']:
+for name in ['pip-composition-smoke', 'player-landscape-smoke', 'player-initial-portrait', 'player-paused-portrait', 'player-controls-landscape', 'player-controls-portrait', 'player-info-landscape', 'player-info-portrait', 'player-rules-portrait', 'player-settings-portrait']:
     source = container / f'Documents/{name}.png'
     if source.exists():
         Path(f'dist/{name}.png').write_bytes(source.read_bytes())

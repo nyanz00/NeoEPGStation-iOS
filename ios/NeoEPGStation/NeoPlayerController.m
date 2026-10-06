@@ -413,12 +413,16 @@
 #if TARGET_OS_SIMULATOR
 - (NSDictionary<NSString *, id> *)runLayoutSmokeChecks {
   self.chrome.autoHide = NO; [self showControls];
+  BOOL initialPortrait = [self.chrome checkInitialPortrait];
+  [self.chrome snapshot:@"player-initial-portrait"];
   self.smokeSavedFrame = self.view.frame;
   self.view.frame = CGRectMake(0, 0, 844, 390);
   [self applyPlayerLayout:self.view.bounds.size]; [self.view layoutIfNeeded];
   BOOL full = CGRectEqualToRect(self.movieView.frame, self.view.bounds);
   BOOL overlay = self.header.frame.size.height < 80 && CGRectGetMaxY(self.controls.frame) <= 390;
-  NSDictionary *layout = [self.chrome runLayoutChecks];
+  NSMutableDictionary *layout = [[self.chrome runLayoutChecks] mutableCopy];
+  layout[@"initialPortrait"] = @(initialPortrait);
+  layout[@"success"] = initialPortrait && [layout[@"success"] boolValue] ? @YES : @NO;
   NSString *directory = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
   [[NSJSONSerialization dataWithJSONObject:layout options:0 error:nil] writeToFile:[directory stringByAppendingPathComponent:@"player-ui-smoke.json"] atomically:YES];
   return @{@"success": @(full && overlay && self.frameTapInstalled && self.commentPiP.consumedFrameCount >= 24 && self.commentPiP.composedFrameCount >= 24),
@@ -464,6 +468,8 @@
       completion(@{@"success": @NO, @"phase": playing ? @"playing" : @"paused", @"position": @(restored), @"expected": @(self.reloadTime), @"rate": @(self.player.rate)}); return;
     }
     if (!playing) {
+      [self.chrome updatePlayback:NO current:restored / 1000 duration:self.player.media.length.value.longLongValue / 1000];
+      [self.chrome showControls:YES]; [self.chrome snapshot:@"player-paused-portrait"];
       [self.player play];
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self reloadPlayback]; [self pollReloadSmoke:0 expectedPlaying:YES completion:completion];
