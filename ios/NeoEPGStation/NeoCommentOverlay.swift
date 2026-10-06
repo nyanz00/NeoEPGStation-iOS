@@ -10,8 +10,9 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   @objc private(set) var status = "コメントを確認中…"
   @objc private(set) var ready = false
   @objc var enabled = true {
-    didSet { refreshRendering(); onChange?() }
+    didSet { UserDefaults.standard.set(enabled, forKey: Self.enabledKey); refreshRendering(); onChange?() }
   }
+  private static let enabledKey = "player.comments.enabled", sizeKey = "player.comments.size", opacityKey = "player.comments.opacity"
   private(set) var sizeMultiplier = 1.0, opacity: Float = 1
   private(set) var tracks: [NativeCommentTrack] = []
   private(set) var selectedIndex: Int?
@@ -35,6 +36,12 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
 
   @objc override init(frame: CGRect) {
     super.init(frame: frame)
+    let defaults = UserDefaults.standard
+    enabled = defaults.object(forKey: Self.enabledKey) as? Bool ?? true
+    let size = defaults.object(forKey: Self.sizeKey) as? Double ?? 1
+    let alpha = defaults.object(forKey: Self.opacityKey) as? Float ?? 1
+    sizeMultiplier = size.isFinite ? min(2, max(0.5, size)) : 1
+    opacity = alpha.isFinite ? min(1, max(0, alpha)) : 1
     isUserInteractionEnabled = false; backgroundColor = .clear
     do {
       guard let device = MTLCreateSystemDefaultDevice() else { throw CommentParseError.invalid("Metalデバイス") }
@@ -110,8 +117,14 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     }
   }
 
-  func setSize(_ value: Double) { sizeMultiplier = min(2, max(0.5, value)); onChange?() }
-  func setOpacity(_ value: Float) { opacity = min(1, max(0, value)); onChange?() }
+  func setSize(_ value: Double) {
+    guard value.isFinite else { return }
+    sizeMultiplier = min(2, max(0.5, value)); UserDefaults.standard.set(sizeMultiplier, forKey: Self.sizeKey); onChange?()
+  }
+  func setOpacity(_ value: Float) {
+    guard value.isFinite else { return }
+    opacity = min(1, max(0, value)); UserDefaults.standard.set(opacity, forKey: Self.opacityKey); onChange?()
+  }
   var diagnostics: String { String(format: "描画更新 %.0ffps · 描画 %d件 · キャッシュ %.1f / 48MiB", fps, drawn, Double(renderer?.cachedBytes ?? 0) / 1048576) }
 
   @objc func stop() {

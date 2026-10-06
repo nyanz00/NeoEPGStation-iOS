@@ -17,6 +17,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private let logo = UIImageView(), channel = NeoStyle.label(size: 11), title = NeoStyle.label(size: 15, bold: true)
   private let leftHeader = UIView(), rightHeader = UIView(), videoDim = UIView()
   private let videoTap = UITapGestureRecognizer()
+  private let navigationPan = UIPanGestureRecognizer()
+  private var navigationStart = CGPoint.zero, navigationAction: NeoSwipeAction?
+  private weak var navigationScroll: UIScrollView?
+  private var navigationScrollEnabled = false
   private var settingsCategory = "general"
   private weak var commentOverlay: NeoCommentOverlay?
   private var subtitleTracks: [[String: Any]] = []
@@ -151,7 +155,9 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     // The HUD and VLC drawable are siblings. Observe their common ancestor so
     // empty HUD regions and VLC/Metal subviews receive the same background tap.
     videoTap.addTarget(self, action: #selector(tapVideo)); videoTap.delegate = self
-    videoTap.cancelsTouchesInView = false; addGestureRecognizer(videoTap)
+    videoTap.cancelsTouchesInView = true; addGestureRecognizer(videoTap)
+    navigationPan.addTarget(self, action: #selector(dragNavigation)); navigationPan.delegate = self
+    addGestureRecognizer(navigationPan); videoTap.require(toFail: navigationPan)
     header.backgroundColor = .clear; controls.backgroundColor = .clear
     renderPanel()
     statusLabel.backgroundColor = .clear; statusLabel.numberOfLines = 2; statusLabel.isHidden = true
@@ -171,7 +177,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   }
   private func fittedSymbol(_ name: String) -> UIImage? {
     guard let symbol = UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium)) else { return nil }
-    let scale = 20 / max(symbol.size.width, symbol.size.height)
+    let scale = 24 / max(symbol.size.width, symbol.size.height)
     let size = CGSize(width: symbol.size.width * scale, height: symbol.size.height * scale)
     return UIGraphicsImageRenderer(size: CGSize(width: 24, height: 24)).image { _ in
       symbol.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in:
@@ -266,7 +272,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     // Align the close glyph with the subtitle tab, rather than subtracting
     // landscape safe-area insets twice inside the already separate panel.
     panelClose.frame = CGRect(x: panel.bounds.width * 5 / 6 - 22, y: 0, width: 44, height: 44)
-    panelTitle.frame = CGRect(x: 14, y: 0, width: max(0, panelClose.frame.minX - 18), height: 44)
+    panelClose.isHidden = !wide
+    panelTitle.frame = CGRect(x: 14, y: 0, width: max(0, (wide ? panelClose.frame.minX : panel.bounds.width) - 18), height: 44)
     let tabsHeight: CGFloat = 72
     panelTabs.isHidden = false
     panelTabs.frame = CGRect(x: 0, y: panel.bounds.height - panelBottom - tabsHeight, width: panel.bounds.width, height: tabsHeight)
@@ -305,7 +312,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     pipCover.isHidden = !active
     centerControls.isHidden = active
   }
-  @objc var interactionOpen: Bool { drawerOpen || popup != nil }
+  @objc var interactionOpen: Bool { drawerOpen || drawerDragging || navigationAction != nil || popup != nil }
   @objc var controlTracking: Bool {
     func tracking(_ view: UIView) -> Bool {
       (view as? UIControl)?.isTracking == true || view.subviews.contains(where: tracking)
@@ -323,7 +330,19 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     return ancestor === self
   }
   func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-    gesture !== videoTap || acceptsVideoTap(touch.location(in: self), target: touch.view)
+    if gesture === videoTap { return acceptsVideoTap(touch.location(in: self), target: touch.view) }
+    guard gesture === navigationPan else { return true }
+    navigationStart = touch.location(in: self); navigationScroll = nil
+    var candidate = touch.view
+    while let current = candidate, current !== self {
+      if current === drawer || current === drawerDim || current is UISlider || current is UISwitch || current is UITextField || current is UITextView { return false }
+      if let scroll = current as? UIScrollView {
+        if scroll.contentSize.width > scroll.bounds.width + 1 { return false }
+        if navigationScroll == nil { navigationScroll = scroll }
+      }
+      candidate = current.superview
+    }
+    return true
   }
   @objc func updatePlayback(_ running: Bool, current: Int64, duration: Int64) {
     self.current = current; self.duration = duration
@@ -447,6 +466,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
         stack.addArrangedSubview(NeoStyle.button(text) { [weak self] in self?.onAction?("orientation:\(id)") })
       }
       append(diagnostic, size: 12, muted: true); append(commentDiagnostic, size: 12, muted: true)
+      let reload = NeoStyle.button("再読み込み") { [weak self] in self?.onAction?("reload") }
+      reload.accessibilityIdentifier = "player-settings-reload"; stack.addArrangedSubview(reload)
     default: break
     }; setNeedsLayout()
   }
@@ -559,10 +580,47 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       setDrawer(gesture.state != .ended || (translation > -drawer.bounds.width * 0.25 && gesture.velocity(in: self).x > -350))
     }
   }
-  override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
-    guard let pan = gesture as? UIPanGestureRecognizer else { return true }; let v = pan.velocity(in: self); return v.x < 0 && abs(v.x) >= abs(v.y)
+  private func navigationTarget(start: CGPoint, velocity: CGPoint) -> NeoSwipeAction? {
+    guard !drawerOpen, !drawerDragging, popup == nil else { return nil }
+    return NeoNavigationGesture.action(startY: Double(start.y), height: Double(bounds.height),
+      canGoBack: !isWide, tablet: false, horizontal: Double(velocity.x), vertical: Double(velocity.y))
   }
-  func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+  @objc private func dragNavigation(_ gesture: UIPanGestureRecognizer) {
+    updateNavigation(state: gesture.state, translation: gesture.translation(in: self).x, velocity: gesture.velocity(in: self).x)
+  }
+  private func updateNavigation(state: UIGestureRecognizer.State, translation: CGFloat, velocity: CGFloat) {
+    guard let action = navigationAction else { return }
+    if state == .began {
+      onAction?("interaction"); navigationScrollEnabled = navigationScroll?.isScrollEnabled == true
+      navigationScroll?.isScrollEnabled = false
+      if action == .menu {
+        drawerDragging = true; drawerStart = -drawer.bounds.width
+        drawer.isHidden = false; drawerDim.isHidden = false; drawer.frame.origin.x = drawerStart
+      }
+    }
+    if action == .menu && (state == .changed || state == .began) {
+      drawer.frame.origin.x = min(0, max(-drawer.bounds.width, drawerStart + translation))
+      drawerDim.alpha = 1 + drawer.frame.minX / max(1, drawer.bounds.width)
+    }
+    if [.ended, .cancelled, .failed].contains(state) {
+      let threshold = action == .menu ? drawer.bounds.width * 0.5 : bounds.width * 0.28
+      let finish = state == .ended && (translation > threshold || velocity > 450)
+      if navigationScrollEnabled { navigationScroll?.isScrollEnabled = true }
+      navigationScroll = nil; navigationAction = nil; drawerDragging = false
+      if action == .menu { setDrawer(finish) }
+      else if finish { perform("back") }
+      onAction?("interaction")
+    }
+  }
+  override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+    guard let pan = gesture as? UIPanGestureRecognizer else { return true }
+    let v = pan.velocity(in: self)
+    if gesture === navigationPan { navigationAction = navigationTarget(start: navigationStart, velocity: v); return navigationAction != nil }
+    return v.x < 0 && abs(v.x) >= abs(v.y)
+  }
+  func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+    gesture === navigationPan && other === navigationScroll?.panGestureRecognizer
+  }
   func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { comments.count }
   func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
     let cell = tableView.dequeueReusableCell(withIdentifier: "comment", for: indexPath), item = comments[indexPath.row]
@@ -591,6 +649,11 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let applied = commentOverlay?.sizeMultiplier == 1.5 && commentOverlay?.opacity == 0.4 && commentOverlay?.enabled == false
       && commentOverlay?.compositionState.size == 1.5 && commentOverlay?.compositionState.opacity == 0.4 && commentOverlay?.compositionState.enabled == false
     let stable = zip(before, stack.arrangedSubviews).allSatisfy { $0 === $1 } && before.count == stack.arrangedSubviews.count
+    let reopenedOverlay = NeoCommentOverlay(frame: .zero)
+    let persisted = reopenedOverlay.sizeMultiplier == 1.5 && reopenedOverlay.opacity == 0.4 && !reopenedOverlay.enabled
+    reopenedOverlay.stop()
+    showSettings("general"); showSettings("comments")
+    let panelRetained = commentSize.value == 1.5 && commentOpacity.value == 0.4 && !commentToggle.isOn
     if let oldEnabled, let oldSize, let oldOpacity {
       commentOverlay?.enabled = oldEnabled; commentOverlay?.setSize(oldSize); commentOverlay?.setOpacity(oldOpacity)
     }
@@ -605,7 +668,15 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       && categoryButtons[0].frame.maxX == categoryButtons[1].frame.minX && categoryButtons[1].frame.maxX == categoryButtons[2].frame.minX
     categoryButtons[0].sendActions(for: .touchUpInside)
     let returns = tab == "settings" && settingsCategory == "general" && panelOpen
-    let noReload = !stack.arrangedSubviews.compactMap { $0 as? UIButton }.contains { $0.currentTitle == "再読み込み" }
+    let generalReload = stack.arrangedSubviews.last as? UIButton
+    let reloadAtBottom = generalReload?.accessibilityIdentifier == "player-settings-reload"
+    generalReload?.sendActions(for: .touchUpInside)
+    let reloadRouted = actions.contains("reload")
+    showSettings("comments")
+    let commentsNoReload = !stack.arrangedSubviews.contains { $0.accessibilityIdentifier == "player-settings-reload" }
+    showSettings("subtitles")
+    let subtitlesNoReload = !stack.arrangedSubviews.contains { $0.accessibilityIdentifier == "player-settings-reload" }
+    showSettings("general")
     tabButtons[0].sendActions(for: .touchUpInside); tabButtons[3].sendActions(for: .touchUpInside)
     let settingsTab = tab == "settings" && settingsCategory == "general" && !panelTabs.isHidden && panelTabs.bounds.height == 72
       && tabButtons[3].accessibilityLabel == "設定" && !settingsTabs.isHidden
@@ -617,7 +688,9 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let shared = drawer.brand.frame.minX == drawer.contentSafeArea.left + 16 && drawer.logo.frame.minX - drawer.brand.frame.maxX == 7
       && config?.imageProperties.reservedLayoutSize == CGSize(width: 24, height: 27)
     onAction = handler; subtitleTracks = oldTracks; subtitleKey = ""; settingsCategory = oldCategory
-    return ["settingsStayInPanel": returns, "fixedSettingsCategoryTabs": categories, "settingsBottomTab": settingsTab, "noVideoReloadInSettings": noReload,
+    return ["settingsStayInPanel": returns, "fixedSettingsCategoryTabs": categories, "settingsBottomTab": settingsTab,
+      "videoReloadOnlyAtGeneralBottom": reloadAtBottom && reloadRouted && commentsNoReload && subtitlesNoReload,
+      "commentPreferencesRestoredInNewPlayer": persisted, "commentPreferencesRetainedAcrossPanels": panelRetained,
       "commentSettingsApplyToComposition": applied, "slidersRetainedDuringUpdates": stable,
       "danmakuExcludedFromSubtitles": filtered, "filteredSubtitleKeepsOriginalIndex": routed,
       "pipCoversVideoWithoutStoppingDrawable": covered, "pipRestoresVideo": restored, "sharedDrawerAlignmentAndIconSize": shared]
@@ -659,11 +732,40 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       tabsAligned = tabsAligned && panelTabRowsAligned()
     }
     panelOpen = false; tab = "program"; renderPanel()
+    let gestures = runNavigationChecks()
     let checks = ["rootTapRecognizer": videoTap.view === self, "hiddenButtonRevealsOnly": hiddenPlayIsBackground,
       "buttonsAndSliderExcluded": buttonsExcluded, "emptyHUDTap": hudBackground,
       "panelTapExcluded": panelExcluded, "tabsImmediateWithoutGeometryAnimation": immediate,
       "panelTabsAlignedInitially": initiallyAligned, "panelTabsStayAlignedAfterSelection": tabsAligned]
-    return checks.merging(["success": checks.values.allSatisfy { $0 }]) { _, new in new }
+    let all = checks.merging(gestures) { _, new in new }
+    return all.merging(["success": all.values.allSatisfy { $0 }]) { _, new in new }
+  }
+  private func runNavigationChecks() -> [String: Bool] {
+    let savedFrame = frame, handler = onAction
+    var actions: [String] = []; onAction = { actions.append($0) }
+    frame = CGRect(x: 0, y: 0, width: 390, height: 844); setNeedsLayout(); layoutIfNeeded()
+    let forward = CGPoint(x: 600, y: 400)
+    let top = navigationTarget(start: CGPoint(x: 200, y: 844 * 0.39), velocity: forward) == .menu
+    let lower = navigationTarget(start: CGPoint(x: 200, y: 844 * 0.4), velocity: forward) == .back
+    let vertical = navigationTarget(start: .zero, velocity: CGPoint(x: 100, y: 300)) == nil
+    navigationAction = .back; updateNavigation(state: .began, translation: 0, velocity: 0)
+    updateNavigation(state: .cancelled, translation: 300, velocity: 800)
+    let cancelled = !actions.contains("back")
+    navigationAction = .back; updateNavigation(state: .began, translation: 0, velocity: 0)
+    updateNavigation(state: .ended, translation: 200, velocity: 600)
+    let completed = actions.contains("back")
+    navigationAction = .menu; updateNavigation(state: .began, translation: 0, velocity: 0)
+    updateNavigation(state: .changed, translation: 160, velocity: 600)
+    let dragging = drawer.frame.minX > -drawer.bounds.width && drawerDim.alpha > 0
+    updateNavigation(state: .ended, translation: 200, velocity: 600)
+    let opened = drawerOpen; setDrawer(false)
+    frame = CGRect(x: 0, y: 0, width: 844, height: 390); setNeedsLayout(); layoutIfNeeded()
+    let wide = [0.1, 0.8].allSatisfy { navigationTarget(start: CGPoint(x: 300, y: 390 * $0), velocity: forward) == .menu }
+    frame = savedFrame; onAction = handler; setNeedsLayout(); layoutIfNeeded()
+    drawer.layer.removeAllAnimations(); drawerDim.layer.removeAllAnimations(); drawer.isHidden = true; drawerDim.isHidden = true
+    return ["portraitSwipe40Menu60Back": top && lower, "landscapeSwipeOnlyMenu": wide,
+      "swipeBackCompletesAndCancels": completed && cancelled, "swipeDrawerOpens": dragging && opened,
+      "verticalSwipeLeavesScrolling": vertical, "rootNavigationGesture": navigationPan.view === self]
   }
   private func panelTabRowsAligned() -> Bool {
     tabButtons.forEach { $0.layoutIfNeeded() }
@@ -702,6 +804,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     frame = CGRect(x: 0, y: 0, width: 390, height: 844); setNeedsLayout(); layoutIfNeeded()
     let below = panel.frame.minY >= videoView.frame.maxY && panel.frame.maxY == bounds.maxY && rightHeader.frame.minY == 0 && title.isHidden && reloadButton.isHidden
     let portraitTabs = panelTabRowsAligned()
+    let portraitCloseHidden = panelClose.isHidden
     let portraitThumbFits = controls.frame.minY + timeline.frame.midY + 6 <= videoView.frame.maxY
 
     tab = "rules"; rulesLoaded = true; ruleHeading = "サンプルルール"
@@ -720,7 +823,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
 
     frame = original; autoHide = originalHide; setNeedsLayout(); layoutIfNeeded()
     let noCircles = ([playButton] + jumps).allSatisfy { $0.backgroundColor == UIColor.clear && $0.layer.shadowOpacity > 0 }
-    return ["success": full && centered && lowerHUD && side && closeAligned && landscapeTabs && portraitTabs && portraitThumbFits && hudShadows && below && routing && time && noBands && smallThumb && filledPlay && noCircles && settings.values.allSatisfy { $0 }, "noBands": noBands, "noCentralBackgrounds": noCircles, "hudIconShadows": hudShadows, "panelCloseAlignedWithSubtitle": closeAligned, "panelTabsAlignedAcrossOrientations": landscapeTabs && portraitTabs, "lowerHUDWithoutMovingVideo": lowerHUD, "portraitSeekThumbFits": portraitThumbFits, "smallThumb": smallThumb, "fullVideo": full, "centerControls": centered, "landscapePanel": side, "portraitPanel": below, "buttonRouting": routing, "timeToggle": time]
+    return ["success": full && centered && lowerHUD && side && closeAligned && landscapeTabs && portraitTabs && portraitCloseHidden && portraitThumbFits && hudShadows && below && routing && time && noBands && smallThumb && filledPlay && noCircles && settings.values.allSatisfy { $0 }, "portraitSettingsCloseHidden": portraitCloseHidden, "noBands": noBands, "noCentralBackgrounds": noCircles, "hudIconShadows": hudShadows, "panelCloseAlignedWithSubtitle": closeAligned, "panelTabsAlignedAcrossOrientations": landscapeTabs && portraitTabs, "lowerHUDWithoutMovingVideo": lowerHUD, "portraitSeekThumbFits": portraitThumbFits, "smallThumb": smallThumb, "fullVideo": full, "centerControls": centered, "landscapePanel": side, "portraitPanel": below, "buttonRouting": routing, "timeToggle": time]
   }
   @objc func showSmokePanel(_ id: String) {
     if id == "settings" { settingsCategory = "general" }

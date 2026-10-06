@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import time
+import shutil
 from pathlib import Path
 
 def run(*args, timeout=120):
@@ -84,6 +85,9 @@ if '--ipad-only' in sys.argv:
     sys.exit(0)
 run('xcrun', 'simctl', 'bootstatus', device['udid'], '-b', timeout=600)
 run('xcrun', 'simctl', 'install', device['udid'], str(app))
+fixture_container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], 'io.github.nyanz00.NeoEPGStation', 'data'))
+(fixture_container / 'Documents').mkdir(exist_ok=True)
+shutil.copyfile('tests/fixtures/player-tap.ts', fixture_container / 'Documents/player-tap.ts')
 os.environ['SIMCTL_CHILD_NEO_EPG_STORAGE_SMOKE'] = '1'
 try:
     launch = run('xcrun', 'simctl', 'launch', device['udid'], 'io.github.nyanz00.NeoEPGStation')
@@ -97,7 +101,7 @@ pid = launch.rsplit(':', 1)[1].strip()
 container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], 'io.github.nyanz00.NeoEPGStation', 'data'))
 for attempt in range(18):
     time.sleep(5)
-    if (container / 'Documents/pip-player-smoke.json').exists() and (container / 'Documents/pip-composition-smoke.json').exists():
+    if (container / 'Documents/pip-player-smoke.json').exists() and (container / 'Documents/pip-composition-smoke.json').exists() and (container / 'Documents/player-tap-smoke.json').exists():
         break
 processes = run('xcrun', 'simctl', 'spawn', device['udid'], 'launchctl', 'list')
 if not any(line.split()[0] == pid for line in processes.splitlines() if line.split()):
@@ -134,7 +138,7 @@ for name in ['pip-composition-smoke', 'player-landscape-smoke', 'player-initial-
     if source.exists():
         Path(f'dist/{name}.png').write_bytes(source.read_bytes())
 results = {}
-for name in ['pip-composition-smoke', 'pip-player-smoke', 'player-ui-smoke', 'player-playback-smoke', 'player-controls-smoke', 'player-settings-smoke', 'player-exit-smoke']:
+for name in ['pip-composition-smoke', 'pip-player-smoke', 'player-ui-smoke', 'player-playback-smoke', 'player-controls-smoke', 'player-settings-smoke', 'player-exit-smoke', 'player-tap-smoke']:
     result = json.loads((container / f'Documents/{name}.json').read_text())
     Path(f'dist/{name}.json').write_text(json.dumps(result, indent=2) + '\n')
     results[name] = result

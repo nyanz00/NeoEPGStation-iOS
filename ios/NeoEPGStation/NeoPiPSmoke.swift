@@ -124,23 +124,26 @@ enum NeoPiPSmoke {
             player.modalPresentationStyle = .fullScreen
             root.present(player, animated: false) {
               DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                player.runControlsSmoke { controls in
-                  save("player-controls-smoke", controls)
-                  var result = player.runLayoutSmokeChecks()
-                  // VLC resize reporting and MTK drawable replacement are async.
-                  DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    result.merge(player.finishLayoutSmokeSnapshot()) { _, new in new }
-                    let attempted = player.startPiPSmoke()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                      result.merge(player.piPSmokeState()) { _, new in new }
-                      result["pipStartAttempted"] = attempted
-                      let primed = result["pipSupported"] as? Bool != true || result["pipStatus"] as? String == "PiP · コメント合成"
-                      result["success"] = result["success"] as? Bool == true && result["videoFillsFit"] as? Bool == true && primed && (!attempted || result["pipActive"] as? Bool == true)
-                      player.runReloadSmoke { playback in
-                        save("player-playback-smoke", playback)
-                        player.runExitSmoke(host: root) { exit in
-                          save("player-exit-smoke", exit)
-                          save("pip-player-smoke", result)
+                player.runVideoTapSmoke { encodedTap in
+                  player.runControlsSmoke { controls in
+                    save("player-controls-smoke", controls)
+                    var result = player.runLayoutSmokeChecks()
+                    // VLC resize reporting and MTK drawable replacement are async.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                      result.merge(player.finishLayoutSmokeSnapshot()) { _, new in new }
+                      let attempted = player.startPiPSmoke()
+                      DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        result.merge(player.piPSmokeState()) { _, new in new }
+                        result["pipStartAttempted"] = attempted
+                        let primed = result["pipSupported"] as? Bool != true || result["pipStatus"] as? String == "PiP · コメント合成"
+                        result["success"] = result["success"] as? Bool == true && result["videoFillsFit"] as? Bool == true && primed && (!attempted || result["pipActive"] as? Bool == true)
+                        player.runReloadSmoke { playback in
+                          save("player-playback-smoke", playback)
+                          player.runExitSmoke(host: root) { exit in
+                            save("player-exit-smoke", exit)
+                            save("pip-player-smoke", result)
+                            tsTapTest(root: root, encoded: encodedTap)
+                          }
                         }
                       }
                     }
@@ -151,6 +154,21 @@ enum NeoPiPSmoke {
           }
         }
       } catch { save("pip-player-smoke", ["success": false, "error": error.localizedDescription]) }
+    }
+  }
+  static func tsTapTest(root: UIViewController, encoded: [String: Any]) {
+    let url = directory.appendingPathComponent("player-tap.ts")
+    guard FileManager.default.fileExists(atPath: url.path) else { save("player-tap-smoke", ["success": false, "error": "missing TS fixture"]); return }
+    let player = NeoPlayerController(url: url, title: "Synthetic TS tap test", username: "", password: "", networkCaching: 100)
+    player.modalPresentationStyle = .fullScreen
+    root.present(player, animated: false) {
+      player.runVideoTapSmoke { ts in
+        player.onClose = {
+          save("player-tap-smoke", ["success": encoded["success"] as? Bool == true && ts["success"] as? Bool == true,
+            "encodedMP4": encoded, "transportStream": ts])
+        }
+        player.closeTapSmoke()
+      }
     }
   }
 }

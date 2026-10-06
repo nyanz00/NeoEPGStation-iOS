@@ -417,6 +417,10 @@
 }
 
 - (void)addSubview:(UIView *)view {
+  // VLC's UIView output forwards taps as mouse events (including pause/play).
+  // Recorded PLAY has one input owner: the app's controls on the ancestor.
+  // Apply this to each output replacement, including TS and reloads.
+  view.userInteractionEnabled = NO;
   [self.movieView addSubview:view];
   [NeoVLCFrameTap bindView:view sink:self.commentPiP];
   if (self.comments) { [self.movieView bringSubviewToFront:self.comments]; }
@@ -436,6 +440,44 @@
   [self showControls]; [self.commentPiP start];
 }
 #if TARGET_OS_SIMULATOR
+- (void)closeTapSmoke { [self closePlayer]; }
+- (void)runVideoTapSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  [self waitForTapSmokePlayback:0 completion:completion];
+}
+- (void)waitForTapSmokePlayback:(NSInteger)attempt completion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  UIView *video = [NeoVLCFrameTap videoViewInView:self.movieView];
+  if (!self.player.isPlaying || !video) {
+    if (attempt >= 30) { completion(@{@"success": @NO, @"error": @"tap fixture playback did not start"}); return; }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      [self waitForTapSmokePlayback:attempt + 1 completion:completion];
+    }); return;
+  }
+  BOOL passive = NO;
+  for (UIView *ancestor = video; ancestor && ancestor != self.movieView; ancestor = ancestor.superview) {
+    if (!ancestor.userInteractionEnabled) { passive = YES; break; }
+  }
+  NSMutableDictionary *checks = [@{@"VLCOutputDoesNotReceiveTouches": @(passive), @"playingAtStart": @YES} mutableCopy];
+  [self hideControls];
+  BOOL shown = [self.chrome smokeTapVideoBackground] && self.chrome.controlsVisible;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    checks[@"playingTapShowsWithoutPausing"] = @(shown && self.player.isPlaying);
+    BOOL hidden = [self.chrome smokeTapVideoBackground] && !self.chrome.controlsVisible;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      checks[@"playingTapHidesWithoutPausing"] = @(hidden && self.player.isPlaying);
+      [self.player pause];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        BOOL paused = !self.player.isPlaying;
+        BOOL revealed = [self.chrome smokeTapVideoBackground] && self.chrome.controlsVisible;
+        BOOL concealed = [self.chrome smokeTapVideoBackground] && !self.chrome.controlsVisible;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+          checks[@"pausedTapTogglesUIWithoutPlaying"] = @(paused && revealed && concealed && !self.player.isPlaying);
+          checks[@"success"] = [[checks allValues] indexOfObject:@NO] == NSNotFound ? @YES : @NO;
+          [self.player play]; completion(checks);
+        });
+      });
+    });
+  });
+}
 - (void)runControlsSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
   BOOL playing = self.player.isPlaying; [self.player pause];
   NSMutableDictionary *checks = [[self.chrome runInteractionChecks] mutableCopy];
