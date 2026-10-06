@@ -120,11 +120,14 @@ final class NeoSidebar: UIView, UITableViewDataSource, UITableViewDelegate {
   func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { NeoDestination.all.count }
   func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
     let cell = tableView.dequeueReusableCell(withIdentifier: "navigation", for: indexPath), item = NeoDestination.all[indexPath.row]
+    cell.insetsLayoutMarginsFromSafeArea = false; cell.preservesSuperviewLayoutMargins = false
+    cell.contentView.insetsLayoutMarginsFromSafeArea = false; cell.contentView.preservesSuperviewLayoutMargins = false
     var config = cell.defaultContentConfiguration(); config.text = item.title; config.image = NeoIcon.image(item.icon)
+    config.axesPreservingSuperviewLayoutMargins = []
     config.textProperties.font = .systemFont(ofSize: 14); config.textProperties.color = .white
     config.imageProperties.tintColor = NeoStyle.muted
     config.imageProperties.maximumSize = CGSize(width: 27, height: 27)
-    config.imageProperties.reservedLayoutSize = CGSize(width: 27, height: 27)
+    config.imageProperties.reservedLayoutSize = CGSize(width: item.icon == "AlphaA" ? 27 : 24, height: 27)
     config.imageToTextPadding = item.icon == "AlphaA" ? 13 : 16
     config.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: contentSafeArea.left + 16, bottom: 0, trailing: 16)
     cell.contentConfiguration = config; cell.backgroundColor = item.id == selected ? NeoStyle.accent.withAlphaComponent(0.16) : .clear

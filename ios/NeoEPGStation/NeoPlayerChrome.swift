@@ -52,6 +52,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   @objc(initWithTitle:)
   init(title: String) {
     super.init(frame: .zero); backgroundColor = .black; videoView.backgroundColor = .black
+    videoView.clipsToBounds = true
     self.title.text = title; self.title.lineBreakMode = .byTruncatingTail
     channel.textColor = NeoStyle.muted; logo.contentMode = .scaleAspectFit
     [videoView, pipCover, videoDim, header, controls, centerControls, panel, statusLabel, drawerDim, drawer].forEach(addSubview)
@@ -65,6 +66,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     configure(backButton, icon: "ArrowBack", label: "録画詳細へ戻る", action: "back")
     configure(infoButton, icon: "InfoOutlined", label: "番組情報", action: "program")
     configure(pipButton, symbol: "pip.enter", label: "コメント付きPiP", action: "pip")
+    pipButton.setImage(UIImage(systemName: "pip.enter", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .medium))?.withRenderingMode(.alwaysTemplate), for: .normal)
     configure(commentButton, icon: "ChatBubbleOutlineOutlined", label: "コメント設定", action: "comments-settings")
     configure(settingsButton, icon: "SettingsOutlined", label: "プレイヤー設定", action: "settings")
     configure(rotationButton, icon: "ScreenRotation", label: "画面の向きを切り替えて固定", action: "rotate")
@@ -212,7 +214,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     for (index, button) in [infoButton, pipButton, commentButton, settingsButton].enumerated() {
       button.frame = CGRect(x: CGFloat(index) * 40, y: 0, width: 40, height: 44)
     }
-    let controlsHeight: CGFloat = wide ? 80 : 46
+    let controlsHeight: CGFloat = wide ? 80 : 50
     let bottom = wide ? bounds.height - safe.bottom : videoView.frame.maxY
     controls.frame = CGRect(x: safe.left + 8, y: bottom - controlsHeight, width: header.bounds.width, height: controlsHeight)
     let timeWidth = min(controls.bounds.width - 48, max(90, timeLabel.intrinsicContentSize.width + 16))
@@ -587,7 +589,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let cell = drawer.tableView(drawer.list, cellForRowAt: IndexPath(row: 0, section: 0))
     let config = cell.contentConfiguration as? UIListContentConfiguration
     let shared = drawer.brand.frame.minX == drawer.contentSafeArea.left + 16 && drawer.logo.frame.minX - drawer.brand.frame.maxX == 7
-      && config?.imageProperties.reservedLayoutSize == CGSize(width: 27, height: 27)
+      && config?.imageProperties.reservedLayoutSize == CGSize(width: 24, height: 27)
     onAction = handler; subtitleTracks = oldTracks; subtitleKey = ""; settingsCategory = oldCategory
     return ["settingsStayInPanel": returns, "commentSettingsApplyToComposition": applied, "slidersRetainedDuringUpdates": stable,
       "danmakuExcludedFromSubtitles": filtered, "filteredSubtitleKeepsOriginalIndex": routed,
