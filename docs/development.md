@@ -29,7 +29,7 @@ Swift / UIKit版のビルド32の検証結果は `swift-ui-verification.md` を�
 録画メニュー・PLAY選択欄・ドロップ表示・サイドメニューを閉じる操作のビルド44の結果は `recorded-menus-verification.md` を参照する。
 録画操作ボタン・THUMB設定・一覧メニュー・ログダイアログと設定取得のビルド45の結果は `recording-ui-parity-verification.md` を参照する。
 PLAYメニューの中央揃えとWeb色定義への修正を含むビルド46の結果は `play-menu-color-verification.md` を参照する。
-プレイヤーの新配置・情報パネル・回転固定・リロードを含むビルド50の結果は `player-ui-verification.md` を参照する。
+プレイヤーの新配置・情報パネル・回転固定・リロードと操作の見やすさ・縦画面初期表示を含むビルド53の結果は `player-ui-verification.md` を参照する。
 端末の起動・導入だけで検証が中断した場合は、Actionsの手動実行で `reuse_run` に
 生成済みビルドのrun IDを指定すると、保存したシミュレーター用アプリでiPad UIのみを再確認できる。
 アプリ・ネイティブコード・依存ロックが同一で、元ビルドの保存・再生・コメント合成・iPhone UIの
