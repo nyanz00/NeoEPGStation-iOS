@@ -273,6 +273,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     // Cover the drawable rather than hiding it: VLC must keep supplying frames
     // for the PiP compositor, including while the app remains in foreground.
     pipCover.isHidden = !active
+    centerControls.isHidden = active
   }
   @objc var interactionOpen: Bool { drawerOpen || popup != nil }
   @objc var controlTracking: Bool {
@@ -584,8 +585,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     general?.sendActions(for: .touchUpInside)
     let returns = tab == "settings" && settingsCategory == "general" && panelOpen
     let frameBefore = videoView.frame; updatePiP(true)
-    let covered = !pipCover.isHidden && pipCover.frame == videoView.frame && pipCover.backgroundColor == UIColor.black && !videoView.isHidden && videoView.frame == frameBefore
-    updatePiP(false); let restored = pipCover.isHidden && !videoView.isHidden
+    let covered = !pipCover.isHidden && pipCover.frame == videoView.frame && pipCover.backgroundColor == UIColor.black && !videoView.isHidden && videoView.frame == frameBefore && centerControls.isHidden
+    updatePiP(false); let restored = pipCover.isHidden && !videoView.isHidden && !centerControls.isHidden
     let cell = drawer.tableView(drawer.list, cellForRowAt: IndexPath(row: 0, section: 0))
     let config = cell.contentConfiguration as? UIListContentConfiguration
     let shared = drawer.brand.frame.minX == drawer.contentSafeArea.left + 16 && drawer.logo.frame.minX - drawer.brand.frame.maxX == 7
