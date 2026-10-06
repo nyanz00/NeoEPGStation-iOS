@@ -18,7 +18,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)startPiPSmoke;
 - (NSDictionary<NSString *, id> *)piPSmokeState;
 - (void)runReloadSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runReloadSmoke(completion:));
-- (void)runExitSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runExitSmoke(completion:));
+- (void)runExitSmokeFromHost:(UIViewController *)host completion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runExitSmoke(host:completion:));
 #endif
 @end
 NS_ASSUME_NONNULL_END

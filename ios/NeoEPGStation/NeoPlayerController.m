@@ -576,16 +576,17 @@
   if (!self.commentPiP.possible) { return NO; }
   [self.commentPiP start]; return YES;
 }
-- (void)runExitSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
+- (void)runExitSmokeFromHost:(UIViewController *)host completion:(void (^)(NSDictionary<NSString *, id> *))completion {
   [self setOrientation:@"landscape"];
   [self waitForSmokeOrientation:UIInterfaceOrientationLandscapeRight attempt:0 completion:^(BOOL locked) {
     if (!locked) { completion(@{@"success": @NO, @"landscapeBeforeExit": @NO}); return; }
-    UIViewController *host = self.presentingViewController;
     self.onNavigate = ^(NSString *route) {
       [self waitForHostPortrait:host attempt:0 completion:^(BOOL portrait) {
-        completion(@{@"success": @(portrait && [route isEqualToString:@"recorded"]), @"landscapeBeforeExit": @YES,
-          @"sidebarRouteDelivered": @([route isEqualToString:@"recorded"]), @"hostPortraitAfterExit": @(portrait),
-          @"hostPortraitOnly": @(host.supportedInterfaceOrientations == UIInterfaceOrientationMaskPortrait)});
+        completion(@{@"success": portrait && [route isEqualToString:@"recorded"] ? @YES : @NO, @"landscapeBeforeExit": @YES,
+          @"sidebarRouteDelivered": [route isEqualToString:@"recorded"] ? @YES : @NO, @"hostPortraitAfterExit": portrait ? @YES : @NO,
+          @"hostPortraitOnly": host.supportedInterfaceOrientations == UIInterfaceOrientationMaskPortrait ? @YES : @NO,
+          @"hostClass": NSStringFromClass(host.class), @"hostOrientationMask": @(host.supportedInterfaceOrientations),
+          @"sceneOrientation": @(host.view.window.windowScene.interfaceOrientation), @"hostFrame": NSStringFromCGRect(host.view.bounds)});
       }];
     };
     [self performPlayerAction:@"navigate:recorded"];
@@ -646,7 +647,7 @@
   void (^navigate)(NSString *) = self.onNavigate; self.onNavigate = nil;
   void (^recording)(NSInteger) = self.onRecording; self.onRecording = nil;
   NSString *route = self.pendingRoute; NSInteger recordingID = self.pendingRecording;
-  UIViewController *presenter = self.presentingViewController;
+  UIViewController *presenter = self.view.window.rootViewController ?: self.presentingViewController;
   UIWindowScene *scene = self.view.window.windowScene;
   [self dismissViewControllerAnimated:YES completion:^{
     // Reset the scene as well as the mask: a manually locked landscape scene
