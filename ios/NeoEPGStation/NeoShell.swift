@@ -85,7 +85,52 @@ class NeoPage: UIViewController {
   }
 }
 
-final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelegate, UIGestureRecognizerDelegate, UINavigationControllerDelegate {
+// The same drawer content is used by navigation and fullscreen playback.
+// Explicit safe-area margins keep the brand and icons aligned in either host.
+final class NeoSidebar: UIView, UITableViewDataSource, UITableViewDelegate {
+  let brand = NeoStyle.label("NeoEPGStation", size: 18, bold: true)
+  let logo = UIImageView(image: UIImage(named: "Brand"))
+  let list = UITableView(frame: .zero, style: .plain)
+  var onSelect: ((String) -> Void)?
+  var selected = "recorded" { didSet { if oldValue != selected { list.reloadData() } } }
+  var contentSafeArea = UIEdgeInsets.zero { didSet { setNeedsLayout() } }
+  override init(frame: CGRect) {
+    super.init(frame: frame); backgroundColor = NeoStyle.paper
+    [brand, logo, list].forEach(addSubview); logo.contentMode = .scaleAspectFit
+    list.backgroundColor = .clear; list.separatorStyle = .none; list.rowHeight = 40
+    list.contentInsetAdjustmentBehavior = .never; list.insetsContentViewsToSafeArea = false
+    list.contentInset.top = 8; list.dataSource = self; list.delegate = self
+    list.register(UITableViewCell.self, forCellReuseIdentifier: "navigation")
+    layer.borderColor = NeoStyle.border.cgColor; layer.borderWidth = 0.5
+  }
+  required init?(coder: NSCoder) { fatalError() }
+  override func layoutSubviews() {
+    super.layoutSubviews(); let safe = contentSafeArea
+    let logoWidth = (logo.image?.size.width ?? 28) / max(1, logo.image?.size.height ?? 28) * 28
+    let left = safe.left + 16
+    brand.frame = CGRect(x: left, y: safe.top, width: min(ceil(brand.intrinsicContentSize.width), max(0, bounds.width - left - logoWidth - 11)), height: 60)
+    logo.frame = CGRect(x: brand.frame.maxX + 7, y: safe.top + 16, width: logoWidth, height: 28)
+    list.frame = CGRect(x: 0, y: safe.top + 60, width: bounds.width, height: max(0, bounds.height - safe.top - 60 - safe.bottom))
+  }
+  func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { NeoDestination.all.count }
+  func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+    let cell = tableView.dequeueReusableCell(withIdentifier: "navigation", for: indexPath), item = NeoDestination.all[indexPath.row]
+    var config = cell.defaultContentConfiguration(); config.text = item.title; config.image = NeoIcon.image(item.icon)
+    config.textProperties.font = .systemFont(ofSize: 14); config.textProperties.color = .white
+    config.imageProperties.tintColor = NeoStyle.muted
+    config.imageProperties.maximumSize = CGSize(width: 27, height: 24)
+    config.imageProperties.reservedLayoutSize = CGSize(width: 27, height: 24)
+    config.imageToTextPadding = item.icon == "AlphaA" ? 13 : 16
+    config.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: contentSafeArea.left + 16, bottom: 0, trailing: 16)
+    cell.contentConfiguration = config; cell.backgroundColor = item.id == selected ? NeoStyle.accent.withAlphaComponent(0.16) : .clear
+    cell.accessibilityIdentifier = "menu-" + item.id; return cell
+  }
+  func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+    tableView.deselectRow(at: indexPath, animated: false); onSelect?(NeoDestination.all[indexPath.row].id)
+  }
+}
+
+final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigationControllerDelegate {
   let storage = NeoNative()
   private(set) var api: NeoAPI?
   private(set) var channels: [Int: String] = [:]
@@ -94,10 +139,9 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   // Each destination keeps its own stack. Switching tabs never adds a back target.
   private var controllers: [String: UINavigationController] = [:]
   private var active: UINavigationController?
-  private let content = UIView(), sidebar = UIView(), bottom = UIView(), dim = UIView()
-  private let menuList = UITableView(frame: .zero, style: .plain)
-  private let brand = NeoStyle.label("NeoEPGStation", size: 18, bold: true)
-  private let logo = UIImageView(image: UIImage(named: "Brand"))
+  private let content = UIView(), bottom = UIView(), dim = UIView()
+  private let sidebar = NeoSidebar()
+  private var sidebarWidth: CGFloat { 240 + view.safeAreaInsets.left }
   private var shortcuts: [String] = []
   private var bottomButtons: [UIButton] = []
   private var menuOpen = false, tabletExpanded = true
@@ -128,10 +172,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     shortcuts = storage.shortcuts
     view.addSubview(content); view.addSubview(bottom); view.addSubview(dim); view.addSubview(sidebar)
     sidebar.backgroundColor = NeoStyle.paper; bottom.backgroundColor = NeoStyle.paper
-    sidebar.addSubview(brand); sidebar.addSubview(logo); sidebar.addSubview(menuList)
-    menuList.backgroundColor = .clear; menuList.separatorStyle = .none; menuList.rowHeight = 40
-    menuList.dataSource = self; menuList.delegate = self; menuList.contentInset.top = 8
-    menuList.register(UITableViewCell.self, forCellReuseIdentifier: "menu")
+    sidebar.onSelect = { [weak self] in self?.showRoute($0) }
     dim.backgroundColor = UIColor.black.withAlphaComponent(0.5); dim.alpha = 0
     dim.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(closeMenu)))
     contentPan = UIPanGestureRecognizer(target: self, action: #selector(dragContent(_:))); contentPan.delegate = self
@@ -156,7 +197,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
     let safe = view.safeAreaInsets, width = view.bounds.width
-    let sidebarWidth: CGFloat = tablet && tabletExpanded ? 240 : 0
+    let sidebarWidth: CGFloat = tablet && tabletExpanded ? self.sidebarWidth : 0
     let navHeight: CGFloat = tablet ? 0 : 56
     content.frame = CGRect(x: sidebarWidth, y: safe.top, width: max(0, width - sidebarWidth), height: max(0, view.bounds.height - safe.top - safe.bottom - navHeight))
     active?.view.frame = content.bounds
@@ -168,14 +209,9 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     }
     dim.frame = view.bounds; dim.isHidden = tablet || api == nil
     sidebar.isHidden = api == nil || tablet && !tabletExpanded
-    let sidebarX: CGFloat = menuDragging ? sidebar.frame.minX : tablet || menuOpen ? 0 : -240
-    sidebar.frame = CGRect(x: sidebarX, y: 0, width: 240, height: view.bounds.height)
-    let brandWidth = min(173, ceil(brand.intrinsicContentSize.width))
-    brand.frame = CGRect(x: 16, y: safe.top, width: brandWidth, height: 60)
-    let logoWidth = (logo.image?.size.width ?? 28) / max(1, logo.image?.size.height ?? 28) * 28
-    logo.frame = CGRect(x: brand.frame.maxX + 7, y: safe.top + 16, width: logoWidth, height: 28); logo.contentMode = .scaleAspectFit
-    menuList.frame = CGRect(x: 0, y: safe.top + 60, width: 240, height: max(0, view.bounds.height - safe.top - 60 - safe.bottom))
-    sidebar.layer.borderColor = NeoStyle.border.cgColor; sidebar.layer.borderWidth = 0.5
+    let sidebarX: CGFloat = menuDragging ? sidebar.frame.minX : tablet || menuOpen ? 0 : -self.sidebarWidth
+    sidebar.frame = CGRect(x: sidebarX, y: 0, width: self.sidebarWidth, height: view.bounds.height)
+    sidebar.contentSafeArea = safe
     bottom.layer.borderColor = NeoStyle.border.cgColor; bottom.layer.borderWidth = 0.5
     popup?.setNeedsLayout()
   }
@@ -225,7 +261,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
       nav.interactivePopGestureRecognizer?.isEnabled = false
       controllers[id] = nav
     }
-    attach(nav); menuList.reloadData(); updateBottom(); setMenu(false, animated: true)
+    attach(nav); sidebar.selected = route; updateBottom(); setMenu(false, animated: true)
   }
   private func attach(_ nav: UINavigationController) {
     if active !== nav {
@@ -280,7 +316,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
     guard !tablet else { return }
     if open { dismissPopup() }
     menuOpen = open
-    let changes = { self.sidebar.frame.origin.x = open ? 0 : -240; self.dim.alpha = open ? 1 : 0 }
+    let changes = { self.sidebar.frame.origin.x = open ? 0 : -self.sidebarWidth; self.dim.alpha = open ? 1 : 0 }
     if animated { UIView.animate(withDuration: 0.22, delay: 0, options: [.beginFromCurrentState, .curveEaseOut], animations: changes) }
     else { changes() }
     sidebar.accessibilityViewIsModal = open
@@ -302,14 +338,14 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
       menuDragging = true
       let x = sidebar.layer.presentation()?.frame.minX ?? sidebar.frame.minX
       sidebar.layer.removeAllAnimations(); dim.layer.removeAllAnimations()
-      sidebar.frame.origin.x = x; panStart = min(240, max(0, x + 240)); dim.alpha = panStart / 240
+      sidebar.frame.origin.x = x; panStart = min(sidebarWidth, max(0, x + sidebarWidth)); dim.alpha = panStart / sidebarWidth
     }
-    let progress = min(240, max(0, panStart + translation))
+    let progress = min(sidebarWidth, max(0, panStart + translation))
     if state == .changed || state == .began {
-      sidebar.frame.origin.x = progress - 240; dim.alpha = progress / 240
+      sidebar.frame.origin.x = progress - sidebarWidth; dim.alpha = progress / sidebarWidth
     } else if state == .ended {
       menuDragging = false
-      setMenu(abs(velocity) > 350 ? velocity > 0 : progress > 120, animated: true)
+      setMenu(abs(velocity) > 350 ? velocity > 0 : progress > sidebarWidth / 2, animated: true)
     } else if state == .cancelled || state == .failed { menuDragging = false; setMenu(menuOpen, animated: true) }
   }
   private var canGoBack: Bool { (active?.viewControllers.count ?? 1) > 1 }
@@ -438,19 +474,6 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
       b.accessibilityTraits = shortcuts[i] == route ? [.button, .selected] : .button
     }
   }
-  func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { NeoDestination.all.count }
-  func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-    let cell = tableView.dequeueReusableCell(withIdentifier: "menu", for: indexPath), item = NeoDestination.all[indexPath.row]
-    var config = cell.defaultContentConfiguration(); config.text = item.title; config.image = NeoIcon.image(item.icon)
-    config.textProperties.font = .systemFont(ofSize: 14); config.textProperties.color = .white
-    config.imageProperties.tintColor = NeoStyle.muted
-    config.imageToTextPadding = item.icon == "AlphaA" ? 13 : 16
-    config.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
-    cell.contentConfiguration = config
-    cell.backgroundColor = item.id == route ? NeoStyle.accent.withAlphaComponent(0.16) : .clear
-    cell.accessibilityIdentifier = "menu-" + item.id; return cell
-  }
-  func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) { showRoute(NeoDestination.all[indexPath.row].id) }
 
 #if targetEnvironment(simulator)
   private var backSmokeDetails: [String: Any] = [:]
@@ -484,7 +507,7 @@ final class NeoShell: UIViewController, UITableViewDataSource, UITableViewDelega
         let cachedFade = recorded.lastFadeDuration
         runBackSmoke(recorded) { [weak self] correct in
           guard let self else { return }
-          let gap = self.logo.frame.minX - self.brand.frame.maxX
+          let gap = self.sidebar.logo.frame.minX - self.sidebar.brand.frame.maxX
           NeoNative.writeSmoke("ui-gestures-smoke", ["success": correct && drawerClosed && popupCycles && gap == 7 && thumbnails && freshFade == 0.5 && cachedFade == 0.32,
             "stage": "gestures", "route": self.route, "recordCount": recorded.records.count,
             "theme": "neon-teal-dark", "uiEngine": "Swift / UIKit", "retainedList": retained,

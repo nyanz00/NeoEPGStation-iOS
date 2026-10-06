@@ -112,6 +112,7 @@
     return weakSelf.player.isPlaying && !weakSelf.scrubbing && !weakSelf.buffering && !weakSelf.closing && !weakSelf.reloading;
   };
   self.comments.onChange = ^{ [weakSelf updateCommentState]; };
+  [self.chrome bindCommentSettings:self.comments];
   [self.movieView addSubview:self.comments];
   self.frameTapInstalled = [NeoVLCFrameTap install];
   self.commentPiP = [NeoCommentPiP new];
@@ -211,12 +212,15 @@
   } else if ([action hasPrefix:@"cache:"]) { self.networkCaching = MAX(1000, MIN(30000, [action substringFromIndex:6].integerValue * 1000)); }
   else if ([action hasPrefix:@"subtitle:"]) {
     NSInteger index = [action substringFromIndex:9].integerValue;
-    if (index < 0) { [self.player deselectAllTextTracks]; }
-    else if (index < self.player.textTracks.count) {
+    if (index < 0) {
+      for (VLCMediaPlayerTrack *track in self.player.textTracks) {
+        if (![NeoCommentOverlay isCommentName:track.trackName ?: @""] && ![NeoCommentOverlay isCommentName:track.trackDescription ?: @""]) { track.selected = NO; }
+      }
+    } else if (index < self.player.textTracks.count) {
       VLCMediaPlayerTrack *track = self.player.textTracks[index];
-      if ([NeoCommentOverlay isCommentName:track.trackName] || [NeoCommentOverlay isCommentName:track.trackDescription ?: @""]) { self.comments.enabled = NO; }
-      [self.player selectTextTracks:@[track]];
+      if (![NeoCommentOverlay isCommentName:track.trackName ?: @""] && ![NeoCommentOverlay isCommentName:track.trackDescription ?: @""]) { [self.player selectTextTracks:@[track]]; }
     }
+    [self updateSubtitleSettings];
   } else if ([action hasPrefix:@"navigate:"]) { self.pendingRoute = [action substringFromIndex:9]; [self closePlayer]; }
   else if ([action hasPrefix:@"recording:"]) { self.pendingRecording = [action substringFromIndex:10].integerValue; [self closePlayer]; }
 }
@@ -280,13 +284,15 @@
 - (void)cancelScrubbing { self.scrubbing = NO; [self showControls]; }
 - (void)endScrubbing { if (self.player.isSeekable) { self.player.position = self.timeline.value; } self.scrubbing = NO; [self showControls]; }
 
-- (void)showSubtitles {
-  [self showControls]; NSMutableArray *names = [NSMutableArray new];
-  for (VLCMediaPlayerTrack *track in self.player.textTracks) { [names addObject:track.trackName ?: @"字幕"]; }
-  [self.chrome showSubtitleChoices:names];
+- (void)updateSubtitleSettings {
+  NSMutableArray *tracks = [NSMutableArray new]; NSInteger index = 0;
+  for (VLCMediaPlayerTrack *track in self.player.textTracks) {
+    [tracks addObject:@{@"index": @(index++), @"name": track.trackName ?: @"字幕", @"detail": track.trackDescription ?: @"", @"selected": @(track.isSelected)}];
+  }
+  [self.chrome updateSubtitleTracks:tracks];
 }
-
-- (void)showComments { [self showControls]; [self presentViewController:[self.comments makeSettingsController] animated:YES completion:nil]; }
+- (void)showSubtitles { [self showControls]; [self updateSubtitleSettings]; [self.chrome showSettings:@"subtitles"]; }
+- (void)showComments { [self showControls]; [self.chrome showSettings:@"comments"]; }
 
 - (void)updateCommentState {
   if (self.closing) { return; }
@@ -295,6 +301,7 @@
     self.comments.enabled ? @"" : @" · 専用描画オフ"];
   [self.commentPiP updateCommentsFrom:self.comments];
   if (self.chrome.commentVersion != self.comments.panelVersion) { [self.chrome setCommentRows:[self.comments panelComments] version:self.comments.panelVersion]; }
+  [self.chrome refreshCommentSettings];
   [self.chrome updateDiagnostics];
   for (VLCMediaPlayerTrack *track in self.player.textTracks) {
     if (![NeoCommentOverlay isCommentName:track.trackName] && ![NeoCommentOverlay isCommentName:track.trackDescription ?: @""]) { continue; }
@@ -315,7 +322,8 @@
   int64_t current = MAX(0, self.player.time.value.longLongValue / 1000);
   int64_t length = MAX(0, self.player.media.length.value.longLongValue / 1000);
   [self.chrome updatePlayback:self.player.isPlaying current:current duration:length];
-  self.subtitleButton.enabled = self.player.textTracks.count > 0 && !self.reloading;
+  self.subtitleButton.enabled = !self.reloading;
+  [self updateSubtitleSettings];
   CGSize size = self.player.videoSize;
   VLCMediaVideoTrack *video = self.player.media.videoTracks.firstObject.video;
   if (video.sourceAspectRatio > 0 && video.sourceAspectRatioDenominator > 0) {
@@ -417,6 +425,7 @@
 - (void)updatePiPState {
   if (self.closing) { return; }
   BOOL wasActive = self.pipActive; self.pipActive = self.commentPiP.active;
+  [self.chrome updatePiP:self.pipActive];
   self.pipButton.enabled = self.frameTapInstalled && self.commentPiP.possible;
   if (!self.frameTapInstalled) { self.commentLabel.text = @"PiP · VLCの映像出力を取得できません。"; }
   if (wasActive && !self.pipActive && UIApplication.sharedApplication.applicationState == UIApplicationStateBackground) {
@@ -436,11 +445,13 @@
   checks[@"tapShows"] = @(showTap); checks[@"tapHides"] = @(hideTap);
   [self.chrome smokeTapVideoBackground];
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    checks[@"fadeInCompletes"] = self.chrome.controls.layer.presentationLayer.opacity > 0.99 ? @YES : @NO;
     [self performPlayerAction:@"interaction"];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
       checks[@"interactionRestartsTwoSeconds"] = @(self.chrome.controlsVisible);
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         checks[@"pausedIdleHides"] = self.chrome.controlsVisible ? @NO : @YES;
+        checks[@"fadeOutCompletes"] = self.chrome.controls.layer.presentationLayer.opacity < 0.01 ? @YES : @NO;
         [self beginScrubbing];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
           checks[@"scrubbingStaysVisible"] = @(self.chrome.controlsVisible);
@@ -463,7 +474,9 @@
   self.smokeSavedFrame = self.view.frame;
   self.view.frame = CGRectMake(0, 0, 844, 390);
   [self applyPlayerLayout:self.view.bounds.size]; [self.view layoutIfNeeded];
-  BOOL full = CGRectEqualToRect(self.movieView.frame, self.view.bounds);
+  UIEdgeInsets safe = self.view.safeAreaInsets;
+  BOOL full = CGRectGetMinX(self.movieView.frame) >= safe.left && CGRectGetMaxX(self.movieView.frame) <= self.view.bounds.size.width - safe.right &&
+    CGRectGetMinY(self.movieView.frame) >= safe.top && CGRectGetMaxY(self.movieView.frame) <= self.view.bounds.size.height - safe.bottom;
   BOOL overlay = self.header.frame.size.height < 80 && CGRectGetMaxY(self.controls.frame) <= 390;
   NSMutableDictionary *layout = [[self.chrome runLayoutChecks] mutableCopy];
   layout[@"initialPortrait"] = @(initialPortrait);
@@ -525,11 +538,18 @@
       [self waitForSmokeOrientation:UIInterfaceOrientationLandscapeRight attempt:0 completion:^(BOOL locked) {
         [self.chrome showSmokePanel:@"program"]; [self.chrome snapshot:@"player-info-landscape"];
         [self.chrome showSmokePanel:@"controls"]; [self.chrome snapshot:@"player-controls-landscape"];
+        [self.chrome snapshotDrawer:@"player-drawer-landscape"];
+        [self.chrome snapshotPiPNotice:@"player-pip-notice"];
+        [self.chrome snapshotSettings:@"general" name:@"player-settings-landscape"];
+        [self.chrome snapshotSettings:@"comments" name:@"player-comment-settings-landscape"];
+        [self.chrome snapshotSettings:@"subtitles" name:@"player-subtitle-settings-landscape"];
         [self setOrientation:@"portrait"];
         [self waitForSmokeOrientation:UIInterfaceOrientationPortrait attempt:0 completion:^(BOOL portrait) {
           [self.chrome showSmokePanel:@"program"]; [self.chrome snapshot:@"player-info-portrait"];
           [self.chrome showSmokePanel:@"rules"]; [self.chrome snapshot:@"player-rules-portrait"];
           [self.chrome showSmokePanel:@"settings"]; [self.chrome snapshot:@"player-settings-portrait"];
+          [self.chrome snapshotSettings:@"comments" name:@"player-comment-settings-portrait"];
+          [self.chrome snapshotSettings:@"subtitles" name:@"player-subtitle-settings-portrait"];
           [self.chrome showSmokePanel:@"controls"]; [self.chrome snapshot:@"player-controls-portrait"];
           [self setOrientation:@"auto"];
           completion(@{@"success": locked && portrait ? @YES : @NO, @"reloadStatusCleared": @(statusCleared), @"pausedReload": @YES, @"playingReload": @YES, @"positionPreserved": @(position), @"ratePreserved": @(settings), @"commentsPreserved": @(self.comments.ready), @"landscapeLock": @(locked), @"portraitLock": @(portrait), @"autoOrientation": self.orientationMask == UIInterfaceOrientationMaskAllButUpsideDown ? @YES : @NO});

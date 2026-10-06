@@ -17,7 +17,16 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private let logo = UIImageView(), channel = NeoStyle.label(size: 11), title = NeoStyle.label(size: 15, bold: true)
   private let leftHeader = UIView(), rightHeader = UIView(), videoDim = UIView()
   private let videoTap = UITapGestureRecognizer()
-  private let settingsSubtitles = UIButton(type: .system)
+  private var settingsCategory = "general"
+  private weak var commentOverlay: NeoCommentOverlay?
+  private var subtitleTracks: [[String: Any]] = []
+  private let commentToggle = UISwitch(), commentSize = UISlider(), commentOpacity = UISlider()
+  private let commentSizeLabel = NeoStyle.label(), commentOpacityLabel = NeoStyle.label()
+  private let commentStatus = NeoStyle.label(size: 12, muted: true), commentStats = NeoStyle.label(size: 12, muted: true)
+  private let commentTracks = UIStackView()
+  private var commentTrackKey = "", subtitleKey = ""
+  private var hudVisible = true
+  private let pipCover = UIView(), pipMessage = NeoStyle.label("ピクチャインピクチャで視聴中", size: 16)
   private var isWide: Bool { bounds.width > bounds.height }
   private var panelVisible: Bool { !isWide || panelOpen }
   private let menuButton = UIButton(type: .system), backButton = UIButton(type: .system)
@@ -36,8 +45,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private var task: Task<Void, Never>?, relatedTask: Task<Void, Never>?, logoTask: URLSessionDataTask?
   private var popup: NeoAnchoredMenu?, remainingTime = false, current: Int64 = 0, duration: Int64 = 0
   private var cacheSeconds = 5, speed: Float = 1
-  private let drawer = UIView(), drawerDim = UIButton(type: .custom), drawerTable = UITableView(frame: .zero, style: .plain)
-  private let brand = NeoStyle.label("NeoEPGStation", size: 18, bold: true), brandLogo = UIImageView(image: UIImage(named: "Brand"))
+  private let drawer = NeoSidebar(), drawerDim = UIButton(type: .custom)
   private var drawerOpen = false, drawerStart: CGFloat = 0
   private var diagnostic = "", commentDiagnostic = ""
 
@@ -46,7 +54,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     super.init(frame: .zero); backgroundColor = .black; videoView.backgroundColor = .black
     self.title.text = title; self.title.lineBreakMode = .byTruncatingTail
     channel.textColor = NeoStyle.muted; logo.contentMode = .scaleAspectFit
-    [videoView, videoDim, header, controls, centerControls, panel, statusLabel, drawerDim, drawer].forEach(addSubview)
+    [videoView, pipCover, videoDim, header, controls, centerControls, panel, statusLabel, drawerDim, drawer].forEach(addSubview)
     header.addSubview(leftHeader); header.addSubview(rightHeader)
     [menuButton, backButton, logo, channel, self.title].forEach(leftHeader.addSubview)
     [infoButton, pipButton, commentButton, settingsButton].forEach(rightHeader.addSubview)
@@ -56,7 +64,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     configure(menuButton, icon: "Menu", label: "サイドメニュー", action: "menu")
     configure(backButton, icon: "ArrowBack", label: "録画詳細へ戻る", action: "back")
     configure(infoButton, icon: "InfoOutlined", label: "番組情報", action: "program")
-    configure(pipButton, icon: "PictureInPictureAltOutlined", label: "コメント付きPiP", action: "pip")
+    configure(pipButton, symbol: "pip.enter", label: "コメント付きPiP", action: "pip")
     configure(commentButton, icon: "ChatBubbleOutlineOutlined", label: "コメント設定", action: "comments-settings")
     configure(settingsButton, icon: "SettingsOutlined", label: "プレイヤー設定", action: "settings")
     configure(rotationButton, icon: "ScreenRotation", label: "画面の向きを切り替えて固定", action: "rotate")
@@ -72,15 +80,24 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     configure(playButton, icon: "Pause", label: "再生・一時停止", action: "play")
     playButton.setImage(playerIcon("Pause", side: 60), for: .normal)
     ([playButton] + jumps).forEach { button in
-      button.backgroundColor = .black.withAlphaComponent(0.55)
-      button.layer.shadowColor = UIColor.black.cgColor; button.layer.shadowOpacity = 0.25
+      button.backgroundColor = .clear
+      button.layer.shadowColor = UIColor.black.cgColor; button.layer.shadowOpacity = 0.7
       button.layer.shadowRadius = 2; button.layer.shadowOffset = .zero
     }
     timeLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
-    timeLabel.textAlignment = .center; timeButton.backgroundColor = .black.withAlphaComponent(0.6)
+    timeLabel.textAlignment = .center; timeButton.backgroundColor = UIColor(white: 0.32, alpha: 0.8)
     timeButton.layer.cornerRadius = 12
     videoDim.backgroundColor = .black.withAlphaComponent(0.18); videoDim.isUserInteractionEnabled = false
-    configure(settingsSubtitles, icon: "SubtitlesOutlined", label: "字幕", action: "subtitles")
+    pipCover.backgroundColor = .black; pipCover.isHidden = true; pipCover.isUserInteractionEnabled = false
+    pipMessage.textAlignment = .center; pipMessage.numberOfLines = 0; pipCover.addSubview(pipMessage)
+    commentTracks.axis = .vertical; commentTracks.spacing = 6
+    commentSize.minimumValue = 0.5; commentSize.maximumValue = 2
+    commentOpacity.minimumValue = 0; commentOpacity.maximumValue = 1
+    commentToggle.onTintColor = NeoStyle.accent
+    [commentSize, commentOpacity].forEach { $0.tintColor = NeoStyle.accent }
+    commentToggle.addAction(UIAction { [weak self] _ in guard let self else { return }; self.onAction?("interaction"); self.commentOverlay?.enabled = self.commentToggle.isOn }, for: .valueChanged)
+    commentSize.addAction(UIAction { [weak self] _ in guard let self else { return }; self.onAction?("interaction"); self.commentOverlay?.setSize(Double(self.commentSize.value)) }, for: .valueChanged)
+    commentOpacity.addAction(UIAction { [weak self] _ in guard let self else { return }; self.onAction?("interaction"); self.commentOverlay?.setOpacity(self.commentOpacity.value) }, for: .valueChanged)
     centerControls.addSubview(playButton)
     timeline.minimumTrackTintColor = NeoStyle.accent; timeline.maximumTrackTintColor = .white.withAlphaComponent(0.35)
     timeline.thumbTintColor = .white; timeline.accessibilityLabel = "再生位置"
@@ -116,10 +133,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     }
     drawer.backgroundColor = NeoStyle.paper; drawerDim.backgroundColor = .black.withAlphaComponent(0.5)
     drawerDim.addAction(UIAction { [weak self] _ in self?.setDrawer(false) }, for: .touchUpInside)
-    drawer.addSubview(brand); drawer.addSubview(brandLogo); drawer.addSubview(drawerTable)
-    drawerTable.backgroundColor = NeoStyle.paper; drawerTable.separatorStyle = .none
-    drawerTable.dataSource = self; drawerTable.delegate = self; drawerTable.rowHeight = 40
-    drawerTable.register(UITableViewCell.self, forCellReuseIdentifier: "navigation")
+    drawer.onSelect = { [weak self] in self?.onAction?("navigate:\($0)") }
     drawer.isHidden = true; drawerDim.isHidden = true
     let pan = UIPanGestureRecognizer(target: self, action: #selector(dragDrawer)); pan.delegate = self
     drawer.addGestureRecognizer(pan)
@@ -147,7 +161,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private func perform(_ action: String) {
     onAction?("interaction")
     switch action {
-    case "program", "rules", "settings": selectPanel(action, toggle: true)
+    case "program", "rules": selectPanel(action, toggle: true)
+    case "settings": showSettings("general")
     case "panel-close": setPanel(false)
     case "menu": setDrawer(!drawerOpen)
     default: onAction?(action)
@@ -178,9 +193,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let wide = isWide, safe = safeAreaInsets
     let panelWidth: CGFloat = wide && panelOpen ? min(420, max(230, bounds.width / 3)) : 0
     let videoWidth = bounds.width - panelWidth
-    videoView.frame = wide ? CGRect(x: 0, y: 0, width: videoWidth, height: bounds.height)
+    videoView.frame = wide ? CGRect(x: safe.left, y: safe.top, width: max(0, videoWidth - safe.left - (panelOpen ? 0 : safe.right)), height: max(0, bounds.height - safe.top - safe.bottom))
       : CGRect(x: 0, y: safe.top, width: videoWidth, height: videoWidth * 9 / 16)
-    videoDim.frame = videoView.frame
+    videoDim.frame = videoView.frame; pipCover.frame = videoView.frame
+    pipMessage.frame = pipCover.bounds.insetBy(dx: 20, dy: 20)
     let rightInset = panelOpen && wide ? 8 : safe.right + 8
     header.frame = CGRect(x: safe.left + 8, y: wide ? safe.top + 4 : videoView.frame.minY + 2,
       width: max(0, videoWidth - safe.left - rightInset - 8), height: 44)
@@ -196,8 +212,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     for (index, button) in [infoButton, pipButton, commentButton, settingsButton].enumerated() {
       button.frame = CGRect(x: CGFloat(index) * 40, y: 0, width: 40, height: 44)
     }
-    let controlsHeight: CGFloat = wide ? 88 : 50
-    let bottom = wide ? bounds.height - safe.bottom - 6 : videoView.frame.maxY
+    let controlsHeight: CGFloat = wide ? 80 : 46
+    let bottom = wide ? bounds.height - safe.bottom : videoView.frame.maxY
     controls.frame = CGRect(x: safe.left + 8, y: bottom - controlsHeight, width: header.bounds.width, height: controlsHeight)
     let timeWidth = min(controls.bounds.width - 48, max(90, timeLabel.intrinsicContentSize.width + 16))
     timeButton.frame = CGRect(x: 4, y: 0, width: max(0, timeWidth), height: 26); timeLabel.frame = timeButton.bounds
@@ -206,11 +222,11 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     timeline.frame = CGRect(x: 0, y: 26, width: controls.bounds.width, height: 32)
     for (index, button) in [reloadButton, ruleButton, subtitleButton].enumerated() {
       button.isHidden = !wide
-      button.frame = CGRect(x: controls.bounds.width - CGFloat(3 - index) * 44, y: 50, width: 44, height: 38)
+      button.frame = CGRect(x: controls.bounds.width - CGFloat(3 - index) * 44, y: 44, width: 44, height: 36)
     }
     let centerWidth = min(wide ? 400 : 340, max(0, videoWidth - safe.left - rightInset - 16))
     let centerHeight: CGFloat = 64
-    centerControls.frame = CGRect(x: (videoWidth - centerWidth) / 2, y: videoView.frame.midY - centerHeight / 2, width: centerWidth, height: centerHeight)
+    centerControls.frame = CGRect(x: videoView.frame.midX - centerWidth / 2, y: videoView.frame.midY + (wide ? 6 : 0) - centerHeight / 2, width: centerWidth, height: centerHeight)
     for (index, button) in [jumps[0], jumps[1], playButton, jumps[2], jumps[3]].enumerated() {
       let side: CGFloat = button === playButton ? 64 : 46
       button.frame = CGRect(x: (CGFloat(index) + 0.5) * centerWidth / 5 - side / 2, y: (centerHeight - side) / 2, width: side, height: side)
@@ -237,16 +253,25 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     statusLabel.frame = CGRect(x: safe.left + 16, y: header.frame.maxY + 4,
       width: max(0, videoWidth - safe.left - rightInset - 24), height: 32)
     drawerDim.frame = bounds
-    let drawerWidth = min(280, bounds.width * 0.8)
+    let drawerWidth = min(240 + safe.left, bounds.width * 0.8)
     drawer.frame = CGRect(x: drawerOpen ? 0 : -drawerWidth, y: 0, width: drawerWidth, height: bounds.height)
-    brand.frame = CGRect(x: 16, y: safe.top + 16, width: 194, height: 40); brandLogo.frame = CGRect(x: 217, y: safe.top + 19, width: 32, height: 32)
-    drawerTable.frame = CGRect(x: 0, y: brand.frame.maxY + 12, width: drawerWidth, height: max(0, bounds.height - brand.frame.maxY - safe.bottom - 12))
+    drawer.contentSafeArea = safe
+
   }
   @objc func showControls(_ visible: Bool) {
-    videoDim.alpha = visible ? 1 : 0
-    [header, controls, centerControls].forEach { $0.alpha = visible ? 1 : 0; $0.isUserInteractionEnabled = visible }
+    guard hudVisible != visible else { return }; hudVisible = visible
+    [header, controls, centerControls].forEach { $0.isUserInteractionEnabled = visible }
+    UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.12, delay: 0,
+      options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseInOut]) {
+      [self.videoDim, self.header, self.controls, self.centerControls].forEach { $0.alpha = visible ? 1 : 0 }
+    }
   }
-  @objc var controlsVisible: Bool { controls.alpha > 0 }
+  @objc var controlsVisible: Bool { hudVisible }
+  @objc func updatePiP(_ active: Bool) {
+    // Cover the drawable rather than hiding it: VLC must keep supplying frames
+    // for the PiP compositor, including while the app remains in foreground.
+    pipCover.isHidden = !active
+  }
   @objc var interactionOpen: Bool { drawerOpen || popup != nil }
   @objc var controlTracking: Bool {
     func tracking(_ view: UIView) -> Bool {
@@ -369,11 +394,20 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       }
     case "twitter": append("Twitter連携は準備中です。", muted: true)
     case "settings":
-      let playbackActions = UIStackView(); playbackActions.spacing = 12; playbackActions.distribution = .fillEqually
-      let reload = NeoStyle.button("再読み込み") { [weak self] in self?.onAction?("reload") }
-      settingsSubtitles.setTitle("字幕", for: .normal); settingsSubtitles.tintColor = NeoStyle.accent
-      playbackActions.addArrangedSubview(reload); playbackActions.addArrangedSubview(settingsSubtitles)
-      playbackActions.heightAnchor.constraint(equalToConstant: 44).isActive = true; stack.addArrangedSubview(playbackActions)
+      let categories = UIStackView(); categories.distribution = .fillEqually; categories.spacing = 6
+      let destinations = settingsCategory == "comments" ? [("general", "全般"), ("subtitles", "字幕")]
+        : settingsCategory == "subtitles" ? [("comments", "コメント"), ("general", "全般")]
+        : [("comments", "コメント"), ("subtitles", "字幕")]
+      for (id, name) in destinations {
+        let button = NeoStyle.button(name) { [weak self] in self?.showSettings(id) }
+        button.accessibilityIdentifier = "player-settings-" + id
+        button.tintColor = NeoStyle.accent
+        categories.addArrangedSubview(button)
+      }
+      categories.heightAnchor.constraint(equalToConstant: 44).isActive = true; stack.addArrangedSubview(categories)
+      if settingsCategory == "comments" { buildCommentSettings(); break }
+      if settingsCategory == "subtitles" { buildSubtitleSettings(); break }
+      stack.addArrangedSubview(NeoStyle.button("再読み込み") { [weak self] in self?.onAction?("reload") })
       append("再生速度", bold: true)
       let speeds = UIStackView(); speeds.spacing = 4; speeds.distribution = .fillEqually
       for rate in [Float(0.5), 0.75, 1, 1.25, 1.5, 2] {
@@ -421,12 +455,67 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let index = max(0, low - 1); guard index != lastCommentIndex else { return }; lastCommentIndex = index
     commentList.scrollToRow(at: IndexPath(row: index, section: 0), at: .middle, animated: false)
   }
-  @objc func showSubtitleChoices(_ names: [String]) {
-    popup?.dismiss()
-    let menu = NeoAnchoredMenu(anchor: isWide ? subtitleButton : settingsSubtitles, entries: (["オフ"] + names).enumerated().map { i, name in
-      NeoMenuEntry(title: name) { [weak self] in self?.onAction?("subtitle:\(i - 1)") }
-    }, appearance: .actions)
-    menu.onDismiss = { [weak self] in self?.popup = nil }; popup = menu; menu.show(in: self)
+  @objc func showSettings(_ category: String) {
+    onAction?("interaction"); settingsCategory = category; selectPanel("settings", toggle: false)
+  }
+  @objc func bindCommentSettings(_ overlay: NeoCommentOverlay) { commentOverlay = overlay; refreshCommentSettings() }
+  @objc func refreshCommentSettings() {
+    guard let overlay = commentOverlay else { return }
+    if !commentToggle.isTracking { commentToggle.isOn = overlay.enabled }
+    if !commentSize.isTracking { commentSize.value = Float(overlay.sizeMultiplier) }
+    if !commentOpacity.isTracking { commentOpacity.value = overlay.opacity }
+    commentSizeLabel.text = String(format: "文字サイズ %.2f倍", overlay.sizeMultiplier)
+    commentOpacityLabel.text = "不透明度 \(Int(overlay.opacity * 100))%"
+    commentStatus.text = overlay.status; commentStats.text = overlay.diagnostics
+    let key = overlay.tracks.map { "\($0.subtitleIndex):\($0.displayName)" }.joined(separator: "|") + "#\(overlay.selectedIndex ?? -1)"
+    guard key != commentTrackKey else { return }; commentTrackKey = key
+    commentTracks.arrangedSubviews.forEach { $0.removeFromSuperview() }
+    for track in overlay.tracks {
+      commentTracks.addArrangedSubview(settingChoice(track.displayName, selected: track.subtitleIndex == overlay.selectedIndex) { [weak self, weak overlay] in
+        self?.onAction?("interaction"); overlay?.select(track)
+      })
+    }
+  }
+  private func buildCommentSettings() {
+    append("コメント", size: 16, bold: true)
+    commentStatus.numberOfLines = 0; commentStats.numberOfLines = 0
+    stack.addArrangedSubview(commentStatus)
+    let row = UIStackView(arrangedSubviews: [NeoStyle.label("コメントを表示"), commentToggle]); row.distribution = .equalSpacing
+    [row, commentSizeLabel, commentSize, commentOpacityLabel, commentOpacity, commentTracks, commentStats].forEach(stack.addArrangedSubview)
+    stack.addArrangedSubview(NeoStyle.button("コメントを再読み込み") { [weak self] in self?.onAction?("interaction"); self?.commentOverlay?.reloadTracks() })
+    append("表示・文字サイズ・不透明度の設定はPiPにも反映します。", size: 12, muted: true)
+    refreshCommentSettings()
+  }
+  static func ordinarySubtitles(_ tracks: [[String: Any]]) -> [[String: Any]] {
+    tracks.filter { !NeoCommentOverlay.isCommentName($0["name"] as? String ?? "") && !NeoCommentOverlay.isCommentName($0["detail"] as? String ?? "") }
+  }
+  @objc func updateSubtitleTracks(_ tracks: [[String: Any]]) {
+    subtitleTracks = Self.ordinarySubtitles(tracks)
+    let key = subtitleTracks.map { "\($0["index"] ?? ""): \($0["name"] ?? ""): \($0["selected"] ?? false)" }.joined(separator: "|")
+    guard key != subtitleKey else { return }; subtitleKey = key
+    if tab == "settings" && settingsCategory == "subtitles" { renderPanel() }
+  }
+  private func settingChoice(_ name: String, selected: Bool, action: @escaping () -> Void) -> UIButton {
+    let button = NeoStyle.button(name, action: action)
+    button.contentHorizontalAlignment = .leading
+    var config = UIButton.Configuration.plain(); config.title = name
+    config.image = selected ? UIImage(systemName: "checkmark.circle") : NeoIcon.image("SubtitlesOutlined"); config.imagePadding = 10
+    config.baseForegroundColor = selected ? NeoStyle.accent : .white
+    config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)
+    config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { a in var a = a; a.font = .systemFont(ofSize: 14); return a }
+    config.background.backgroundColor = selected ? NeoStyle.accent.withAlphaComponent(0.16) : NeoStyle.background
+    config.background.strokeColor = selected ? NeoStyle.accent : NeoStyle.border; config.background.strokeWidth = 1; config.background.cornerRadius = 6
+    button.configuration = config; button.heightAnchor.constraint(greaterThanOrEqualToConstant: 48).isActive = true
+    return button
+  }
+  private func buildSubtitleSettings() {
+    append("字幕", size: 16, bold: true)
+    stack.addArrangedSubview(settingChoice("字幕なし", selected: !subtitleTracks.contains { $0["selected"] as? Bool == true }) { [weak self] in self?.onAction?("subtitle:-1") })
+    if subtitleTracks.isEmpty { append("この録画ファイルには切り替え可能な字幕がありません。", muted: true) }
+    for track in subtitleTracks {
+      guard let index = track["index"] as? Int else { continue }
+      stack.addArrangedSubview(settingChoice(track["name"] as? String ?? "字幕", selected: track["selected"] as? Bool == true) { [weak self] in self?.onAction?("subtitle:\(index)") })
+    }
   }
   private func setDrawer(_ open: Bool) {
     drawerOpen = open; drawer.isHidden = false; drawerDim.isHidden = false; setNeedsLayout()
@@ -444,30 +533,58 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     guard let pan = gesture as? UIPanGestureRecognizer else { return true }; let v = pan.velocity(in: self); return v.x < 0 && abs(v.x) >= abs(v.y)
   }
   func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
-  func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { tableView === drawerTable ? NeoDestination.all.count : comments.count }
+  func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { comments.count }
   func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-    let navigation = tableView === drawerTable
-    let cell = tableView.dequeueReusableCell(withIdentifier: navigation ? "navigation" : "comment", for: indexPath)
+    let cell = tableView.dequeueReusableCell(withIdentifier: "comment", for: indexPath), item = comments[indexPath.row]
     var config = cell.defaultContentConfiguration(); config.textProperties.color = .white
-    if navigation {
-      let item = NeoDestination.all[indexPath.row]; config.text = item.title; config.image = NeoIcon.image(item.icon)
-      config.imageProperties.tintColor = NeoStyle.muted; config.textProperties.font = .systemFont(ofSize: 14)
-    } else {
-      let item = comments[indexPath.row]; config.text = item.text; config.textProperties.font = .systemFont(ofSize: 13)
-      config.secondaryText = String(format: "%d:%02d", Int(item.time) / 60, Int(item.time) % 60); config.secondaryTextProperties.color = NeoStyle.muted
-    }
+    config.text = item.text; config.textProperties.font = .systemFont(ofSize: 13)
+    config.secondaryText = String(format: "%d:%02d", Int(item.time) / 60, Int(item.time) % 60); config.secondaryTextProperties.color = NeoStyle.muted
     cell.contentConfiguration = config; cell.backgroundColor = NeoStyle.paper; return cell
   }
   func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-    tableView.deselectRow(at: indexPath, animated: true)
-    if tableView === drawerTable { onAction?("navigate:\(NeoDestination.all[indexPath.row].id)") }
-    else { onAction?("seekto:\(comments[indexPath.row].time)") }
+    tableView.deselectRow(at: indexPath, animated: true); onAction?("seekto:\(comments[indexPath.row].time)")
   }
   func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { if scrollView === commentList { followsComments = false } }
   @objc func shutdown() { task?.cancel(); relatedTask?.cancel(); logoTask?.cancel(); popup?.dismiss(); onAction = nil }
   deinit { task?.cancel(); relatedTask?.cancel(); logoTask?.cancel() }
 
 #if targetEnvironment(simulator)
+  private func runSettingsChecks() -> [String: Bool] {
+    let oldTracks = subtitleTracks, oldCategory = settingsCategory, handler = onAction
+    let oldEnabled = commentOverlay?.enabled, oldSize = commentOverlay?.sizeMultiplier, oldOpacity = commentOverlay?.opacity
+    var actions: [String] = []; onAction = { actions.append($0) }
+    showSettings("comments")
+    let before = stack.arrangedSubviews
+    commentSize.value = 1.5; commentSize.sendActions(for: .valueChanged)
+    commentOpacity.value = 0.4; commentOpacity.sendActions(for: .valueChanged)
+    commentToggle.isOn = false; commentToggle.sendActions(for: .valueChanged)
+    let applied = commentOverlay?.sizeMultiplier == 1.5 && commentOverlay?.opacity == 0.4 && commentOverlay?.enabled == false
+      && commentOverlay?.compositionState.size == 1.5 && commentOverlay?.compositionState.opacity == 0.4 && commentOverlay?.compositionState.enabled == false
+    let stable = zip(before, stack.arrangedSubviews).allSatisfy { $0 === $1 } && before.count == stack.arrangedSubviews.count
+    if let oldEnabled, let oldSize, let oldOpacity {
+      commentOverlay?.enabled = oldEnabled; commentOverlay?.setSize(oldSize); commentOverlay?.setOpacity(oldOpacity)
+    }
+    updateSubtitleTracks([["index": 0, "name": "NicoJK ASS", "selected": true],
+      ["index": 1, "name": "ASS", "detail": "弾幕"], ["index": 3, "name": "日本語 ASS", "selected": false]])
+    showSettings("subtitles")
+    let filtered = subtitleTracks.count == 1 && subtitleTracks.first?["index"] as? Int == 3
+    (stack.arrangedSubviews.last as? UIButton)?.sendActions(for: .touchUpInside)
+    let routed = actions.contains("subtitle:3") && !actions.contains("subtitle:0") && !actions.contains("subtitle:1")
+    let general = stack.arrangedSubviews.first?.subviews.compactMap { $0 as? UIButton }.first { $0.accessibilityIdentifier == "player-settings-general" }
+    general?.sendActions(for: .touchUpInside)
+    let returns = tab == "settings" && settingsCategory == "general" && panelOpen
+    let frameBefore = videoView.frame; updatePiP(true)
+    let covered = !pipCover.isHidden && pipCover.frame == videoView.frame && pipCover.backgroundColor == UIColor.black && !videoView.isHidden && videoView.frame == frameBefore
+    updatePiP(false); let restored = pipCover.isHidden && !videoView.isHidden
+    let cell = drawer.tableView(drawer.list, cellForRowAt: IndexPath(row: 0, section: 0))
+    let config = cell.contentConfiguration as? UIListContentConfiguration
+    let shared = drawer.brand.frame.minX == drawer.contentSafeArea.left + 16 && drawer.logo.frame.minX - drawer.brand.frame.maxX == 7
+      && config?.imageProperties.reservedLayoutSize == CGSize(width: 27, height: 24)
+    onAction = handler; subtitleTracks = oldTracks; subtitleKey = ""; settingsCategory = oldCategory
+    return ["settingsStayInPanel": returns, "commentSettingsApplyToComposition": applied, "slidersRetainedDuringUpdates": stable,
+      "danmakuExcludedFromSubtitles": filtered, "filteredSubtitleKeepsOriginalIndex": routed,
+      "pipCoversVideoWithoutStoppingDrawable": covered, "pipRestoresVideo": restored, "sharedDrawerAlignmentAndIconSize": shared]
+  }
   // Exercise the same hit-test/ancestor filter used by the real recognizer.
   @objc func smokeTapVideoBackground() -> Bool {
     layoutIfNeeded()
@@ -519,11 +636,11 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   @objc func runLayoutChecks() -> [String: Any] {
     let original = frame, originalHide = autoHide; autoHide = false; showControls(true)
     frame = CGRect(x: 0, y: 0, width: 844, height: 390); setNeedsLayout(); layoutIfNeeded()
-    let full = videoView.frame == bounds
+    let full = videoView.frame.minX >= safeAreaInsets.left && videoView.frame.maxX <= bounds.maxX - safeAreaInsets.right && videoView.frame.maxY <= bounds.maxY - safeAreaInsets.bottom
     let noBands = header.backgroundColor == UIColor.clear && controls.backgroundColor == UIColor.clear && statusLabel.backgroundColor == UIColor.clear
     let smallThumb = timeline.thumbImage(for: .normal)?.size.width == 12
     let filledPlay = playerIcon("PlayArrow", side: 60).size.width == 60
-    let centered = centerControls.frame.midX == videoView.frame.midX && centerControls.frame.midY == videoView.frame.midY
+    let centered = centerControls.frame.midX == videoView.frame.midX && centerControls.frame.midY == videoView.frame.midY + 6
 
     tab = "program"; panelOpen = true; panel.isHidden = false; panel.alpha = 1; renderPanel(); setNeedsLayout(); layoutIfNeeded()
     let side = abs(panel.frame.width / bounds.width - 1/3) < 0.01 && panel.frame.minX == videoView.frame.maxX
@@ -541,18 +658,32 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     onAction = handler
     let routing = ["jump:-30", "jump:-10", "jump:10", "jump:30", "play", "reload", "rotate"].allSatisfy { actions.contains($0) }
     let before = remainingTime; timeButton.sendActions(for: .touchUpInside); let time = remainingTime != before; remainingTime = before; updateTime()
+    let settings = runSettingsChecks()
+    NeoNative.writeSmoke("player-settings-smoke", settings.merging(["success": settings.values.allSatisfy { $0 }]) { _, new in new })
     panelOpen = false; tab = "program"; rulesLoaded = false; records = []; renderPanel()
 
     frame = original; autoHide = originalHide; setNeedsLayout(); layoutIfNeeded()
-    return ["success": full && centered && side && below && routing && time && noBands && smallThumb && filledPlay, "noBands": noBands, "smallThumb": smallThumb, "fullVideo": full, "centerControls": centered, "landscapePanel": side, "portraitPanel": below, "buttonRouting": routing, "timeToggle": time]
+    let noCircles = ([playButton] + jumps).allSatisfy { $0.backgroundColor == UIColor.clear && $0.layer.shadowOpacity > 0 }
+    return ["success": full && centered && side && below && routing && time && noBands && smallThumb && filledPlay && noCircles && settings.values.allSatisfy { $0 }, "noBands": noBands, "noCentralBackgrounds": noCircles, "smallThumb": smallThumb, "fullVideo": full, "centerControls": centered, "landscapePanel": side, "portraitPanel": below, "buttonRouting": routing, "timeToggle": time]
   }
   @objc func showSmokePanel(_ id: String) {
+    if id == "settings" { settingsCategory = "general" }
     tab = id == "controls" ? "program" : id; panelOpen = id != "controls"; panel.isHidden = !panelOpen; panel.alpha = 1
     if id == "rules" {
       rulesLoaded = true; ruleHeading = "サンプルルール"
       records = (1...3).map { i in NeoRecording(id: i, name: "サンプル番組 #\(i)", startAt: 1791042600000, endAt: 1791044400000, isRecording: false, description: "関連する番組の説明", extended: nil, channelId: nil, channelName: nil, thumbnails: nil, videoFiles: nil) }
     }
     renderPanel(); showControls(true); setNeedsLayout(); layoutIfNeeded()
+  }
+  @objc func snapshotSettings(_ category: String, name: String) {
+    showSettings(category); layoutIfNeeded(); snapshot(name)
+  }
+  @objc func snapshotDrawer(_ name: String) {
+    UIView.performWithoutAnimation { setDrawer(true); layoutIfNeeded() }; snapshot(name)
+    UIView.performWithoutAnimation { setDrawer(false); layoutIfNeeded() }
+  }
+  @objc func snapshotPiPNotice(_ name: String) {
+    updatePiP(true); snapshot(name); updatePiP(false)
   }
   @objc func snapshot(_ name: String) {
     layoutIfNeeded(); let image = UIGraphicsImageRenderer(size: bounds.size).image { _ in drawHierarchy(in: bounds, afterScreenUpdates: true) }
