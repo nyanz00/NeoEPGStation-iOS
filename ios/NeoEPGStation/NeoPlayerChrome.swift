@@ -25,7 +25,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private let timeButton = UIButton(type: .custom)
   private var jumps: [UIButton] = []
   private let panel = UIView(), panelHeader = UIView(), panelTitle = NeoStyle.label(size: 16, bold: true)
-  private let panelClose = UIButton(type: .system), panelTabs = UIView()
+  private let panelClose = UIButton(type: .system), panelTabs = UIView(), panelTabDivider = UIView()
   private let scroll = UIScrollView(), stack = UIStackView()
   private let commentList = UITableView(frame: .zero, style: .plain), followButton = UIButton(type: .system)
   private var tabButtons: [UIButton] = [], tab = "program", followsComments = true, lastCommentIndex = -1
@@ -88,6 +88,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     timeline.addAction(UIAction { [weak self] _ in self?.onAction?("scrub-cancel") }, for: .touchCancel)
     panel.backgroundColor = NeoStyle.paper; panel.clipsToBounds = true; panel.isHidden = true
     [panelHeader, scroll, commentList, panelTabs, followButton].forEach(panel.addSubview)
+    panelTabDivider.backgroundColor = NeoStyle.border; panelTabs.addSubview(panelTabDivider)
     panelHeader.addSubview(panelTitle); panelHeader.addSubview(panelClose)
     configure(panelClose, icon: "Close", label: "パネルを閉じる", action: "panel-close")
     stack.axis = .vertical; stack.spacing = 12; stack.translatesAutoresizingMaskIntoConstraints = false; scroll.addSubview(stack)
@@ -217,9 +218,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     panelHeader.frame = CGRect(x: 0, y: panelTop, width: panel.bounds.width, height: panelHeaderHeight)
     panelTitle.frame = CGRect(x: 14, y: 0, width: max(0, panel.bounds.width - 62), height: 44)
     panelClose.frame = CGRect(x: panel.bounds.width - 44, y: 0, width: 44, height: 44)
-    let tabsHeight: CGFloat = tab == "settings" ? 0 : 64
+    let tabsHeight: CGFloat = tab == "settings" ? 0 : 72
     panelTabs.isHidden = tab == "settings"
     panelTabs.frame = CGRect(x: 0, y: panel.bounds.height - panelBottom - tabsHeight, width: panel.bounds.width, height: tabsHeight)
+    panelTabDivider.frame = CGRect(x: 0, y: 0, width: panel.bounds.width, height: 1)
     for (i, b) in tabButtons.enumerated() { b.frame = CGRect(x: CGFloat(i) * panel.bounds.width / 4, y: 0, width: panel.bounds.width / 4, height: tabsHeight) }
     let contentFrame = CGRect(x: 0, y: panelHeader.frame.maxY, width: panel.bounds.width, height: max(0, panelTabs.frame.minY - panelHeader.frame.maxY))
     scroll.frame = contentFrame; commentList.frame = contentFrame
@@ -291,7 +293,13 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     stack.arrangedSubviews.forEach { $0.removeFromSuperview() }; scroll.setContentOffset(.zero, animated: false)
     scroll.isHidden = tab == "comments"; commentList.isHidden = tab != "comments"; followButton.isHidden = tab != "comments"
     panelTitle.text = ["program":"番組情報", "rules":"ルール", "comments":"コメント", "twitter":"Twitter", "settings":"プレイヤー設定"][tab]
-    for (i, b) in tabButtons.enumerated() { b.tintColor = ["program", "rules", "comments", "twitter"][i] == tab ? NeoStyle.accent : NeoStyle.muted }
+    for (i, b) in tabButtons.enumerated() {
+      let selected = ["program", "rules", "comments", "twitter"][i] == tab
+      b.tintColor = selected ? NeoStyle.accent : NeoStyle.muted
+      b.configuration?.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { a in
+        var a = a; a.font = .systemFont(ofSize: selected ? 14 : 12); return a
+      }
+    }
     switch tab {
     case "program":
       let identity = UIStackView(); identity.spacing = 10; identity.alignment = .center
