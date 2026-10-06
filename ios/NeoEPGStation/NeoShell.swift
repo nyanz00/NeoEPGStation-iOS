@@ -182,6 +182,19 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
 #endif
   }
   override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
+  override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .portrait }
+  override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { .portrait }
+  override func viewDidAppear(_ animated: Bool) {
+    super.viewDidAppear(animated)
+    if presentedViewController == nil {
+      setNeedsUpdateOfSupportedInterfaceOrientations()
+      view.window?.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
+    }
+#if targetEnvironment(simulator)
+    guard !smokeStage.isEmpty else { return }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.runUISmoke() }
+#endif
+  }
   override func viewDidLoad() {
     super.viewDidLoad(); overrideUserInterfaceStyle = .dark; view.backgroundColor = NeoStyle.paper
     content.clipsToBounds = true
@@ -493,11 +506,6 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
 
 #if targetEnvironment(simulator)
   private var backSmokeDetails: [String: Any] = [:]
-  override func viewDidAppear(_ animated: Bool) {
-    super.viewDidAppear(animated)
-    guard !smokeStage.isEmpty else { return }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.runUISmoke() }
-  }
   private func runUISmoke() {
     let recorded = controllers["recorded"]!.viewControllers.first as! NeoRecordedPage
     let original = recorded.collection
