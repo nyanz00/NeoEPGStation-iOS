@@ -72,6 +72,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     configure(commentButton, icon: "ChatBubbleOutlineOutlined", label: "コメント設定", action: "comments-settings")
     configure(settingsButton, icon: "SettingsOutlined", label: "プレイヤー設定", action: "settings")
     configure(rotationButton, icon: "ScreenRotationRounded", label: "画面の向きを切り替えて固定", action: "rotate")
+    rotationButton.setImage(playerIcon("ScreenRotationRounded", side: 32), for: .normal)
     configure(reloadButton, icon: "Refresh", label: "再読み込み", action: "reload")
     configure(ruleButton, icon: "RuleOutlined", label: "ルール・関連録画", action: "rules")
     configure(subtitleButton, icon: "SubtitlesOutlined", label: "字幕", action: "subtitles")
