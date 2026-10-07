@@ -27,10 +27,10 @@ def start_server(directory):
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            if self.path != '/api/videos/1':
+            if self.path not in ['/api/videos/1', '/api/videos/2']:
                 self.send_error(404)
                 return
-            data = (Path(directory) / 'player-tap.ts').read_bytes()
+            data = (Path(directory) / ('player-tap.ts' if self.path == '/api/videos/1' else 'pip-fixture.mp4')).read_bytes()
             value = self.headers.get('Range', 'bytes=0-').removeprefix('bytes=')
             begin, end = value.split('-')
             begin = int(begin)

@@ -75,6 +75,7 @@
 @property (nonatomic) BOOL awaitingEndpoint;
 @property (nonatomic) BOOL transportRecoveryAttempted;
 @property (nonatomic) BOOL awaitingComments;
+@property (nonatomic) NSInteger reloadGeneration;
 @property (nonatomic) int64_t backgroundTime;
 @property (nonatomic, copy) NSString *subtitleSignature;
 #if TARGET_OS_SIMULATOR
@@ -309,6 +310,7 @@
   if (self.pipActive) {
     self.statusLabel.text = @"再読み込み · PiPを閉じてから実行してください。"; [self.chrome updateDiagnostics]; return;
   }
+  NSInteger generation = ++self.reloadGeneration;
   [self sampleHistory]; [self.history flush];
   self.reloadTime = MAX(0, self.player.time.value.longLongValue); self.reloadPlaying = self.wantsPlayback;
   [self completeSeek:self.seekGeneration failed:NO];
@@ -321,8 +323,9 @@
   __weak typeof(self) weakSelf = self;
   if (self.rewindCache) {
     self.awaitingEndpoint = YES;
+    [self.player stop];
     [self.rewindCache reopen:^(NSURL *url, NSString *message) {
-      if (!weakSelf || weakSelf.closing || !weakSelf.reloading) { return; }
+      if (!weakSelf || weakSelf.closing || !weakSelf.reloading || weakSelf.reloadGeneration != generation) { return; }
       weakSelf.playbackURL = url ?: weakSelf.sourceURL;
       if (!url) { weakSelf.statusLabel.text = message; }
       [weakSelf restartInputAfterEndpointReady];
@@ -364,10 +367,11 @@
     [self.chrome updateDiagnostics]; [self.commentPiP invalidatePlaybackState]; return;
   }
   self.restoringReload = YES;
+  NSInteger generation = self.reloadGeneration;
   __weak typeof(self) weakSelf = self;
   dispatch_block_t restore = ^{
     dispatch_async(dispatch_get_main_queue(), ^{
-      if (weakSelf.closing) { return; }
+      if (weakSelf.closing || !weakSelf.reloading || weakSelf.reloadGeneration != generation) { return; }
       weakSelf.player.rate = weakSelf.playbackRate;
       if (weakSelf.lastSeekFailed) { weakSelf.reloading = NO; weakSelf.restoringReload = NO; [weakSelf setPlaybackIntent:NO]; return; }
       [weakSelf.player deselectAllTextTracks];
@@ -496,6 +500,7 @@
       return;
     }
     if (self.reloading && state == VLCMediaPlayerStateStopped && !self.restoringReload && !self.awaitingEndpoint) { [self restartMedia]; return; }
+    if (state == VLCMediaPlayerStateError && (self.transportSuspended || self.awaitingEndpoint || self.player.state != state)) { return; }
     if (state == VLCMediaPlayerStateError) {
       self.playbackFailed = YES; self.wantsPlayback = NO;
       [self completeSeek:self.seekGeneration failed:YES];
@@ -697,6 +702,34 @@
 }
 - (void)runVideoTapSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
   [self waitForTapSmokePlayback:0 completion:completion];
+}
+- (void)runRecoverySmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  [self seekBy:5000-self.player.time.value.longLongValue completion:^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      NSURL *oldEndpoint = self.playbackURL;
+      [self backgrounded];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self foregrounded]; [self pollRecoverySmoke:0 oldEndpoint:oldEndpoint completion:completion];
+      });
+    });
+  }];
+}
+- (void)pollRecoverySmoke:(NSInteger)attempt oldEndpoint:(NSURL *)oldEndpoint completion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  if (!self.reloading && !self.restoringReload && !self.transportSuspended && self.player.isSeekable && self.player.state == VLCMediaPlayerStatePaused) {
+    BOOL position = llabs(self.player.time.value.longLongValue-self.backgroundTime) < 1000;
+    BOOL endpoint = self.rewindCache != nil && ![oldEndpoint isEqual:self.playbackURL];
+    [self seekBy:2000-self.player.time.value.longLongValue completion:^{
+      NSInteger frames = self.commentPiP.capturedFrameCount;
+      [self setPlaybackIntent:YES];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        BOOL advancing = self.player.isPlaying && self.player.time.value.longLongValue > 2500 && self.commentPiP.capturedFrameCount > frames;
+        completion(@{@"success": @(position && endpoint && advancing), @"positionRestored": @(position),
+          @"endpointRecreated": @(endpoint), @"rewindResumesVideoAndClock": @(advancing), @"time": self.player.time.value ?: @0});
+      });
+    }]; return;
+  }
+  if (attempt >= 100) { completion(@{@"success": @NO, @"error": @"recovery timed out", @"state": VLCMediaPlayerStateToString(self.player.state), @"reloading": @(self.reloading), @"restoring": @(self.restoringReload)}); return; }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self pollRecoverySmoke:attempt+1 oldEndpoint:oldEndpoint completion:completion]; });
 }
 - (void)waitForTapSmokePlayback:(NSInteger)attempt completion:(void (^)(NSDictionary<NSString *, id> *))completion {
   UIView *video = [NeoVLCFrameTap videoViewInView:self.movieView];
@@ -932,6 +965,7 @@
     NSMutableArray *tracks = [NSMutableArray new];
     for (VLCMediaPlayerTrack *track in weakSelf.player.textTracks) { if (track.isSelected) { [tracks addObject:track.trackId]; } }
     weakSelf.reloadTextTracks = tracks;
+    weakSelf.reloadGeneration += 1;
     weakSelf.reloading = YES; weakSelf.restoringReload = NO; [weakSelf armReloadDeadline];
     [weakSelf.commentPiP seekDiscontinuity]; [weakSelf.player stop];
   }];
@@ -970,8 +1004,9 @@
 }
 - (void)armReloadDeadline {
   [self.reloadTimer invalidate]; __weak typeof(self) weakSelf = self;
+  NSInteger generation = self.reloadGeneration;
   self.reloadTimer = [NSTimer timerWithTimeInterval:25 repeats:NO block:^(NSTimer *timer) {
-    if (!weakSelf || weakSelf.closing || !weakSelf.reloading) { return; }
+    if (!weakSelf || weakSelf.closing || !weakSelf.reloading || weakSelf.reloadGeneration != generation) { return; }
     weakSelf.reloading = NO; weakSelf.restoringReload = NO;
     [weakSelf completeSeek:weakSelf.seekGeneration failed:YES]; [weakSelf setPlaybackIntent:NO];
     weakSelf.statusLabel.text = @"再読み込みできませんでした。接続を確認して再試行してください。";

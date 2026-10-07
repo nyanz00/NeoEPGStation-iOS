@@ -203,11 +203,27 @@ enum NeoPiPSmoke {
             player.onClose = {
               let correct = disabledTap["success"] as? Bool == true && end["success"] as? Bool == true
               save("player-history-disabled-smoke", ["success": correct, "disabledViewer": "8", "playPauseSeekEnd": correct])
-              save("player-tap-smoke", ["success": encoded["success"] as? Bool == true && ts["success"] as? Bool == true && correct,
-                "encodedMP4": encoded, "transportStream": ts])
+              recoveryTest(root: root) { recovered in
+                save("player-tap-smoke", ["success": encoded["success"] as? Bool == true && ts["success"] as? Bool == true && correct && recovered,
+                  "encodedMP4": encoded, "transportStream": ts])
+              }
             }
             player.closeTapSmoke()
           }
+        }
+      }
+    }
+  }
+  static func recoveryTest(root: UIViewController, completion: @escaping (Bool) -> Void) {
+    guard let base = ProcessInfo.processInfo.environment["NEO_EPG_RANGE_SMOKE"], let url = URL(string: base+"/api/videos/2") else { completion(false); return }
+    let player = NeoPlayerController(url: url, title: "Synthetic encoded HTTP recovery", username: "", password: "", networkCaching: 100)
+    player.modalPresentationStyle = .fullScreen
+    root.present(player, animated: false) {
+      player.runVideoTapSmoke { taps in
+        player.runRecoverySmoke { recovery in
+          save("player-recovery-smoke", recovery)
+          player.onClose = { completion(taps["success"] as? Bool == true && recovery["success"] as? Bool == true) }
+          player.closeTapSmoke()
         }
       }
     }
