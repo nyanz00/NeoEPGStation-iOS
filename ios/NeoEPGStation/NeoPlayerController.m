@@ -163,6 +163,11 @@
   else {
     self.rewindCache = [[NeoPlaybackCache alloc] initWithSource:self.sourceURL username:self.username password:self.password];
     self.rewindCache.onChange = ^{ [weakSelf updateControls]; };
+    [self.rewindCache fetchDuration:^(double duration) {
+      if (weakSelf.closing) { return; }
+      if (duration > 0 && weakSelf.lastObservedLength <= 0) { weakSelf.lastObservedLength = (int64_t)llround(duration * 1000); }
+      [weakSelf updateControls]; [weakSelf.commentPiP invalidatePlaybackState];
+    }];
     [self.rewindCache start:^(NSURL *url, NSString *message) {
       if (weakSelf.closing) { return; }
       if (!url) {
@@ -432,8 +437,12 @@
       [self.history sample:self.lastObservedLength / 1000.0 duration:self.lastObservedLength / 1000.0 running:NO seeking:NO rate:self.playbackRate];
       [self.history flush]; [self showControls];
     }
+    if (state == VLCMediaPlayerStateStopped && !self.playbackEnded && !self.reloading && self.lastObservedTime > 0) {
+      self.playbackFailed = YES; self.wantsPlayback = NO;
+      [self completeSeek:self.seekGeneration failed:YES]; [self.history flush]; [self showControls];
+    }
     if (state == VLCMediaPlayerStatePlaying && !self.reloading && !self.wantsPlayback) { [self.player pause]; }
-    self.statusLabel.text = state == VLCMediaPlayerStateError
+    self.statusLabel.text = state == VLCMediaPlayerStateError || self.playbackFailed
       ? @"再生エラー · 接続・ファイル形式・認証を確認してください。"
       : [NSString stringWithFormat:@"PLAY · %@ · キャッシュ %ld秒", VLCMediaPlayerStateToString(state), (long)self.networkCaching / 1000];
     [self.commentPiP invalidatePlaybackState]; [self updateControls];

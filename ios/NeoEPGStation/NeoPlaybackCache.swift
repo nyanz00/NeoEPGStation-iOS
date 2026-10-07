@@ -62,6 +62,19 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
       }
     }
   }
+  @objc func fetchDuration(_ completion: @escaping (Double) -> Void) {
+    // The Web player uses this same file-duration API. In particular, VLC's
+    // HTTP TS input may remain seekable without ever reporting a duration.
+    var request = URLRequest(url: source.appendingPathComponent("duration"))
+    if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
+    session.dataTask(with: request) { data, response, _ in
+      var duration = 0.0
+      if let http = response as? HTTPURLResponse, http.statusCode == 200, let data,
+         let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+         let value = json["duration"] as? Double, value.isFinite, value > 0, value <= 24*60*60 { duration = value }
+      DispatchQueue.main.async { completion(duration) }
+    }.resume()
+  }
   private func listen() {
     guard !closed else { return }
           do {
