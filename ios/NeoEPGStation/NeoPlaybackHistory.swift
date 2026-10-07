@@ -34,6 +34,9 @@ final class NeoPlaybackHistory: NSObject, URLSessionTaskDelegate {
     self.user = user
     authorization = username.isEmpty ? nil : "Basic " + Data("\(username):\(password)".utf8).base64EncodedString()
     super.init()
+    if Int(user).map({ $0 > 0 }) != true {
+      status = "視聴履歴を保存するには、アプリ設定でWebと同じ通常ユーザーを選んでください。"
+    }
     let config = URLSessionConfiguration.ephemeral; config.urlCache = nil
     config.timeoutIntervalForRequest = 15; config.timeoutIntervalForResource = 20
     session = URLSession(configuration: config, delegate: self, delegateQueue: .main)
@@ -45,7 +48,7 @@ final class NeoPlaybackHistory: NSObject, URLSessionTaskDelegate {
     if now - lastSent >= 5 && clock.duration > 0 { flush() }
   }
   @objc func flush() {
-    guard clock.duration > 0 else { return }
+    guard Int(user).map({ $0 > 0 }) == true, clock.duration > 0 else { return }
     pending = true; drain()
   }
   private func drain() {
@@ -80,7 +83,7 @@ final class NeoPlaybackHistory: NSObject, URLSessionTaskDelegate {
   }
   @objc func finish() {
     ended = true; onChange = nil
-    if clock.duration > 0 { flush() } else { session.finishTasksAndInvalidate() }
+    if Int(user).map({ $0 > 0 }) == true && clock.duration > 0 { flush() } else { session.finishTasksAndInvalidate() }
   }
   func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                   newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {

@@ -130,7 +130,7 @@ struct NeoMediaByteClock {
           guard let bytes = defaultSize > 0 ? defaultSize : Self.number(stsz.body, 12+Int(sample)*4) else { valid = false; break }
           count += bytes; ticks += delta; remaining -= 1; sample += 1
         }
-        guard valid, count <= Int64.max else { valid = false; break }
+        guard valid, count <= UInt64(Int64.max)-offset else { valid = false; break }
         track.append(Span(offset: Int64(offset), count: Int64(count), start: start, end: Double(ticks)/Double(scale)))
       }
       if valid && sample == samples { result += track }

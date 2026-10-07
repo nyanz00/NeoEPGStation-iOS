@@ -113,6 +113,10 @@ final class NeoDanmakuRenderer {
     requestedLaneSize = size; let version = generation; lock.unlock()
     textQueue.async { [weak self] in
       guard let self else { return }
+      self.lock.lock()
+      let current = self.generation == version && self.requestedLaneSize == size
+      self.lock.unlock()
+      guard current else { return }
       var metrics: [CommentTextureKey: CommentExtent] = [:]
       let plan = CommentLanePlan.build(timeline, size: size) { comment in
         let key = CommentTextureKey(text: comment.text, style: comment.style)
@@ -327,8 +331,10 @@ final class NeoDanmakuRenderer {
       let half = CommentStyle(size: 24, color: CommentColor(red: 1, green: 0, blue: 0, alpha: 143.0/255), outline: 0)
       let test = NativeComment(id: 900, layer: 0, start: 0, end: 10, text: "RGB ALPHA", style: half)
       let alphaTimeline = CommentTimeline(width: 640, height: 360, comments: [test])
+      renderer.reset()
       func alphaFrame(_ override: Float?) throws -> [UInt8] {
-        renderer.prepare([test], absoluteOpacity: override); renderer.waitForPreparedImages()
+        renderer.prepare([test], absoluteOpacity: override)
+        renderer.prepareLayout(alphaTimeline, size: 1); renderer.waitForPreparedImages()
         let pass = MTLRenderPassDescriptor(); pass.colorAttachments[0].texture = target
         pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
         pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
