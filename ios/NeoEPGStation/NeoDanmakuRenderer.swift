@@ -53,7 +53,9 @@ final class NeoDanmakuRenderer {
 
   var error: String? { lock.lock(); defer { lock.unlock() }; return failure }
   var cachedBytes: Int { lock.lock(); defer { lock.unlock() }; return cost }
-  var hasPendingImages: Bool { lock.lock(); defer { lock.unlock() }; return !pending.isEmpty }
+  // A paused PiP must also repaint when a new lane plan finishes, even when
+  // its glyph textures were already cached and no image work was necessary.
+  var hasPendingImages: Bool { lock.lock(); defer { lock.unlock() }; return !pending.isEmpty || requestedLaneSize != laneSize }
   func overflow(timeline: CommentTimeline, time: Double) -> Int {
     lock.lock(); defer { lock.unlock() }
     guard laneSize != nil else { return 0 }
@@ -253,11 +255,16 @@ final class NeoDanmakuRenderer {
     guard width > 0, height > 0, width <= 8192, height <= 8192, width * height * 4 <= budget else { throw CommentParseError.invalid("文字画像の大きさ") }
     let rowBytes = width * 4
     var pixels = [UInt8](repeating: 0, count: rowBytes * height)
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
     try pixels.withUnsafeMutableBytes { bytes in
       guard let context = CGContext(data: bytes.baseAddress, width: width, height: height, bitsPerComponent: 8,
-        bytesPerRow: rowBytes, space: CGColorSpaceCreateDeviceRGB(),
+        bytesPerRow: rowBytes, space: colorSpace,
         bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else { throw CommentParseError.invalid("文字画像") }
-      func color(_ value: CommentColor) -> CGColor { CGColor(red: value.red, green: value.green, blue: value.blue, alpha: value.alpha) }
+      // Use the bitmap's RGB space explicitly. CGColor's convenience initializer
+      // can introduce a color-space conversion before the bytes reach Metal.
+      func color(_ value: CommentColor) -> CGColor {
+        CGColor(colorSpace: colorSpace, components: [value.red, value.green, value.blue, value.alpha])!
+      }
       context.setLineJoin(.round)
       for (index, line) in lines.enumerated() {
         let position = CGPoint(x: padding, y: CGFloat(height) - padding - ascent - CGFloat(index) * lineHeight)
