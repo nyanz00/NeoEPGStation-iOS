@@ -384,6 +384,14 @@ final class NeoDanmakuRenderer {
       let larger = try frame(time: 3, opacity: 1, size: 1.5)
       guard first.1 > 0, first.1 <= 80, first.0.contains(where: { $0 > 0 }), first.0 == paused.0,
         first.0 != moved.0, first.0 != larger.0, !hidden.0.contains(where: { $0 > 0 }), !ended.0.contains(where: { $0 > 0 }) else { throw CommentParseError.invalid("描画検証") }
+      renderer.prepareLayout(timeline, size: 1); renderer.waitForPreparedImages()
+      let packed = renderer.snapshot(comments, pixelScale: 1, opacity: 1, size: 1).compactMap { comment, image, top in
+        renderer.placement(comment, imageSize: image.size, timeline: timeline, time: 3,
+          videoRect: CGRect(x: 0, y: 0, width: 640, height: 360), sizeMultiplier: 1, laneTop: top)
+      }.sorted { $0.minY < $1.minY }
+      guard packed.first?.minY == 0, zip(packed, packed.dropFirst()).allSatisfy({ abs($1.minY-$0.maxY-1) < 0.01 }) else {
+        throw CommentParseError.invalid("字形の高さで隙間なく行を詰める")
+      }
       // Integer placement avoids sampling two neighboring texels at a half
       // pixel. The check measures opacity, not bilinear edge interpolation.
       let half = CommentStyle(size: 24, color: CommentColor(red: 1, green: 0, blue: 0, alpha: 143.0/255), outline: 0, alignment: 7)
@@ -421,7 +429,7 @@ final class NeoDanmakuRenderer {
         try? UIImage(cgImage: image).pngData()?.write(to: directory.appendingPathComponent("danmaku-smoke.png"))
       }
       return ["success": true, "comments": first.1, "cacheBytes": renderer.cachedBytes,
-        "checks": ["textRaster", "danmakuMovement", "pause", "size", "opacity", "endTime", "ASSAlpha143", "absoluteAlpha255", "RGBPreserved"]]
+        "checks": ["textRaster", "tightInkBoundsPacking", "danmakuMovement", "pause", "size", "opacity", "endTime", "ASSAlpha143", "absoluteAlpha255", "RGBPreserved"]]
     } catch { return ["success": false, "error": error.localizedDescription] }
   }
 #endif

@@ -27,7 +27,11 @@ enum CommentLanePlan {
       let preferred = min(timeline.height-extent.height, max(0, anchor-extent.height*Double(2-row)/2))
       var candidates = [preferred, 0, timeline.height-extent.height]
       for item in active { candidates += [item.top+item.extent.height+1, item.top-extent.height-1] }
-      candidates.sort { abs($0-preferred) < abs($1-preferred) }
+      // Top/bottom comments pack from their screen edge rather than retaining
+      // gaps baked into ASS lane coordinates. Centered comments retain anchor.
+      if row == 2 { candidates.sort() }
+      else if row == 0 { candidates.sort(by: >) }
+      else { candidates.sort { abs($0-preferred) < abs($1-preferred) } }
       let top = candidates.first { y in
         guard y >= 0, y+extent.height <= timeline.height else { return false }
         return !active.contains { item in
