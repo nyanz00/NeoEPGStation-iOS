@@ -159,10 +159,13 @@ enum NeoPiPSmoke {
     }
   }
   static func tsTapTest(root: UIViewController, encoded: [String: Any]) {
-    let url = directory.appendingPathComponent("player-tap.ts")
-    guard FileManager.default.fileExists(atPath: url.path) else { save("player-tap-smoke", ["success": false, "error": "missing TS fixture"]); return }
+    let file = directory.appendingPathComponent("player-tap.ts")
+    guard FileManager.default.fileExists(atPath: file.path) else { save("player-tap-smoke", ["success": false, "error": "missing TS fixture"]); return }
+    let base = ProcessInfo.processInfo.environment["NEO_EPG_RANGE_SMOKE"]
+    let url = base.flatMap { URL(string: $0+"/api/videos/1") } ?? file
     let player = NeoPlayerController(url: url, title: "Synthetic TS tap test", username: "", password: "", networkCaching: 100)
     player.modalPresentationStyle = .fullScreen
+    if let base { player.recordingContext = ["baseURL": base, "id": 1, "user": "7", "name": "Synthetic HTTP TS"] }
     root.present(player, animated: false) {
       player.runVideoTapSmoke { ts in
         player.onClose = {

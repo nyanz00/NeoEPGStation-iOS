@@ -88,6 +88,10 @@ run('xcrun', 'simctl', 'install', device['udid'], str(app))
 fixture_container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], 'io.github.nyanz00.NeoEPGStation', 'data'))
 (fixture_container / 'Documents').mkdir(exist_ok=True)
 shutil.copyfile('tests/fixtures/player-tap.ts', fixture_container / 'Documents/player-tap.ts')
+sys.path.insert(0, str(Path('tests/fixtures').resolve()))
+from http_range_server import start_server
+range_server = start_server(fixture_container / 'Documents')
+os.environ['SIMCTL_CHILD_NEO_EPG_RANGE_SMOKE'] = f'http://127.0.0.1:{range_server.server_port}'
 os.environ['SIMCTL_CHILD_NEO_EPG_STORAGE_SMOKE'] = '1'
 try:
     launch = run('xcrun', 'simctl', 'launch', device['udid'], 'io.github.nyanz00.NeoEPGStation')
@@ -99,7 +103,7 @@ except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
     raise
 pid = launch.rsplit(':', 1)[1].strip()
 container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], 'io.github.nyanz00.NeoEPGStation', 'data'))
-for attempt in range(18):
+for attempt in range(24):
     time.sleep(5)
     if (container / 'Documents/pip-player-smoke.json').exists() and (container / 'Documents/pip-composition-smoke.json').exists() and (container / 'Documents/player-tap-smoke.json').exists():
         break
@@ -138,13 +142,18 @@ for name in ['pip-composition-smoke', 'player-landscape-smoke', 'player-initial-
     if source.exists():
         Path(f'dist/{name}.png').write_bytes(source.read_bytes())
 results = {}
-for name in ['pip-composition-smoke', 'pip-player-smoke', 'player-ui-smoke', 'player-playback-smoke', 'player-controls-smoke', 'player-settings-smoke', 'player-exit-smoke', 'player-tap-smoke']:
+for name in ['pip-composition-smoke', 'pip-player-smoke', 'player-ui-smoke', 'player-playback-smoke', 'player-controls-smoke', 'player-settings-smoke', 'player-exit-smoke', 'player-tap-smoke', 'rewind-cache-smoke']:
     result = json.loads((container / f'Documents/{name}.json').read_text())
     Path(f'dist/{name}.json').write_text(json.dumps(result, indent=2) + '\n')
     results[name] = result
 for name, result in results.items():
     if result.get('success') is not True:
         raise RuntimeError(f"{name} failed: {result}")
+assert range_server.progress, 'Native player never registered Web playback history'
+Path('dist/playback-history-smoke.json').write_text(json.dumps({'success': True, 'requests': len(range_server.progress),
+    'checks': ['recordingID', 'viewerHeader', 'resumeSeconds', 'cumulativeSessionTotal', 'finalFlush']}, indent=2))
+range_server.shutdown()
+del os.environ['SIMCTL_CHILD_NEO_EPG_RANGE_SMOKE']
 
 # Further launches check the actual UIKit Release UI and interactive transitions.
 # Fixtures are enabled only on the simulator, never in the device application.

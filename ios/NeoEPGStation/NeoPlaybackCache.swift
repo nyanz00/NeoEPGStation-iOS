@@ -46,6 +46,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     super.init()
     let config = URLSessionConfiguration.ephemeral; config.urlCache = nil
     config.requestCachePolicy = .reloadIgnoringLocalCacheData
+    config.httpCookieStorage = .shared; config.urlCredentialStorage = .shared
     config.timeoutIntervalForRequest = 15; config.timeoutIntervalForResource = 20
     session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
   }
@@ -102,7 +103,10 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   }
   private func finishStart(_ url: URL?, _ error: String?) {
     guard let callback = startup else { return }; startup = nil
-    DispatchQueue.main.async { callback(url, error) }
+    DispatchQueue.main.async { [weak self] in
+      if let error { self?.status = error; self?.onChange?() }
+      callback(url, error)
+    }
   }
   @objc func setSeconds(_ value: Int) {
     guard Self.presets.contains(value) else { return }
@@ -112,12 +116,13 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   @objc func observeTime(_ value: Double, running: Bool) {
     guard value.isFinite else { return }
     queue.async { [self] in
+      expireIdle()
       mediaTime = max(0, value)
       if running { lastUse = ProcessInfo.processInfo.systemUptime; highWater = max(highWater, mediaTime); evict() }
     }
   }
   @objc func beginSeek(_ time: Double) {
-    queue.async { [self] in mediaTime = max(0, time); highWater = mediaTime; lastUse = ProcessInfo.processInfo.systemUptime }
+    queue.async { [self] in expireIdle(); mediaTime = max(0, time); highWater = mediaTime; lastUse = ProcessInfo.processInfo.systemUptime }
   }
   @objc func close() {
     queue.async { [self] in
@@ -130,6 +135,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     }
   }
   private func clearBlocks() { blocks.removeAll(); bytes = 0; try? FileManager.default.removeItem(at: directory) }
+  private func expireIdle() { if ProcessInfo.processInfo.systemUptime-lastUse > 15*60 { clearBlocks() } }
   private func file(_ offset: Int64) -> URL { directory.appendingPathComponent(String(offset)) }
   private func evict() {
     // Demux reads lead the presentation clock by network caching/keyframes.
@@ -192,7 +198,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   }
   private func pump(_ connection: NWConnection, offset: Int64, end: Int64) {
     guard !closed, offset <= end, case .ready = connection.state else { connection.cancel(); return }
-    lastUse = ProcessInfo.processInfo.systemUptime
+    expireIdle(); lastUse = ProcessInfo.processInfo.systemUptime
     let aligned = offset / blockSize * blockSize, count = Int(min(blockSize, length - aligned))
     func deliver(_ data: Data) {
       let begin = Int(offset - aligned), amount = min(data.count - begin, Int(end - offset + 1))
@@ -256,4 +262,45 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     guard let url = request.url, url.scheme == source.scheme, url.host == source.host, url.port == source.port else { completionHandler(nil); return }
     completionHandler(request)
   }
+#if targetEnvironment(simulator)
+  static func runSmoke(_ source: URL) {
+    let old = UserDefaults.standard.object(forKey: preference)
+    let cache = NeoPlaybackCache(source: source, username: "", password: "")
+    cache.setSeconds(60)
+    cache.start { url, error in
+      Task { @MainActor in
+        defer {
+          cache.close()
+          if let old { UserDefaults.standard.set(old, forKey: preference) } else { UserDefaults.standard.removeObject(forKey: preference) }
+        }
+        do {
+          guard let url else { throw NeoError(error ?? "Cache startup") }
+          func read() async throws -> Data {
+            var request = URLRequest(url: url); request.setValue("bytes=0-1023", forHTTPHeaderField: "Range")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 206, data.count == 1024 else { throw NeoError("Range contract") }
+            return data
+          }
+          let first = try await read(), bytes = cache.queue.sync { cache.networkBytes }
+          let second = try await read()
+          var checks = ["sameBytes": first == second, "rewindWithoutUpstreamRequest": cache.queue.sync { cache.networkBytes == bytes && cache.hitBytes > 0 }]
+          cache.setSeconds(0); _ = try await read()
+          checks["offDoesNotRetain"] = cache.queue.sync { cache.blocks.isEmpty && cache.networkBytes > bytes }
+          cache.setSeconds(30); _ = try await read()
+          cache.observeTime(1000, running: true)
+          checks["expiredMediaEvicted"] = cache.queue.sync { cache.blocks.isEmpty }
+          cache.beginSeek(0)
+          _ = try await read()
+          checks["cacheRecreatedAfterEviction"] = cache.queue.sync { !cache.blocks.isEmpty }
+          cache.queue.sync { cache.lastUse = ProcessInfo.processInfo.systemUptime-901 }
+          cache.observeTime(1000, running: false)
+          checks["idleCleanup"] = cache.queue.sync { !FileManager.default.fileExists(atPath: cache.directory.path) }
+          cache.close()
+          checks["closeCleanup"] = cache.queue.sync { cache.closed && cache.blocks.isEmpty && !FileManager.default.fileExists(atPath: cache.directory.path) }
+          NeoPiPSmoke.save("rewind-cache-smoke", ["success": checks.values.allSatisfy { $0 }, "checks": checks])
+        } catch { NeoPiPSmoke.save("rewind-cache-smoke", ["success": false, "error": error.localizedDescription]) }
+      }
+    }
+  }
+#endif
 }

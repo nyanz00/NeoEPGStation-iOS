@@ -51,7 +51,9 @@ final class NeoPlaybackHistory: NSObject, URLSessionTaskDelegate {
   private func drain() {
     guard pending, !sending else { return }
     let now = ProcessInfo.processInfo.systemUptime
-    guard now - lastAttempt >= 1 else { return }
+    guard now - lastAttempt >= 1 else {
+      DispatchQueue.main.asyncAfter(deadline: .now()+1) { [self] in drain() }; return
+    }
     sending = true; pending = false; lastAttempt = now; lastSent = now
     let total = min(clock.total, acknowledged + 30)
     var request = URLRequest(url: endpoint); request.httpMethod = "PUT"

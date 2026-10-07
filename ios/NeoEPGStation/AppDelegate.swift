@@ -18,6 +18,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
 #if targetEnvironment(simulator)
     if ProcessInfo.processInfo.environment["NEO_EPG_STORAGE_SMOKE"] == "1" {
       NeoNative.runStorageSmokeTest()
+      if let base = ProcessInfo.processInfo.environment["NEO_EPG_RANGE_SMOKE"], let url = URL(string: base+"/api/videos/1") { NeoPlaybackCache.runSmoke(url) }
       DispatchQueue.global(qos: .userInitiated).async {
         NeoNative.writeSmoke("danmaku-smoke", NeoDanmakuRenderer.smokeTest())
         NeoPiPSmoke.compositionTest()

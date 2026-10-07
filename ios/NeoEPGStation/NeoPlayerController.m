@@ -159,7 +159,7 @@
     self.history.onChange = ^{ [weakSelf updateControls]; };
   }
   [self showControls];
-  if (self.sourceURL.isFileURL) { [self restartMedia]; }
+  if (self.sourceURL.isFileURL || [self.recordingContext[@"isRecording"] boolValue]) { [self restartMedia]; }
   else {
     self.rewindCache = [[NeoPlaybackCache alloc] initWithSource:self.sourceURL username:self.username password:self.password];
     self.rewindCache.onChange = ^{ [weakSelf updateControls]; };
@@ -245,7 +245,11 @@
   } else if ([action hasPrefix:@"rate:"]) {
     self.playbackRate = [action substringFromIndex:5].floatValue; self.player.rate = self.playbackRate;
   } else if ([action hasPrefix:@"cache:"]) { self.networkCaching = MAX(1000, MIN(30000, [action substringFromIndex:6].integerValue * 1000)); }
-  else if ([action hasPrefix:@"retention:"]) { [self.rewindCache setSeconds:[action substringFromIndex:10].integerValue]; }
+  else if ([action hasPrefix:@"retention:"]) {
+    NSInteger value = [action substringFromIndex:10].integerValue;
+    if (self.rewindCache) { [self.rewindCache setSeconds:value]; }
+    else { [NSUserDefaults.standardUserDefaults setInteger:value forKey:@"player.rewind.seconds"]; }
+  }
   else if ([action hasPrefix:@"subtitle:"]) {
     NSInteger index = [action substringFromIndex:9].integerValue;
     if (index < 0) {
