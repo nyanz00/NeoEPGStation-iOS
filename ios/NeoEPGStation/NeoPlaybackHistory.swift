@@ -19,6 +19,8 @@ struct NeoWatchClock {
 
 @objc(NeoPlaybackHistory)
 final class NeoPlaybackHistory: NSObject, URLSessionTaskDelegate {
+  // Keep server history dormant until the full user feature is implemented.
+  @objc static var sendingEnabled: Bool { false }
   private let endpoint: URL, user: String, authorization: String?
   private let sessionID = UUID().uuidString.lowercased()
   private var clock = NeoWatchClock(), acknowledged = 0.0, lastSent = 0.0
@@ -48,11 +50,11 @@ final class NeoPlaybackHistory: NSObject, URLSessionTaskDelegate {
     if now - lastSent >= 5 && clock.duration > 0 { flush() }
   }
   @objc func flush() {
-    guard Int(user).map({ $0 > 0 }) == true, clock.duration > 0 else { return }
+    guard Self.sendingEnabled, Int(user).map({ $0 > 0 }) == true, clock.duration > 0 else { return }
     pending = true; drain()
   }
   private func drain() {
-    guard pending, !sending else { return }
+    guard Self.sendingEnabled, pending, !sending else { return }
     let now = ProcessInfo.processInfo.systemUptime
     guard now - lastAttempt >= 1 else {
       DispatchQueue.main.asyncAfter(deadline: .now()+1) { [self] in drain() }; return
@@ -83,7 +85,7 @@ final class NeoPlaybackHistory: NSObject, URLSessionTaskDelegate {
   }
   @objc func finish() {
     ended = true; onChange = nil
-    if Int(user).map({ $0 > 0 }) == true && clock.duration > 0 { flush() } else { session.finishTasksAndInvalidate() }
+    if Self.sendingEnabled && Int(user).map({ $0 > 0 }) == true && clock.duration > 0 { flush() } else { session.finishTasksAndInvalidate() }
   }
   func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                   newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {

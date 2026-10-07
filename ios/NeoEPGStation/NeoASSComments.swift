@@ -54,9 +54,9 @@ struct NativeComment {
 
 enum CommentTiming: Equatable {
   case ass, danmaku
-  // The prototype uses a full-screen player. DPlayer's full-screen defaults
-  // are 5.5s for scrolling and 4.5s for fixed comments, at speedRate 1.
-  static let scrollingDuration = 5.5, fixedDuration = 4.5
+  // App-specific travel time requested for both portrait and landscape.
+  // Fixed comments retain their existing lifetime.
+  static let scrollingDuration = 5.25, fixedDuration = 4.5
 }
 
 struct CommentTimeline {

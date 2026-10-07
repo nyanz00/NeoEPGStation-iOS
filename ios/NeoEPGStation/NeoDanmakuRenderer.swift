@@ -305,10 +305,10 @@ final class NeoDanmakuRenderer {
       guard let device = MTLCreateSystemDefaultDevice() else { throw CommentParseError.invalid("Metalデバイス") }
       let renderer = try NeoDanmakuRenderer(device: device)
       let style = CommentStyle(size: 24, outline: 1)
-      let comments = (0..<80).map { index in NativeComment(id: index, layer: 0, start: 0, end: 5.5,
+      let comments = (0..<80).map { index in NativeComment(id: index, layer: 0, start: 0, end: CommentTiming.scrollingDuration,
         text: "コメント \(index)", style: style,
         position: nil, motion: CommentMotion(from: CommentPoint(x: 640, y: Double(index % 10) * 32 + 32),
-          to: CommentPoint(x: -160, y: Double(index % 10) * 32 + 32), start: 0, end: 5.5), usesDanmakuTiming: true) }
+          to: CommentPoint(x: -160, y: Double(index % 10) * 32 + 32), start: 0, end: CommentTiming.scrollingDuration), usesDanmakuTiming: true) }
       let timeline = CommentTimeline(width: 640, height: 360, comments: comments)
       renderer.prepare(comments); renderer.textQueue.sync {}
       if let failure = renderer.error { throw CommentParseError.invalid(failure) }

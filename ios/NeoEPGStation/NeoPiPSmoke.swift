@@ -7,9 +7,9 @@ enum NeoPiPSmoke {
   static var fixture: CommentTimeline {
     let style = CommentStyle(size: 24, outline: 1)
     return CommentTimeline(width: 640, height: 360, comments: (0..<80).map { index in
-      NativeComment(id: index, layer: 0, start: 0, end: 5.5, text: "TEST コメント \(index)", style: style,
+      NativeComment(id: index, layer: 0, start: 0, end: CommentTiming.scrollingDuration, text: "TEST コメント \(index)", style: style,
         position: nil, motion: CommentMotion(from: CommentPoint(x: 640, y: Double(index % 10) * 32 + 32),
-          to: CommentPoint(x: -160, y: Double(index % 10) * 32 + 32), start: 0, end: 5.5), usesDanmakuTiming: true)
+          to: CommentPoint(x: -160, y: Double(index % 10) * 32 + 32), start: 0, end: CommentTiming.scrollingDuration), usesDanmakuTiming: true)
     })
   }
   static func save(_ name: String, _ result: [String: Any]) {

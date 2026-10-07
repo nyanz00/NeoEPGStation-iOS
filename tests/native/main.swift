@@ -1,5 +1,7 @@
 import Foundation
 
+assert(!NeoPlaybackHistory.sendingEnabled, "Server history is disabled until the user feature is implemented")
+
 var watch = NeoWatchClock()
 watch.sample(position: 0, duration: 120, running: true, seeking: false, rate: 1, now: 0)
 watch.sample(position: 1, duration: 120, running: true, seeking: false, rate: 1, now: 1)
@@ -81,8 +83,8 @@ let opaque = sourceStyle.withAbsoluteOpacity(1)
 check(opaque.color.alpha == 1 && opaque.outlineColor.alpha == 1 && opaque.color.red == 1 && opaque.outlineColor.blue == 1, "Absolute opacity preserves RGB")
 let flowStyle = CommentStyle(size: 20, alignment: 7)
 let flow = CommentTimeline(width: 640, height: 360, comments: (0..<3).map {
-  NativeComment(id: $0, layer: 0, start: 0, end: 5.5, text: "flow", style: flowStyle,
-    motion: CommentMotion(from: CommentPoint(x: 640, y: 20), to: CommentPoint(x: -100, y: 20), start: 0, end: 5.5), usesDanmakuTiming: true)
+  NativeComment(id: $0, layer: 0, start: 0, end: CommentTiming.scrollingDuration, text: "flow", style: flowStyle,
+    motion: CommentMotion(from: CommentPoint(x: 640, y: 20), to: CommentPoint(x: -100, y: 20), start: 0, end: CommentTiming.scrollingDuration), usesDanmakuTiming: true)
 })
 let measure: (NativeComment) -> CommentExtent = { _ in CommentExtent(width: 100, height: 30) }
 let lanes = CommentLanePlan.build(flow, size: 2, measure: measure)
@@ -119,13 +121,13 @@ Dialogue: 0,0:00:10.00,0:00:10.00,Default,,0,0,0,,{\move(1920,100,-400,100)}表�
 Dialogue: 0,0:00:10.00,unused,Default,,0,0,0,,{\pos(960,100)\an8}固定
 """#), timing: .danmaku)
 check(cutComments.comments.count == 4 && cutComments.comments.allSatisfy(\.usesDanmakuTiming), "CM-cut comments are retained in danmaku mode")
-check(cutComments.comments.prefix(3).allSatisfy { $0.end == 15.5 && $0.motion?.end == 5.5 && $0.motion?.start == 0 }, "Normal, short and zero-duration comments use the same travel time")
+check(cutComments.comments.prefix(3).allSatisfy { $0.end == 15.25 && $0.motion?.end == 5.25 && $0.motion?.start == 0 }, "Scrolling comments use the requested 5.25-second travel time")
 check(cutComments.comments[3].end == 14.5, "Fixed comments use the DPlayer full-screen lifetime")
-check(cutComments.visible(at: 12).count == 4 && cutComments.visible(at: 15).count == 3 && cutComments.visible(at: 15.5).isEmpty, "Comments remain across the cut and expire at the new end")
+check(cutComments.visible(at: 12).count == 4 && cutComments.visible(at: 15).count == 3 && cutComments.visible(at: 15.25).isEmpty, "Comments remain across the cut and expire at the new end")
 let scroll = cutComments.comments[2]
 check(scroll.scrollingX(viewportWidth: 1000, textWidth: 200, elapsed: 0) == 1000, "Enter at the right edge")
-check(scroll.scrollingX(viewportWidth: 1000, textWidth: 200, elapsed: 2.75) == 400, "Normal-speed midpoint after a zero-duration cut")
-check(scroll.scrollingX(viewportWidth: 1000, textWidth: 400, elapsed: 5.5) == -400, "Leave completely using actual resized text width")
+check(scroll.scrollingX(viewportWidth: 1000, textWidth: 200, elapsed: 2.625) == 400, "Normal-speed midpoint after a zero-duration cut")
+check(scroll.scrollingX(viewportWidth: 1000, textWidth: 400, elapsed: 5.25) == -400, "Leave completely using actual resized text width")
 check(cutComments.visible(at: 11).count == 4, "Backward seek restores cut comments")
 rejects(ass("Dialogue: 0,broken,0:00:18.00,Default,,0,0,0,,invalid"), "Danmaku still requires a valid emission time", timing: .danmaku)
 rejects(ass(#"Dialogue: 0,0:00:00.00,0:00:08.00,Default,,0,0,0,,{\an1e300}invalid"#), "Huge alignment must not trap an Int conversion")

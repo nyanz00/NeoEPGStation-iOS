@@ -79,9 +79,11 @@ final class NeoSettingsPage: NeoPage {
     thumbnail.addArrangedSubview(label); thumbnail.addArrangedSubview(toggle)
     thumbnail.heightAnchor.constraint(equalToConstant: 48).isActive = true; stack.addArrangedSubview(thumbnail)
     let text = NeoStyle.label("テーマ：ターコイズ・ダーク", muted: true); stack.addArrangedSubview(text)
-    let viewer = NeoStyle.button("視聴履歴のユーザーを選択") { [weak self] in self?.selectViewer() }
-    viewer.contentHorizontalAlignment = .left; viewer.heightAnchor.constraint(equalToConstant: 48).isActive = true
-    stack.addArrangedSubview(viewer)
+    if NeoPlaybackHistory.sendingEnabled {
+      let viewer = NeoStyle.button("視聴履歴のユーザーを選択") { [weak self] in self?.selectViewer() }
+      viewer.contentHorizontalAlignment = .left; viewer.heightAnchor.constraint(equalToConstant: 48).isActive = true
+      stack.addArrangedSubview(viewer)
+    }
   }
   private func selectViewer() {
     guard let api = shell?.api else { return }
@@ -100,7 +102,7 @@ final class NeoSettingsPage: NeoPage {
       } catch { self?.alert(error.localizedDescription) }
     }
   }
-  override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); stack.frame = CGRect(x: 12, y: 16, width: body.bounds.width - 24, height: 330) }
+  override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); stack.frame = CGRect(x: 12, y: 16, width: body.bounds.width - 24, height: NeoPlaybackHistory.sendingEnabled ? 330 : 270) }
 }
 
 final class NeoShortcutPage: NeoPage, UITableViewDataSource, UITableViewDelegate {
