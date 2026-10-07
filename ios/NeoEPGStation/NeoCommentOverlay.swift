@@ -38,6 +38,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   private var preparationCompletion: (() -> Void)?, preparationTimer: Timer?
   private var clock = CommentPlaybackClock()
   private var resumeGate: CommentSeekResumeGate?
+  private var seekTarget: Double?
   private var drawn = 0, lastFrame = 0.0, frameCount = 0, fps = 0.0
   private let inFlight = DispatchSemaphore(value: 3)
   var compositionState: CommentCompositionState {
@@ -211,13 +212,13 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     }
   }
   @objc func beginSeek(_ time: Double) {
-    seeking = true; seekVersion += 1; resumeGate = CommentSeekResumeGate(); clock.reset(); renderer?.seekWindow(); refreshRendering()
+    seeking = true; seekVersion += 1; seekTarget = max(0, time); resumeGate = CommentSeekResumeGate(); clock.reset(); renderer?.seekWindow(); refreshRendering()
     if let timeline { renderer?.prepareAhead(timeline, time: time, pixelScale: renderScale, opacity: usesSourceOpacity ? nil : opacity) }
   }
   @objc func endSeek() {
     let request = seekVersion
     guard let timeline, let renderer, enabled else { seeking = false; clock.reset(); refreshRendering(); return }
-    renderer.warmWindow(timeline, time: max(0, timeProvider?() ?? 0), size: sizeMultiplier, pixelScale: renderScale,
+    renderer.warmWindow(timeline, time: seekTarget ?? max(0, timeProvider?() ?? 0), size: sizeMultiplier, pixelScale: renderScale,
       opacity: usesSourceOpacity ? nil : opacity) { [weak self] in
       guard let self, !self.closed, self.seekVersion == request else { return }
       self.seeking = false; self.clock.reset(); self.refreshRendering()
@@ -271,6 +272,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     if var gate = resumeGate {
       canDraw = gate.allows(media: media, running: running, wantsPlayback: wantsPlaybackProvider?() ?? running)
       resumeGate = canDraw ? nil : gate
+      if canDraw { seekTarget = nil }
       clock.reset()
     }
     let time = clock.time(media: media, running: running, now: now, rate: rateProvider?() ?? 1)
@@ -278,7 +280,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     let ratio = videoSize.width > 0 && videoSize.height > 0 ? videoSize.width / videoSize.height : CGFloat(timeline.width / timeline.height)
     let fittedWidth = min(viewport.width, viewport.height * ratio), fittedHeight = fittedWidth / ratio
     let pixelScale = max(Double(fittedWidth) / timeline.width, Double(fittedHeight) / timeline.height)
-    renderer.prepareAhead(timeline, time: time, pixelScale: pixelScale, opacity: usesSourceOpacity ? nil : opacity)
+    renderer.prepareAhead(timeline, time: canDraw ? time : seekTarget ?? time, pixelScale: pixelScale, opacity: usesSourceOpacity ? nil : opacity)
     guard inFlight.wait(timeout: .now()) == .success else { return }
     guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
       let command = renderer.queue.makeCommandBuffer(), let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { inFlight.signal(); return }

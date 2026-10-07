@@ -233,7 +233,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     connection.send(content: Data(header.utf8), completion: .contentProcessed { error in if error == nil { then() } else { connection.cancel() } })
   }
   private func pump(_ connection: NWConnection, offset: Int64, end: Int64) {
-    guard !closed, !suspended, offset <= end, case .ready = connection.state else { connection.cancel(); return }
+    guard !closed, !suspended, connections[ObjectIdentifier(connection)] != nil, offset <= end, case .ready = connection.state else { connection.cancel(); return }
     lastUse = ProcessInfo.processInfo.systemUptime
     let aligned = offset / blockSize * blockSize, count = Int(min(blockSize, length - aligned))
     func deliver(_ data: Data) {

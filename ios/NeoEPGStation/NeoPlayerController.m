@@ -952,7 +952,7 @@
   self.playbackEnded = NO; self.seeking = YES; self.seekCompletion = completion;
   self.lastSeekFailed = NO;
   NSInteger generation = ++self.seekGeneration;
-  [self.rewindCache beginSeek:target / 1000.0]; [self.comments beginSeek:target / 1000.0]; [self.commentPiP seekDiscontinuity];
+  [self.rewindCache beginSeek:target / 1000.0]; [self.comments beginSeek:target / 1000.0]; [self.commentPiP seekDiscontinuity:target / 1000.0];
   __weak typeof(self) weakSelf = self;
   self.seekTimer = [NSTimer timerWithTimeInterval:20 repeats:NO block:^(NSTimer *timer) {
     if (weakSelf.seekGeneration != generation || !weakSelf.seeking || weakSelf.closing) { return; }
@@ -967,7 +967,7 @@
     weakSelf.reloadTextTracks = tracks;
     weakSelf.reloadGeneration += 1;
     weakSelf.reloading = YES; weakSelf.restoringReload = NO; [weakSelf armReloadDeadline];
-    [weakSelf.commentPiP seekDiscontinuity]; [weakSelf.player stop];
+    [weakSelf.commentPiP seekDiscontinuity:target / 1000.0]; [weakSelf.player stop];
   }];
   [NSRunLoop.mainRunLoop addTimer:self.seekTimer forMode:NSRunLoopCommonModes];
   dispatch_block_t finished = ^{

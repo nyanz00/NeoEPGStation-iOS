@@ -94,6 +94,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   private var pool: CVPixelBufferPool?
   private var clock = CommentPlaybackClock()
   private var resumeGate: CommentSeekResumeGate?
+  private var seekTarget = 0.0
   private var composing = false, primed = false, dirty = true
   private var lastTime = -1.0
   private var errorReported = false
@@ -176,11 +177,12 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   }
   @objc func invalidatePlaybackState() { pip?.invalidatePlaybackState() }
   // A seek flushes stale samples without stopping the active PiP session.
-  @objc func seekDiscontinuity() {
+  @objc func seekDiscontinuity(_ target: Double) {
     frameLock.lock(); frames.removeAll(); frameLock.unlock()
     work.async { [weak self] in
       self?.current = nil; self?.image = nil; self?.clock = CommentPlaybackClock()
       self?.resumeGate = CommentSeekResumeGate()
+      self?.seekTarget = max(0, target)
       self?.lastTime = -1; self?.dirty = true; self?.renderer?.seekWindow(); self?.displayLayer.flush()
     }
     invalidatePlaybackState()
@@ -246,6 +248,11 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
         if size != outputSize { outputSize = size; pool = try Self.makePool(size: size); displayLayer.flush() }
       }
       guard let image = image, let pool = pool, let renderer = renderer else { return }
+      if resumeGate != nil, let timeline = state.timeline {
+        let scale = max(Double(outputSize.width)/timeline.width, Double(outputSize.height)/timeline.height)
+        renderer.prepareAhead(timeline, time: seekTarget, pixelScale: scale, opacity: state.usesSourceOpacity ? nil : state.opacity)
+        renderer.prepareLayout(timeline, size: state.size, pixelScale: scale)
+      }
       let layer = displayLayer
       if layer.status == .failed { layer.flush() }
       guard layer.isReadyForMoreMediaData else { return }
