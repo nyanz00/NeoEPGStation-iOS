@@ -585,7 +585,8 @@
   [self completeSeek:old failed:NO]; BOOL ignoresOld = self.seeking && count == 1;
   [self completeSeek:latest failed:YES]; BOOL failedFinishes = !self.seeking && count == 2;
   self.buffering = buffering; [self setPlaybackIntent:prior];
-  return @{@"success": @(waitingIsPlaying && paused && resumed && once && ignoresOld && failedFinishes),
+  BOOL success = waitingIsPlaying && paused && resumed && once && ignoresOld && failedFinishes;
+  return @{@"success": @(success),
     @"bufferingDoesNotMeanPaused": @(waitingIsPlaying), @"latestPauseIntent": @(paused), @"latestPlayIntent": @(resumed),
     @"completionExactlyOnce": @(once), @"lateSeekCallbackIgnored": @(ignoresOld), @"failedSeekCompletes": @(failedFinishes)};
 }
@@ -602,7 +603,8 @@
       BOOL retained = self.chrome.controlsVisible && self.controlsHideTimer == nil;
       BOOL hidden = [self.chrome smokeTapVideoBackground] && !self.chrome.controlsVisible;
       BOOL revealed = [self.chrome smokeTapVideoBackground] && self.chrome.controlsVisible && self.controlsHideTimer == nil;
-      completion(@{@"success": @(shown && retained && hidden && revealed), @"naturalEndShowsControls": @(shown),
+      BOOL success = shown && retained && hidden && revealed;
+      completion(@{@"success": @(success), @"naturalEndShowsControls": @(shown),
         @"endedDoesNotAutoHide": @(retained), @"endedTapHides": @(hidden), @"endedTapShows": @(revealed)});
     }); return;
   }
