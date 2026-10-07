@@ -158,9 +158,14 @@ for name in ['pip-composition-smoke', 'pip-player-smoke', 'player-ui-smoke', 'pl
 for name, result in results.items():
     if result.get('success') is not True:
         raise RuntimeError(f"{name} failed: {result}")
-assert not range_server.history_requests, 'Playback history must remain disabled until the user feature is implemented'
-Path('dist/playback-history-smoke.json').write_text(json.dumps({'success': True, 'requests': 0,
-    'checks': ['serverSendingDisabled', 'noProgressRequestsThroughNaturalEnd']}, indent=2))
+assert range_server.progress, 'Native player never registered Web playback history'
+for _ in range(10):
+    if range_server.progress[-1]['position'] == range_server.progress[-1]['duration']:
+        break
+    time.sleep(0.5)
+assert range_server.progress[-1]['position'] == range_server.progress[-1]['duration'], 'End position was not flushed'
+Path('dist/playback-history-smoke.json').write_text(json.dumps({'success': True, 'requests': len(range_server.progress),
+    'checks': ['recordingID', 'viewerHeader', 'resumeSeconds', 'cumulativeSessionTotal', 'finalFlush']}, indent=2))
 range_server.shutdown()
 del os.environ['SIMCTL_CHILD_NEO_EPG_RANGE_SMOKE']
 

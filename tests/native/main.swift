@@ -1,7 +1,5 @@
 import Foundation
 
-assert(!NeoPlaybackHistory.sendingEnabled, "Server history is disabled until the user feature is implemented")
-
 var watch = NeoWatchClock()
 watch.sample(position: 0, duration: 120, running: true, seeking: false, rate: 1, now: 0)
 watch.sample(position: 1, duration: 120, running: true, seeking: false, rate: 1, now: 1)
