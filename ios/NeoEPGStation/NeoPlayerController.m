@@ -133,7 +133,7 @@
   self.commentPiP.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   [self.movieView insertSubview:self.commentPiP.view atIndex:0];
   self.commentPiP.timeProvider = self.comments.timeProvider;
-  self.commentPiP.lengthProvider = ^double { return weakSelf.player.media.length.value.doubleValue / 1000.0; };
+  self.commentPiP.lengthProvider = ^double { return [weakSelf mediaLength] / 1000.0; };
   self.commentPiP.runningProvider = self.comments.runningProvider;
   self.commentPiP.wantsPlaybackProvider = ^BOOL { return weakSelf.wantsPlayback && !weakSelf.playbackEnded && !weakSelf.closing; };
   self.commentPiP.playAction = ^{ [weakSelf setPlaybackIntent:YES]; };
@@ -295,6 +295,7 @@
 }
 - (void)restartMedia {
   self.playbackEnded = NO; self.playbackFailed = NO; self.buffering = NO;
+  self.lastObservedTime = 0;
   VLCMedia *media = [VLCMedia mediaWithURL:self.playbackURL ?: self.sourceURL];
   [media addOption:[NSString stringWithFormat:@":network-caching=%ld", (long)self.networkCaching]];
   self.player.media = media; [self.player play];
@@ -329,26 +330,29 @@
 - (void)setPlaybackIntent:(BOOL)playing {
   [self sampleHistory]; [self.history flush];
   self.wantsPlayback = playing;
-  if (playing && (self.playbackEnded || self.playbackFailed)) {
+  if (playing && (self.playbackEnded || self.playbackFailed || self.player.state == VLCMediaPlayerStateStopped)) {
     self.lastObservedTime = 0; [self.rewindCache beginSeek:0]; [self restartMedia];
   } else { [self applyPlaybackIntent]; }
   [self.commentPiP invalidatePlaybackState]; [self updateControls]; [self scheduleControlsHide];
 }
 - (void)applyPlaybackIntent {
-  if (self.closing || self.reloading) { return; }
+  if (self.closing || self.reloading || self.playbackEnded || self.playbackFailed) { return; }
+  // Buffering/seek callbacks can arrive after EOF. Only reconcile an active
+  // input; starting a stopped input belongs to an explicit play/reload action.
+  if (self.player.state != VLCMediaPlayerStatePlaying && self.player.state != VLCMediaPlayerStatePaused) { return; }
   if (self.wantsPlayback) { if (!self.player.isPlaying) { [self.player play]; } }
   else if (self.player.isPlaying) { [self.player pause]; }
 }
 - (void)sampleHistory {
   [self.history sample:self.playbackEnded ? self.lastObservedLength / 1000.0 : MAX(0, self.player.time.value.doubleValue / 1000.0)
-    duration:MAX(self.lastObservedLength / 1000.0, self.player.media.length.value.doubleValue / 1000.0)
+    duration:[self mediaLength] / 1000.0
     running:self.player.isPlaying && self.wantsPlayback && !self.buffering
     seeking:self.seeking || self.scrubbing || self.reloading rate:self.playbackRate];
 }
 - (void)beginScrubbing { [self showControls]; self.scrubbing = YES; }
 - (void)cancelScrubbing { self.scrubbing = NO; [self showControls]; }
 - (void)endScrubbing {
-  if (self.player.isSeekable) { [self seekBy:(int64_t)(self.timeline.value * self.player.media.length.value.longLongValue) - self.player.time.value.longLongValue completion:^{}]; }
+  if (self.player.isSeekable) { [self seekBy:(int64_t)(self.timeline.value * [self mediaLength]) - self.player.time.value.longLongValue completion:^{}]; }
   self.scrubbing = NO; [self showControls];
 }
 
@@ -390,8 +394,8 @@
   self.timeline.enabled = self.player.isSeekable && !self.reloading; self.playButton.enabled = YES;
   if (!self.scrubbing) { self.timeline.value = self.player.position; }
   int64_t current = MAX(0, self.player.time.value.longLongValue / 1000);
-  int64_t length = MAX(0, self.player.media.length.value.longLongValue / 1000);
-  if (!self.playbackEnded && !self.seeking && length > 0) { self.lastObservedTime = current * 1000; self.lastObservedLength = length * 1000; }
+  int64_t length = [self mediaLength] / 1000;
+  [self rememberPlaybackTime];
   [self.rewindCache observeTime:current running:self.player.isPlaying && !self.buffering && !self.seeking];
   [self.chrome updatePlayback:self.wantsPlayback && !self.playbackEnded current:self.playbackEnded ? self.lastObservedLength / 1000 : current duration:length > 0 ? length : self.lastObservedLength / 1000];
   NSString *warning = self.rewindCache.status.length ? self.rewindCache.status : self.history.status;
@@ -420,9 +424,11 @@
       self.reloading = NO; self.restoringReload = NO;
       [self.reloadTimer invalidate]; self.reloadTimer = nil; [self showControls]; [self.history flush];
     }
-    if (state == VLCMediaPlayerStateStopped && !self.playbackFailed && !self.seeking && !self.reloading &&
+    if (state == VLCMediaPlayerStateStopping) { [self rememberPlaybackTime]; }
+    if (state == VLCMediaPlayerStateStopped && !self.playbackFailed && !self.reloading &&
       self.lastObservedLength > 0 && self.lastObservedTime >= self.lastObservedLength - 1500) {
       self.playbackEnded = YES; self.wantsPlayback = NO;
+      [self completeSeek:self.seekGeneration failed:NO];
       [self.history sample:self.lastObservedLength / 1000.0 duration:self.lastObservedLength / 1000.0 running:NO seeking:NO rate:self.playbackRate];
       [self.history flush]; [self showControls];
     }
@@ -447,7 +453,25 @@
     [self.commentPiP invalidatePlaybackState];
   });
 }
-- (void)mediaPlayerLengthChanged:(int64_t)length { dispatch_async(dispatch_get_main_queue(), ^{ [self.commentPiP invalidatePlaybackState]; }); }
+- (void)mediaPlayerLengthChanged:(int64_t)length {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    // VLC 4 reports input duration here even when VLCMedia has not been parsed.
+    // The pinned VLCKit delegate already converts microseconds to milliseconds.
+    if (length > 0) { self.lastObservedLength = length; }
+    [self.commentPiP invalidatePlaybackState];
+  });
+}
+- (void)rememberPlaybackTime {
+  VLCMediaPlayerState state = self.player.state;
+  if (self.playbackEnded || self.seeking ||
+      (state != VLCMediaPlayerStatePlaying && state != VLCMediaPlayerStatePaused && state != VLCMediaPlayerStateStopping)) { return; }
+  int64_t length = [self mediaLength];
+  if (length > 0) {
+    self.lastObservedLength = length;
+    self.lastObservedTime = MAX(0, self.player.time.value.longLongValue);
+  }
+}
+- (void)mediaPlayerTimeChanged:(NSNotification *)notification { [self rememberPlaybackTime]; }
 
 - (void)interrupted:(NSNotification *)notification {
   if ([notification.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue] == AVAudioSessionInterruptionTypeBegan) {
@@ -549,7 +573,7 @@
 }
 - (void)runEndedSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
   [self setPlaybackIntent:YES];
-  [self seekBy:MAX(0, self.player.media.length.value.longLongValue-1000)-self.player.time.value.longLongValue completion:^{
+  [self seekBy:MAX(0, [self mediaLength]-1000)-self.player.time.value.longLongValue completion:^{
     [self pollEndedSmoke:0 completion:completion];
   }];
 }
@@ -564,7 +588,10 @@
         @"endedDoesNotAutoHide": @(retained), @"endedTapHides": @(hidden), @"endedTapShows": @(revealed)});
     }); return;
   }
-  if (attempt >= 50) { completion(@{@"success": @NO, @"error": @"natural end timed out"}); return; }
+  if (attempt >= 50) { completion(@{@"success": @NO, @"error": @"natural end timed out",
+    @"state": @(self.player.state), @"time": self.player.time.value ?: @0, @"mediaLength": @([self mediaLength]),
+    @"observedTime": @(self.lastObservedTime), @"seeking": @(self.seeking), @"buffering": @(self.buffering),
+    @"wantsPlayback": @(self.wantsPlayback)}); return; }
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self pollEndedSmoke:attempt+1 completion:completion]; });
 }
 - (void)runVideoTapSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
@@ -785,7 +812,9 @@
   if (self.closing || !self.player.isSeekable) { completion(); return; }
   [self sampleHistory]; [self.history flush];
   [self completeSeek:self.seekGeneration failed:NO];
-  int64_t target = MAX(0, MIN(self.player.media.length.value.longLongValue, self.player.time.value.longLongValue + offset));
+  int64_t length = [self mediaLength];
+  int64_t target = MAX(0, self.player.time.value.longLongValue + offset);
+  if (length > 0) { target = MIN(length, target); }
   self.playbackEnded = NO; self.seeking = YES; self.seekCompletion = completion;
   self.lastSeekFailed = NO;
   NSInteger generation = ++self.seekGeneration;
@@ -818,6 +847,7 @@
   // Even a short jump or a delayed completion must not become watched time.
   if (!self.closing) { [self sampleHistory]; }
   [self.seekTimer invalidate]; self.seekTimer = nil; self.seeking = NO;
+  if (!failed && !self.playbackEnded) { [self rememberPlaybackTime]; }
   self.lastSeekFailed = failed;
   dispatch_block_t completion = self.seekCompletion; self.seekCompletion = nil;
   if (!self.closing) {
@@ -838,7 +868,7 @@
   }];
   [NSRunLoop.mainRunLoop addTimer:self.reloadTimer forMode:NSRunLoopCommonModes];
 }
-- (int64_t)mediaLength { return self.player.media.length.value.longLongValue; }
+- (int64_t)mediaLength { return MAX(self.lastObservedLength, MAX(0, self.player.media.length.value.longLongValue)); }
 - (int64_t)mediaTime { return self.player.time.value.longLongValue; }
 - (BOOL)isMediaSeekable { return self.player.isSeekable; }
 - (BOOL)isMediaPlaying { return self.player.isPlaying; }
