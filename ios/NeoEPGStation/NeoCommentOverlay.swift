@@ -141,7 +141,11 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     opacity = min(1, max(0, value)); usesSourceOpacity = false; mixedOpacity = false
     UserDefaults.standard.set(opacity, forKey: Self.opacityKey); onChange?()
   }
-  var diagnostics: String { String(format: "描画更新 %.0ffps · 描画 %d件 · キャッシュ %.1f / 48MiB", fps, drawn, Double(renderer?.cachedBytes ?? 0) / 1048576) }
+  var diagnostics: String {
+    let overflow = timeline.map { renderer?.overflow(timeline: $0, time: timeProvider?() ?? 0) ?? 0 } ?? 0
+    return String(format: "描画更新 %.0ffps · 描画 %d件 · キャッシュ %.1f / 48MiB", fps, drawn, Double(renderer?.cachedBytes ?? 0) / 1048576)
+      + (overflow > 0 ? " · 重なり回避のため非表示 \(overflow)件" : "")
+  }
 
   @objc func stop() {
     closed = true; version += 1; task?.cancel(); task = nil

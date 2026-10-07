@@ -54,6 +54,11 @@ final class NeoDanmakuRenderer {
   var error: String? { lock.lock(); defer { lock.unlock() }; return failure }
   var cachedBytes: Int { lock.lock(); defer { lock.unlock() }; return cost }
   var hasPendingImages: Bool { lock.lock(); defer { lock.unlock() }; return !pending.isEmpty }
+  func overflow(timeline: CommentTimeline, time: Double) -> Int {
+    lock.lock(); defer { lock.unlock() }
+    guard laneSize != nil else { return 0 }
+    return timeline.visible(at: time).filter { $0.usesDanmakuTiming && lanes[$0.id] == nil }.count
+  }
 
   // Only newly visible or imminent comments are rasterized, away from the main
   // thread. Textures stay immutable once published to the render thread.
@@ -319,6 +324,27 @@ final class NeoDanmakuRenderer {
       let larger = try frame(time: 3, opacity: 1, size: 1.5)
       guard first.1 > 0, first.1 <= 80, first.0.contains(where: { $0 > 0 }), first.0 == paused.0,
         first.0 != moved.0, first.0 != larger.0, !hidden.0.contains(where: { $0 > 0 }), !ended.0.contains(where: { $0 > 0 }) else { throw CommentParseError.invalid("描画検証") }
+      let half = CommentStyle(size: 24, color: CommentColor(red: 1, green: 0, blue: 0, alpha: 143.0/255), outline: 0)
+      let test = NativeComment(id: 900, layer: 0, start: 0, end: 10, text: "RGB ALPHA", style: half)
+      let alphaTimeline = CommentTimeline(width: 640, height: 360, comments: [test])
+      func alphaFrame(_ override: Float?) throws -> [UInt8] {
+        renderer.prepare([test], absoluteOpacity: override); renderer.waitForPreparedImages()
+        let pass = MTLRenderPassDescriptor(); pass.colorAttachments[0].texture = target
+        pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
+        pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
+        let command = renderer.queue.makeCommandBuffer()!, encoder = command.makeRenderCommandEncoder(descriptor: pass)!
+        _ = renderer.encode(timeline: alphaTimeline, time: 1, viewport: CGSize(width: 640, height: 360), videoRect: CGRect(x: 0, y: 0, width: 640, height: 360),
+          sizeMultiplier: 1, opacity: override ?? 1, usesSourceOpacity: override == nil, encoder: encoder)
+        encoder.endEncoding(); command.commit(); command.waitUntilCompleted()
+        var pixels = [UInt8](repeating: 0, count: 640*360*4)
+        pixels.withUnsafeMutableBytes { target.getBytes($0.baseAddress!, bytesPerRow: 640*4, from: MTLRegionMake2D(0, 0, 640, 360), mipmapLevel: 0) }
+        return pixels
+      }
+      let assPixels = try alphaFrame(nil), opaquePixels = try alphaFrame(1)
+      let assAlpha = stride(from: 3, to: assPixels.count, by: 4).map { assPixels[$0] }.max() ?? 0
+      let fullAlpha = stride(from: 3, to: opaquePixels.count, by: 4).map { opaquePixels[$0] }.max() ?? 0
+      guard (142...144).contains(Int(assAlpha)), fullAlpha == 255,
+        stride(from: 0, to: opaquePixels.count, by: 4).allSatisfy({ opaquePixels[$0] == 0 && opaquePixels[$0+1] == 0 }) else { throw CommentParseError.invalid("ASSの色と絶対不透明度") }
       if let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
         let provider = CGDataProvider(data: Data(first.0) as CFData),
         let image = CGImage(width: 640, height: 360, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 640 * 4,
@@ -327,7 +353,7 @@ final class NeoDanmakuRenderer {
         try? UIImage(cgImage: image).pngData()?.write(to: directory.appendingPathComponent("danmaku-smoke.png"))
       }
       return ["success": true, "comments": first.1, "cacheBytes": renderer.cachedBytes,
-        "checks": ["textRaster", "danmakuMovement", "pause", "size", "opacity", "endTime"]]
+        "checks": ["textRaster", "danmakuMovement", "pause", "size", "opacity", "endTime", "ASSAlpha143", "absoluteAlpha255", "RGBPreserved"]]
     } catch { return ["success": false, "error": error.localizedDescription] }
   }
 #endif
