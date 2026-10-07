@@ -181,10 +181,33 @@ enum NeoPiPSmoke {
           save("player-ended-smoke", end)
           player.onClose = {
             save("playback-phase-smoke", ["phase": "closed"])
-            save("player-tap-smoke", ["success": encoded["success"] as? Bool == true && ts["success"] as? Bool == true,
-              "encodedMP4": encoded, "transportStream": ts])
+            disabledHistoryTest(root: root, encoded: encoded, ts: ts)
           }
           player.closeTapSmoke()
+        }
+      }
+    }
+  }
+  static func disabledHistoryTest(root: UIViewController, encoded: [String: Any], ts: [String: Any]) {
+    guard let base = ProcessInfo.processInfo.environment["NEO_EPG_RANGE_SMOKE"],
+      let url = URL(string: base+"/api/videos/1") else {
+      save("player-tap-smoke", ["success": false, "error": "missing history fixture server"]); return
+    }
+    let player = NeoPlayerController(url: url, title: "Synthetic history disabled test", username: "", password: "", networkCaching: 100)
+    player.recordingContext = ["baseURL": base, "id": 1, "user": "8", "disableHistory": true, "name": "Synthetic HTTP TS"]
+    player.modalPresentationStyle = .fullScreen
+    root.present(player, animated: false) {
+      player.runVideoTapSmoke { disabledTap in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.5) {
+          player.runEndedSmoke { end in
+            player.onClose = {
+              let correct = disabledTap["success"] as? Bool == true && end["success"] as? Bool == true
+              save("player-history-disabled-smoke", ["success": correct, "disabledViewer": "8", "playPauseSeekEnd": correct])
+              save("player-tap-smoke", ["success": encoded["success"] as? Bool == true && ts["success"] as? Bool == true && correct,
+                "encodedMP4": encoded, "transportStream": ts])
+            }
+            player.closeTapSmoke()
+          }
         }
       }
     }

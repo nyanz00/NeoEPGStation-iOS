@@ -1,6 +1,23 @@
 import Foundation
 
 func expect(_ condition: Bool, _ message: String) { if !condition { fatalError(message) } }
+do {
+  let first = NeoAPI(base: URL(string: "https://history-preference.example.test/epg")!)
+  let second = NeoAPI(base: URL(string: "https://other-preference.example.test/epg")!)
+  let keys = [first, second].map { "history.disabled." + $0.base.absoluteString }
+  let previous = keys.map { UserDefaults.standard.object(forKey: $0) }
+  defer {
+    for (key, value) in zip(keys, previous) {
+      if let value { UserDefaults.standard.set(value, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
+    }
+  }
+  keys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+  expect(!first.disablePlaybackHistory, "History sending remains enabled by default for normal viewers")
+  first.disablePlaybackHistory = true
+  expect(NeoAPI(base: first.base).disablePlaybackHistory && !second.disablePlaybackHistory, "History opt-out persists per server")
+  first.disablePlaybackHistory = false
+  expect(!NeoAPI(base: first.base).disablePlaybackHistory, "History sending can be enabled again")
+}
 for count in 1...150 {
   for page in 1...count {
     let values = NeoPagination.mobile(page: page, count: count)

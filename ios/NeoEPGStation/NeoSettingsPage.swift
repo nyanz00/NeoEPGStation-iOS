@@ -52,6 +52,7 @@ final class NeoConnectionPage: NeoPage, UITextFieldDelegate {
 
 final class NeoSettingsPage: NeoPage {
   private let stack = UIStackView()
+  private let historyToggle = UISwitch()
   init(shell: NeoShell) { super.init(title: "設定", shell: shell) }
   required init?(coder: NSCoder) { fatalError() }
   override func viewDidLoad() {
@@ -82,25 +83,52 @@ final class NeoSettingsPage: NeoPage {
     let viewer = NeoStyle.button("視聴履歴のユーザーを選択") { [weak self] in self?.selectViewer() }
     viewer.contentHorizontalAlignment = .left; viewer.heightAnchor.constraint(equalToConstant: 48).isActive = true
     stack.addArrangedSubview(viewer)
+    let history = UIStackView(); history.axis = .horizontal; history.spacing = 8; history.alignment = .center
+    let historyLabel = NeoStyle.label("視聴履歴を送信しない"); historyLabel.numberOfLines = 0
+    historyToggle.isOn = shell?.api?.disablePlaybackHistory ?? false; historyToggle.onTintColor = NeoStyle.accent
+    historyToggle.accessibilityLabel = "視聴履歴を送信しない"
+    historyToggle.addAction(UIAction { [weak self] _ in
+      guard let self else { return }; self.shell?.api?.disablePlaybackHistory = self.historyToggle.isOn
+    }, for: .valueChanged)
+    history.addArrangedSubview(historyLabel); history.addArrangedSubview(historyToggle)
+    history.heightAnchor.constraint(equalToConstant: 48).isActive = true; stack.addArrangedSubview(history)
   }
   private func selectViewer() {
     guard let api = shell?.api else { return }
     Task { [weak self] in
-      do {
-        let viewers = try await api.viewers()
-        guard let self else { return }
-        let menu = UIAlertController(title: "視聴履歴のユーザー", message: "Webで使っているユーザーを選んでください。", preferredStyle: .actionSheet)
-        for user in viewers.users {
-          menu.addAction(UIAlertAction(title: user.name + (api.viewer == String(user.id) ? " ✓" : ""), style: .default) { _ in api.viewer = String(user.id) })
-        }
-        menu.addAction(UIAlertAction(title: "キャンセル", style: .cancel))
-        menu.popoverPresentationController?.sourceView = self.view
-        menu.popoverPresentationController?.sourceRect = CGRect(x: self.view.bounds.midX, y: self.view.bounds.midY, width: 1, height: 1)
-        self.present(menu, animated: true)
-      } catch { self?.alert(error.localizedDescription) }
+      let viewers = try? await api.viewers()
+      guard let self, self.shell?.api === api else { return }
+      let menu = self.viewerMenu(users: viewers?.users ?? [])
+      if viewers == nil { menu.message = "ユーザー一覧を取得できません。masterを選択できます。" }
+      self.present(menu, animated: true)
     }
   }
-  override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); stack.frame = CGRect(x: 12, y: 16, width: body.bounds.width - 24, height: 330) }
+  private func viewerMenu(users: [NeoViewer]) -> UIAlertController {
+    let menu = UIAlertController(title: "視聴履歴のユーザー", message: "Webで使っているユーザーを選んでください。masterでは履歴を送信しません。", preferredStyle: .actionSheet)
+    if let api = shell?.api {
+      menu.addAction(UIAlertAction(title: "master（すべて）" + (api.viewer == "master" || api.viewer == "0" ? " ✓" : ""), style: .default) { _ in api.viewer = "master" })
+      for user in users where user.id > 0 {
+        menu.addAction(UIAlertAction(title: user.name + (api.viewer == String(user.id) ? " ✓" : ""), style: .default) { _ in api.viewer = String(user.id) })
+      }
+    }
+    menu.addAction(UIAlertAction(title: "キャンセル", style: .cancel))
+    menu.popoverPresentationController?.sourceView = view
+    menu.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+    return menu
+  }
+  override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); stack.frame = CGRect(x: 12, y: 16, width: body.bounds.width - 24, height: 390) }
+#if targetEnvironment(simulator)
+  func smokeHistoryPreferences() -> Bool {
+    guard let api = shell?.api else { return false }
+    let original = api.disablePlaybackHistory
+    defer { api.disablePlaybackHistory = original; historyToggle.isOn = original }
+    historyToggle.isOn = true; historyToggle.sendActions(for: .valueChanged)
+    let restored = NeoAPI(base: api.base).disablePlaybackHistory
+    historyToggle.isOn = false; historyToggle.sendActions(for: .valueChanged)
+    let titles = viewerMenu(users: [NeoViewer(id: 7, name: "Sample")]).actions.compactMap(\.title)
+    return restored && !api.disablePlaybackHistory && titles.first?.hasPrefix("master（すべて）") == true && titles.contains(where: { $0.hasPrefix("Sample") })
+  }
+#endif
 }
 
 final class NeoShortcutPage: NeoPage, UITableViewDataSource, UITableViewDelegate {

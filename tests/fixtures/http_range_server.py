@@ -50,6 +50,7 @@ def start_server(directory):
                 pass
 
         def do_PUT(self):
+            self.server.history_requests.append(self.headers.get('X-EPGStation-User-Id'))
             body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             assert self.path == '/api/recorded/1/playback'
             assert self.headers['X-EPGStation-User-Id'] == '7'
@@ -66,5 +67,6 @@ def start_server(directory):
 
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     server.progress = []
+    server.history_requests = []
     Thread(target=server.serve_forever, daemon=True).start()
     return server

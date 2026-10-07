@@ -172,6 +172,10 @@ final class NeoAPI {
     get { UserDefaults.standard.string(forKey: "viewer." + base.absoluteString) ?? "master" }
     set { UserDefaults.standard.set(newValue, forKey: "viewer." + base.absoluteString) }
   }
+  var disablePlaybackHistory: Bool {
+    get { UserDefaults.standard.bool(forKey: "history.disabled." + base.absoluteString) }
+    set { UserDefaults.standard.set(newValue, forKey: "history.disabled." + base.absoluteString) }
+  }
   init(base: URL, session: URLSession = .shared) { self.base = base; self.session = session }
   func url(_ path: String) -> URL { URL(string: base.absoluteString + "/api" + path)! }
   func recordings(page: Int, keyword: String = "", reverse: Bool = false) async throws -> NeoRecords {

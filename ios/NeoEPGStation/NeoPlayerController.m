@@ -161,7 +161,7 @@
   self.timer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer) { [weakSelf updateControls]; }];
   NSNumber *recordingID = self.recordingContext[@"id"];
   NSURL *base = [NSURL URLWithString:self.recordingContext[@"baseURL"] ?: @""];
-  if (base && recordingID.integerValue > 0) {
+  if (![self.recordingContext[@"disableHistory"] boolValue] && base && recordingID.integerValue > 0) {
     self.history = [[NeoPlaybackHistory alloc] initWithBase:base recordingID:recordingID.integerValue
       user:self.recordingContext[@"user"] ?: @"master" username:self.username password:self.password];
     self.history.onChange = ^{ [weakSelf updateControls]; };

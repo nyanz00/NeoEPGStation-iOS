@@ -314,6 +314,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     guard player == nil, let api else { return }
     let controller = NeoPlayerController(url: api.url("/videos/\(file.id)"), title: recording.name, username: "", password: "", networkCaching: 5000)
     controller.recordingContext = ["baseURL": api.base.absoluteString, "id": recording.id, "user": api.viewer,
+      "disableHistory": api.disablePlaybackHistory,
       "channelId": recording.channelId ?? 0, "channelName": recording.channelName ?? recording.channelId.flatMap { channels[$0] } ?? "",
       "name": recording.name, "startAt": recording.startAt, "endAt": recording.endAt, "isRecording": recording.isRecording,
       "description": recording.description ?? "", "extended": recording.extended ?? "", "ruleId": recording.ruleId ?? 0]
@@ -552,6 +553,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       let cardHeight = recorded.cardHeight
       let pages = recorded.renderedPages
       var popupCorrect = true
+      if let settings = self.active?.topViewController as? NeoSettingsPage {
+        popupCorrect = settings.smokeHistoryPreferences()
+      }
       var dropText = ""
       if self.smokeStage == "record-actions" {
         recorded.smokeOpenFirstMenu()

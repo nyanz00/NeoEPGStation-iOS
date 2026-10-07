@@ -164,8 +164,12 @@ for _ in range(10):
         break
     time.sleep(0.5)
 assert range_server.progress[-1]['position'] == range_server.progress[-1]['duration'], 'End position was not flushed'
+assert '8' not in range_server.history_requests, 'History was sent despite the do-not-send setting'
+disabled = json.loads((container / 'Documents/player-history-disabled-smoke.json').read_text())
+assert disabled.get('success') is True, f'Disabled-history playback failed: {disabled}'
 Path('dist/playback-history-smoke.json').write_text(json.dumps({'success': True, 'requests': len(range_server.progress),
-    'checks': ['recordingID', 'viewerHeader', 'resumeSeconds', 'cumulativeSessionTotal', 'finalFlush']}, indent=2))
+    'disabledViewerRequests': range_server.history_requests.count('8'),
+    'checks': ['recordingID', 'viewerHeader', 'resumeSeconds', 'cumulativeSessionTotal', 'finalFlush', 'doNotSendSetting']}, indent=2))
 range_server.shutdown()
 del os.environ['SIMCTL_CHILD_NEO_EPG_RANGE_SMOKE']
 
