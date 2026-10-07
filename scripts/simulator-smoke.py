@@ -125,6 +125,15 @@ if not any(line.split()[0] == pid for line in processes.splitlines() if line.spl
 Path('dist/simulator-launch.txt').write_text(f"{device['name']}\n{launch}\nProcess remained running through native rendering tests.\n")
 run('xcrun', 'simctl', 'io', device['udid'], 'screenshot', 'dist/simulator.png')
 container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], 'io.github.nyanz00.NeoEPGStation', 'data'))
+# Preserve every synthetic native result before an assertion can stop the run.
+for source in (container / 'Documents').glob('*-smoke.json'):
+    Path('dist', source.name).write_bytes(source.read_bytes())
+for source in (container / 'Documents').glob('*.png'):
+    Path('dist', source.name).write_bytes(source.read_bytes())
+if not (container / 'Documents/player-tap-smoke.json').exists():
+    logs = run('xcrun', 'simctl', 'spawn', device['udid'], 'log', 'show', '--last', '3m',
+               '--style', 'compact', '--predicate', 'process == "NeoEPGStation"')
+    Path('dist/simulator-native.log').write_text(logs)
 storage = json.loads((container / 'Documents/storage-smoke.json').read_text())
 Path('dist/storage-smoke.json').write_text(json.dumps(storage, indent=2) + '\n')
 if storage.get('success') is not True:

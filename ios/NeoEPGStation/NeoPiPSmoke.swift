@@ -97,6 +97,7 @@ enum NeoPiPSmoke {
   // Local synthetic H.264 exercises the actual pinned VLC output and frame tap.
   // It does not stand in for device AV1 throughput or background PiP testing.
   static func playerTest(root: UIViewController) {
+    save("playback-phase-smoke", ["phase": "encode"])
     DispatchQueue.global(qos: .userInitiated).async {
       do {
         let url = directory.appendingPathComponent("pip-fixture.mp4")
@@ -125,9 +126,11 @@ enum NeoPiPSmoke {
               "description": "番組の説明がここに表示されます。", "extended": "◇番組内容\n検証用の番組情報です。\n\n◇出演者\nサンプル"]
             player.modalPresentationStyle = .fullScreen
             root.present(player, animated: false) {
+              save("playback-phase-smoke", ["phase": "encoded player"])
               DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                 player.runVideoTapSmoke { encodedTap in
                   player.runControlsSmoke { controls in
+                    save("playback-phase-smoke", ["phase": "controls", "success": controls["success"] ?? false])
                     save("player-controls-smoke", controls)
                     var result = player.runLayoutSmokeChecks()
                     // VLC resize reporting and MTK drawable replacement are async.
@@ -140,8 +143,10 @@ enum NeoPiPSmoke {
                         let primed = result["pipSupported"] as? Bool != true || result["pipStatus"] as? String == "PiP · コメント合成"
                         result["success"] = result["success"] as? Bool == true && result["videoFillsFit"] as? Bool == true && primed && (!attempted || result["pipActive"] as? Bool == true)
                         player.runReloadSmoke { playback in
+                          save("playback-phase-smoke", ["phase": "reload", "success": playback["success"] ?? false])
                           save("player-playback-smoke", playback)
                           player.runExitSmoke(host: root) { exit in
+                            save("playback-phase-smoke", ["phase": "exit", "success": exit["success"] ?? false])
                             save("player-exit-smoke", exit)
                             save("pip-player-smoke", result)
                             tsTapTest(root: root, encoded: encodedTap)
@@ -159,6 +164,7 @@ enum NeoPiPSmoke {
     }
   }
   static func tsTapTest(root: UIViewController, encoded: [String: Any]) {
+    save("playback-phase-smoke", ["phase": "TS player"])
     let file = directory.appendingPathComponent("player-tap.ts")
     guard FileManager.default.fileExists(atPath: file.path) else { save("player-tap-smoke", ["success": false, "error": "missing TS fixture"]); return }
     let base = ProcessInfo.processInfo.environment["NEO_EPG_RANGE_SMOKE"]
@@ -168,10 +174,13 @@ enum NeoPiPSmoke {
     if let base { player.recordingContext = ["baseURL": base, "id": 1, "user": "7", "name": "Synthetic HTTP TS"] }
     root.present(player, animated: false) {
       player.runVideoTapSmoke { ts in
+        save("playback-phase-smoke", ["phase": "TS tap", "success": ts["success"] ?? false])
         save("player-seek-state-smoke", player.runSeekStateSmokeChecks())
         player.runEndedSmoke { end in
+          save("playback-phase-smoke", ["phase": "natural end", "success": end["success"] ?? false])
           save("player-ended-smoke", end)
           player.onClose = {
+            save("playback-phase-smoke", ["phase": "closed"])
             save("player-tap-smoke", ["success": encoded["success"] as? Bool == true && ts["success"] as? Bool == true,
               "encodedMP4": encoded, "transportStream": ts])
           }

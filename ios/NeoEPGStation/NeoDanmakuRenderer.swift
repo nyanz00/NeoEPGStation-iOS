@@ -328,7 +328,9 @@ final class NeoDanmakuRenderer {
       let larger = try frame(time: 3, opacity: 1, size: 1.5)
       guard first.1 > 0, first.1 <= 80, first.0.contains(where: { $0 > 0 }), first.0 == paused.0,
         first.0 != moved.0, first.0 != larger.0, !hidden.0.contains(where: { $0 > 0 }), !ended.0.contains(where: { $0 > 0 }) else { throw CommentParseError.invalid("描画検証") }
-      let half = CommentStyle(size: 24, color: CommentColor(red: 1, green: 0, blue: 0, alpha: 143.0/255), outline: 0)
+      // Integer placement avoids sampling two neighboring texels at a half
+      // pixel. The check measures opacity, not bilinear edge interpolation.
+      let half = CommentStyle(size: 24, color: CommentColor(red: 1, green: 0, blue: 0, alpha: 143.0/255), outline: 0, alignment: 7)
       let test = NativeComment(id: 900, layer: 0, start: 0, end: 10, text: "RGB ALPHA", style: half)
       let alphaTimeline = CommentTimeline(width: 640, height: 360, comments: [test])
       renderer.reset()
@@ -350,7 +352,11 @@ final class NeoDanmakuRenderer {
       let assAlpha = stride(from: 3, to: assPixels.count, by: 4).map { assPixels[$0] }.max() ?? 0
       let fullAlpha = stride(from: 3, to: opaquePixels.count, by: 4).map { opaquePixels[$0] }.max() ?? 0
       guard (142...144).contains(Int(assAlpha)), fullAlpha == 255,
-        stride(from: 0, to: opaquePixels.count, by: 4).allSatisfy({ opaquePixels[$0] == 0 && opaquePixels[$0+1] == 0 }) else { throw CommentParseError.invalid("ASSの色と絶対不透明度") }
+        stride(from: 0, to: opaquePixels.count, by: 4).allSatisfy({ opaquePixels[$0] == 0 && opaquePixels[$0+1] == 0 }) else {
+        return ["success": false, "error": "ASS color/opacity readback", "ASSAlpha": Int(assAlpha), "absoluteAlpha": Int(fullAlpha),
+          "blueMaximum": Int(stride(from: 0, to: opaquePixels.count, by: 4).map { opaquePixels[$0] }.max() ?? 0),
+          "greenMaximum": Int(stride(from: 1, to: opaquePixels.count, by: 4).map { opaquePixels[$0] }.max() ?? 0)]
+      }
       if let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
         let provider = CGDataProvider(data: Data(first.0) as CFData),
         let image = CGImage(width: 640, height: 360, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 640 * 4,
