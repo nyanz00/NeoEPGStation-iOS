@@ -168,11 +168,15 @@ enum NeoPiPSmoke {
     if let base { player.recordingContext = ["baseURL": base, "id": 1, "user": "7", "name": "Synthetic HTTP TS"] }
     root.present(player, animated: false) {
       player.runVideoTapSmoke { ts in
-        player.onClose = {
-          save("player-tap-smoke", ["success": encoded["success"] as? Bool == true && ts["success"] as? Bool == true,
-            "encodedMP4": encoded, "transportStream": ts])
+        save("player-seek-state-smoke", player.runSeekStateSmokeChecks())
+        player.runEndedSmoke { end in
+          save("player-ended-smoke", end)
+          player.onClose = {
+            save("player-tap-smoke", ["success": encoded["success"] as? Bool == true && ts["success"] as? Bool == true,
+              "encodedMP4": encoded, "transportStream": ts])
+          }
+          player.closeTapSmoke()
         }
-        player.closeTapSmoke()
       }
     }
   }

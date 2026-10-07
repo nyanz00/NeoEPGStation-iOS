@@ -14,6 +14,8 @@ NS_ASSUME_NONNULL_BEGIN
 #if TARGET_OS_SIMULATOR
 - (void)runVideoTapSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runVideoTapSmoke(completion:));
 - (void)closeTapSmoke;
+- (void)runEndedSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runEndedSmoke(completion:));
+- (NSDictionary<NSString *, id> *)runSeekStateSmokeChecks;
 - (void)runControlsSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runControlsSmoke(completion:));
 - (NSDictionary<NSString *, id> *)runLayoutSmokeChecks;
 - (NSDictionary<NSString *, id> *)finishLayoutSmokeSnapshot;

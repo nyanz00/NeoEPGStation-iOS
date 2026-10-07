@@ -142,7 +142,7 @@ for name in ['pip-composition-smoke', 'player-landscape-smoke', 'player-initial-
     if source.exists():
         Path(f'dist/{name}.png').write_bytes(source.read_bytes())
 results = {}
-for name in ['pip-composition-smoke', 'pip-player-smoke', 'player-ui-smoke', 'player-playback-smoke', 'player-controls-smoke', 'player-settings-smoke', 'player-exit-smoke', 'player-tap-smoke', 'rewind-cache-smoke']:
+for name in ['pip-composition-smoke', 'pip-player-smoke', 'player-ui-smoke', 'player-playback-smoke', 'player-controls-smoke', 'player-settings-smoke', 'player-exit-smoke', 'player-tap-smoke', 'rewind-cache-smoke', 'player-seek-state-smoke', 'player-ended-smoke']:
     result = json.loads((container / f'Documents/{name}.json').read_text())
     Path(f'dist/{name}.json').write_text(json.dumps(result, indent=2) + '\n')
     results[name] = result
@@ -150,6 +150,11 @@ for name, result in results.items():
     if result.get('success') is not True:
         raise RuntimeError(f"{name} failed: {result}")
 assert range_server.progress, 'Native player never registered Web playback history'
+for _ in range(10):
+    if range_server.progress[-1]['position'] == range_server.progress[-1]['duration']:
+        break
+    time.sleep(0.5)
+assert range_server.progress[-1]['position'] == range_server.progress[-1]['duration'], 'End position was not flushed'
 Path('dist/playback-history-smoke.json').write_text(json.dumps({'success': True, 'requests': len(range_server.progress),
     'checks': ['recordingID', 'viewerHeader', 'resumeSeconds', 'cumulativeSessionTotal', 'finalFlush']}, indent=2))
 range_server.shutdown()

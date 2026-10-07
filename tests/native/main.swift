@@ -34,6 +34,10 @@ func tsPacket(_ seconds: UInt64) -> Data {
   return Data(packet)
 }
 assert(byteClock.observeTS(tsPacket(100)+tsPacket(130), offset: 0) == 0...31)
+var mkvClock = NeoMediaByteClock()
+let cluster0 = Data([0x1f,0x43,0xb6,0x75,0xff,0xe7,0x82,0,0]) + Data(repeating: 0, count: 20)
+let cluster60 = Data([0x1f,0x43,0xb6,0x75,0xff,0xe7,0x82,0xea,0x60]) + Data(repeating: 0, count: 20)
+assert(mkvClock.observeMatroska(cluster0+cluster60, offset: 0) == 0...70)
 
 let header = """
 [Script Info]

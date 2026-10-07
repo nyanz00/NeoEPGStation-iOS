@@ -219,7 +219,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
             try FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
             try data.write(to: self.file(aligned), options: .atomic)
             self.bytes -= self.blocks[aligned]?.count ?? 0
-            let range = self.byteClock.timeRange(offset: aligned, count: data.count) ?? self.byteClock.observeTS(data, offset: aligned)
+            let range = self.byteClock.timeRange(offset: aligned, count: data.count) ?? self.byteClock.observeTS(data, offset: aligned) ?? self.byteClock.observeMatroska(data, offset: aligned)
             // MP4 metadata has no media time. Keep its bounded chunks so VLC
             // can seek without fetching the same moov/index again. Unknown
             // containers fall back to observed presentation/read checkpoints.

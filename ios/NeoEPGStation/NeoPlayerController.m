@@ -529,6 +529,44 @@
 }
 #if TARGET_OS_SIMULATOR
 - (void)closeTapSmoke { [self closePlayer]; }
+- (NSDictionary<NSString *, id> *)runSeekStateSmokeChecks {
+  BOOL prior = self.wantsPlayback; BOOL buffering = self.buffering;
+  self.buffering = YES; [self setPlaybackIntent:YES];
+  BOOL waitingIsPlaying = self.commentPiP.wantsPlaybackProvider();
+  [self setPlaybackIntent:NO]; BOOL paused = !self.commentPiP.wantsPlaybackProvider();
+  [self setPlaybackIntent:YES]; BOOL resumed = self.commentPiP.wantsPlaybackProvider();
+  __block NSInteger count = 0;
+  self.seeking = YES; NSInteger old = ++self.seekGeneration; self.seekCompletion = ^{ count++; };
+  [self completeSeek:old failed:NO]; [self completeSeek:old failed:NO];
+  BOOL once = count == 1;
+  self.seeking = YES; NSInteger latest = ++self.seekGeneration; self.seekCompletion = ^{ count++; };
+  [self completeSeek:old failed:NO]; BOOL ignoresOld = self.seeking && count == 1;
+  [self completeSeek:latest failed:YES]; BOOL failedFinishes = !self.seeking && count == 2;
+  self.buffering = buffering; [self setPlaybackIntent:prior];
+  return @{@"success": @(waitingIsPlaying && paused && resumed && once && ignoresOld && failedFinishes),
+    @"bufferingDoesNotMeanPaused": @(waitingIsPlaying), @"latestPauseIntent": @(paused), @"latestPlayIntent": @(resumed),
+    @"completionExactlyOnce": @(once), @"lateSeekCallbackIgnored": @(ignoresOld), @"failedSeekCompletes": @(failedFinishes)};
+}
+- (void)runEndedSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  [self setPlaybackIntent:YES];
+  [self seekBy:MAX(0, self.player.media.length.value.longLongValue-1000)-self.player.time.value.longLongValue completion:^{
+    [self pollEndedSmoke:0 completion:completion];
+  }];
+}
+- (void)pollEndedSmoke:(NSInteger)attempt completion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  if (self.playbackEnded) {
+    BOOL shown = self.chrome.controlsVisible;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.8*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      BOOL retained = self.chrome.controlsVisible && self.controlsHideTimer == nil;
+      BOOL hidden = [self.chrome smokeTapVideoBackground] && !self.chrome.controlsVisible;
+      BOOL revealed = [self.chrome smokeTapVideoBackground] && self.chrome.controlsVisible && self.controlsHideTimer == nil;
+      completion(@{@"success": @(shown && retained && hidden && revealed), @"naturalEndShowsControls": @(shown),
+        @"endedDoesNotAutoHide": @(retained), @"endedTapHides": @(hidden), @"endedTapShows": @(revealed)});
+    }); return;
+  }
+  if (attempt >= 50) { completion(@{@"success": @NO, @"error": @"natural end timed out"}); return; }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self pollEndedSmoke:attempt+1 completion:completion]; });
+}
 - (void)runVideoTapSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
   [self waitForTapSmokePlayback:0 completion:completion];
 }

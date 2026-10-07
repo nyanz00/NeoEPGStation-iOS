@@ -365,9 +365,11 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     }; lastCommentIndex = -1; commentList.reloadData()
   }
   @objc func updateCommentMessage(_ message: String) {
-    let label = NeoStyle.label(message, size: 14, muted: true)
+    guard comments.isEmpty else { commentList.backgroundView = nil; return }
+    let label = (commentList.backgroundView as? UILabel) ?? NeoStyle.label(message, size: 14, muted: true)
+    label.text = message
     label.textAlignment = .center; label.numberOfLines = 0
-    commentList.backgroundView = comments.isEmpty ? label : nil
+    commentList.backgroundView = label
   }
   private func selectPanel(_ id: String, toggle: Bool) {
     if toggle && isWide && panelOpen && tab == id { setPanel(false); return }

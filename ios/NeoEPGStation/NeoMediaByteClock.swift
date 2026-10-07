@@ -8,6 +8,46 @@ struct NeoMediaByteClock {
   private(set) var spans: [Span] = []
   private var pcrOrigin: Double?, pcrPID: Int?
   private(set) var isMP4 = false
+  private var matroskaScale = 0.001
+  private var clusters: [(offset: Int64, time: Double)] = []
+  mutating func observeMatroska(_ data: Data, offset: Int64) -> ClosedRange<Double>? {
+    let bytes = [UInt8](data)
+    guard bytes.count >= 16 else { return nil }
+    func vint(_ i: Int) -> (value: UInt64, next: Int)? {
+      guard i < bytes.count, bytes[i] != 0 else { return nil }
+      var length = 1, mask: UInt8 = 0x80
+      while bytes[i]&mask == 0 && length < 8 { length += 1; mask >>= 1 }
+      guard i+length <= bytes.count else { return nil }
+      var value = UInt64(bytes[i]&(~mask))
+      if length > 1 { for j in i+1..<i+length { value = (value<<8)|UInt64(bytes[j]) } }
+      return (value, i+length)
+    }
+    func unsigned(_ i: Int, _ n: Int) -> UInt64? {
+      guard n > 0, n <= 8, i+n <= bytes.count else { return nil }
+      return bytes[i..<i+n].reduce(UInt64(0)) { ($0<<8)|UInt64($1) }
+    }
+    for i in 0..<bytes.count-12 {
+      if offset == 0, bytes[i] == 0x2a, bytes[i+1] == 0xd7, bytes[i+2] == 0xb1,
+        let length = vint(i+3), length.value <= 8, let value = unsigned(length.next, Int(length.value)), value > 0, value <= 1_000_000_000 {
+        matroskaScale = Double(value)/1_000_000_000
+      }
+      guard bytes[i] == 0x1f, bytes[i+1] == 0x43, bytes[i+2] == 0xb6, bytes[i+3] == 0x75,
+        let length = vint(i+4) else { continue }
+      var child = length.next
+      // A cluster's first fields are its timestamp and optionally a CRC.
+      if bytes[child] == 0xbf, let crc = vint(child+1), crc.value == 4 { child = crc.next+4 }
+      guard child+2 <= bytes.count, bytes[child] == 0xe7, let size = vint(child+1), size.value <= 8,
+        let ticks = unsigned(size.next, Int(size.value)), ticks < 86_400_000_000 else { continue }
+      let point = (offset: offset+Int64(i), time: Double(ticks)*matroskaScale)
+      if !clusters.contains(where: { $0.offset == point.offset }) { clusters.append(point) }
+    }
+    clusters.sort { $0.offset < $1.offset }
+    let within = clusters.filter { $0.offset >= offset && $0.offset < offset+Int64(data.count) }
+    let previous = clusters.last { $0.offset < offset }
+    guard let first = within.first ?? previous, let last = within.last ?? previous else { return nil }
+    // Cluster duration/keyframe preroll can extend beyond its timestamp.
+    return max(0, first.time)...(last.time+10)
+  }
   mutating func observeTS(_ data: Data, offset: Int64) -> ClosedRange<Double>? {
     let bytes = [UInt8](data), first = Int((188-offset%188)%188)
     guard bytes.count > first+188, bytes[first] == 0x47, bytes[first+188] == 0x47 else { return nil }
