@@ -93,6 +93,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   private var outputSize = CGSize.zero
   private var pool: CVPixelBufferPool?
   private var clock = CommentPlaybackClock()
+  private var resumeGate: CommentSeekResumeGate?
   private var composing = false, primed = false, dirty = true
   private var lastTime = -1.0
   private var errorReported = false
@@ -103,6 +104,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   @objc var onChange: (() -> Void)?
   @objc var timeProvider: (() -> Double)?
   @objc var lengthProvider: (() -> Double)?
+  @objc var rateProvider: (() -> Double)?
   @objc var runningProvider: (() -> Bool)?
   @objc var wantsPlaybackProvider: (() -> Bool)?
   @objc var playAction: (() -> Void)?
@@ -178,7 +180,8 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     frameLock.lock(); frames.removeAll(); frameLock.unlock()
     work.async { [weak self] in
       self?.current = nil; self?.image = nil; self?.clock = CommentPlaybackClock()
-      self?.lastTime = -1; self?.dirty = true; self?.displayLayer.flush()
+      self?.resumeGate = CommentSeekResumeGate()
+      self?.lastTime = -1; self?.dirty = true; self?.renderer?.seekWindow(); self?.displayLayer.flush()
     }
     invalidatePlaybackState()
   }
@@ -218,7 +221,13 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     if let due = due { frames.removeFirst(due + 1) }
     frameLock.unlock()
     let running = runningProvider?() ?? false
-    let time = clock.time(media: timeProvider?() ?? 0, running: running, now: now)
+    let media = timeProvider?() ?? 0
+    var composition = state
+    if var gate = resumeGate {
+      let ready = gate.allows(media: media, running: running, wantsPlayback: wantsPlaybackProvider?() ?? running)
+      resumeGate = ready ? nil : gate; composition.enabled = composition.enabled && ready; clock.reset()
+    }
+    let time = clock.time(media: media, running: running, now: now, rate: rateProvider?() ?? 1)
     guard next != nil || current != nil else { return }
     if next == nil && !running && !dirty && time == lastTime { return }
     do {
@@ -240,7 +249,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
       let layer = displayLayer
       if layer.status == .failed { layer.flush() }
       guard layer.isReadyForMoreMediaData else { return }
-      guard let output = try Self.compose(image: image, size: outputSize, pool: pool, renderer: renderer, state: state, time: time) else { return }
+      guard let output = try Self.compose(image: image, size: outputSize, pool: pool, renderer: renderer, state: composition, time: time) else { return }
       let sample = try Self.makeSample(output, hostTime: now)
       layer.enqueue(sample)
       frameLock.lock(); composed += 1; frameLock.unlock()
@@ -279,8 +288,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     context.draw(image, in: CGRect(origin: .zero, size: size))
     if state.enabled, let timeline = state.timeline {
       let scale = max(Double(size.width) / timeline.width, Double(size.height) / timeline.height)
-      renderer.prepare(timeline.visible(at: time, lookAhead: 1), pixelScale: scale, absoluteOpacity: state.usesSourceOpacity ? nil : state.opacity)
-      renderer.prepareLayout(timeline, size: state.size)
+      renderer.prepareAhead(timeline, time: time, pixelScale: scale, opacity: state.usesSourceOpacity ? nil : state.opacity)
       _ = renderer.drawCPU(timeline: timeline, time: time, viewport: size,
         sizeMultiplier: state.size, opacity: state.opacity, pixelScale: scale, usesSourceOpacity: state.usesSourceOpacity, context: context)
       if let failure = renderer.error { throw CommentParseError.invalid(failure) }

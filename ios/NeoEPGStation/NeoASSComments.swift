@@ -304,13 +304,59 @@ enum NeoASSComments {
   }
 }
 
-// Smooth the discrete VLCKit clock only between recent samples. Never run away
-// during a stalled network read; discontinuities and pauses reset immediately.
+// Bridge coarse native time samples with a bounded monotonic playback clock.
+// Seeks reset explicitly; pauses/buffering freeze immediately. Correct small
+// sample phase errors gradually instead of jumping backwards each update.
 struct CommentPlaybackClock {
-  private var sample = -1.0, host = 0.0
-  mutating func time(media: Double, running: Bool, now: Double) -> Double {
-    guard media.isFinite, media >= 0 else { sample = -1; return 0 }
-    if !running || media != sample { sample = media; host = now }
-    return media + (running ? min(0.05, max(0, now - host)) : 0)
+  private var sample = -1.0, sampleHost = 0.0, anchor = 0.0, host = 0.0, last = 0.0
+  private var wasRunning = false
+  mutating func reset() { self = CommentPlaybackClock() }
+  mutating func time(media: Double, running: Bool, now: Double, rate: Double = 1) -> Double {
+    guard media.isFinite, media >= 0, now.isFinite else { reset(); return 0 }
+    let speed = rate.isFinite ? min(4, max(0.25, rate)) : 1
+    if sample < 0 || !running || !wasRunning || media < sample - 0.5 {
+      sample = media; sampleHost = now; anchor = media; host = now; last = media; wasRunning = running
+      return media
+    }
+    var predicted = anchor + max(0, now-host)*speed
+    if media != sample {
+      let difference = media-predicted
+      if abs(difference) > 1.5*speed { predicted = media; last = media }
+      else { predicted += min(0.02, max(-0.02, difference)) }
+      sample = media; sampleHost = now; anchor = predicted; host = now
+    }
+    // A genuinely stalled native clock cannot advance indefinitely.
+    let bounded = min(predicted, anchor + max(0, sampleHost+1.5-host)*speed)
+    last = max(last, bounded); wasRunning = true
+    return last
+  }
+}
+
+// Do not show a stationary comment at the seek destination while VLC is still
+// acquiring its first advancing playback timestamp. Explicit pause can show it.
+struct CommentSeekResumeGate {
+  private var anchor: Double?
+  mutating func reset() { anchor = nil }
+  mutating func allows(media: Double, running: Bool, wantsPlayback: Bool) -> Bool {
+    if !wantsPlayback { return true }
+    guard media.isFinite, media >= 0 else { return false }
+    guard let anchor else { self.anchor = media; return false }
+    return running && abs(media-anchor) > 0.001
+  }
+}
+
+// Re-query and sort only at a comment start/end boundary or a backwards seek.
+struct CommentFrameCursor {
+  private var previous = -Double.infinity, next = -Double.infinity
+  private var current: [NativeComment] = []
+  mutating func reset() { self = CommentFrameCursor() }
+  mutating func visible(_ timeline: CommentTimeline, at time: Double) -> [NativeComment] {
+    if time >= previous && time < next { previous = time; return current }
+    current = timeline.visible(at: time).sorted { $0.layer == $1.layer ? $0.id < $1.id : $0.layer < $1.layer }
+    var low = 0, high = timeline.comments.count
+    while low < high { let mid = (low+high)/2; if timeline.comments[mid].start <= time { low = mid+1 } else { high = mid } }
+    next = min(low < timeline.comments.count ? timeline.comments[low].start : .infinity,
+               current.map(\.end).min() ?? .infinity)
+    previous = time; return current
   }
 }

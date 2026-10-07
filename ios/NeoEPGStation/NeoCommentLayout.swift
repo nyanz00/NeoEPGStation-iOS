@@ -6,7 +6,7 @@ enum CommentLanePlan {
   // Horizontal separation is checked at both ends of the shared lifetime:
   // linear trajectories cannot collide between two separated endpoints.
   static func build(_ timeline: CommentTimeline, size: Double,
-                    measure: (NativeComment) -> CommentExtent) -> [Int: Double] {
+                    cancelled: () -> Bool = { false }, measure: (NativeComment) -> CommentExtent) -> [Int: Double] {
     struct Active { let comment: NativeComment; let extent: CommentExtent; let top: Double }
     var active: [Active] = [], positions: [Int: Double] = [:]
     func left(_ c: NativeComment, _ e: CommentExtent, _ time: Double) -> Double {
@@ -15,7 +15,8 @@ enum CommentLanePlan {
       let anchor = c.position?.x ?? (column == 0 ? c.style.marginL : column == 1 ? timeline.width/2 : timeline.width-c.style.marginR)
       return anchor - e.width * Double(column)/2
     }
-    for comment in timeline.comments where comment.usesDanmakuTiming {
+    for (index, comment) in timeline.comments.enumerated() where comment.usesDanmakuTiming {
+      if index % 128 == 0 && cancelled() { return [:] }
       active.removeAll { $0.comment.end <= comment.start }
       let measured = measure(comment)
       let extent = CommentExtent(width: measured.width * comment.style.scaleX * size,
@@ -25,17 +26,17 @@ enum CommentLanePlan {
       let anchor = comment.motion?.from.y ?? comment.position?.y ?? (row == 0 ? timeline.height-comment.style.marginV : row == 1 ? timeline.height/2 : comment.style.marginV)
       let preferred = min(timeline.height-extent.height, max(0, anchor-extent.height*Double(2-row)/2))
       var candidates = [preferred, 0, timeline.height-extent.height]
-      for item in active { candidates += [item.top+item.extent.height+4, item.top-extent.height-4] }
+      for item in active { candidates += [item.top+item.extent.height+1, item.top-extent.height-1] }
       candidates.sort { abs($0-preferred) < abs($1-preferred) }
       let top = candidates.first { y in
         guard y >= 0, y+extent.height <= timeline.height else { return false }
         return !active.contains { item in
-          guard y < item.top+item.extent.height+4, y+extent.height+4 > item.top else { return false }
+          guard y < item.top+item.extent.height+1, y+extent.height+1 > item.top else { return false }
           let end = min(comment.end, item.comment.end)
           let a0 = left(comment, extent, comment.start), a1 = left(comment, extent, end)
           let b0 = left(item.comment, item.extent, comment.start), b1 = left(item.comment, item.extent, end)
-          let behind = a0 >= b0+item.extent.width+8 && a1 >= b1+item.extent.width+8
-          let ahead = b0 >= a0+extent.width+8 && b1 >= a1+extent.width+8
+          let behind = a0 >= b0+item.extent.width+1 && a1 >= b1+item.extent.width+1
+          let ahead = b0 >= a0+extent.width+1 && b1 >= a1+extent.width+1
           return !behind && !ahead
         }
       }

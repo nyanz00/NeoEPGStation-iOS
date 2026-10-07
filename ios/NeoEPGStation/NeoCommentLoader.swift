@@ -106,3 +106,15 @@ final class NeoCommentLoader: NSObject, URLSessionTaskDelegate {
     completionHandler(redirected)
   }
 }
+
+// A track ID/index belongs to one input; names survive the next recording.
+@objc(NeoSubtitlePreference)
+final class NeoSubtitlePreference: NSObject {
+  private static let key = "player.subtitle.name"
+  @objc static var savedName: String? { UserDefaults.standard.string(forKey: key) }
+  @objc static func save(_ name: String) { UserDefaults.standard.set(name, forKey: key) }
+  @objc static func preferredIndex(_ names: [String]) -> Int {
+    guard let name = savedName, !name.isEmpty else { return -1 }
+    return names.firstIndex(of: name) ?? -1
+  }
+}

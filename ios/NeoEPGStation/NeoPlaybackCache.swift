@@ -15,9 +15,13 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   private static var root: URL {
     FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!.appendingPathComponent("NeoPlaybackTemporary", isDirectory: true)
   }
+  private static let activeLock = NSLock()
+  private static var activeDirectories: Set<URL> = []
   @objc static func cleanAbandoned() {
-    // Called once, before any player is created. Never persist URLs or credentials.
-    try? FileManager.default.removeItem(at: root)
+    activeLock.lock(); defer { activeLock.unlock() }
+    for url in (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [] where !activeDirectories.contains(url) {
+      try? FileManager.default.removeItem(at: url)
+    }
   }
   private struct Block { let count: Int; let endTime: Double?; var used: Double }
   private let source: URL, authorization: String?, directory: URL
@@ -28,7 +32,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   private var blocks: [Int64: Block] = [:], bytes = 0
   private var mediaTime = 0.0, highWater = 0.0, lastUse = ProcessInfo.processInfo.systemUptime
   private var seconds = NeoPlaybackCache.savedSeconds
-  private var listener: NWListener?, session: URLSession!, sweep: DispatchSourceTimer?
+  private var listener: NWListener?, session: URLSession!
   private var connections: [ObjectIdentifier: NWConnection] = [:]
   private var requests: [ObjectIdentifier: URLSessionDataTask] = [:]
   private var length: Int64 = 0, closed = false
@@ -37,6 +41,8 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   private var startup: ((URL?, String?) -> Void)?
   @objc private(set) var status = ""
   @objc var onChange: (() -> Void)?
+  @objc var onTransportFailure: (() -> Void)?
+  private var suspended = false
   private(set) var networkBytes: Int64 = 0, hitBytes: Int64 = 0
 
   @objc(initWithSource:username:password:)
@@ -44,6 +50,8 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     self.source = source; directory = Self.root.appendingPathComponent(UUID().uuidString, isDirectory: true)
     authorization = username.isEmpty ? nil : "Basic " + Data("\(username):\(password)".utf8).base64EncodedString()
     super.init()
+    Self.cleanAbandoned()
+    Self.activeLock.lock(); Self.activeDirectories.insert(directory); Self.activeLock.unlock()
     let config = URLSessionConfiguration.ephemeral; config.urlCache = nil
     config.requestCachePolicy = .reloadIgnoringLocalCacheData
     config.httpCookieStorage = .shared; config.urlCredentialStorage = .shared
@@ -76,25 +84,23 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     }.resume()
   }
   private func listen() {
-    guard !closed else { return }
+    guard !closed, !suspended else { return }
           do {
             let parameters = NWParameters.tcp
             parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
             let server = try NWListener(using: parameters); listener = server
             server.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
             server.stateUpdateHandler = { [weak self, weak server] state in
-              guard let self else { return }
-              if case .ready = state, let port = server?.port {
+              guard let self, let server, self.listener === server else { return }
+              if case .ready = state, let port = server.port {
                 self.finishStart(URL(string: "http://127.0.0.1:\(port.rawValue)\(self.route)"), nil)
-              } else if case .failed = state { self.finishStart(nil, "巻き戻し用キャッシュの読み取り口を開始できません。") }
+              } else if case .failed = state {
+                let starting = self.startup != nil
+                self.finishStart(nil, "巻き戻し用キャッシュの読み取り口を開始できません。")
+                if !starting { self.report("動画の読み取り接続が切れました。復旧しています…"); DispatchQueue.main.async { [weak self] in self?.onTransportFailure?() } }
+              }
             }
             server.start(queue: queue)
-            let timer = DispatchSource.makeTimerSource(queue: queue)
-            timer.schedule(deadline: .now() + 60, repeating: 60)
-            timer.setEventHandler { [weak self] in
-              guard let self else { return }
-              if ProcessInfo.processInfo.systemUptime - self.lastUse > 15 * 60 { self.clearBlocks() }
-            }; sweep = timer; timer.resume()
           } catch { finishStart(nil, "巻き戻し用キャッシュを準備できません。") }
   }
   private func loadIndex(offset: Int64, attempt: Int, completion: @escaping () -> Void) {
@@ -129,26 +135,40 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   @objc func observeTime(_ value: Double, running: Bool) {
     guard value.isFinite else { return }
     queue.async { [self] in
-      expireIdle()
       mediaTime = max(0, value)
       if running { lastUse = ProcessInfo.processInfo.systemUptime; highWater = max(highWater, mediaTime); evict() }
     }
   }
   @objc func beginSeek(_ time: Double) {
-    queue.async { [self] in expireIdle(); mediaTime = max(0, time); highWater = mediaTime; lastUse = ProcessInfo.processInfo.systemUptime }
+    queue.async { [self] in mediaTime = max(0, time); highWater = mediaTime; lastUse = ProcessInfo.processInfo.systemUptime }
   }
   @objc func close() {
     queue.async { [self] in
       guard !closed else { return }; closed = true
       finishStart(nil, "再生を終了しました。")
-      listener?.cancel(); listener = nil; sweep?.cancel(); sweep = nil
-      requests.values.forEach { $0.cancel() }; requests.removeAll()
-      connections.values.forEach { $0.cancel() }; connections.removeAll()
+      stopTransport()
       session.invalidateAndCancel(); clearBlocks()
+      Self.activeLock.lock(); Self.activeDirectories.remove(directory); Self.activeLock.unlock()
+    }
+  }
+  // Suspending transport does not destroy retained video blocks or metadata.
+  private func stopTransport() {
+    let old = listener; listener = nil; old?.cancel()
+    requests.values.forEach { $0.cancel() }; requests.removeAll()
+    let oldConnections = Array(connections.values); connections.removeAll()
+    oldConnections.forEach { $0.cancel() }
+  }
+  @objc func suspendTransport() {
+    queue.async { [self] in guard !closed else { return }; suspended = true; stopTransport() }
+  }
+  @objc func reopen(_ completion: @escaping (URL?, String?) -> Void) {
+    queue.async { [self] in
+      guard !closed else { DispatchQueue.main.async { completion(nil, "再生を終了しました。") }; return }
+      finishStart(nil, "接続を作り直しています。")
+      stopTransport(); suspended = false; startup = completion; listen()
     }
   }
   private func clearBlocks() { blocks.removeAll(); bytes = 0; try? FileManager.default.removeItem(at: directory) }
-  private func expireIdle() { if ProcessInfo.processInfo.systemUptime-lastUse > 15*60 { clearBlocks() } }
   private func file(_ offset: Int64) -> URL { directory.appendingPathComponent(String(offset)) }
   private func evict() {
     // Demux reads lead the presentation clock by network caching/keyframes.
@@ -169,9 +189,12 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     guard !closed else { connection.cancel(); return }
     let id = ObjectIdentifier(connection); connections[id] = connection
     connection.stateUpdateHandler = { [weak self, weak connection] state in
-      if case .cancelled = state, let connection {
+      let terminal: Bool
+      switch state { case .cancelled, .failed: terminal = true; default: terminal = false }
+      if terminal, let connection {
         let id = ObjectIdentifier(connection); self?.connections.removeValue(forKey: id)
         self?.requests.removeValue(forKey: id)?.cancel()
+        if case .failed = state { connection.cancel() }
       }
     }
     connection.start(queue: queue); readHeaders(connection, data: Data())
@@ -210,8 +233,8 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     connection.send(content: Data(header.utf8), completion: .contentProcessed { error in if error == nil { then() } else { connection.cancel() } })
   }
   private func pump(_ connection: NWConnection, offset: Int64, end: Int64) {
-    guard !closed, offset <= end, case .ready = connection.state else { connection.cancel(); return }
-    expireIdle(); lastUse = ProcessInfo.processInfo.systemUptime
+    guard !closed, !suspended, offset <= end, case .ready = connection.state else { connection.cancel(); return }
+    lastUse = ProcessInfo.processInfo.systemUptime
     let aligned = offset / blockSize * blockSize, count = Int(min(blockSize, length - aligned))
     func deliver(_ data: Data) {
       let begin = Int(offset - aligned), amount = min(data.count - begin, Int(end - offset + 1))
@@ -307,7 +330,24 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
           checks["cacheRecreatedAfterEviction"] = cache.queue.sync { !cache.blocks.isEmpty }
           cache.queue.sync { cache.lastUse = ProcessInfo.processInfo.systemUptime-901 }
           cache.observeTime(1000, running: false)
-          checks["idleCleanup"] = cache.queue.sync { !FileManager.default.fileExists(atPath: cache.directory.path) }
+          checks["idleRetainsCache"] = cache.queue.sync { !cache.blocks.isEmpty }
+          let priorBytes = cache.queue.sync { cache.networkBytes }
+          cache.suspendTransport()
+          let reopened: URL = try await withCheckedThrowingContinuation { continuation in
+            cache.reopen { url, error in
+              if let url { continuation.resume(returning: url) }
+              else { continuation.resume(throwing: NeoError(error ?? "Reopen")) }
+            }
+          }
+          var resumed = URLRequest(url: reopened); resumed.setValue("bytes=0-1023", forHTTPHeaderField: "Range")
+          let (resumedData, resumedResponse) = try await URLSession.shared.data(for: resumed)
+          checks["resumeRecreatesEndpointAndRetainsBytes"] = resumedData == first && (resumedResponse as? HTTPURLResponse)?.statusCode == 206 && cache.queue.sync { cache.networkBytes == priorBytes }
+          let abandoned = root.appendingPathComponent("abandoned-smoke", isDirectory: true)
+          try FileManager.default.createDirectory(at: abandoned, withIntermediateDirectories: true)
+          try Data([1]).write(to: abandoned.appendingPathComponent("block"))
+          let another = NeoPlaybackCache(source: source, username: "", password: "")
+          checks["newPlaybackClearsAbandonedButKeepsActive"] = !FileManager.default.fileExists(atPath: abandoned.path) && FileManager.default.fileExists(atPath: cache.directory.path)
+          another.close()
           cache.close()
           checks["closeCleanup"] = cache.queue.sync { cache.closed && cache.blocks.isEmpty && !FileManager.default.fileExists(atPath: cache.directory.path) }
           NeoPiPSmoke.save("rewind-cache-smoke", ["success": checks.values.allSatisfy { $0 }, "checks": checks])

@@ -476,6 +476,12 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       }
       let row = UIStackView(); row.addArrangedSubview(NeoStyle.label("操作ボタンを自動で隠す")); let toggle = UISwitch(); toggle.isOn = autoHide; toggle.onTintColor = NeoStyle.accent
       toggle.addAction(UIAction { [weak self, weak toggle] _ in self?.autoHide = toggle?.isOn == true; self?.onAction?("interaction") }, for: .valueChanged); row.addArrangedSubview(toggle); stack.addArrangedSubview(row)
+      let waitRow = UIStackView(arrangedSubviews: [NeoStyle.label("コメントの準備を待って再生"), UISwitch()]); waitRow.distribution = .equalSpacing
+      if let toggle = waitRow.arrangedSubviews.last as? UISwitch {
+        toggle.accessibilityIdentifier = "player-wait-for-comments"; toggle.isOn = NeoCommentOverlay.waitBeforePlayback; toggle.onTintColor = NeoStyle.accent
+        toggle.addAction(UIAction { [weak toggle] _ in NeoCommentOverlay.waitBeforePlayback = toggle?.isOn == true }, for: .valueChanged)
+      }
+      stack.addArrangedSubview(waitRow)
       append("画面の向き", bold: true)
       for (id, text) in [("auto", "端末の向きに合わせる"), ("portrait", "縦に固定"), ("landscape", "横に固定")] {
         stack.addArrangedSubview(NeoStyle.button(text) { [weak self] in self?.onAction?("orientation:\(id)") })
@@ -683,6 +689,12 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       && categoryButtons[0].frame.maxX == categoryButtons[1].frame.minX && categoryButtons[1].frame.maxX == categoryButtons[2].frame.minX
     categoryButtons[0].sendActions(for: .touchUpInside)
     let returns = tab == "settings" && settingsCategory == "general" && panelOpen
+    let oldWait = NeoCommentOverlay.waitBeforePlayback
+    let waitToggle = stack.arrangedSubviews.compactMap { $0 as? UIStackView }.flatMap(\.arrangedSubviews)
+      .first { $0.accessibilityIdentifier == "player-wait-for-comments" } as? UISwitch
+    waitToggle?.isOn = !oldWait; waitToggle?.sendActions(for: .valueChanged)
+    let waitSaved = waitToggle != nil && NeoCommentOverlay.waitBeforePlayback == !oldWait
+    NeoCommentOverlay.waitBeforePlayback = oldWait
     let generalReload = stack.arrangedSubviews.last as? UIButton
     let reloadAtBottom = generalReload?.accessibilityIdentifier == "player-settings-reload"
     generalReload?.sendActions(for: .touchUpInside)
@@ -703,7 +715,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let shared = drawer.brand.frame.minX == drawer.contentSafeArea.left + 16 && drawer.logo.frame.minX - drawer.brand.frame.maxX == 7
       && config?.imageProperties.reservedLayoutSize == CGSize(width: 24, height: 27)
     onAction = handler; subtitleTracks = oldTracks; subtitleKey = ""; settingsCategory = oldCategory
-    return ["settingsStayInPanel": returns, "fixedSettingsCategoryTabs": categories, "settingsBottomTab": settingsTab,
+    return ["waitForCommentsSettingPersisted": waitSaved, "settingsStayInPanel": returns, "fixedSettingsCategoryTabs": categories, "settingsBottomTab": settingsTab,
       "videoReloadOnlyAtGeneralBottom": reloadAtBottom && reloadRouted && commentsNoReload && subtitlesNoReload,
       "commentPreferencesRestoredInNewPlayer": persisted, "commentPreferencesRetainedAcrossPanels": panelRetained,
       "commentSettingsApplyToComposition": applied, "slidersRetainedDuringUpdates": stable,

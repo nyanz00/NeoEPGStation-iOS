@@ -15,6 +15,7 @@ final class NeoDanmakuRenderer {
   let device: MTLDevice
   let queue: MTLCommandQueue
   private let pipeline: MTLRenderPipelineState
+  private let layoutQueue = DispatchQueue(label: "neo.comments.layout", qos: .userInitiated)
   private let textQueue = DispatchQueue(label: "neo.comments.text", qos: .userInitiated)
   private let lock = NSLock()
   private var cache: [CommentTextureKey: CommentTexture] = [:]
@@ -26,6 +27,15 @@ final class NeoDanmakuRenderer {
   private let cpuOnly: Bool
   private var laneSize: Double?, requestedLaneSize: Double?
   private var lanes: [Int: Double] = [:]
+  private var laneScale: Double?, requestedLaneScale: Double?, layoutVersion = 0
+  private var cursor = CommentFrameCursor()
+  private var preparedIDs: [Int] = [], preparedScale = -1.0, preparedOpacity: Float?
+  private var preparationGeneration = -1
+  private var preparedTime = -Double.infinity
+  private var renderRevision = 0, snapshotRevision = -1
+  private var snapshotIDs: [Int] = [], snapshotScale = -1.0, snapshotOpacity: Float?, snapshotSize = -1.0
+  private var frameImages: [(NativeComment, CommentTexture, Double?)] = []
+
 
   init(device: MTLDevice, cpuOnly: Bool = false) throws {
     self.device = device
@@ -48,14 +58,16 @@ final class NeoDanmakuRenderer {
   func reset() {
     lock.lock(); defer { lock.unlock() }
     generation += 1; cache.removeAll(); pending.removeAll(); wanted.removeAll(); cost = 0; failure = nil
-    laneSize = nil; requestedLaneSize = nil; lanes.removeAll()
+    laneSize = nil; requestedLaneSize = nil; laneScale = nil; requestedLaneScale = nil; layoutVersion += 1; lanes.removeAll()
+    cursor.reset(); preparedIDs.removeAll(); preparationGeneration = -1
+    renderRevision += 1; frameImages.removeAll(); snapshotRevision = -1
   }
 
   var error: String? { lock.lock(); defer { lock.unlock() }; return failure }
   var cachedBytes: Int { lock.lock(); defer { lock.unlock() }; return cost }
   // A paused PiP must also repaint when a new lane plan finishes, even when
   // its glyph textures were already cached and no image work was necessary.
-  var hasPendingImages: Bool { lock.lock(); defer { lock.unlock() }; return !pending.isEmpty || requestedLaneSize != laneSize }
+  var hasPendingImages: Bool { lock.lock(); defer { lock.unlock() }; return !pending.isEmpty || requestedLaneSize != laneSize || requestedLaneScale != laneScale }
   func overflow(timeline: CommentTimeline, time: Double) -> Int {
     lock.lock(); defer { lock.unlock() }
     guard laneSize != nil else { return 0 }
@@ -69,7 +81,13 @@ final class NeoDanmakuRenderer {
   }
 
   func prepare(_ comments: [NativeComment], pixelScale: Double = 1, absoluteOpacity: Float? = nil) {
-    lock.lock(); wanted = Set(comments.map { key($0, pixelScale: pixelScale, absoluteOpacity: absoluteOpacity) }); lock.unlock()
+    let ids = comments.map(\.id)
+    lock.lock()
+    if preparationGeneration == generation && ids == preparedIDs && preparedScale == pixelScale && preparedOpacity == absoluteOpacity { lock.unlock(); return }
+    preparedIDs = ids; preparedScale = pixelScale; preparedOpacity = absoluteOpacity; preparationGeneration = generation
+    wanted = Set(comments.map { key($0, pixelScale: pixelScale, absoluteOpacity: absoluteOpacity) })
+    for item in wanted { if var saved = cache[item] { tick += 1; saved.used = tick; cache[item] = saved } }
+    lock.unlock()
     for comment in comments {
       let key = self.key(comment, pixelScale: pixelScale, absoluteOpacity: absoluteOpacity)
       lock.lock()
@@ -99,7 +117,7 @@ final class NeoDanmakuRenderer {
             guard self.cost + saved.cost <= self.budget else {
               self.failure = "同時表示するコメントの画像がキャッシュ容量を超えました。VLCの字幕表示を利用してください。"; return
             }
-            self.cache[key] = saved; self.cost += saved.cost
+            self.cache[key] = saved; self.cost += saved.cost; self.renderRevision += 1
           } catch {
             self.lock.lock(); defer { self.lock.unlock() }
             if self.generation == version { self.pending.remove(key); self.failure = "文字画像を生成できません。VLCの字幕表示を利用してください。" }
@@ -109,47 +127,102 @@ final class NeoDanmakuRenderer {
     }
   }
 
-  func prepareLayout(_ timeline: CommentTimeline, size: Double) {
+  func prepareAhead(_ timeline: CommentTimeline, time: Double, pixelScale: Double, opacity: Float?) {
+    if preparationGeneration == generation && time >= preparedTime && time-preparedTime < 0.2 && preparedScale == pixelScale && preparedOpacity == opacity { return }
+    preparedTime = time
+    prepare(timeline.visible(at: time, lookAhead: 1.5), pixelScale: pixelScale, absoluteOpacity: opacity)
+  }
+  func seekWindow() { cursor.reset(); preparedTime = -.infinity; preparationGeneration = -1 }
+
+  private struct RasterGeometry {
+    let font: CTFont, lines: [CTLine], bounds: CGRect, lineHeight: CGFloat
+    let scale: Double, width: Int, height: Int
+    var size: CGSize { CGSize(width: Double(width)/scale, height: Double(height)/scale) }
+  }
+  // Identical geometry is used by packing and drawing. Glyph ink bounds include
+  // italic bearings, outline/shadow and one raster pixel of antialiasing safety.
+  private func geometry(_ key: CommentTextureKey) -> RasterGeometry {
+    let style = key.style, scale = min(key.pixelScale, 128/style.size)
+    let base = CTFontCreateWithName(style.font as CFString, CGFloat(style.size*scale), nil)
+    var traits: CTFontSymbolicTraits = []
+    if style.bold { traits.insert(.traitBold) }; if style.italic { traits.insert(.traitItalic) }
+    let font = CTFontCreateCopyWithSymbolicTraits(base, 0, nil, traits, traits) ?? base
+    let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key(kCTFontAttributeName as String): font,
+      NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true]
+    let lines = key.text.components(separatedBy: "\n").map { CTLineCreateWithAttributedString(NSAttributedString(string: $0, attributes: attributes) as CFAttributedString) }
+    let lineHeight = ceil(CTFontGetAscent(font)+CTFontGetDescent(font)+CTFontGetLeading(font))
+    var ink = CGRect.null
+    for (index, line) in lines.enumerated() {
+      let rect = CTLineGetBoundsWithOptions(line, [.useGlyphPathBounds]).offsetBy(dx: 0, dy: -CGFloat(index)*lineHeight)
+      if !rect.isEmpty { ink = ink.union(rect) }
+    }
+    if ink.isNull { ink = CGRect(x: 0, y: 0, width: 1, height: max(1, lineHeight)) }
+    let stroke = CGFloat(style.outline*scale)
+    var bounds = ink.insetBy(dx: -stroke, dy: -stroke)
+    if style.shadow > 0 { bounds = bounds.union(ink.offsetBy(dx: CGFloat(style.shadow*scale), dy: -CGFloat(style.shadow*scale))) }
+    bounds = CGRect(x: floor(bounds.minX)-1, y: floor(bounds.minY)-1,
+      width: ceil(bounds.maxX)-floor(bounds.minX)+2, height: ceil(bounds.maxY)-floor(bounds.minY)+2)
+    return RasterGeometry(font: font, lines: lines, bounds: bounds, lineHeight: lineHeight,
+      scale: scale, width: Int(bounds.width), height: Int(bounds.height))
+  }
+
+  func prepareLayout(_ timeline: CommentTimeline, size: Double, pixelScale: Double = 1) {
+    let scale = min(2, max(0.25, ceil(pixelScale*4)/4))
     lock.lock()
-    guard requestedLaneSize != size else { lock.unlock(); return }
-    requestedLaneSize = size; let version = generation; lock.unlock()
-    textQueue.async { [weak self] in
+    guard requestedLaneSize != size || requestedLaneScale != scale else { lock.unlock(); return }
+    requestedLaneSize = size; requestedLaneScale = scale; layoutVersion += 1
+    let version = generation, layout = layoutVersion; lock.unlock()
+    layoutQueue.async { [weak self] in
       guard let self else { return }
-      self.lock.lock()
-      let current = self.generation == version && self.requestedLaneSize == size
-      self.lock.unlock()
-      guard current else { return }
+      func cancelled() -> Bool {
+        self.lock.lock(); defer { self.lock.unlock() }
+        return self.generation != version || self.layoutVersion != layout
+      }
+      guard !cancelled() else { return }
       var metrics: [CommentTextureKey: CommentExtent] = [:]
-      let plan = CommentLanePlan.build(timeline, size: size) { comment in
-        let key = CommentTextureKey(text: comment.text, style: comment.style)
+      let plan = CommentLanePlan.build(timeline, size: size, cancelled: cancelled) { comment in
+        let key = CommentTextureKey(text: comment.text, style: comment.style, pixelScale: scale)
         if let value = metrics[key] { return value }
-        let style = comment.style
-        let base = CTFontCreateWithName(style.font as CFString, CGFloat(style.size), nil)
-        var traits: CTFontSymbolicTraits = []
-        if style.bold { traits.insert(.traitBold) }; if style.italic { traits.insert(.traitItalic) }
-        let font = CTFontCreateCopyWithSymbolicTraits(base, 0, nil, traits, traits) ?? base
-        let lines = comment.text.components(separatedBy: "\n").map {
-          CTLineCreateWithAttributedString(NSAttributedString(string: $0, attributes: [NSAttributedString.Key(kCTFontAttributeName as String): font]) as CFAttributedString)
-        }
-        // Covers raster rounding/padding at all supported pixel scales.
-        let padding = (style.outline+style.shadow+12)*2
-        let extent = CommentExtent(width: ceil(lines.map { CTLineGetTypographicBounds($0, nil, nil, nil) }.max() ?? 0)+padding,
-          height: ceil(CTFontGetAscent(font)+CTFontGetDescent(font)+CTFontGetLeading(font))*Double(lines.count)+padding)
-        metrics[key] = extent; return extent
+        let raster = self.geometry(key)
+        let value = CommentExtent(width: Double(raster.size.width), height: Double(raster.size.height))
+        metrics[key] = value; return value
       }
       self.lock.lock(); defer { self.lock.unlock() }
-      if self.generation == version && self.requestedLaneSize == size { self.lanes = plan; self.laneSize = size }
+      if self.generation == version && self.layoutVersion == layout { self.lanes = plan; self.laneSize = size; self.laneScale = scale; self.renderRevision += 1 }
     }
+  }
+
+  func warmWindow(_ timeline: CommentTimeline, time: Double, size: Double, pixelScale: Double,
+                  opacity: Float?, completion: @escaping () -> Void) {
+    prepareLayout(timeline, size: size, pixelScale: pixelScale)
+    prepare(timeline.visible(at: time, lookAhead: 1.5), pixelScale: pixelScale, absoluteOpacity: opacity)
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      self?.waitForPreparedImages()
+      DispatchQueue.main.async(execute: completion)
+    }
+  }
+
+  private func snapshot(_ comments: [NativeComment], pixelScale: Double, opacity: Float?, size: Double)
+    -> [(NativeComment, CommentTexture, Double?)] {
+    lock.lock(); defer { lock.unlock() }
+    let ids = comments.map(\.id)
+    if snapshotRevision == renderRevision && snapshotIDs == ids && snapshotScale == pixelScale && snapshotOpacity == opacity && snapshotSize == size { return frameImages }
+    snapshotRevision = renderRevision; snapshotIDs = ids; snapshotScale = pixelScale; snapshotOpacity = opacity; snapshotSize = size
+    frameImages = comments.compactMap { comment in
+      guard let image = cache[key(comment, pixelScale: pixelScale, absoluteOpacity: opacity)] else { return nil }
+      return (comment, image, laneSize == size && laneScale == min(2, max(0.25, ceil(pixelScale*4)/4)) ? lanes[comment.id] : nil)
+    }
+    return frameImages
   }
 
   // All comments are retained. Cache misses are requested, never converted into
   // a permanent density limit. The initial 1-second lookahead hides normal misses.
   func encode(timeline: CommentTimeline, time: Double, viewport: CGSize, videoRect: CGRect,
               sizeMultiplier: Double, opacity: Float, pixelScale: Double = 1, usesSourceOpacity: Bool = false, encoder: MTLRenderCommandEncoder) -> Int {
-    let visible = timeline.visible(at: time).sorted { $0.layer == $1.layer ? $0.id < $1.id : $0.layer < $1.layer }
+    let visible = cursor.visible(timeline, at: time)
     guard viewport.width > 0, viewport.height > 0, videoRect.width > 0, videoRect.height > 0 else { return 0 }
     encoder.setRenderPipelineState(pipeline)
-    prepareLayout(timeline, size: sizeMultiplier)
+    prepareLayout(timeline, size: sizeMultiplier, pixelScale: pixelScale)
     var alpha: Float = 1
     encoder.setFragmentBytes(&alpha, length: MemoryLayout<Float>.size, index: 0)
     // Clip to the fitted video, not to the entire window's letterbox bars.
@@ -158,15 +231,10 @@ final class NeoDanmakuRenderer {
     encoder.setScissorRect(MTLScissorRect(x: Int(clip.minX), y: Int(clip.minY),
       width: max(1, Int(clip.maxX) - Int(clip.minX)), height: max(1, Int(clip.maxY) - Int(clip.minY))))
     var drawn = 0
-    for comment in visible {
-      let key = self.key(comment, pixelScale: pixelScale, absoluteOpacity: usesSourceOpacity ? nil : opacity)
-      lock.lock()
-      var entry = cache[key]
-      if entry != nil { tick += 1; entry!.used = tick; cache[key] = entry! }
-      lock.unlock()
-      guard let image = entry, let texture = image.texture else { continue }
+    for (comment, image, top) in snapshot(visible, pixelScale: pixelScale, opacity: usesSourceOpacity ? nil : opacity, size: sizeMultiplier) {
+      guard let texture = image.texture else { continue }
       guard let rect = placement(comment, imageSize: image.size, timeline: timeline, time: time,
-        videoRect: videoRect, sizeMultiplier: sizeMultiplier) else { continue }
+        videoRect: videoRect, sizeMultiplier: sizeMultiplier, laneTop: top) else { continue }
       if !rect.intersects(clip) { continue }
       let x = Double(rect.minX), y = Double(rect.minY), width = Double(rect.width), height = Double(rect.height)
       func point(_ x: Double, _ y: Double) -> SIMD2<Float> {
@@ -189,7 +257,7 @@ final class NeoDanmakuRenderer {
   }
 
   private func placement(_ comment: NativeComment, imageSize: CGSize, timeline: CommentTimeline,
-                         time: Double, videoRect: CGRect, sizeMultiplier: Double) -> CGRect? {
+                         time: Double, videoRect: CGRect, sizeMultiplier: Double, laneTop: Double?) -> CGRect? {
     let scaleX = Double(videoRect.width) / timeline.width, scaleY = Double(videoRect.height) / timeline.height
     let width = Double(imageSize.width) * comment.style.scaleX * sizeMultiplier * scaleX
     let height = Double(imageSize.height) * comment.style.scaleY * sizeMultiplier * scaleY
@@ -201,8 +269,7 @@ final class NeoDanmakuRenderer {
       textWidth: width, elapsed: time - comment.start) ?? (anchor.x * scaleX - width * Double(column) / 2))
     var y = Double(videoRect.minY) + anchor.y * scaleY - height * Double(2 - row) / 2
     if comment.usesDanmakuTiming {
-      lock.lock(); let top = laneSize == sizeMultiplier ? lanes[comment.id] : nil; lock.unlock()
-      guard let top else { return nil }; y = Double(videoRect.minY)+top*scaleY
+      guard let top = laneTop else { return nil }; y = Double(videoRect.minY)+top*scaleY
     }
     return CGRect(x: x, y: y, width: width, height: height)
   }
@@ -212,20 +279,15 @@ final class NeoDanmakuRenderer {
   func drawCPU(timeline: CommentTimeline, time: Double, viewport: CGSize, sizeMultiplier: Double,
                opacity: Float, pixelScale: Double, usesSourceOpacity: Bool = false, context: CGContext) -> Int {
     context.saveGState(); defer { context.restoreGState() }
-    prepareLayout(timeline, size: sizeMultiplier)
+    prepareLayout(timeline, size: sizeMultiplier, pixelScale: pixelScale)
     context.interpolationQuality = .medium
     let videoRect = CGRect(origin: .zero, size: viewport)
     context.clip(to: videoRect)
     var drawn = 0
-    for comment in timeline.visible(at: time).sorted(by: { $0.layer == $1.layer ? $0.id < $1.id : $0.layer < $1.layer }) {
-      let key = key(comment, pixelScale: pixelScale, absoluteOpacity: usesSourceOpacity ? nil : opacity)
-      lock.lock()
-      var image = cache[key]
-      if image != nil { tick += 1; image!.used = tick; cache[key] = image! }
-      lock.unlock()
-      guard let image = image, let bitmap = image.image else { continue }
+    for (comment, image, top) in snapshot(cursor.visible(timeline, at: time), pixelScale: pixelScale, opacity: usesSourceOpacity ? nil : opacity, size: sizeMultiplier) {
+      guard let bitmap = image.image else { continue }
       guard var rect = placement(comment, imageSize: image.size, timeline: timeline, time: time,
-        videoRect: videoRect, sizeMultiplier: sizeMultiplier) else { continue }
+        videoRect: videoRect, sizeMultiplier: sizeMultiplier, laneTop: top) else { continue }
       if !rect.intersects(videoRect) { continue }
       rect.origin.y = viewport.height - rect.maxY
       context.draw(bitmap, in: rect); drawn += 1
@@ -233,25 +295,12 @@ final class NeoDanmakuRenderer {
     return drawn
   }
 
-  func waitForPreparedImages() { textQueue.sync {} }
+  func waitForPreparedImages() { layoutQueue.sync {}; textQueue.sync {} }
 
   private func rasterize(_ key: CommentTextureKey) throws -> CommentTexture {
-    let style = key.style
-    // Large ASS fonts are still positioned in script pixels; bound the raster's
-    // resolution, not its displayed size. Size/opacity sliders reuse the textures.
-    let rasterScale = min(key.pixelScale, 128 / style.size)
-    let base = CTFontCreateWithName(style.font as CFString, CGFloat(style.size * rasterScale), nil)
-    var traits: CTFontSymbolicTraits = []
-    if style.bold { traits.insert(.traitBold) }; if style.italic { traits.insert(.traitItalic) }
-    let font = CTFontCreateCopyWithSymbolicTraits(base, 0, nil, traits, traits) ?? base
-    let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key(kCTFontAttributeName as String): font,
-      NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true]
-    let lines = key.text.components(separatedBy: "\n").map { CTLineCreateWithAttributedString(NSAttributedString(string: $0, attributes: attributes) as CFAttributedString) }
-    let ascent = CTFontGetAscent(font), descent = CTFontGetDescent(font)
-    let lineHeight = ceil(ascent + descent + CTFontGetLeading(font))
-    let padding = ceil((style.outline + style.shadow) * rasterScale) + 3
-    let width = Int(ceil(lines.map { CTLineGetTypographicBounds($0, nil, nil, nil) }.max() ?? 0) + padding * 2)
-    let height = Int(ceil(lineHeight * CGFloat(lines.count) + padding * 2))
+    let style = key.style, raster = geometry(key)
+    let rasterScale = raster.scale, lines = raster.lines, lineHeight = raster.lineHeight
+    let width = raster.width, height = raster.height
     guard width > 0, height > 0, width <= 8192, height <= 8192, width * height * 4 <= budget else { throw CommentParseError.invalid("文字画像の大きさ") }
     let rowBytes = width * 4
     var pixels = [UInt8](repeating: 0, count: rowBytes * height)
@@ -267,7 +316,7 @@ final class NeoDanmakuRenderer {
       }
       context.setLineJoin(.round)
       for (index, line) in lines.enumerated() {
-        let position = CGPoint(x: padding, y: CGFloat(height) - padding - ascent - CGFloat(index) * lineHeight)
+        let position = CGPoint(x: -raster.bounds.minX, y: -raster.bounds.minY - CGFloat(index) * lineHeight)
         if style.shadow > 0 {
           context.textPosition = CGPoint(x: position.x + style.shadow * rasterScale, y: position.y - style.shadow * rasterScale)
           context.setTextDrawingMode(.fill); context.setFillColor(color(style.shadowColor)); CTLineDraw(line, context)
