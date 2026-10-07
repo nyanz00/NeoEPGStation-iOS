@@ -5,6 +5,13 @@
 #import "NeoEPGStation-Swift.h"
 #import "NeoVLCFrameTap.h"
 
+// Pinned VLCKit 4.0.0a25 uses this block internally for jumpWithOffset.
+// Its public position setter has no completion overload. Guard the setter
+// before using the same one-shot notification for a position-based TS seek.
+@interface VLCMediaPlayer (NeoPositionSeekCompletion)
+@property (nonatomic, copy, nullable) dispatch_block_t onSeekCompletion;
+@end
+
 @interface NeoPlayerController () <VLCDrawable, VLCMediaPlayerDelegate, VLCCustomDialogRendererProtocol>
 @property (nonatomic) NSURL *sourceURL;
 @property (nonatomic) NSString *mediaTitle;
@@ -62,6 +69,7 @@
 @property (nonatomic) NSTimer *reloadTimer;
 @property (nonatomic) int64_t lastObservedTime;
 @property (nonatomic) int64_t lastObservedLength;
+@property (nonatomic) BOOL hasInputLength;
 @property (nonatomic) BOOL lastSeekFailed;
 #if TARGET_OS_SIMULATOR
 @property (nonatomic) CGRect smokeSavedFrame;
@@ -397,9 +405,9 @@
   [self restoreReloadIfReady];
   [self sampleHistory];
   self.timeline.enabled = self.player.isSeekable && !self.reloading; self.playButton.enabled = YES;
-  if (!self.scrubbing) { self.timeline.value = self.player.position; }
   int64_t current = MAX(0, self.player.time.value.longLongValue / 1000);
   int64_t length = [self mediaLength] / 1000;
+  if (!self.scrubbing && length > 0) { self.timeline.value = self.playbackEnded ? 1 : MIN(1, MAX(0, self.player.time.value.doubleValue / [self mediaLength])); }
   [self rememberPlaybackTime];
   [self.rewindCache observeTime:current running:self.player.isPlaying && !self.buffering && !self.seeking];
   [self.chrome updatePlayback:self.wantsPlayback && !self.playbackEnded current:self.playbackEnded ? self.lastObservedLength / 1000 : current duration:length > 0 ? length : self.lastObservedLength / 1000];
@@ -430,6 +438,7 @@
       [self.reloadTimer invalidate]; self.reloadTimer = nil; [self showControls]; [self.history flush];
     }
     if (state == VLCMediaPlayerStateStopping) { [self rememberPlaybackTime]; }
+    if (state == VLCMediaPlayerStateStopped) { self.lastObservedTime = MAX(self.lastObservedTime, self.player.time.value.longLongValue); }
     if (state == VLCMediaPlayerStateStopped && !self.playbackFailed && !self.reloading &&
       self.lastObservedLength > 0 && self.lastObservedTime >= self.lastObservedLength - 1500) {
       self.playbackEnded = YES; self.wantsPlayback = NO;
@@ -466,7 +475,7 @@
   dispatch_async(dispatch_get_main_queue(), ^{
     // VLC 4 reports input duration here even when VLCMedia has not been parsed.
     // The pinned VLCKit delegate already converts microseconds to milliseconds.
-    if (length > 0) { self.lastObservedLength = length; }
+    if (length > 0) { self.lastObservedLength = length; self.hasInputLength = YES; }
     [self.commentPiP invalidatePlaybackState];
   });
 }
@@ -844,9 +853,19 @@
     [weakSelf.commentPiP seekDiscontinuity]; [weakSelf.player stop];
   }];
   [NSRunLoop.mainRunLoop addTimer:self.seekTimer forMode:NSRunLoopCommonModes];
-  BOOL accepted = [self.player jumpWithOffset:(int)(target - self.player.time.value.longLongValue) completion:^{
+  dispatch_block_t finished = ^{
     [weakSelf completeSeek:generation failed:NO];
-  }];
+  };
+  BOOL accepted;
+  if (!self.hasInputLength && self.player.media.length.value.longLongValue <= 0 && length > 0) {
+    // HTTP TS cannot use VLC's PCR binary seek (HTTP is not CAN_FASTSEEK).
+    // Use its supported byte-position seek with the Web file duration, rather
+    // than silently resetting to zero or pretending the time seek succeeded.
+    accepted = [self.player respondsToSelector:@selector(setOnSeekCompletion:)];
+    if (accepted) { self.player.onSeekCompletion = finished; self.player.position = (double)target / length; }
+  } else {
+    accepted = [self.player jumpWithOffset:(int)(target - self.player.time.value.longLongValue) completion:finished];
+  }
   if (!accepted) { [self completeSeek:generation failed:YES]; }
   [self.commentPiP invalidatePlaybackState]; [self scheduleControlsHide];
 }
