@@ -799,6 +799,9 @@
     // Re-open the same Range endpoint at the requested time. Keep PiP alive;
     // a second deadline bounds recovery instead of leaving it stuck forever.
     weakSelf.reloadTime = target; weakSelf.reloadPlaying = weakSelf.wantsPlayback;
+    NSMutableArray *tracks = [NSMutableArray new];
+    for (VLCMediaPlayerTrack *track in weakSelf.player.textTracks) { if (track.isSelected) { [tracks addObject:track.trackId]; } }
+    weakSelf.reloadTextTracks = tracks;
     weakSelf.reloading = YES; weakSelf.restoringReload = NO; [weakSelf armReloadDeadline];
     [weakSelf.commentPiP seekDiscontinuity]; [weakSelf.player stop];
   }];
@@ -811,6 +814,9 @@
 }
 - (void)completeSeek:(NSInteger)generation failed:(BOOL)failed {
   if (!self.seeking || generation != self.seekGeneration) { return; }
+  // Establish the new history position while it is still marked as a seek.
+  // Even a short jump or a delayed completion must not become watched time.
+  if (!self.closing) { [self sampleHistory]; }
   [self.seekTimer invalidate]; self.seekTimer = nil; self.seeking = NO;
   self.lastSeekFailed = failed;
   dispatch_block_t completion = self.seekCompletion; self.seekCompletion = nil;
