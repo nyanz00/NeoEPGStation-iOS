@@ -12,6 +12,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     return .portrait
   }
   func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+    NeoPlaybackCache.cleanAbandoned()
     let window = UIWindow(frame: UIScreen.main.bounds)
     window.rootViewController = NeoShell(); self.window = window; window.makeKeyAndVisible()
 #if targetEnvironment(simulator)

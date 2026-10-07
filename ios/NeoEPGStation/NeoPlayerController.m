@@ -49,6 +49,20 @@
 @property (nonatomic) BOOL finishedClosing;
 @property (nonatomic) BOOL scrubbing;
 @property (nonatomic) BOOL resumeAfterInterruption;
+@property (nonatomic) NeoPlaybackCache *rewindCache;
+@property (nonatomic) NSURL *playbackURL;
+@property (nonatomic) NeoPlaybackHistory *history;
+@property (nonatomic) BOOL wantsPlayback;
+@property (nonatomic) BOOL seeking;
+@property (nonatomic) BOOL playbackEnded;
+@property (nonatomic) BOOL playbackFailed;
+@property (nonatomic) NSInteger seekGeneration;
+@property (nonatomic, copy) dispatch_block_t seekCompletion;
+@property (nonatomic) NSTimer *seekTimer;
+@property (nonatomic) NSTimer *reloadTimer;
+@property (nonatomic) int64_t lastObservedTime;
+@property (nonatomic) int64_t lastObservedLength;
+@property (nonatomic) BOOL lastSeekFailed;
 #if TARGET_OS_SIMULATOR
 @property (nonatomic) CGRect smokeSavedFrame;
 #endif
@@ -96,9 +110,8 @@
   self.player.delegate = self; self.player.drawable = self;
   // The comment display link samples VLC's native clock, not the 0.5s UI timer.
   self.player.timeChangeUpdateInterval = 1.0 / 60.0;
-  VLCMedia *media = [VLCMedia mediaWithURL:self.sourceURL];
-  [media addOption:[NSString stringWithFormat:@":network-caching=%ld", (long)self.networkCaching]];
-  self.player.media = media;
+  self.playbackURL = self.sourceURL;
+  self.wantsPlayback = YES;
   [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(interrupted:)
     name:AVAudioSessionInterruptionNotification object:audio];
   [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(backgrounded)
@@ -109,7 +122,7 @@
   self.comments.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   self.comments.timeProvider = ^double { return weakSelf.player.time.value.doubleValue / 1000.0; };
   self.comments.runningProvider = ^BOOL {
-    return weakSelf.player.isPlaying && !weakSelf.scrubbing && !weakSelf.buffering && !weakSelf.closing && !weakSelf.reloading;
+    return weakSelf.player.isPlaying && !weakSelf.seeking && !weakSelf.scrubbing && !weakSelf.buffering && !weakSelf.closing && !weakSelf.reloading;
   };
   self.comments.onChange = ^{ [weakSelf updateCommentState]; };
   [self.chrome bindCommentSettings:self.comments];
@@ -122,8 +135,9 @@
   self.commentPiP.timeProvider = self.comments.timeProvider;
   self.commentPiP.lengthProvider = ^double { return weakSelf.player.media.length.value.doubleValue / 1000.0; };
   self.commentPiP.runningProvider = self.comments.runningProvider;
-  self.commentPiP.playAction = ^{ [weakSelf.player play]; };
-  self.commentPiP.pauseAction = ^{ [weakSelf.player pause]; };
+  self.commentPiP.wantsPlaybackProvider = ^BOOL { return weakSelf.wantsPlayback && !weakSelf.playbackEnded && !weakSelf.closing; };
+  self.commentPiP.playAction = ^{ [weakSelf setPlaybackIntent:YES]; };
+  self.commentPiP.pauseAction = ^{ [weakSelf setPlaybackIntent:NO]; };
   self.commentPiP.seekAction = ^(double seconds, void (^completion)(void)) {
     [weakSelf seekBy:(int64_t)(seconds * 1000) completion:completion];
   };
@@ -137,7 +151,28 @@
   { [self.comments configureWithSource:self.sourceURL username:self.username password:self.password]; }
   [self updateCommentState];
   self.timer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer) { [weakSelf updateControls]; }];
-  [self showControls]; [self.player play];
+  NSNumber *recordingID = self.recordingContext[@"id"];
+  NSURL *base = [NSURL URLWithString:self.recordingContext[@"baseURL"] ?: @""];
+  if (base && recordingID.integerValue > 0) {
+    self.history = [[NeoPlaybackHistory alloc] initWithBase:base recordingID:recordingID.integerValue
+      user:self.recordingContext[@"user"] ?: @"master" username:self.username password:self.password];
+    self.history.onChange = ^{ [weakSelf updateControls]; };
+  }
+  [self showControls];
+  if (self.sourceURL.isFileURL) { [self restartMedia]; }
+  else {
+    self.rewindCache = [[NeoPlaybackCache alloc] initWithSource:self.sourceURL username:self.username password:self.password];
+    self.rewindCache.onChange = ^{ [weakSelf updateControls]; };
+    [self.rewindCache start:^(NSURL *url, NSString *message) {
+      if (weakSelf.closing) { return; }
+      if (!url) {
+        weakSelf.statusLabel.text = message; [weakSelf.chrome updateDiagnostics];
+        // Preserve the direct PLAY/authentication route if Range is unavailable.
+        [weakSelf restartMedia]; return;
+      }
+      weakSelf.playbackURL = url; [weakSelf restartMedia];
+    }];
+  }
 }
 
 - (void)applyPlayerLayout:(CGSize)size {
@@ -161,13 +196,13 @@
 - (BOOL)prefersHomeIndicatorAutoHidden { return self.landscape && !self.chrome.controlsVisible; }
 - (void)scheduleControlsHide {
   [self.controlsHideTimer invalidate]; self.controlsHideTimer = nil;
-  if (self.closing || !self.chrome.controlsVisible || !self.chrome.autoHide) { return; }
+  if (self.closing || self.playbackEnded || !self.chrome.controlsVisible || !self.chrome.autoHide) { return; }
   __weak typeof(self) weakSelf = self;
   self.controlsHideTimer = [NSTimer timerWithTimeInterval:2.5 repeats:NO block:^(NSTimer *timer) {
     typeof(self) self = weakSelf;
     if (!self || self.closing) { return; }
     self.controlsHideTimer = nil;
-    if (!self.chrome.autoHide) { return; }
+    if (self.playbackEnded || !self.chrome.autoHide) { return; }
     if (self.scrubbing || self.chrome.interactionOpen || self.chrome.controlTracking || self.presentedViewController) {
       [self scheduleControlsHide]; return;
     }
@@ -191,7 +226,7 @@
   if (self.closing) { return; }
   if ([action isEqualToString:@"toggle-controls"]) { [self toggleControls]; return; }
   [self showControls];
-  if (self.reloading && ([action isEqualToString:@"play"] || [action hasPrefix:@"jump:"] || [action hasPrefix:@"seekto:"] || [action hasPrefix:@"scrub-"])) { return; }
+  if (self.reloading && ([action hasPrefix:@"jump:"] || [action hasPrefix:@"seekto:"] || [action hasPrefix:@"scrub-"])) { return; }
   if ([action isEqualToString:@"back"]) { [self closePlayer]; }
   else if ([action isEqualToString:@"play"]) { [self togglePlayback]; }
   else if ([action isEqualToString:@"pip"]) { [self startPiP]; }
@@ -210,6 +245,7 @@
   } else if ([action hasPrefix:@"rate:"]) {
     self.playbackRate = [action substringFromIndex:5].floatValue; self.player.rate = self.playbackRate;
   } else if ([action hasPrefix:@"cache:"]) { self.networkCaching = MAX(1000, MIN(30000, [action substringFromIndex:6].integerValue * 1000)); }
+  else if ([action hasPrefix:@"retention:"]) { [self.rewindCache setSeconds:[action substringFromIndex:10].integerValue]; }
   else if ([action hasPrefix:@"subtitle:"]) {
     NSInteger index = [action substringFromIndex:9].integerValue;
     if (index < 0) {
@@ -241,24 +277,28 @@
   if (self.pipActive) {
     self.statusLabel.text = @"再読み込み · PiPを閉じてから実行してください。"; [self.chrome updateDiagnostics]; return;
   }
-  self.reloadTime = MAX(0, self.player.time.value.longLongValue); self.reloadPlaying = self.player.isPlaying;
+  [self sampleHistory]; [self.history flush];
+  self.reloadTime = MAX(0, self.player.time.value.longLongValue); self.reloadPlaying = self.wantsPlayback;
+  [self completeSeek:self.seekGeneration failed:NO];
   NSMutableArray *tracks = [NSMutableArray new];
   for (VLCMediaPlayerTrack *track in self.player.textTracks) { if (track.isSelected) { [tracks addObject:track.trackId]; } }
   self.scrubbing = NO; self.reloadTextTracks = tracks; self.reloading = YES; self.restoringReload = NO;
   self.statusLabel.text = @"プレイヤーを再読み込みしています…"; [self.chrome updateDiagnostics];
   [self.commentPiP resetVideo];
+  [self armReloadDeadline];
   if (self.player.state == VLCMediaPlayerStateStopped || self.player.state == VLCMediaPlayerStateNothingSpecial) { [self restartMedia]; }
   else { [self.player stop]; }
 }
 - (void)restartMedia {
-  VLCMedia *media = [VLCMedia mediaWithURL:self.sourceURL];
+  self.playbackEnded = NO; self.playbackFailed = NO; self.buffering = NO;
+  VLCMedia *media = [VLCMedia mediaWithURL:self.playbackURL ?: self.sourceURL];
   [media addOption:[NSString stringWithFormat:@":network-caching=%ld", (long)self.networkCaching]];
   self.player.media = media; [self.player play];
 }
 - (void)restoreReloadIfReady {
   if (!self.reloading || self.restoringReload || self.player.state != VLCMediaPlayerStatePlaying) { return; }
   if (!self.player.isSeekable) {
-    if (!self.reloadPlaying) { [self.player pause]; }
+    if (!self.wantsPlayback) { [self.player pause]; }
     self.player.rate = self.playbackRate; self.reloading = NO;
     self.statusLabel.text = @"再読み込み · このファイルは再生位置を復元できません。";
     [self.chrome updateDiagnostics]; [self.commentPiP invalidatePlaybackState]; return;
@@ -269,20 +309,44 @@
     dispatch_async(dispatch_get_main_queue(), ^{
       if (weakSelf.closing) { return; }
       weakSelf.player.rate = weakSelf.playbackRate;
+      if (weakSelf.lastSeekFailed) { weakSelf.reloading = NO; weakSelf.restoringReload = NO; [weakSelf setPlaybackIntent:NO]; return; }
       [weakSelf.player deselectAllTextTracks];
       for (VLCMediaPlayerTrack *track in weakSelf.player.textTracks) { if ([weakSelf.reloadTextTracks containsObject:track.trackId]) { track.selected = YES; } }
-      if (!weakSelf.reloadPlaying) { [weakSelf.player pause]; }
       weakSelf.reloading = NO; weakSelf.restoringReload = NO;
-      weakSelf.statusLabel.text = weakSelf.reloadPlaying ? @"PLAY · 再生中" : @"PLAY · 一時停止";
+      [weakSelf.reloadTimer invalidate]; weakSelf.reloadTimer = nil;
+      [weakSelf applyPlaybackIntent];
+      weakSelf.statusLabel.text = weakSelf.wantsPlayback ? @"PLAY · 再生中" : @"PLAY · 一時停止";
       [weakSelf.commentPiP invalidatePlaybackState]; [weakSelf updateControls];
     });
   };
   [self seekBy:self.reloadTime - self.player.time.value.longLongValue completion:restore];
 }
-- (void)togglePlayback { [self showControls]; if (self.player.isPlaying) { [self.player pause]; } else { [self.player play]; } }
+- (void)togglePlayback { [self showControls]; [self setPlaybackIntent:!self.wantsPlayback]; }
+- (void)setPlaybackIntent:(BOOL)playing {
+  [self sampleHistory]; [self.history flush];
+  self.wantsPlayback = playing;
+  if (playing && (self.playbackEnded || self.playbackFailed)) {
+    self.lastObservedTime = 0; [self.rewindCache beginSeek:0]; [self restartMedia];
+  } else { [self applyPlaybackIntent]; }
+  [self.commentPiP invalidatePlaybackState]; [self updateControls]; [self scheduleControlsHide];
+}
+- (void)applyPlaybackIntent {
+  if (self.closing || self.reloading) { return; }
+  if (self.wantsPlayback) { if (!self.player.isPlaying) { [self.player play]; } }
+  else if (self.player.isPlaying) { [self.player pause]; }
+}
+- (void)sampleHistory {
+  [self.history sample:self.playbackEnded ? self.lastObservedLength / 1000.0 : MAX(0, self.player.time.value.doubleValue / 1000.0)
+    duration:MAX(self.lastObservedLength / 1000.0, self.player.media.length.value.doubleValue / 1000.0)
+    running:self.player.isPlaying && self.wantsPlayback && !self.buffering
+    seeking:self.seeking || self.scrubbing || self.reloading rate:self.playbackRate];
+}
 - (void)beginScrubbing { [self showControls]; self.scrubbing = YES; }
 - (void)cancelScrubbing { self.scrubbing = NO; [self showControls]; }
-- (void)endScrubbing { if (self.player.isSeekable) { self.player.position = self.timeline.value; } self.scrubbing = NO; [self showControls]; }
+- (void)endScrubbing {
+  if (self.player.isSeekable) { [self seekBy:(int64_t)(self.timeline.value * self.player.media.length.value.longLongValue) - self.player.time.value.longLongValue completion:^{}]; }
+  self.scrubbing = NO; [self showControls];
+}
 
 - (void)updateSubtitleSettings {
   NSMutableArray *tracks = [NSMutableArray new]; NSInteger index = 0;
@@ -301,6 +365,7 @@
     self.comments.enabled ? @"" : @" · 専用描画オフ"];
   [self.commentPiP updateCommentsFrom:self.comments];
   if (self.chrome.commentVersion != self.comments.panelVersion) { [self.chrome setCommentRows:[self.comments panelComments] version:self.comments.panelVersion]; }
+  [self.chrome updateCommentMessage:self.comments.status];
   [self.chrome refreshCommentSettings];
   [self.chrome updateDiagnostics];
   for (VLCMediaPlayerTrack *track in self.player.textTracks) {
@@ -317,11 +382,16 @@
 - (void)updateControls {
   if (self.closing) { return; }
   [self restoreReloadIfReady];
-  self.timeline.enabled = self.player.isSeekable && !self.reloading; self.playButton.enabled = !self.reloading;
+  [self sampleHistory];
+  self.timeline.enabled = self.player.isSeekable && !self.reloading; self.playButton.enabled = YES;
   if (!self.scrubbing) { self.timeline.value = self.player.position; }
   int64_t current = MAX(0, self.player.time.value.longLongValue / 1000);
   int64_t length = MAX(0, self.player.media.length.value.longLongValue / 1000);
-  [self.chrome updatePlayback:self.player.isPlaying current:current duration:length];
+  if (!self.playbackEnded && !self.seeking && length > 0) { self.lastObservedTime = current * 1000; self.lastObservedLength = length * 1000; }
+  [self.rewindCache observeTime:current running:self.player.isPlaying && !self.buffering && !self.seeking];
+  [self.chrome updatePlayback:self.wantsPlayback && !self.playbackEnded current:self.playbackEnded ? self.lastObservedLength / 1000 : current duration:length > 0 ? length : self.lastObservedLength / 1000];
+  NSString *warning = self.rewindCache.status.length ? self.rewindCache.status : self.history.status;
+  if (warning.length) { self.statusLabel.text = warning; [self.chrome updateDiagnostics]; }
   self.subtitleButton.enabled = !self.reloading;
   [self updateSubtitleSettings];
   CGSize size = self.player.videoSize;
@@ -340,7 +410,19 @@
       return;
     }
     if (self.reloading && state == VLCMediaPlayerStateStopped && !self.restoringReload) { [self restartMedia]; return; }
-    if (state == VLCMediaPlayerStateError) { self.reloading = NO; self.restoringReload = NO; }
+    if (state == VLCMediaPlayerStateError) {
+      self.playbackFailed = YES; self.wantsPlayback = NO;
+      [self completeSeek:self.seekGeneration failed:YES];
+      self.reloading = NO; self.restoringReload = NO;
+      [self.reloadTimer invalidate]; self.reloadTimer = nil; [self showControls]; [self.history flush];
+    }
+    if (state == VLCMediaPlayerStateStopped && !self.playbackFailed && !self.seeking && !self.reloading &&
+      self.lastObservedLength > 0 && self.lastObservedTime >= self.lastObservedLength - 1500) {
+      self.playbackEnded = YES; self.wantsPlayback = NO;
+      [self.history sample:self.lastObservedLength / 1000.0 duration:self.lastObservedLength / 1000.0 running:NO seeking:NO rate:self.playbackRate];
+      [self.history flush]; [self showControls];
+    }
+    if (state == VLCMediaPlayerStatePlaying && !self.reloading && !self.wantsPlayback) { [self.player pause]; }
     self.statusLabel.text = state == VLCMediaPlayerStateError
       ? @"再生エラー · 接続・ファイル形式・認証を確認してください。"
       : [NSString stringWithFormat:@"PLAY · %@ · キャッシュ %ld秒", VLCMediaPlayerStateToString(state), (long)self.networkCaching / 1000];
@@ -357,19 +439,21 @@
         : self.reloading ? @"プレイヤーを再読み込みしています…" : @"PLAY · 再生準備完了";
     }
     [self.chrome updateDiagnostics];
+    if (!self.buffering) { [self applyPlaybackIntent]; }
+    [self.commentPiP invalidatePlaybackState];
   });
 }
 - (void)mediaPlayerLengthChanged:(int64_t)length { dispatch_async(dispatch_get_main_queue(), ^{ [self.commentPiP invalidatePlaybackState]; }); }
 
 - (void)interrupted:(NSNotification *)notification {
   if ([notification.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue] == AVAudioSessionInterruptionTypeBegan) {
-    self.resumeAfterInterruption = self.player.isPlaying; [self.player pause];
+    self.resumeAfterInterruption = self.wantsPlayback; [self setPlaybackIntent:NO];
   } else if (self.resumeAfterInterruption &&
     ([notification.userInfo[AVAudioSessionInterruptionOptionKey] unsignedIntegerValue] & AVAudioSessionInterruptionOptionShouldResume)) {
-    [AVAudioSession.sharedInstance setActive:YES error:nil]; [self.player play]; self.resumeAfterInterruption = NO;
+    [AVAudioSession.sharedInstance setActive:YES error:nil]; [self setPlaybackIntent:YES]; self.resumeAfterInterruption = NO;
   }
 }
-- (void)backgrounded { if (!self.pipActive) { [self.player pause]; } }
+- (void)backgrounded { [self.history flush]; if (!self.pipActive) { [self setPlaybackIntent:NO]; } }
 
 // VLC 4's HTTP access uses authentication dialogs, not the old http-user/pwd options.
 - (void)showLoginWithTitle:(NSString *)title message:(NSString *)message defaultUsername:(NSString *)username
@@ -464,7 +548,7 @@
     BOOL hidden = [self.chrome smokeTapVideoBackground] && !self.chrome.controlsVisible;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
       checks[@"playingTapHidesWithoutPausing"] = @(hidden && self.player.isPlaying);
-      [self.player pause];
+      [self setPlaybackIntent:NO];
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         BOOL paused = !self.player.isPlaying;
         BOOL revealed = [self.chrome smokeTapVideoBackground] && self.chrome.controlsVisible;
@@ -472,14 +556,14 @@
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
           checks[@"pausedTapTogglesUIWithoutPlaying"] = @(paused && revealed && concealed && !self.player.isPlaying);
           checks[@"success"] = [[checks allValues] indexOfObject:@NO] == NSNotFound ? @YES : @NO;
-          [self.player play]; completion(checks);
+          [self setPlaybackIntent:YES]; completion(checks);
         });
       });
     });
   });
 }
 - (void)runControlsSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
-  BOOL playing = self.player.isPlaying; [self.player pause];
+  BOOL playing = self.player.isPlaying; [self setPlaybackIntent:NO];
   NSMutableDictionary *checks = [[self.chrome runInteractionChecks] mutableCopy];
   self.chrome.autoHide = YES; [self hideControls];
   BOOL showTap = [self.chrome smokeTapVideoBackground] && self.chrome.controlsVisible;
@@ -504,7 +588,7 @@
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
               checks[@"scrubbingEndRestartsHide"] = self.chrome.controlsVisible ? @NO : @YES;
               checks[@"success"] = [[checks allValues] indexOfObject:@NO] == NSNotFound ? @YES : @NO;
-              if (playing) { [self.player play]; }
+              if (playing) { [self setPlaybackIntent:YES]; }
               completion(checks);
             });
           });
@@ -555,7 +639,7 @@
 }
 - (void)runReloadSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
   if (self.pipActive) { [self.commentPiP stop]; }
-  [self.player pause]; [self performPlayerAction:@"rate:1.25"]; [self performPlayerAction:@"cache:7"];
+  [self setPlaybackIntent:NO]; [self performPlayerAction:@"rate:1.25"]; [self performPlayerAction:@"cache:7"];
   __weak typeof(self) weakSelf = self;
   [self seekBy:3000 - self.player.time.value.longLongValue completion:^{
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -575,7 +659,7 @@
     if (!playing) {
       [self.chrome updatePlayback:NO current:restored / 1000 duration:self.player.media.length.value.longLongValue / 1000];
       [self.chrome showControls:YES]; [self.chrome snapshot:@"player-paused-portrait"];
-      [self.player play];
+      [self setPlaybackIntent:YES];
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [self reloadPlayback]; [self pollReloadSmoke:0 expectedPlaying:YES completion:completion];
       });
@@ -653,10 +737,58 @@
     @"composedFrames": @(self.commentPiP.composedFrameCount), @"consumedFrames": @(self.commentPiP.consumedFrameCount)};
 }
 #endif
-- (void)play { [self.player play]; }
-- (void)pause { [self.player pause]; }
+- (void)play { [self setPlaybackIntent:YES]; }
+- (void)pause { [self setPlaybackIntent:NO]; }
 - (void)seekBy:(int64_t)offset completion:(dispatch_block_t)completion {
-  if (![self.player jumpWithOffset:(int)offset completion:completion]) { completion(); }
+  if (self.closing || !self.player.isSeekable) { completion(); return; }
+  [self sampleHistory]; [self.history flush];
+  [self completeSeek:self.seekGeneration failed:NO];
+  int64_t target = MAX(0, MIN(self.player.media.length.value.longLongValue, self.player.time.value.longLongValue + offset));
+  self.playbackEnded = NO; self.seeking = YES; self.seekCompletion = completion;
+  self.lastSeekFailed = NO;
+  NSInteger generation = ++self.seekGeneration;
+  [self.rewindCache beginSeek:target / 1000.0]; [self.commentPiP seekDiscontinuity];
+  __weak typeof(self) weakSelf = self;
+  self.seekTimer = [NSTimer timerWithTimeInterval:20 repeats:NO block:^(NSTimer *timer) {
+    if (weakSelf.seekGeneration != generation || !weakSelf.seeking || weakSelf.closing) { return; }
+    BOOL wasRestoring = weakSelf.restoringReload;
+    [weakSelf completeSeek:generation failed:YES];
+    if (wasRestoring) { return; }
+    // Re-open the same Range endpoint at the requested time. Keep PiP alive;
+    // a second deadline bounds recovery instead of leaving it stuck forever.
+    weakSelf.reloadTime = target; weakSelf.reloadPlaying = weakSelf.wantsPlayback;
+    weakSelf.reloading = YES; weakSelf.restoringReload = NO; [weakSelf armReloadDeadline];
+    [weakSelf.commentPiP seekDiscontinuity]; [weakSelf.player stop];
+  }];
+  [NSRunLoop.mainRunLoop addTimer:self.seekTimer forMode:NSRunLoopCommonModes];
+  BOOL accepted = [self.player jumpWithOffset:(int)(target - self.player.time.value.longLongValue) completion:^{
+    [weakSelf completeSeek:generation failed:NO];
+  }];
+  if (!accepted) { [self completeSeek:generation failed:YES]; }
+  [self.commentPiP invalidatePlaybackState]; [self scheduleControlsHide];
+}
+- (void)completeSeek:(NSInteger)generation failed:(BOOL)failed {
+  if (!self.seeking || generation != self.seekGeneration) { return; }
+  [self.seekTimer invalidate]; self.seekTimer = nil; self.seeking = NO;
+  self.lastSeekFailed = failed;
+  dispatch_block_t completion = self.seekCompletion; self.seekCompletion = nil;
+  if (!self.closing) {
+    [self applyPlaybackIntent]; [self sampleHistory]; [self.history flush];
+    [self.commentPiP invalidatePlaybackState];
+    if (failed) { self.statusLabel.text = @"シークできませんでした。再読み込みで再試行できます。"; [self.chrome updateDiagnostics]; [self showControls]; }
+  }
+  if (completion) { completion(); }
+}
+- (void)armReloadDeadline {
+  [self.reloadTimer invalidate]; __weak typeof(self) weakSelf = self;
+  self.reloadTimer = [NSTimer timerWithTimeInterval:25 repeats:NO block:^(NSTimer *timer) {
+    if (!weakSelf || weakSelf.closing || !weakSelf.reloading) { return; }
+    weakSelf.reloading = NO; weakSelf.restoringReload = NO;
+    [weakSelf completeSeek:weakSelf.seekGeneration failed:YES]; [weakSelf setPlaybackIntent:NO];
+    weakSelf.statusLabel.text = @"再読み込みできませんでした。接続を確認して再試行してください。";
+    [weakSelf.chrome updateDiagnostics]; [weakSelf showControls];
+  }];
+  [NSRunLoop.mainRunLoop addTimer:self.reloadTimer forMode:NSRunLoopCommonModes];
 }
 - (int64_t)mediaLength { return self.player.media.length.value.longLongValue; }
 - (int64_t)mediaTime { return self.player.time.value.longLongValue; }
@@ -664,7 +796,11 @@
 - (BOOL)isMediaPlaying { return self.player.isPlaying; }
 
 - (void)closePlayer {
-  if (self.closing) { return; } self.closing = YES;
+  if (self.closing) { return; }
+  [self sampleHistory]; [self.history finish]; self.closing = YES;
+  [self completeSeek:self.seekGeneration failed:NO];
+  [self.reloadTimer invalidate]; self.reloadTimer = nil;
+  [self.rewindCache close]; self.rewindCache.onChange = nil;
   self.view.userInteractionEnabled = NO;
   [self.timer invalidate]; self.timer = nil;
   [self.controlsHideTimer invalidate]; self.controlsHideTimer = nil;

@@ -1,5 +1,40 @@
 import Foundation
 
+var watch = NeoWatchClock()
+watch.sample(position: 0, duration: 120, running: true, seeking: false, rate: 1, now: 0)
+watch.sample(position: 1, duration: 120, running: true, seeking: false, rate: 1, now: 1)
+assert(watch.total == 1)
+watch.sample(position: 90, duration: 120, running: true, seeking: true, rate: 1, now: 2)
+watch.sample(position: 90, duration: 120, running: false, seeking: false, rate: 1, now: 3)
+watch.sample(position: 91, duration: 120, running: true, seeking: false, rate: 1, now: 4)
+assert(watch.total == 2 && watch.position == 91)
+watch.sample(position: 10, duration: 120, running: true, seeking: false, rate: 1, now: 5)
+assert(watch.total == 2, "Backward seek must not add watched time")
+
+func be(_ n: UInt64, _ size: Int = 4) -> Data { Data((0..<size).reversed().map { UInt8((n >> ($0*8)) & 255) }) }
+func atom(_ name: String, _ body: Data) -> Data { be(UInt64(body.count+8))+Data(name.utf8)+body }
+let stco = atom("stco", be(0)+be(2)+be(100)+be(1100))
+let stsc = atom("stsc", be(0)+be(1)+be(1)+be(1)+be(1))
+let stsz = atom("stsz", be(0)+be(1000)+be(2))
+let stts = atom("stts", be(0)+be(1)+be(2)+be(1000))
+let mdhd = atom("mdhd", be(0)+be(0)+be(0)+be(1000)+be(2000))
+let moov = atom("trak", atom("mdia", mdhd+atom("minf", atom("stbl", stco+stsc+stsz+stts))))
+var byteClock = NeoMediaByteClock()
+assert(byteClock.loadMP4Moov(moov))
+assert(byteClock.timeRange(offset: 100, count: 1000) == 0...1)
+assert(byteClock.timeRange(offset: 1100, count: 1000) == 1...2)
+assert(byteClock.timeRange(offset: 0, count: 50) == nil)
+assert(!byteClock.loadMP4Moov(Data([0,1,2])))
+func tsPacket(_ seconds: UInt64) -> Data {
+  let ticks = seconds*90000
+  var packet = [UInt8](repeating: 0xff, count: 188)
+  packet[0] = 0x47; packet[1] = 0; packet[2] = 0x10; packet[3] = 0x20; packet[4] = 7; packet[5] = 0x10
+  packet[6] = UInt8((ticks>>25)&255); packet[7] = UInt8((ticks>>17)&255); packet[8] = UInt8((ticks>>9)&255)
+  packet[9] = UInt8((ticks>>1)&255); packet[10] = UInt8((ticks&1)<<7)
+  return Data(packet)
+}
+assert(byteClock.observeTS(tsPacket(100)+tsPacket(130), offset: 0) == 0...31)
+
 let header = """
 [Script Info]
 PlayResX: 1920
@@ -36,6 +71,21 @@ check(moving.text == "赤いコメント,カンマ付き", "Text commas retained
 check(moving.style.color.red == 1 && moving.style.color.blue == 0 && moving.style.size == 80, "BGR color and inline size")
 check(moving.motion!.point(elapsed: 4) == CommentPoint(x: 760, y: 100), "ASS movement interpolation")
 let fixed = timeline.comments[0]
+let sourceStyle = CommentStyle(color: CommentColor(red: 1, green: 0, blue: 0, alpha: 143.0/255), outlineColor: CommentColor(red: 0, green: 0, blue: 1, alpha: 143.0/255))
+check(sourceStyle.withAbsoluteOpacity(nil) == sourceStyle, "ASS opacity must be preserved before override")
+let opaque = sourceStyle.withAbsoluteOpacity(1)
+check(opaque.color.alpha == 1 && opaque.outlineColor.alpha == 1 && opaque.color.red == 1 && opaque.outlineColor.blue == 1, "Absolute opacity preserves RGB")
+let flowStyle = CommentStyle(size: 20, alignment: 7)
+let flow = CommentTimeline(width: 640, height: 360, comments: (0..<3).map {
+  NativeComment(id: $0, layer: 0, start: 0, end: 5.5, text: "flow", style: flowStyle,
+    motion: CommentMotion(from: CommentPoint(x: 640, y: 20), to: CommentPoint(x: -100, y: 20), start: 0, end: 5.5), usesDanmakuTiming: true)
+})
+let measure: (NativeComment) -> CommentExtent = { _ in CommentExtent(width: 100, height: 30) }
+let lanes = CommentLanePlan.build(flow, size: 2, measure: measure)
+check(lanes.count == 3, "Three enlarged comments must fit")
+let tops = lanes.values.sorted()
+check(zip(tops, tops.dropFirst()).allSatisfy { $1-$0 >= 64 }, "Enlarged lanes must not overlap")
+check(lanes == CommentLanePlan.build(flow, size: 2, measure: measure), "Seek must produce deterministic lanes")
 check(fixed.text == "固定\n二行" && fixed.style.alignment == 8, "Newlines and alignment")
 check(abs(fixed.style.color.alpha - (1 - 128.0 / 255)) < 0.0001, "ASS inverse alpha")
 let timed = timeline.comments[1].motion!

@@ -8,6 +8,7 @@ struct CommentCompositionState {
   var enabled: Bool
   var size: Double
   var opacity: Float
+  var usesSourceOpacity = false
 }
 
 private struct CapturedVideoFrame {
@@ -103,6 +104,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   @objc var timeProvider: (() -> Double)?
   @objc var lengthProvider: (() -> Double)?
   @objc var runningProvider: (() -> Bool)?
+  @objc var wantsPlaybackProvider: (() -> Bool)?
   @objc var playAction: (() -> Void)?
   @objc var pauseAction: (() -> Void)?
   @objc var seekAction: ((Double, @escaping () -> Void) -> Void)?
@@ -171,6 +173,15 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     pip?.invalidatePlaybackState(); pip?.startPictureInPicture()
   }
   @objc func invalidatePlaybackState() { pip?.invalidatePlaybackState() }
+  // A seek flushes stale samples without stopping the active PiP session.
+  @objc func seekDiscontinuity() {
+    frameLock.lock(); frames.removeAll(); frameLock.unlock()
+    work.async { [weak self] in
+      self?.current = nil; self?.image = nil; self?.clock = CommentPlaybackClock()
+      self?.lastTime = -1; self?.dirty = true; self?.displayLayer.flush()
+    }
+    invalidatePlaybackState()
+  }
   @objc func resetVideo() {
     pip?.stopPictureInPicture()
     work.async { [weak self] in
@@ -268,9 +279,10 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     context.draw(image, in: CGRect(origin: .zero, size: size))
     if state.enabled, let timeline = state.timeline {
       let scale = max(Double(size.width) / timeline.width, Double(size.height) / timeline.height)
-      renderer.prepare(timeline.visible(at: time, lookAhead: 1), pixelScale: scale)
+      renderer.prepare(timeline.visible(at: time, lookAhead: 1), pixelScale: scale, absoluteOpacity: state.usesSourceOpacity ? nil : state.opacity)
+      renderer.prepareLayout(timeline, size: state.size)
       _ = renderer.drawCPU(timeline: timeline, time: time, viewport: size,
-        sizeMultiplier: state.size, opacity: state.opacity, pixelScale: scale, context: context)
+        sizeMultiplier: state.size, opacity: state.opacity, pixelScale: scale, usesSourceOpacity: state.usesSourceOpacity, context: context)
       if let failure = renderer.error { throw CommentParseError.invalid(failure) }
     }
     return output
@@ -316,7 +328,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
       duration: CMTimeMakeWithSeconds(length, preferredTimescale: 1000000))
   }
   func pictureInPictureControllerIsPlaybackPaused(_ pictureInPictureController: AVPictureInPictureController) -> Bool {
-    !(runningProvider?() ?? false)
+    !(wantsPlaybackProvider?() ?? runningProvider?() ?? false)
   }
   func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, didTransitionToRenderSize newRenderSize: CMVideoDimensions) {}
   func pictureInPictureControllerShouldProhibitBackgroundAudioPlayback(_ pictureInPictureController: AVPictureInPictureController) -> Bool { false }

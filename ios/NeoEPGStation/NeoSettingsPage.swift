@@ -79,8 +79,28 @@ final class NeoSettingsPage: NeoPage {
     thumbnail.addArrangedSubview(label); thumbnail.addArrangedSubview(toggle)
     thumbnail.heightAnchor.constraint(equalToConstant: 48).isActive = true; stack.addArrangedSubview(thumbnail)
     let text = NeoStyle.label("テーマ：ターコイズ・ダーク", muted: true); stack.addArrangedSubview(text)
+    let viewer = NeoStyle.button("視聴履歴のユーザーを選択") { [weak self] in self?.selectViewer() }
+    viewer.contentHorizontalAlignment = .left; viewer.heightAnchor.constraint(equalToConstant: 48).isActive = true
+    stack.addArrangedSubview(viewer)
   }
-  override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); stack.frame = CGRect(x: 12, y: 16, width: body.bounds.width - 24, height: 270) }
+  private func selectViewer() {
+    guard let api = shell?.api else { return }
+    Task { [weak self] in
+      do {
+        let viewers = try await api.viewers()
+        guard let self else { return }
+        let menu = UIAlertController(title: "視聴履歴のユーザー", message: "Webで使っているユーザーを選んでください。", preferredStyle: .actionSheet)
+        for user in viewers.users {
+          menu.addAction(UIAlertAction(title: user.name + (api.viewer == String(user.id) ? " ✓" : ""), style: .default) { _ in api.viewer = String(user.id) })
+        }
+        menu.addAction(UIAlertAction(title: "キャンセル", style: .cancel))
+        menu.popoverPresentationController?.sourceView = self.view
+        menu.popoverPresentationController?.sourceRect = CGRect(x: self.view.bounds.midX, y: self.view.bounds.midY, width: 1, height: 1)
+        self.present(menu, animated: true)
+      } catch { self?.alert(error.localizedDescription) }
+    }
+  }
+  override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); stack.frame = CGRect(x: 12, y: 16, width: body.bounds.width - 24, height: 330) }
 }
 
 final class NeoShortcutPage: NeoPage, UITableViewDataSource, UITableViewDelegate {

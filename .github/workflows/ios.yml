@@ -44,7 +44,7 @@ jobs:
       - name: Native ASS parser and playback clock tests
         run: |
           mkdir -p build/native-tests
-          swiftc ios/NeoEPGStation/NeoASSComments.swift ios/NeoEPGStation/NeoCommentLoader.swift tests/native/main.swift -o build/native-tests/comments
+          swiftc ios/NeoEPGStation/NeoASSComments.swift ios/NeoEPGStation/NeoCommentLoader.swift ios/NeoEPGStation/NeoCommentLayout.swift ios/NeoEPGStation/NeoMediaByteClock.swift ios/NeoEPGStation/NeoPlaybackHistory.swift tests/native/main.swift -o build/native-tests/comments
           build/native-tests/comments
           swiftc ios/NeoEPGStation/NeoModels.swift tests/ui/main.swift -o build/native-tests/ui
           build/native-tests/ui

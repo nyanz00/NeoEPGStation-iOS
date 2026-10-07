@@ -364,6 +364,11 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       guard let time = row["time"] as? Double, let text = row["text"] as? String else { return nil }; return (time, text)
     }; lastCommentIndex = -1; commentList.reloadData()
   }
+  @objc func updateCommentMessage(_ message: String) {
+    let label = NeoStyle.label(message, size: 14, muted: true)
+    label.textAlignment = .center; label.numberOfLines = 0
+    commentList.backgroundView = comments.isEmpty ? label : nil
+  }
   private func selectPanel(_ id: String, toggle: Bool) {
     if toggle && isWide && panelOpen && tab == id { setPanel(false); return }
     tab = id; renderPanel(); setPanel(true)
@@ -459,6 +464,14 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       let cache = UIStepper(); cache.minimumValue = 1; cache.maximumValue = 30; cache.value = Double(cacheSeconds)
       cache.addAction(UIAction { [weak self, weak cache] _ in guard let self, let cache else { return }; self.cacheSeconds = Int(cache.value); self.onAction?("cache:\(self.cacheSeconds)"); self.renderPanel() }, for: .valueChanged)
       stack.addArrangedSubview(cache); append("次のリロードから適用します。", size: 12, muted: true)
+      append("巻き戻し用キャッシュ", bold: true)
+      let retained = NeoPlaybackCache.savedSeconds
+      for value in NeoPlaybackCache.presets {
+        let text = value == 0 ? "オフ" : value == 30 ? "30秒" : "\(value/60)分"
+        let choice = NeoStyle.button(text) { [weak self] in self?.onAction?("retention:\(value)"); self?.renderPanel() }
+        choice.tintColor = value == retained ? NeoStyle.accent : NeoStyle.muted
+        stack.addArrangedSubview(choice)
+      }
       let row = UIStackView(); row.addArrangedSubview(NeoStyle.label("操作ボタンを自動で隠す")); let toggle = UISwitch(); toggle.isOn = autoHide; toggle.onTintColor = NeoStyle.accent
       toggle.addAction(UIAction { [weak self, weak toggle] _ in self?.autoHide = toggle?.isOn == true; self?.onAction?("interaction") }, for: .valueChanged); row.addArrangedSubview(toggle); stack.addArrangedSubview(row)
       append("画面の向き", bold: true)
@@ -508,7 +521,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     if !commentSize.isTracking { commentSize.value = Float(overlay.sizeMultiplier) }
     if !commentOpacity.isTracking { commentOpacity.value = overlay.opacity }
     commentSizeLabel.text = String(format: "文字サイズ %.2f倍", overlay.sizeMultiplier)
-    commentOpacityLabel.text = "不透明度 \(Int(overlay.opacity * 100))%"
+    commentOpacityLabel.text = overlay.usesSourceOpacity && overlay.mixedOpacity ? "不透明度：ASS準拠（混在）" : "不透明度 \(Int((overlay.opacity * 100).rounded()))%"
     commentStatus.text = overlay.status; commentStats.text = overlay.diagnostics
     let key = overlay.tracks.map { "\($0.subtitleIndex):\($0.displayName)" }.joined(separator: "|") + "#\(overlay.selectedIndex ?? -1)"
     guard key != commentTrackKey else { return }; commentTrackKey = key

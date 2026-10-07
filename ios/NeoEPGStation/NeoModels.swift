@@ -164,8 +164,14 @@ enum NeoProgramText {
       + (total > 0 ? " \(bytes(total))" : "")
   }
 }
+struct NeoViewer: Decodable { let id: Int; let name: String }
+struct NeoViewers: Decodable { let users: [NeoViewer] }
 final class NeoAPI {
   let base: URL; let session: URLSession
+  var viewer: String {
+    get { UserDefaults.standard.string(forKey: "viewer." + base.absoluteString) ?? "master" }
+    set { UserDefaults.standard.set(newValue, forKey: "viewer." + base.absoluteString) }
+  }
   init(base: URL, session: URLSession = .shared) { self.base = base; self.session = session }
   func url(_ path: String) -> URL { URL(string: base.absoluteString + "/api" + path)! }
   func recordings(page: Int, keyword: String = "", reverse: Bool = false) async throws -> NeoRecords {
@@ -183,6 +189,7 @@ final class NeoAPI {
     return value
   }
   func channels() async throws -> [NeoChannel] { try await request(url("/channels")) }
+  func viewers() async throws -> NeoViewers { try await request(url("/users")) }
   func rule(_ id: Int) async throws -> NeoRule { try await request(url("/rules/\(id)")) }
   func relatedRecordings(ruleId: Int?, keyword: String) async throws -> NeoRecords {
     var parts = URLComponents(url: url("/recorded"), resolvingAgainstBaseURL: false)!
@@ -196,7 +203,7 @@ final class NeoAPI {
   func dropLog(_ id: Int) async throws -> String {
     var request = URLRequest(url: url("/dropLogs/\(id)?maxsize=512")); request.timeoutInterval = 20
     request.setValue("text/plain", forHTTPHeaderField: "Accept")
-    request.setValue("master", forHTTPHeaderField: "X-EPGStation-User-Id")
+    request.setValue(viewer, forHTTPHeaderField: "X-EPGStation-User-Id")
     let (data, response) = try await session.data(for: request)
     guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
       http.mimeType?.lowercased() != "text/html", let text = String(data: data, encoding: .utf8) else {
@@ -207,7 +214,7 @@ final class NeoAPI {
   private func request<T: Decodable>(_ url: URL) async throws -> T {
     var request = URLRequest(url: url); request.timeoutInterval = 20
     request.setValue("application/json", forHTTPHeaderField: "Accept")
-    request.setValue("master", forHTTPHeaderField: "X-EPGStation-User-Id")
+    request.setValue(viewer, forHTTPHeaderField: "X-EPGStation-User-Id")
     let (data, response) = try await session.data(for: request)
     guard let http = response as? HTTPURLResponse else { throw NeoError("サーバーの応答を確認できませんでした。") }
     guard (200..<300).contains(http.statusCode) else {

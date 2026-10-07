@@ -12,8 +12,10 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   @objc var enabled = true {
     didSet { UserDefaults.standard.set(enabled, forKey: Self.enabledKey); refreshRendering(); onChange?() }
   }
-  private static let enabledKey = "player.comments.enabled", sizeKey = "player.comments.size", opacityKey = "player.comments.opacity"
+  private static let enabledKey = "player.comments.enabled", sizeKey = "player.comments.size", opacityKey = "player.comments.absoluteOpacity"
   private(set) var sizeMultiplier = 1.0, opacity: Float = 1
+  private(set) var usesSourceOpacity = true
+  private(set) var mixedOpacity = false
   private(set) var tracks: [NativeCommentTrack] = []
   private(set) var selectedIndex: Int?
   private var metal: MTKView?
@@ -31,7 +33,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   private let inFlight = DispatchSemaphore(value: 3)
   var compositionState: CommentCompositionState {
     CommentCompositionState(timeline: timeline, version: version, enabled: enabled && ready && !closed,
-      size: sizeMultiplier, opacity: opacity)
+      size: sizeMultiplier, opacity: opacity, usesSourceOpacity: usesSourceOpacity)
   }
 
   @objc override init(frame: CGRect) {
@@ -42,6 +44,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     let alpha = defaults.object(forKey: Self.opacityKey) as? Float ?? 1
     sizeMultiplier = size.isFinite ? min(2, max(0.5, size)) : 1
     opacity = alpha.isFinite ? min(1, max(0, alpha)) : 1
+    usesSourceOpacity = defaults.object(forKey: Self.opacityKey) == nil
     isUserInteractionEnabled = false; backgroundColor = .clear
     do {
       guard let device = MTLCreateSystemDefaultDevice() else { throw CommentParseError.invalid("Metalデバイス") }
@@ -88,7 +91,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
         case .success(let tracks):
           self.tracks = tracks
           if let first = tracks.first { self.select(first) }
-          else { self.status = "NicoJKのASSコメントがありません。"; self.onChange?() }
+          else { self.status = "コメント字幕がありません"; self.onChange?() }
         case .failure(let error): self.status = error.localizedDescription; self.onChange?()
         }
       }
@@ -108,8 +111,20 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
         switch result {
         case .success(let timeline):
           self.timeline = timeline; self.ready = true
+          if self.usesSourceOpacity {
+            let values = Set(timeline.comments.map { $0.style.color.alpha })
+            self.opacity = Float(timeline.comments.first?.style.color.alpha ?? 1)
+            self.mixedOpacity = values.count > 1
+            // Migrate an intentionally reduced old multiplier without turning
+            // its default 100% into a new fully-opaque preference.
+            if let old = UserDefaults.standard.object(forKey: "player.comments.opacity") as? Float, old.isFinite, old < 1 {
+              self.setOpacity(self.opacity * max(0, old))
+            }
+            UserDefaults.standard.removeObject(forKey: "player.comments.opacity")
+          }
           self.status = "専用描画 · \(timeline.comments.count)件"
-          self.renderer?.prepare(timeline.visible(at: self.timeProvider?() ?? 0, lookAhead: 1))
+          self.renderer?.prepare(timeline.visible(at: self.timeProvider?() ?? 0, lookAhead: 1), absoluteOpacity: self.usesSourceOpacity ? nil : self.opacity)
+          self.renderer?.prepareLayout(timeline, size: self.sizeMultiplier)
           self.refreshRendering(); self.onChange?()
         case .failure(let error): self.status = error.localizedDescription; self.onChange?()
         }
@@ -123,7 +138,8 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   }
   func setOpacity(_ value: Float) {
     guard value.isFinite else { return }
-    opacity = min(1, max(0, value)); UserDefaults.standard.set(opacity, forKey: Self.opacityKey); onChange?()
+    opacity = min(1, max(0, value)); usesSourceOpacity = false; mixedOpacity = false
+    UserDefaults.standard.set(opacity, forKey: Self.opacityKey); onChange?()
   }
   var diagnostics: String { String(format: "描画更新 %.0ffps · 描画 %d件 · キャッシュ %.1f / 48MiB", fps, drawn, Double(renderer?.cachedBytes ?? 0) / 1048576) }
 
@@ -159,13 +175,14 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     let ratio = videoSize.width > 0 && videoSize.height > 0 ? videoSize.width / videoSize.height : CGFloat(timeline.width / timeline.height)
     let fittedWidth = min(viewport.width, viewport.height * ratio), fittedHeight = fittedWidth / ratio
     let pixelScale = max(Double(fittedWidth) / timeline.width, Double(fittedHeight) / timeline.height)
-    renderer.prepare(timeline.visible(at: time, lookAhead: 1), pixelScale: pixelScale)
+    renderer.prepare(timeline.visible(at: time, lookAhead: 1), pixelScale: pixelScale, absoluteOpacity: usesSourceOpacity ? nil : opacity)
+    renderer.prepareLayout(timeline, size: sizeMultiplier)
     guard inFlight.wait(timeout: .now()) == .success else { return }
     guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
       let command = renderer.queue.makeCommandBuffer(), let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { inFlight.signal(); return }
     drawn = renderer.encode(timeline: timeline, time: time, viewport: viewport,
       videoRect: CGRect(x: (viewport.width - fittedWidth) / 2, y: (viewport.height - fittedHeight) / 2, width: fittedWidth, height: fittedHeight),
-      sizeMultiplier: sizeMultiplier, opacity: opacity, pixelScale: pixelScale, encoder: encoder)
+      sizeMultiplier: sizeMultiplier, opacity: opacity, pixelScale: pixelScale, usesSourceOpacity: usesSourceOpacity, encoder: encoder)
     let completion = inFlight
     command.addCompletedHandler { _ in completion.signal() }
     encoder.endEncoding(); command.present(drawable); command.commit()
