@@ -389,8 +389,10 @@ final class NeoDanmakuRenderer {
         renderer.placement(comment, imageSize: image.size, timeline: timeline, time: 3,
           videoRect: CGRect(x: 0, y: 0, width: 640, height: 360), sizeMultiplier: 1, laneTop: top)
       }.sorted { $0.minY < $1.minY }
-      guard packed.first?.minY == 0, zip(packed, packed.dropFirst()).allSatisfy({ abs($1.minY-$0.maxY-1) < 0.01 }) else {
-        throw CommentParseError.invalid("字形の高さで隙間なく行を詰める")
+      // This fixture uses ASS alignment 2, so packing starts at the bottom.
+      guard packed.last?.maxY == 360, zip(packed, packed.dropFirst()).allSatisfy({ abs($1.minY-$0.maxY-1) < 0.01 }) else {
+        let bounds = packed.map { "\($0.minY)...\($0.maxY)" }.joined(separator: ", ")
+        throw CommentParseError.invalid("字形の高さで隙間なく行を詰める: \(bounds)")
       }
       // Integer placement avoids sampling two neighboring texels at a half
       // pixel. The check measures opacity, not bilinear edge interpolation.
