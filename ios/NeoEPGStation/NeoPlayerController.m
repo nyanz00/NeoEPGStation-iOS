@@ -367,6 +367,10 @@
     [self.chrome updateDiagnostics]; [self.commentPiP invalidatePlaybackState]; return;
   }
   self.restoringReload = YES;
+  // A paused reload must not keep advancing while the asynchronous seek
+  // completion waits for the main queue. Seek with playback already paused.
+  self.player.rate = self.playbackRate;
+  if (!self.wantsPlayback) { [self.player pause]; }
   NSInteger generation = self.reloadGeneration;
   __weak typeof(self) weakSelf = self;
   dispatch_block_t restore = ^{
