@@ -508,7 +508,8 @@
   self.wantsPlayback = playing;
   [NeoPlaybackDiagnostics record:@"playback.intent" fields:@{@"playing": @(playing), @"reloading": @(self.reloading)}];
   [self.commentPiP updateAutomaticPlayback];
-  if (!self.reloading && playing && (self.transportSuspended || self.playbackEnded || self.playbackFailed || self.player.state == VLCMediaPlayerStateStopped)) {
+  if (!self.reloading && !self.awaitingComments && !self.awaitingEndpoint && playing &&
+      (self.transportSuspended || self.playbackEnded || self.playbackFailed || self.player.state == VLCMediaPlayerStateStopped)) {
     if (self.playbackEnded) {
       self.backgroundPositionValid = NO; self.lastObservedTime = 0;
       [self.rewindCache beginSeek:0];
