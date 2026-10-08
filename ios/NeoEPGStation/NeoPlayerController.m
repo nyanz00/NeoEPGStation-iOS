@@ -835,7 +835,7 @@
         [self runLifecycleRecoverySmoke:^(NSDictionary *result) {
           NSMutableDictionary *checks = [result mutableCopy];
           checks[@"bufferingBurstCoalesced"] = @(coalesced); checks[@"bufferingResetDropsOldUpdate"] = @(reset);
-          checks[@"success"] = @([result[@"success"] boolValue] && coalesced && reset); completion(checks);
+          checks[@"success"] = @((BOOL)([result[@"success"] boolValue] && coalesced && reset)); completion(checks);
         }];
       });
     });
@@ -858,9 +858,9 @@
           [self backgrounded]; [self foregrounded];
           [self pollRecoverySmoke:0 oldEndpoint:oldEndpoint completion:^(NSDictionary *result) {
             NSMutableDictionary *checks = [result mutableCopy];
-            checks[@"playingBackgroundKeepsInputAndIntent"] = @(keptInput && noReload);
+            checks[@"playingBackgroundKeepsInputAndIntent"] = @((BOOL)(keptInput && noReload));
             checks[@"normalVideoMasksPiPPrimingImage"] = @(backing);
-            checks[@"success"] = @([result[@"success"] boolValue] && keptInput && noReload && backing);
+            checks[@"success"] = @((BOOL)([result[@"success"] boolValue] && keptInput && noReload && backing));
             completion(checks);
           }];
         });
