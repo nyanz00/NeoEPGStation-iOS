@@ -525,6 +525,7 @@
     [NeoPlaybackDiagnostics record:@"player.sample" fields:@{@"mediaMs": self.player.time.value ?: @0,
       @"state": @(self.player.state), @"buffering": @(self.buffering), @"seeking": @(self.seeking),
       @"wantsPlayback": @(self.wantsPlayback), @"pip": @(self.pipActive),
+      @"commentTime": @(self.comments.renderedTime), @"commentsReady": @(self.comments.ready), @"videoHook": @(self.frameTapInstalled),
       @"videoAge": @(MAX(0, now - self.commentPiP.videoPresentationHostTime)),
       @"capturedFrames": @(self.commentPiP.capturedFrameCount)}];
   }

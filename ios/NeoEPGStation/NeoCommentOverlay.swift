@@ -13,6 +13,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   @objc var videoSize: CGSize = .zero
   @objc private(set) var status = "コメントを確認中…"
   @objc private(set) var ready = false
+  @objc private(set) var renderedTime = 0.0
   @objc var enabled = true {
     didSet { UserDefaults.standard.set(enabled, forKey: Self.enabledKey); refreshRendering(); finishPreparationIfPossible(); onChange?() }
   }
@@ -278,6 +279,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
       clock.reset()
     }
     let time = clock.time(media: media, running: running, now: now, rate: rateProvider?() ?? 1, videoHost: videoHostProvider?())
+    renderedTime = time
     let viewport = view.drawableSize
     let ratio = videoSize.width > 0 && videoSize.height > 0 ? videoSize.width / videoSize.height : CGFloat(timeline.width / timeline.height)
     let fittedWidth = min(viewport.width, viewport.height * ratio), fittedHeight = fittedWidth / ratio
