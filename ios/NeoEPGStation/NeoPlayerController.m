@@ -1305,7 +1305,14 @@
     accepted = [self.player respondsToSelector:@selector(setOnSeekCompletion:)];
     if (accepted) { self.player.onSeekCompletion = finished; self.player.position = self.inputStartTime > 0 ? (double)(target-self.inputStartTime) / MAX(1, length-self.inputStartTime) : (double)target / length; }
   } else {
-    accepted = [self.player jumpWithOffset:(int)(target - [self mediaTime]) completion:finished];
+    // The offset convenience method reads VLC's clock again internally.
+    // Set the relative input time directly so an invalid interpolation point
+    // cannot turn the intended target into a completely different seek.
+    accepted = [self.player respondsToSelector:@selector(setOnSeekCompletion:)];
+    if (accepted) {
+      self.player.onSeekCompletion = finished;
+      self.player.time = [VLCTime timeWithInt:(int)(target-self.inputStartTime)];
+    }
   }
   if (!accepted) { [self completeSeek:generation failed:YES]; }
   [NeoPlaybackDiagnostics record:@"seek.accepted" fields:@{@"accepted": @(accepted), @"bytePositionFallback": @(!self.hasInputLength && self.player.media.length.value.longLongValue <= 0 && length > 0)}];
