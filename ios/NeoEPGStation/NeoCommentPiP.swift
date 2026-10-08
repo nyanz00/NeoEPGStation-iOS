@@ -100,6 +100,8 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   private let frameLock = NSLock()
   private var frames: [CapturedVideoFrame] = []
   private var presentationTimes: [Double] = [], lastPresentedHost = 0.0
+  private var lastDecodedHost = 0.0
+  private var automaticStartPending = false, automaticStartAttempted = false
   private var closed = false, received = 0, composed = 0, consumed = 0
   private var capturing = false
   private var timer: DispatchSourceTimer?
@@ -134,6 +136,11 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   @objc var composedFrameCount: Int { frameLock.lock(); defer { frameLock.unlock() }; return composed }
   @objc var consumedFrameCount: Int { frameLock.lock(); defer { frameLock.unlock() }; return consumed }
   @objc var capturingForPiP: Bool { frameLock.lock(); defer { frameLock.unlock() }; return capturing }
+  @objc var videoDecodeHostTime: Double { frameLock.lock(); defer { frameLock.unlock() }; return lastDecodedHost }
+  @objc var videoActivityHostTime: Double {
+    let presented = videoPresentationHostTime
+    return presented > 0 ? max(presented, videoDecodeHostTime) : presented
+  }
   // VLC samples carry scheduled host presentation times, not arrival times.
   @objc var videoPresentationHostTime: Double {
     let now = CACurrentMediaTime()
@@ -158,10 +165,13 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     if AVPictureInPictureController.isPictureInPictureSupported() {
       let source = AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer: displayLayer, playbackDelegate: self)
       let controller = AVPictureInPictureController(contentSource: source)
-      controller.delegate = self; controller.canStartPictureInPictureAutomaticallyFromInline = false
+      controller.delegate = self; controller.canStartPictureInPictureAutomaticallyFromInline = true
       pip = controller
       observation = controller.observe(\.isPictureInPicturePossible, options: [.initial, .new]) { [weak self] controller, _ in
-        DispatchQueue.main.async { self?.possible = controller.isPictureInPicturePossible && !(self?.failed ?? true); self?.onChange?() }
+        DispatchQueue.main.async {
+          self?.possible = controller.isPictureInPicturePossible && !(self?.failed ?? true)
+          self?.startAutomaticIfPossible(); self?.onChange?()
+        }
       }
     } else {
       status = "この環境ではPiPを利用できません。"
@@ -178,9 +188,12 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   @objc func receiveVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
     let pts = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
     guard pts.isFinite else { return }
+    let arrived = CACurrentMediaTime()
+    NeoPlaybackDiagnostics.decodedFrame(host: arrived, presentation: pts)
     frameLock.lock(); defer { frameLock.unlock() }
     guard !closed else { return }
     received += 1
+    lastDecodedHost = arrived
     presentationTimes.append(pts)
     if presentationTimes.count > 64 { presentationTimes.removeFirst(presentationTimes.count - 64) }
     frames.append(CapturedVideoFrame(sample: sampleBuffer, hostTime: pts))
@@ -201,14 +214,45 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   }
 
   @objc func start() {
-    guard possible, !active else { return }
+    guard possible, !active, !(pip?.isPictureInPictureActive ?? false) else { return }
+    NeoPlaybackDiagnostics.record("pip.startRequest", fields: ["background": UIApplication.shared.applicationState == .background])
     work.async { [weak self] in self?.composing = true; self?.dirty = true }
     pip?.invalidatePlaybackState(); pip?.startPictureInPicture()
   }
   @objc func invalidatePlaybackState() { pip?.invalidatePlaybackState() }
+  @objc func updateAutomaticPlayback() {
+    pip?.canStartPictureInPictureAutomaticallyFromInline = wantsPlaybackProvider?() ?? false
+  }
+  @objc func prepareForInactive() {
+    updateAutomaticPlayback()
+    guard wantsPlaybackProvider?() == true else { return }
+    // Refresh the source before iOS starts its automatic inline transition.
+    work.async { [weak self] in self?.composing = true; self?.dirty = true }
+  }
+  @objc func enterBackground() {
+    automaticStartPending = wantsPlaybackProvider?() ?? false
+    automaticStartAttempted = false
+    startAutomaticIfPossible()
+  }
+  private func startAutomaticIfPossible() {
+    guard automaticStartPending, !automaticStartAttempted, !active, possible,
+      UIApplication.shared.applicationState == .background, wantsPlaybackProvider?() == true else { return }
+    automaticStartAttempted = true
+    start()
+  }
+  @objc func enterForeground() {
+    automaticStartPending = false; automaticStartAttempted = false
+    updateAutomaticPlayback()
+    if !active {
+      work.async { [weak self] in
+        self?.composing = false; self?.primed = false; self?.dirty = true
+        self?.displayLayer.flushAndRemoveImage()
+      }
+    }
+  }
   // A seek flushes stale samples without stopping the active PiP session.
   @objc func seekDiscontinuity(_ target: Double) {
-    frameLock.lock(); frames.removeAll(); presentationTimes.removeAll(); lastPresentedHost = 0; frameLock.unlock()
+    frameLock.lock(); frames.removeAll(); presentationTimes.removeAll(); lastPresentedHost = 0; lastDecodedHost = 0; frameLock.unlock()
     work.async { [weak self] in
       self?.current = nil; self?.image = nil; self?.clock = CommentPresentationClock()
       self?.resumeGate = CommentSeekResumeGate()
@@ -221,7 +265,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     pip?.stopPictureInPicture()
     work.async { [weak self] in
       guard let self = self else { return }
-      self.frameLock.lock(); self.frames.removeAll(); self.presentationTimes.removeAll(); self.lastPresentedHost = 0; self.frameLock.unlock()
+      self.frameLock.lock(); self.frames.removeAll(); self.presentationTimes.removeAll(); self.lastPresentedHost = 0; self.lastDecodedHost = 0; self.frameLock.unlock()
       self.current = nil; self.image = nil; self.primed = false; self.dirty = true
       self.clock = CommentPresentationClock(); self.lastTime = -1
       self.displayLayer.flushAndRemoveImage()
@@ -271,9 +315,10 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
       let ready = gate.allows(media: media, running: running, wantsPlayback: wantsPlaybackProvider?() ?? running)
       resumeGate = ready ? nil : gate; composition.enabled = composition.enabled && ready; clock.reset()
     }
-    let time = clock.time(media: media, running: running, now: now, rate: rateProvider?() ?? 1, videoHost: videoPresentationHostTime)
+    let presented = videoPresentationHostTime
+    let time = clock.time(media: media, running: running, now: now, rate: rateProvider?() ?? 1,
+      videoHost: presented, decodedHost: presented > 0 ? videoDecodeHostTime : nil)
     guard next != nil || current != nil else { return }
-    if next == nil && !dirty && time == lastTime { return }
     do {
       if let next = next, let pixel = CMSampleBufferGetImageBuffer(next.sample) {
         frameLock.lock(); consumed += 1; frameLock.unlock()
@@ -399,14 +444,19 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, didTransitionToRenderSize newRenderSize: CMVideoDimensions) {}
   func pictureInPictureControllerShouldProhibitBackgroundAudioPlayback(_ pictureInPictureController: AVPictureInPictureController) -> Bool { false }
   func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+    automaticStartPending = false
+    NeoPlaybackDiagnostics.record("pip.willStart", fields: [:])
     frameLock.lock(); capturing = true; frameLock.unlock()
     active = true; work.async { [weak self] in self?.composing = true; self?.dirty = true }; onChange?()
   }
   func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+    automaticStartPending = false
+    NeoPlaybackDiagnostics.record("pip.didStop", fields: [:])
     frameLock.lock(); capturing = false; frameLock.unlock()
     active = false; work.async { [weak self] in self?.composing = false }; onChange?()
   }
   func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
+    NeoPlaybackDiagnostics.record("pip.startFailed", fields: ["errorCode": (error as NSError).code])
     frameLock.lock(); capturing = false; frameLock.unlock()
     active = false; status = "PiPを開始できませんでした。"; work.async { [weak self] in self?.composing = false }; onChange?()
   }

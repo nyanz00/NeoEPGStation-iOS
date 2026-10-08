@@ -45,6 +45,20 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   private var suspended = false
   private(set) var networkBytes: Int64 = 0, hitBytes: Int64 = 0
   private var requestSequence = 0
+  private struct Delivery {
+    let id: Int, seek: Int, began: Double, start: Int64, end: Int64
+    var diskBytes: Int64 = 0, sentBytes: Int64 = 0, networkBytes: Int64 = 0
+    var firstSent = false
+  }
+  private var deliverySequence = 0
+  private var deliveries: [ObjectIdentifier: Delivery] = [:]
+  private func finishDelivery(_ connection: NWConnection, reason: Int) {
+    guard let entry = deliveries.removeValue(forKey: ObjectIdentifier(connection)) else { return }
+    NeoPlaybackDiagnostics.record("range.deliveryEnd", fields: ["delivery": entry.id, "originSeek": entry.seek,
+      "start": entry.start, "end": entry.end, "diskReadBytes": entry.diskBytes,
+      "processedBytes": entry.sentBytes, "networkBytes": entry.networkBytes, "reason": reason,
+      "durationMs": (ProcessInfo.processInfo.systemUptime-entry.began)*1000])
+  }
 
   @objc(initWithSource:username:password:)
   init(source: URL, username: String, password: String) {
@@ -160,7 +174,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     let old = listener; listener = nil; old?.cancel()
     requests.values.forEach { $0.cancel() }; requests.removeAll()
     let oldConnections = Array(connections.values); connections.removeAll()
-    oldConnections.forEach { $0.cancel() }
+    oldConnections.forEach { finishDelivery($0, reason: 2); $0.cancel() }
   }
   @objc func suspendTransport() {
     queue.async { [self] in guard !closed else { return }; suspended = true; stopTransport() }
@@ -198,6 +212,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
       let terminal: Bool
       switch state { case .cancelled, .failed: terminal = true; default: terminal = false }
       if terminal, let connection {
+        self?.finishDelivery(connection, reason: 1)
         let id = ObjectIdentifier(connection); self?.connections.removeValue(forKey: id)
         self?.requests.removeValue(forKey: id)?.cancel()
         if case .failed = state { connection.cancel() }
@@ -229,7 +244,14 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     guard start < length, end >= start else {
       send(connection, "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */\(length)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", then: { connection.cancel() }); return
     }
-    NeoPlaybackDiagnostics.record("range.request", fields: ["start": start, "end": end, "head": first[0] == "HEAD"])
+    deliverySequence += 1
+    let entry = Delivery(id: deliverySequence, seek: NeoPlaybackDiagnostics.seekID,
+      began: ProcessInfo.processInfo.systemUptime, start: start, end: end)
+    deliveries[ObjectIdentifier(connection)] = entry
+    let mapped = byteClock.timeRange(offset: start, count: 1)
+    NeoPlaybackDiagnostics.record("range.request", fields: ["delivery": entry.id, "originSeek": entry.seek,
+      "start": start, "end": end, "head": first[0] == "HEAD", "mappedTime": mapped?.lowerBound ?? -1,
+      "retainedBytes": bytes, "retainedBlocks": blocks.count, "mp4Index": byteClock.isMP4])
     let header = "HTTP/1.1 \(ranged ? "206 Partial Content" : "200 OK")\r\nAccept-Ranges: bytes\r\nContent-Type: application/octet-stream\r\nContent-Length: \(end-start+1)\r\n" +
       (ranged ? "Content-Range: bytes \(start)-\(end)/\(length)\r\n" : "") + "Connection: close\r\n\r\n"
     send(connection, header) { [weak self] in
@@ -240,25 +262,48 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     connection.send(content: Data(header.utf8), completion: .contentProcessed { error in if error == nil { then() } else { connection.cancel() } })
   }
   private func pump(_ connection: NWConnection, offset: Int64, end: Int64) {
-    guard !closed, !suspended, connections[ObjectIdentifier(connection)] != nil, offset <= end, case .ready = connection.state else { connection.cancel(); return }
+    guard !closed, !suspended, connections[ObjectIdentifier(connection)] != nil, offset <= end, case .ready = connection.state else {
+      finishDelivery(connection, reason: offset > end ? 0 : 2); connection.cancel(); return
+    }
     lastUse = ProcessInfo.processInfo.systemUptime
     let aligned = offset / blockSize * blockSize, count = Int(min(blockSize, length - aligned))
     func deliver(_ data: Data) {
       let begin = Int(offset - aligned), amount = min(data.count - begin, Int(end - offset + 1))
       guard amount > 0 else { connection.cancel(); return }
       connection.send(content: data.subdata(in: begin..<begin+amount), completion: .contentProcessed { [weak self] error in
-        if error == nil { self?.pump(connection, offset: offset + Int64(amount), end: end) } else { connection.cancel() }
+        guard let self else { connection.cancel(); return }
+        let key = ObjectIdentifier(connection)
+        if error == nil {
+          if var entry = self.deliveries[key] {
+            entry.sentBytes += Int64(amount)
+            if !entry.firstSent {
+              entry.firstSent = true
+              NeoPlaybackDiagnostics.record("range.firstProcessed", fields: ["delivery": entry.id, "originSeek": entry.seek,
+                "offset": offset, "bytes": amount, "durationMs": (ProcessInfo.processInfo.systemUptime-entry.began)*1000])
+            }
+            self.deliveries[key] = entry
+          }
+          self.pump(connection, offset: offset + Int64(amount), end: end)
+        } else { self.finishDelivery(connection, reason: 3); connection.cancel() }
       })
     }
     if var block = blocks[aligned], let data = try? Data(contentsOf: file(aligned)), data.count == block.count {
-      NeoPlaybackDiagnostics.record("cache.hit", fields: ["offset": aligned, "bytes": data.count, "requestedOffset": offset])
+      let key = ObjectIdentifier(connection)
+      if var entry = deliveries[key] { entry.diskBytes += Int64(data.count); deliveries[key] = entry }
+      NeoPlaybackDiagnostics.record("cache.hit", fields: ["delivery": deliveries[key]?.id ?? 0,
+        "originSeek": deliveries[key]?.seek ?? NeoPlaybackDiagnostics.seekID,
+        "offset": aligned, "bytes": data.count, "requestedOffset": offset, "blockEndTime": block.endTime ?? -1,
+        "payloadBytes": min(data.count-Int(offset-aligned), Int(end-offset+1))])
       block.used = lastUse; blocks[aligned] = block; hitBytes += Int64(data.count); deliver(data); return
     }
-    NeoPlaybackDiagnostics.record("cache.miss", fields: ["offset": aligned, "bytes": count, "requestedOffset": offset])
+    NeoPlaybackDiagnostics.record("cache.miss", fields: ["delivery": deliveries[ObjectIdentifier(connection)]?.id ?? 0,
+      "offset": aligned, "bytes": count, "requestedOffset": offset])
     fetch(offset: aligned, count: count, connection: connection) { [weak self] result in
       guard let self, !self.closed, case .ready = connection.state else { return }
       switch result {
       case .success(let data):
+        let key = ObjectIdentifier(connection)
+        if var entry = self.deliveries[key] { entry.networkBytes += Int64(data.count); self.deliveries[key] = entry }
         if self.seconds > 0 {
           do {
             try FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)

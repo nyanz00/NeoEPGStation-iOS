@@ -213,3 +213,12 @@ check(presentationClock.time(media: 3, running: false, now: 113, videoHost: 0) =
 check(presentationClock.time(media: 3.1, running: true, now: 113.1, videoHost: 120) == 3,
   "Future enqueued frames do not count as displayed video")
 print("Video-stall-aware comment clock: all checks passed")
+
+var obscuredClock = CommentPresentationClock()
+_ = obscuredClock.time(media: 10, running: true, now: 100, videoHost: 100)
+check(obscuredClock.time(media: 13, running: true, now: 103, videoHost: 100, decodedHost: 103) == 13,
+  "Fresh decoded video keeps comments running when PiP or inline surface is obscured")
+check(obscuredClock.time(media: 14, running: false, now: 104, videoHost: 100, decodedHost: 104) == 13,
+  "Real buffering still freezes comments even with fresh decoded frames")
+check(obscuredClock.time(media: 20, running: true, now: 110, videoHost: 100, decodedHost: 104) == 13,
+  "Both decode and presentation stalled must freeze comments")

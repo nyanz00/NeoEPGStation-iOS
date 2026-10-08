@@ -18,12 +18,12 @@
   return self;
 }
 - (void)backgrounded { self.appBackground = YES; }
-- (void)foregrounded { self.appBackground = NO; [super flush]; }
+- (void)foregrounded { self.appBackground = NO; [super flushAndRemoveImage]; }
 - (AVQueuedSampleBufferRenderingStatus)status {
   AVQueuedSampleBufferRenderingStatus status = super.status;
   // The inactive inline layer can lose renderer resources in the background.
   // VLC must still deliver decoded frames to the separate active PiP source.
-  if (status == AVQueuedSampleBufferRenderingStatusFailed && self.frameSink.capturingForPiP) {
+  if (status == AVQueuedSampleBufferRenderingStatusFailed && (self.appBackground || self.frameSink.capturingForPiP)) {
     return AVQueuedSampleBufferRenderingStatusUnknown;
   }
   return status;
@@ -33,7 +33,9 @@
   if (sink && CMSampleBufferGetImageBuffer(sampleBuffer)) {
     [sink receiveVideoSampleBuffer:sampleBuffer];
   }
-  if (!self.appBackground || !sink.capturingForPiP) { [super enqueueSampleBuffer:sampleBuffer]; }
+  // Background audio also keeps VLC decoding without feeding an inactive
+  // inline AV renderer. PiP, if active, receives the same decoded stream.
+  if (!self.appBackground) { [super enqueueSampleBuffer:sampleBuffer]; }
 }
 - (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
 @end

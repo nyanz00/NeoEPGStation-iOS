@@ -4,12 +4,40 @@
 #import <VLCKit/VLCKit.h>
 #import "NeoEPGStation-Swift.h"
 #import "NeoVLCFrameTap.h"
+#import <stdio.h>
 
 // Pinned VLCKit 4.0.0a25 uses this block internally for jumpWithOffset.
 // Its public position setter has no completion overload. Guard the setter
 // before using the same one-shot notification for a position-based TS seek.
 @interface VLCMediaPlayer (NeoPositionSeekCompletion)
 @property (nonatomic, copy, nullable) dispatch_block_t onSeekCompletion;
+@end
+
+// Only fixed-format numeric timing messages leave libVLC. Never export its raw
+// debug messages: they can contain the server URL, credentials or track text.
+@interface NeoNativePlaybackLogger : NSObject <VLCLogging>
+@property (nonatomic) VLCLogLevel level;
+@end
+@implementation NeoNativePlaybackLogger
+- (void)handleMessage:(NSString *)message logLevel:(VLCLogLevel)level context:(VLCLogContext *)context {
+  NSString *event = nil; long long first = 0, second = 0;
+  if ([message hasPrefix:@"Stream buffering done ("] &&
+      sscanf(message.UTF8String, "Stream buffering done (%lld ms in %lld ms)", &first, &second) == 2) {
+    event = @"vlc.bufferReady";
+  } else if ([message hasPrefix:@"Decoder wait done in "] &&
+      sscanf(message.UTF8String, "Decoder wait done in %lld ms", &first) == 1) {
+    event = @"vlc.decoderReady";
+  } else if ([message hasPrefix:@"seeking with "] &&
+      sscanf(message.UTF8String, "seeking with %lldms preroll (use input-fast-seek to avoid) to %lld", &first, &second) == 2) {
+    event = @"vlc.seekPreroll";
+  }
+  if (event) {
+    NSDictionary *fields = [event isEqualToString:@"vlc.seekPreroll"]
+      ? @{@"prerollMs": @(first), @"targetTicks": @(second)}
+      : @{@"durationMs": @(first), @"wallMs": @(second)};
+    [NeoPlaybackDiagnostics record:event fields:fields];
+  }
+}
 @end
 
 @interface NeoPlayerController () <VLCDrawable, VLCMediaPlayerDelegate, VLCCustomDialogRendererProtocol>
@@ -23,6 +51,9 @@
 @property (nonatomic) NSValue *loginReference;
 @property (nonatomic) UIAlertController *loginAlert;
 @property (nonatomic) UIView *movieView;
+@property (nonatomic) UIView *inlineBacking;
+@property (nonatomic, weak) UIView *videoOutputView;
+@property (nonatomic) NeoBufferingUpdates *bufferingUpdates;
 @property (nonatomic) UILabel *statusLabel;
 @property (nonatomic) UILabel *timeLabel;
 @property (nonatomic) UIButton *playButton;
@@ -125,6 +156,8 @@
     self.statusLabel.text = @"音声セッションを開始できませんでした。"; return;
   }
   self.player = [[VLCMediaPlayer alloc] initWithOptions:@[]];
+  NeoNativePlaybackLogger *nativeLogger = [NeoNativePlaybackLogger new]; nativeLogger.level = kVLCLogLevelDebug;
+  self.player.libraryInstance.loggers = @[nativeLogger];
   self.dialogs = [[VLCDialogProvider alloc] initWithLibrary:self.player.libraryInstance customUI:YES];
   self.dialogs.customRenderer = self;
   self.player.delegate = self; self.player.drawable = self;
@@ -137,7 +170,10 @@
   [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(backgrounded)
     name:UIApplicationDidEnterBackgroundNotification object:nil];
   [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(foregrounded) name:UIApplicationDidBecomeActiveNotification object:nil];
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(inactive) name:UIApplicationWillResignActiveNotification object:nil];
   __weak typeof(self) weakSelf = self;
+  self.bufferingUpdates = [NeoBufferingUpdates new];
+  self.bufferingUpdates.onUpdate = ^(float progress, NSInteger count) { [weakSelf applyBufferingProgress:progress notifications:count]; };
   self.suppressedCommentTracks = [NSMutableSet new];
   self.comments = [[NeoCommentOverlay alloc] initWithFrame:self.movieView.bounds];
   self.comments.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -145,17 +181,23 @@
   self.comments.timeProvider = ^double { return weakSelf.player.time.value.doubleValue / 1000.0; };
   self.comments.wantsPlaybackProvider = ^BOOL { return weakSelf.wantsPlayback && !weakSelf.playbackEnded && !weakSelf.closing; };
   self.comments.runningProvider = ^BOOL {
-    return weakSelf.player.state == VLCMediaPlayerStatePlaying && weakSelf.wantsPlayback && !weakSelf.seeking && !weakSelf.scrubbing && !weakSelf.buffering && !weakSelf.closing && !weakSelf.reloading;
+    return weakSelf.player.isPlaying && weakSelf.wantsPlayback && !weakSelf.seeking && !weakSelf.scrubbing && !weakSelf.buffering && !weakSelf.closing && !weakSelf.reloading;
   };
   self.comments.onChange = ^{ [weakSelf updateCommentState]; };
   [self.chrome bindCommentSettings:self.comments];
   [self.movieView addSubview:self.comments];
   self.frameTapInstalled = [NeoVLCFrameTap install];
-  if (self.frameTapInstalled) { self.comments.videoHostProvider = ^double { return weakSelf.commentPiP.videoPresentationHostTime; }; }
+  if (self.frameTapInstalled) { self.comments.videoHostProvider = ^double { return weakSelf.commentPiP.videoActivityHostTime; }; }
   self.commentPiP = [NeoCommentPiP new];
   self.commentPiP.view.frame = self.movieView.bounds;
   self.commentPiP.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   [self.movieView insertSubview:self.commentPiP.view atIndex:0];
+  // Keep AVKit's source attached for automatic PiP, but never let its priming
+  // frame become the background of the normal VLC output after a resize.
+  self.inlineBacking = [[UIView alloc] initWithFrame:self.movieView.bounds];
+  self.inlineBacking.backgroundColor = UIColor.blackColor; self.inlineBacking.userInteractionEnabled = NO;
+  self.inlineBacking.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+  [self.movieView insertSubview:self.inlineBacking aboveSubview:self.commentPiP.view];
   self.commentPiP.timeProvider = self.comments.timeProvider;
   self.commentPiP.lengthProvider = ^double { return [weakSelf mediaLength] / 1000.0; };
   self.commentPiP.runningProvider = self.comments.runningProvider;
@@ -167,6 +209,7 @@
     [weakSelf seekBy:(int64_t)(seconds * 1000) completion:completion];
   };
   self.commentPiP.onChange = ^{ [weakSelf updatePiPState]; };
+  [self.commentPiP updateAutomaticPlayback];
 #if TARGET_OS_SIMULATOR
   if (self.sourceURL.isFileURL && [NSProcessInfo.processInfo.environment[@"NEO_EPG_STORAGE_SMOKE"] isEqualToString:@"1"]) {
     [self.comments loadSmokeComments];
@@ -214,6 +257,7 @@
   self.landscape = size.width > size.height;
   self.chrome.frame = CGRectMake(0, 0, size.width, size.height);
   [self.chrome setNeedsLayout]; [self.chrome layoutIfNeeded];
+  [self alignVideoOutput];
   if (changed) { [self setNeedsStatusBarAppearanceUpdate]; }
 }
 - (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; [self applyPlayerLayout:self.view.bounds.size]; }
@@ -410,6 +454,7 @@
 - (void)setPlaybackIntent:(BOOL)playing {
   [self sampleHistory]; [self.history flush];
   self.wantsPlayback = playing;
+  [self.commentPiP updateAutomaticPlayback];
   if (playing && (self.playbackEnded || self.playbackFailed || self.player.state == VLCMediaPlayerStateStopped)) {
     self.lastObservedTime = 0; [self.rewindCache beginSeek:0]; if (!self.awaitingComments && !self.transportSuspended && !self.reloading) { [self restartMedia]; }
   } else { [self applyPlaybackIntent]; }
@@ -524,6 +569,9 @@
     self.lastDiagnosticSample = now;
     [NeoPlaybackDiagnostics record:@"player.sample" fields:@{@"mediaMs": self.player.time.value ?: @0,
       @"state": @(self.player.state), @"buffering": @(self.buffering), @"seeking": @(self.seeking),
+      @"nativePlaying": @(self.player.isPlaying), @"appState": @(UIApplication.sharedApplication.applicationState),
+      @"decodeAge": @(self.commentPiP.videoDecodeHostTime > 0 ? MAX(0, now-self.commentPiP.videoDecodeHostTime) : -1),
+      @"videoWidth": @(self.movieView.bounds.size.width), @"videoHeight": @(self.movieView.bounds.size.height),
       @"wantsPlayback": @(self.wantsPlayback), @"pip": @(self.pipActive),
       @"commentTime": @(self.comments.renderedTime), @"commentsReady": @(self.comments.ready), @"videoHook": @(self.frameTapInstalled),
       @"videoAge": @(MAX(0, now - self.commentPiP.videoPresentationHostTime)),
@@ -539,6 +587,7 @@
       return;
     }
     if (state == VLCMediaPlayerStateStopped || state == VLCMediaPlayerStateError) {
+      [self.bufferingUpdates reset];
       self.buffering = NO; [self.chrome updateBuffering:NO progress:1];
     }
     if (self.reloading && state == VLCMediaPlayerStateStopped && !self.restoringReload && !self.awaitingEndpoint) { [self restartMedia]; return; }
@@ -568,24 +617,27 @@
       ? @"再生エラー · 接続・ファイル形式・認証を確認してください。"
       : [NSString stringWithFormat:@"PLAY · %@ · キャッシュ %ld秒", VLCMediaPlayerStateToString(state), (long)self.networkCaching / 1000];
     [self.commentPiP invalidatePlaybackState]; [self updateControls];
+    [self.commentPiP updateAutomaticPlayback];
     if (state == VLCMediaPlayerStateStopped) { [self.commentPiP resetVideo]; }
   });
 }
 
 - (void)mediaPlayerBufferingChanged:(float)progress {
-  dispatch_async(dispatch_get_main_queue(), ^{
+  [self.bufferingUpdates submit:progress];
+}
+- (void)applyBufferingProgress:(float)progress notifications:(NSInteger)count {
     if (self.closing) { return; }
+    BOOL changed = self.buffering != (progress < 1);
     self.buffering = progress < 1;
-    [NeoPlaybackDiagnostics record:@"player.buffering" fields:@{@"progress": @(progress), @"mediaMs": self.player.time.value ?: @0}];
+    [NeoPlaybackDiagnostics record:@"player.buffering" fields:@{@"progress": @(progress), @"notifications": @(count),
+      @"nativePlaying": @(self.player.isPlaying), @"mediaMs": self.player.time.value ?: @0}];
     [self.chrome updateBuffering:self.buffering progress:progress];
     if (!self.closing) {
       self.statusLabel.text = progress < 1 ? [NSString stringWithFormat:@"バッファリング %.0f%%", progress * 100]
         : self.reloading ? @"プレイヤーを再読み込みしています…" : @"PLAY · 再生準備完了";
     }
-    [self.chrome updateDiagnostics];
-    if (!self.buffering) { [self applyPlaybackIntent]; }
-    [self.commentPiP invalidatePlaybackState];
-  });
+    if (changed && !self.buffering) { [self applyPlaybackIntent]; }
+    if (changed) { [self.commentPiP invalidatePlaybackState]; }
 }
 - (void)mediaPlayerLengthChanged:(int64_t)length {
   dispatch_async(dispatch_get_main_queue(), ^{
@@ -615,9 +667,15 @@
     [AVAudioSession.sharedInstance setActive:YES error:nil]; [self setPlaybackIntent:YES]; self.resumeAfterInterruption = NO;
   }
 }
+- (void)inactive { if (!self.closing) { [self.commentPiP prepareForInactive]; } }
 - (void)backgrounded {
   [self.history flush];
-  if (!self.pipActive) {
+  [NeoPlaybackDiagnostics record:@"lifecycle.background" fields:@{@"wantsPlayback": @(self.wantsPlayback), @"pip": @(self.pipActive), @"mediaMs": self.player.time.value ?: @0}];
+  if (self.closing) { return; }
+  [self.commentPiP enterBackground];
+  // PiP callbacks can lag the lifecycle notification. Keep a playing input
+  // and its audio alive even if PiP is unavailable or has not started yet.
+  if (!self.wantsPlayback && !self.pipActive) {
     self.backgroundTime = MAX(0, self.player.time.value.longLongValue);
     [self setPlaybackIntent:NO];
     self.transportSuspended = self.rewindCache != nil;
@@ -625,7 +683,12 @@
   }
 }
 - (void)foregrounded {
-  if (self.closing || !self.transportSuspended) { return; }
+  if (self.closing) { return; }
+  [NeoPlaybackDiagnostics record:@"lifecycle.foreground" fields:@{@"wantsPlayback": @(self.wantsPlayback), @"suspended": @(self.transportSuspended), @"mediaMs": self.player.time.value ?: @0}];
+  [self.commentPiP enterForeground];
+  [AVAudioSession.sharedInstance setActive:YES error:nil];
+  [self alignVideoOutput];
+  if (!self.transportSuspended) { return; }
   self.transportSuspended = NO; self.transportRecoveryAttempted = NO;
   if (self.reloading) { self.awaitingEndpoint = NO; self.reloading = NO; self.restoringReload = NO; }
   [self reloadPlayback];
@@ -682,21 +745,29 @@
   // Recorded PLAY has one input owner: the app's controls on the ancestor.
   // Apply this to each output replacement, including TS and reloads.
   view.userInteractionEnabled = NO;
+  if (self.videoOutputView && self.videoOutputView != view) { [self.videoOutputView removeFromSuperview]; }
+  self.videoOutputView = view;
+  view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+  view.frame = self.movieView.bounds;
   [self.movieView addSubview:view];
   [NeoVLCFrameTap bindView:view sink:self.commentPiP];
   if (self.comments) { [self.movieView bringSubviewToFront:self.comments]; }
 }
+- (void)alignVideoOutput {
+  // Resize VLC's outer drawable only. libVLC lays out its inner aspect-fit
+  // sample-buffer view using the resulting video-output size notification.
+  if (self.videoOutputView.superview != self.movieView) { return; }
+  self.videoOutputView.frame = self.movieView.bounds;
+  [self.videoOutputView setNeedsLayout]; [self.videoOutputView layoutIfNeeded];
+}
 - (CGRect)bounds { return self.movieView.bounds; }
 - (void)updatePiPState {
   if (self.closing) { return; }
-  BOOL wasActive = self.pipActive; self.pipActive = self.commentPiP.active;
+  self.pipActive = self.commentPiP.active;
   [self.chrome updatePiP:self.pipActive];
   if (self.comments.coveredByPiP != self.pipActive) { self.comments.coveredByPiP = self.pipActive; }
   self.pipButton.enabled = self.frameTapInstalled && self.commentPiP.possible;
   if (!self.frameTapInstalled) { self.commentLabel.text = @"PiP · VLCの映像出力を取得できません。"; }
-  if (wasActive && !self.pipActive && UIApplication.sharedApplication.applicationState == UIApplicationStateBackground) {
-    [self.player pause];
-  }
 }
 - (void)startPiP {
   [self showControls]; [self.commentPiP start];
@@ -750,12 +821,49 @@
   [self waitForTapSmokePlayback:0 completion:completion];
 }
 - (void)runRecoverySmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  NeoBufferingUpdates *updates = [NeoBufferingUpdates new];
+  __block NSInteger deliveries = 0, notifications = 0; __block float finalProgress = -1;
+  updates.onUpdate = ^(float progress, NSInteger count) { deliveries++; notifications += count; finalProgress = progress; };
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    for (NSInteger i = 0; i < 2000; i++) { [updates submit:(float)i / 2000]; }
+    [updates submit:1];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      BOOL coalesced = deliveries <= 4 && notifications == 2001 && finalProgress == 1;
+      [updates submit:0]; [updates reset];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        BOOL reset = notifications == 2001;
+        [self runLifecycleRecoverySmoke:^(NSDictionary *result) {
+          NSMutableDictionary *checks = [result mutableCopy];
+          checks[@"bufferingBurstCoalesced"] = @(coalesced); checks[@"bufferingResetDropsOldUpdate"] = @(reset);
+          checks[@"success"] = @([result[@"success"] boolValue] && coalesced && reset); completion(checks);
+        }];
+      });
+    });
+  });
+}
+- (void)runLifecycleRecoverySmoke:(void (^)(NSDictionary<NSString *, id> *))completion {
   [self seekBy:5000-self.player.time.value.longLongValue completion:^{
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
       NSURL *oldEndpoint = self.playbackURL;
+      [self setPlaybackIntent:YES]; [self inactive];
       [self backgrounded];
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self foregrounded]; [self pollRecoverySmoke:0 oldEndpoint:oldEndpoint completion:completion];
+        BOOL keptInput = !self.transportSuspended && self.wantsPlayback && [oldEndpoint isEqual:self.playbackURL];
+        [self foregrounded];
+        BOOL noReload = !self.reloading && [oldEndpoint isEqual:self.playbackURL];
+        BOOL backing = self.inlineBacking.superview == self.movieView &&
+          [self.movieView.subviews indexOfObject:self.inlineBacking] > [self.movieView.subviews indexOfObject:self.commentPiP.view];
+        [self setPlaybackIntent:NO];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+          [self backgrounded]; [self foregrounded];
+          [self pollRecoverySmoke:0 oldEndpoint:oldEndpoint completion:^(NSDictionary *result) {
+            NSMutableDictionary *checks = [result mutableCopy];
+            checks[@"playingBackgroundKeepsInputAndIntent"] = @(keptInput && noReload);
+            checks[@"normalVideoMasksPiPPrimingImage"] = @(backing);
+            checks[@"success"] = @([result[@"success"] boolValue] && keptInput && noReload && backing);
+            completion(checks);
+          }];
+        });
       });
     });
   }];
@@ -1082,6 +1190,7 @@
   if (self.closing) { return; }
   [NeoPlaybackDiagnostics record:@"player.close" fields:@{}];
   [self sampleHistory]; [self.history finish]; self.closing = YES;
+  [self.bufferingUpdates reset]; self.bufferingUpdates.onUpdate = nil;
   [self completeSeek:self.seekGeneration failed:NO];
   [self.reloadTimer invalidate]; self.reloadTimer = nil;
   [self.rewindCache close]; self.rewindCache.onChange = nil; self.rewindCache.onTransportFailure = nil;
@@ -1104,6 +1213,7 @@
 - (void)finishClosing {
   if (self.finishedClosing) { return; } self.finishedClosing = YES;
   self.player.delegate = nil;
+  self.player.libraryInstance.loggers = nil;
   self.player.drawable = nil;
   self.dialogs.customRenderer = nil; self.dialogs = nil;
   self.username = @""; self.password = @"";

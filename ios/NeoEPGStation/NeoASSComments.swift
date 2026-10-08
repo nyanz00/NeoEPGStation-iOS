@@ -339,8 +339,12 @@ struct CommentPresentationClock {
   private var clock = CommentPlaybackClock()
   private var last: Double?, advancing = false
   mutating func reset() { self = CommentPresentationClock() }
-  mutating func time(media: Double, running: Bool, now: Double, rate: Double = 1, videoHost: Double? = nil) -> Double {
-    let fresh = videoHost.map { $0.isFinite && $0 > 0 && now - $0 <= 0.25 && $0 <= now } ?? true
+  mutating func time(media: Double, running: Bool, now: Double, rate: Double = 1, videoHost: Double? = nil, decodedHost: Double? = nil) -> Double {
+    func isFresh(_ host: Double) -> Bool { host.isFinite && host > 0 && now-host <= 0.25 && host <= now }
+    // Decode arrival remains observable when iOS hides an inline/PiP surface.
+    // Neither future scheduled frames alone nor an advancing VLC clock suffice.
+    let videoFresh = videoHost.map(isFresh) ?? true
+    let fresh = videoFresh || (decodedHost.map(isFresh) ?? false)
     let active = running && fresh
     if !active {
       advancing = false
