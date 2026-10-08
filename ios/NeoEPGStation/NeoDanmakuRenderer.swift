@@ -202,7 +202,7 @@ final class NeoDanmakuRenderer {
     }
   }
 
-  private func snapshot(_ comments: [NativeComment], pixelScale: Double, opacity: Float?, size: Double)
+  private func snapshot(_ comments: [NativeComment], pixelScale: Double, opacity: Float?, size: Double, lanePixelScale: Double? = nil)
     -> [(NativeComment, CommentTexture, Double?)] {
     lock.lock(); defer { lock.unlock() }
     let ids = comments.map(\.id)
@@ -210,7 +210,7 @@ final class NeoDanmakuRenderer {
     snapshotRevision = renderRevision; snapshotIDs = ids; snapshotScale = pixelScale; snapshotOpacity = opacity; snapshotSize = size
     frameImages = comments.compactMap { comment in
       guard let image = cache[key(comment, pixelScale: pixelScale, absoluteOpacity: opacity)] else { return nil }
-      return (comment, image, laneSize == size && laneScale == min(2, max(0.25, ceil(pixelScale*4)/4)) ? lanes[comment.id] : nil)
+      return (comment, image, laneSize == size && laneScale == min(2, max(0.25, ceil((lanePixelScale ?? pixelScale)*4)/4)) ? lanes[comment.id] : nil)
     }
     return frameImages
   }
@@ -277,14 +277,15 @@ final class NeoDanmakuRenderer {
   // PiP may continue after the app loses foreground GPU access. Reuse the same
   // cached CoreText images and placement, without submitting Metal commands.
   func drawCPU(timeline: CommentTimeline, time: Double, viewport: CGSize, sizeMultiplier: Double,
-               opacity: Float, pixelScale: Double, usesSourceOpacity: Bool = false, context: CGContext) -> Int {
+               opacity: Float, pixelScale: Double, rasterScale: Double? = nil, usesSourceOpacity: Bool = false, context: CGContext) -> Int {
     context.saveGState(); defer { context.restoreGState() }
     prepareLayout(timeline, size: sizeMultiplier, pixelScale: pixelScale)
     context.interpolationQuality = .medium
     let videoRect = CGRect(origin: .zero, size: viewport)
     context.clip(to: videoRect)
     var drawn = 0
-    for (comment, image, top) in snapshot(cursor.visible(timeline, at: time), pixelScale: pixelScale, opacity: usesSourceOpacity ? nil : opacity, size: sizeMultiplier) {
+    let images = snapshot(cursor.visible(timeline, at: time), pixelScale: rasterScale ?? pixelScale, opacity: usesSourceOpacity ? nil : opacity, size: sizeMultiplier, lanePixelScale: pixelScale)
+    for (comment, image, top) in images {
       guard let bitmap = image.image else { continue }
       guard var rect = placement(comment, imageSize: image.size, timeline: timeline, time: time,
         videoRect: videoRect, sizeMultiplier: sizeMultiplier, laneTop: top) else { continue }

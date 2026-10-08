@@ -50,6 +50,7 @@ enum NeoPiPSmoke {
   }
   static func compositionTest() {
     do {
+      guard try NeoCommentPiP.converterSmoke() else { throw CommentParseError.invalid("縮小変換と画像バッファ寿命") }
       guard let device = MTLCreateSystemDefaultDevice() else { throw CommentParseError.invalid("Metal") }
       let renderer = try NeoDanmakuRenderer(device: device, cpuOnly: true)
       let timeline = fixture, size = CGSize(width: 640, height: 360)

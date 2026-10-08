@@ -7,6 +7,9 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   @objc let header = UIView(), controls = UIView(), centerControls = UIView()
   @objc let statusLabel = NeoStyle.label(size: 12), commentLabel = NeoStyle.label(size: 12)
   @objc let timeLabel = NeoStyle.label(size: 13)
+  private let displayedStatus = NeoStyle.label(size: 12)
+  private var bufferProgress: Float?
+  private var previewTime: Int64?
   @objc let timeline: UISlider = NeoPlayerSeekSlider()
   @objc let playButton = UIButton(type: .system), pipButton = UIButton(type: .system)
   @objc let subtitleButton = UIButton(type: .system), commentButton = UIButton(type: .system)
@@ -61,7 +64,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     videoView.clipsToBounds = true
     self.title.text = title; self.title.lineBreakMode = .byTruncatingTail
     channel.textColor = NeoStyle.muted; logo.contentMode = .scaleAspectFit
-    [videoView, pipCover, videoDim, header, controls, centerControls, panel, statusLabel, drawerDim, drawer].forEach(addSubview)
+    [videoView, pipCover, videoDim, header, controls, centerControls, panel, displayedStatus, drawerDim, drawer].forEach(addSubview)
     header.addSubview(leftHeader); header.addSubview(rightHeader)
     [menuButton, backButton, logo, channel, self.title].forEach(leftHeader.addSubview)
     [infoButton, pipButton, commentButton, settingsButton].forEach(rightHeader.addSubview)
@@ -111,7 +114,13 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     centerControls.addSubview(playButton)
     timeline.minimumTrackTintColor = NeoStyle.accent; timeline.maximumTrackTintColor = .white.withAlphaComponent(0.35)
     timeline.thumbTintColor = .white; timeline.accessibilityLabel = "再生位置"
-    timeline.addAction(UIAction { [weak self] _ in self?.onAction?("scrub-begin") }, for: .touchDown)
+    timeline.addAction(UIAction { [weak self] _ in
+      guard let self else { return }; self.previewTime = self.current
+      self.onAction?("scrub-begin")
+    }, for: .touchDown)
+    timeline.addAction(UIAction { [weak self] _ in
+      guard let self else { return }; self.previewTime = Int64(Double(self.timeline.value) * Double(self.duration)); self.updateTime()
+    }, for: .valueChanged)
     timeline.addAction(UIAction { [weak self] _ in self?.onAction?("scrub-end") }, for: [.touchUpInside, .touchUpOutside])
     timeline.addAction(UIAction { [weak self] _ in self?.onAction?("scrub-cancel") }, for: .touchCancel)
     panel.backgroundColor = NeoStyle.paper; panel.clipsToBounds = true; panel.isHidden = true
@@ -163,6 +172,9 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     statusLabel.backgroundColor = .clear; statusLabel.numberOfLines = 2; statusLabel.isHidden = true
     statusLabel.layer.shadowColor = UIColor.black.cgColor; statusLabel.layer.shadowOpacity = 1
     statusLabel.layer.shadowRadius = 2; statusLabel.layer.shadowOffset = .zero
+    displayedStatus.numberOfLines = 2; displayedStatus.isHidden = true
+    displayedStatus.layer.shadowColor = UIColor.black.cgColor; displayedStatus.layer.shadowOpacity = 1
+    displayedStatus.layer.shadowRadius = 2; displayedStatus.layer.shadowOffset = .zero
   }
   required init?(coder: NSCoder) { fatalError() }
   private func configure(_ button: UIButton, icon: String? = nil, symbol: String? = nil, label: String, action: String) {
@@ -289,7 +301,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     scroll.frame = contentFrame; commentList.frame = contentFrame
     if tab == "comments" { commentList.frame.size.height = max(0, contentFrame.height - 36) }
     followButton.frame = CGRect(x: 0, y: commentList.frame.maxY, width: panel.bounds.width, height: 36)
-    statusLabel.frame = CGRect(x: safe.left + 16, y: header.frame.maxY + 4,
+    displayedStatus.frame = CGRect(x: safe.left + 16, y: header.frame.maxY + 4,
       width: max(0, videoWidth - safe.left - rightInset - 24), height: 32)
     drawerDim.frame = bounds
     let drawerWidth = min(240 + safe.left, bounds.width * 0.8)
@@ -350,14 +362,24 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     playButton.accessibilityLabel = running ? "一時停止" : "再生"
     updateTime(); followCurrentComment(); setNeedsLayout()
   }
+  @objc func previewSeek(_ seconds: Int64) { previewTime = max(0, seconds); updateTime() }
+  @objc func finishSeekPreview() { previewTime = nil; updateTime() }
   private func updateTime() {
+    let current = previewTime ?? self.current
     func format(_ seconds: Int64) -> String { seconds >= 3600 ? String(format: "%lld:%02lld:%02lld", seconds/3600, seconds/60%60, seconds%60) : String(format: "%lld:%02lld", seconds/60, seconds%60) }
     timeLabel.text = remainingTime ? "−\(format(max(0, duration - current))) / \(format(duration))" : "\(format(current)) / \(format(duration))"
   }
   @objc func updateDiagnostics() {
     let status = statusLabel.text ?? ""
-    statusLabel.isHidden = !status.contains("エラー") && !status.contains("できません") && !status.contains("バッファリング") && !status.contains("再読み込み")
+    let important = status.contains("エラー") || status.contains("できません") || status.contains("再読み込み")
+    displayedStatus.text = bufferProgress.map { String(format: "バッファリング %.0f%%", $0 * 100) } ?? status
+    displayedStatus.isHidden = bufferProgress == nil && !important
+    statusLabel.isHidden = displayedStatus.isHidden
     diagnostic = status; commentDiagnostic = commentLabel.text ?? ""
+  }
+  @objc func updateBuffering(_ active: Bool, progress: Float) {
+    bufferProgress = active ? min(1, max(0, progress)) : nil
+    updateDiagnostics()
   }
   @objc func setCommentRows(_ rows: [[String: Any]], version: Int) {
     commentVersion = version; comments = rows.compactMap { row in
@@ -487,6 +509,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
         stack.addArrangedSubview(NeoStyle.button(text) { [weak self] in self?.onAction?("orientation:\(id)") })
       }
       append(diagnostic, size: 12, muted: true); append(commentDiagnostic, size: 12, muted: true)
+      stack.addArrangedSubview(NeoStyle.button("再生診断ログを共有") { [weak self] in self?.onAction?("export-diagnostics") })
       let reload = NeoStyle.button("再読み込み") { [weak self] in self?.onAction?("reload") }
       reload.accessibilityIdentifier = "player-settings-reload"; stack.addArrangedSubview(reload)
     default: break
@@ -658,6 +681,34 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   deinit { task?.cancel(); relatedTask?.cancel(); logoTask?.cancel() }
 
 #if targetEnvironment(simulator)
+  private func runDiagnosticsChecks() -> [String: Bool] {
+    let oldTime = current, oldDuration = duration, oldRemaining = remainingTime, oldStatus = statusLabel.text
+    updatePlayback(true, current: 60, duration: 120)
+    timeline.sendActions(for: .touchDown); timeline.value = 0.75; timeline.sendActions(for: .valueChanged)
+    updatePlayback(true, current: 61, duration: 120)
+    let preview = timeLabel.text == "1:30 / 2:00"
+    remainingTime = true; updateTime(); let remaining = timeLabel.text == "−0:30 / 2:00"
+    remainingTime = false; previewSeek(95); updatePlayback(true, current: 62, duration: 120)
+    let pending = timeLabel.text == "1:35 / 2:00"
+    finishSeekPreview(); let restored = timeLabel.text == "1:02 / 2:00"
+    var stable = true
+    for percent in 1...3 {
+      updateBuffering(true, progress: Float(percent) / 100)
+      // Other notifications continue updating the diagnostic source label.
+      statusLabel.text = "PLAY · Playing"; updateDiagnostics()
+      stable = stable && !displayedStatus.isHidden && displayedStatus.text == "バッファリング \(percent)%"
+    }
+    updateBuffering(false, progress: 1); let cleared = displayedStatus.isHidden
+    NeoPlaybackDiagnostics.record("smoke.numeric", fields: ["targetMs": 10000])
+    let exported = NeoPlaybackDiagnostics.exportURL().flatMap { try? Data(contentsOf: $0) }
+    let logValid = exported.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["events"] != nil
+    remainingTime = oldRemaining; updatePlayback(false, current: oldTime, duration: oldDuration)
+    statusLabel.text = oldStatus; updateDiagnostics()
+    return ["seekDragPreviewsTime": preview, "seekDragPreviewsRemainingTime": remaining,
+      "pendingSeekKeepsTargetTime": pending, "seekCancelRestoresActualTime": restored,
+      "bufferProgressSurvivesOtherStatusUpdates": stable, "bufferCompletionHidesStatus": cleared,
+      "numericPlaybackLogExportsJSON": logValid]
+  }
   private func runSettingsChecks() -> [String: Bool] {
     let oldTracks = subtitleTracks, oldCategory = settingsCategory, handler = onAction
     let oldEnabled = commentOverlay?.enabled, oldSize = commentOverlay?.sizeMultiplier, oldOpacity = commentOverlay?.opacity
@@ -715,12 +766,12 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let shared = drawer.brand.frame.minX == drawer.contentSafeArea.left + 16 && drawer.logo.frame.minX - drawer.brand.frame.maxX == 7
       && config?.imageProperties.reservedLayoutSize == CGSize(width: 24, height: 27)
     onAction = handler; subtitleTracks = oldTracks; subtitleKey = ""; settingsCategory = oldCategory
-    return ["waitForCommentsSettingPersisted": waitSaved, "settingsStayInPanel": returns, "fixedSettingsCategoryTabs": categories, "settingsBottomTab": settingsTab,
+    return runDiagnosticsChecks().merging(["waitForCommentsSettingPersisted": waitSaved, "settingsStayInPanel": returns, "fixedSettingsCategoryTabs": categories, "settingsBottomTab": settingsTab,
       "videoReloadOnlyAtGeneralBottom": reloadAtBottom && reloadRouted && commentsNoReload && subtitlesNoReload,
       "commentPreferencesRestoredInNewPlayer": persisted, "commentPreferencesRetainedAcrossPanels": panelRetained,
       "commentSettingsApplyToComposition": applied, "slidersRetainedDuringUpdates": stable,
       "danmakuExcludedFromSubtitles": filtered, "filteredSubtitleKeepsOriginalIndex": routed,
-      "pipCoversVideoWithoutStoppingDrawable": covered, "pipRestoresVideo": restored, "sharedDrawerAlignmentAndIconSize": shared]
+      "pipCoversVideoWithoutStoppingDrawable": covered, "pipRestoresVideo": restored, "sharedDrawerAlignmentAndIconSize": shared]) { first, _ in first }
   }
   // Exercise the same hit-test/ancestor filter used by the real recognizer.
   @objc func smokeTapVideoBackground() -> Bool {

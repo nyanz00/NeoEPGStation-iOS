@@ -44,6 +44,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   @objc var onTransportFailure: (() -> Void)?
   private var suspended = false
   private(set) var networkBytes: Int64 = 0, hitBytes: Int64 = 0
+  private var requestSequence = 0
 
   @objc(initWithSource:username:password:)
   init(source: URL, username: String, password: String) {
@@ -140,7 +141,10 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     }
   }
   @objc func beginSeek(_ time: Double) {
-    queue.async { [self] in mediaTime = max(0, time); highWater = mediaTime; lastUse = ProcessInfo.processInfo.systemUptime }
+    queue.async { [self] in
+      mediaTime = max(0, time); highWater = mediaTime; lastUse = ProcessInfo.processInfo.systemUptime
+      NeoPlaybackDiagnostics.record("cache.seek", fields: ["target": time, "retainedBytes": bytes, "blocks": blocks.count, "seconds": seconds])
+    }
   }
   @objc func close() {
     queue.async { [self] in
@@ -175,9 +179,11 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     // Keep a 15s safety margin rather than evicting data still being decoded.
     let cutoff = highWater - Double(seconds) - 15
     for (offset, block) in blocks where seconds == 0 || (block.endTime.map { $0 < cutoff } ?? false) {
+      NeoPlaybackDiagnostics.record("cache.evict", fields: ["offset": offset, "bytes": block.count, "cutoff": cutoff, "endTime": block.endTime ?? -1])
       bytes -= block.count; blocks.removeValue(forKey: offset); try? FileManager.default.removeItem(at: file(offset))
     }
     while bytes > limit, let oldest = blocks.min(by: { $0.value.used < $1.value.used }) {
+      NeoPlaybackDiagnostics.record("cache.capacityEvict", fields: ["offset": oldest.key, "bytes": oldest.value.count])
       bytes -= oldest.value.count; blocks.removeValue(forKey: oldest.key); try? FileManager.default.removeItem(at: file(oldest.key))
       report("巻き戻し用キャッシュが容量上限に達しました。保持範囲が設定時間より短くなっています。")
     }
@@ -223,6 +229,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     guard start < length, end >= start else {
       send(connection, "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */\(length)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", then: { connection.cancel() }); return
     }
+    NeoPlaybackDiagnostics.record("range.request", fields: ["start": start, "end": end, "head": first[0] == "HEAD"])
     let header = "HTTP/1.1 \(ranged ? "206 Partial Content" : "200 OK")\r\nAccept-Ranges: bytes\r\nContent-Type: application/octet-stream\r\nContent-Length: \(end-start+1)\r\n" +
       (ranged ? "Content-Range: bytes \(start)-\(end)/\(length)\r\n" : "") + "Connection: close\r\n\r\n"
     send(connection, header) { [weak self] in
@@ -244,8 +251,10 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
       })
     }
     if var block = blocks[aligned], let data = try? Data(contentsOf: file(aligned)), data.count == block.count {
+      NeoPlaybackDiagnostics.record("cache.hit", fields: ["offset": aligned, "bytes": data.count, "requestedOffset": offset])
       block.used = lastUse; blocks[aligned] = block; hitBytes += Int64(data.count); deliver(data); return
     }
+    NeoPlaybackDiagnostics.record("cache.miss", fields: ["offset": aligned, "bytes": count, "requestedOffset": offset])
     fetch(offset: aligned, count: count, connection: connection) { [weak self] result in
       guard let self, !self.closed, case .ready = connection.state else { return }
       switch result {
@@ -269,6 +278,9 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     }
   }
   private func fetch(offset: Int64, count: Int, connection: NWConnection? = nil, completion: @escaping (Result<Data, Error>) -> Void) {
+    requestSequence += 1
+    let requestID = requestSequence, seek = NeoPlaybackDiagnostics.seekID, began = ProcessInfo.processInfo.systemUptime
+    NeoPlaybackDiagnostics.record("range.fetchStart", fields: ["request": requestID, "originSeek": seek, "offset": offset, "bytes": count])
     var request = URLRequest(url: source); request.setValue("bytes=\(offset)-\(offset + Int64(count) - 1)", forHTTPHeaderField: "Range")
     request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
     if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
@@ -276,6 +288,9 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     let task = session.dataTask(with: request) { [weak self] data, response, error in
       guard let self else { return }
       self.queue.async {
+        NeoPlaybackDiagnostics.record("range.fetchEnd", fields: ["request": requestID, "originSeek": seek,
+          "offset": offset, "bytes": data?.count ?? 0, "httpStatus": (response as? HTTPURLResponse)?.statusCode ?? 0,
+          "errorCode": (error as NSError?)?.code ?? 0, "durationMs": (ProcessInfo.processInfo.systemUptime - began) * 1000])
         if let connection { self.requests.removeValue(forKey: ObjectIdentifier(connection)) }
         guard !self.closed else { return }
         guard error == nil, let http = response as? HTTPURLResponse, http.statusCode == 206,

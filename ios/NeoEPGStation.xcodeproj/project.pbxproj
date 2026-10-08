@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+    BDEF00000000000000000015 /* NeoPlaybackDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000015; };
     BDEF00000000000000000014 /* NeoPlaybackHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000014; };
     BDEF00000000000000000013 /* NeoPlaybackCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000013; };
     BDEF00000000000000000012 /* NeoMediaByteClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000012; };
@@ -38,6 +39,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+    ADEF00000000000000000015 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoPlaybackDiagnostics.swift; path = NeoEPGStation/NeoPlaybackDiagnostics.swift; sourceTree = "<group>"; };
     ADEF00000000000000000014 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoPlaybackHistory.swift; path = NeoEPGStation/NeoPlaybackHistory.swift; sourceTree = "<group>"; };
     ADEF00000000000000000013 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoPlaybackCache.swift; path = NeoEPGStation/NeoPlaybackCache.swift; sourceTree = "<group>"; };
     ADEF00000000000000000012 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoMediaByteClock.swift; path = NeoEPGStation/NeoMediaByteClock.swift; sourceTree = "<group>"; };
@@ -108,6 +110,7 @@
         ADEF00000000000000000007,
         ADEF00000000000000000008,
         ADEF00000000000000000010,
+        ADEF00000000000000000015,
         ADEF00000000000000000014,
         ADEF00000000000000000013,
         ADEF00000000000000000012,
@@ -303,6 +306,7 @@
 			buildActionMask = 2147483647;
 			files = (
         BDEF00000000000000000010,
+        BDEF00000000000000000015,
         BDEF00000000000000000014,
         BDEF00000000000000000013,
         BDEF00000000000000000012,

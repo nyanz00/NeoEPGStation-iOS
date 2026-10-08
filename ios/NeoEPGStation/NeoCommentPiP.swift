@@ -19,6 +19,12 @@ private struct CapturedVideoFrame {
 // Decode surfaces may carry VLC-specific color attachments. Do not ask vImage
 // to construct an ICC color space from those attachments. VideoToolbox handles
 // YUV conversion; the final BGRA image has an explicit, stable channel layout.
+private final class PiPPixelOwner {
+  let pixel: CVPixelBuffer
+  init(_ pixel: CVPixelBuffer) { self.pixel = pixel }
+  deinit { CVPixelBufferUnlockBaseAddress(pixel, .readOnly) }
+}
+
 private final class PiPVideoConverter {
   private var session: VTPixelTransferSession?
   private var pool: CVPixelBufferPool?
@@ -26,10 +32,12 @@ private final class PiPVideoConverter {
 
   deinit { if let session = session { VTPixelTransferSessionInvalidate(session) } }
 
-  func image(_ source: CVPixelBuffer) throws -> CGImage {
-    let width = CVPixelBufferGetWidth(source), height = CVPixelBufferGetHeight(source)
+  func image(_ source: CVPixelBuffer, outputSize: CGSize? = nil) throws -> CGImage {
+    let target = outputSize ?? CGSize(width: CVPixelBufferGetWidth(source), height: CVPixelBufferGetHeight(source))
+    let width = Int(target.width), height = Int(target.height)
     var pixel = source
-    if CVPixelBufferGetPixelFormatType(source) != kCVPixelFormatType_32BGRA {
+    if CVPixelBufferGetPixelFormatType(source) != kCVPixelFormatType_32BGRA ||
+        width != CVPixelBufferGetWidth(source) || height != CVPixelBufferGetHeight(source) {
       if session == nil {
         guard VTPixelTransferSessionCreate(allocator: nil, pixelTransferSessionOut: &session) == noErr else {
           throw CommentParseError.invalid("PiP色変換セッション")
@@ -50,10 +58,19 @@ private final class PiPVideoConverter {
     guard CVPixelBufferLockBaseAddress(pixel, .readOnly) == kCVReturnSuccess else {
       throw CommentParseError.invalid("PiP映像バッファの読み取り")
     }
-    defer { CVPixelBufferUnlockBaseAddress(pixel, .readOnly) }
+    // The provider owns the locked surface until its last CGImage is released.
+    // This avoids a full-frame Data copy without reusing a live image's memory.
+    let owner = PiPPixelOwner(pixel)
     let stride = CVPixelBufferGetBytesPerRow(pixel)
-    guard let base = CVPixelBufferGetBaseAddress(pixel),
-      let provider = CGDataProvider(data: Data(bytes: base, count: stride * height) as CFData),
+    guard let base = CVPixelBufferGetBaseAddress(pixel) else { throw CommentParseError.invalid("PiP画素") }
+    let retained = Unmanaged.passRetained(owner).toOpaque()
+    guard let provider = CGDataProvider(dataInfo: retained, data: base, size: stride * height, releaseData: { info, _, _ in
+      if let info { Unmanaged<PiPPixelOwner>.fromOpaque(info).release() }
+    }) else {
+      Unmanaged<PiPPixelOwner>.fromOpaque(retained).release()
+      throw CommentParseError.invalid("PiP画像データ")
+    }
+    guard
       let image = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
         bytesPerRow: stride, space: CGColorSpaceCreateDeviceRGB(),
         bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
@@ -82,6 +99,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   private let work = DispatchQueue(label: "neo.pip.compose", qos: .userInitiated)
   private let frameLock = NSLock()
   private var frames: [CapturedVideoFrame] = []
+  private var presentationTimes: [Double] = [], lastPresentedHost = 0.0
   private var closed = false, received = 0, composed = 0, consumed = 0
   private var capturing = false
   private var timer: DispatchSourceTimer?
@@ -92,12 +110,13 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   private let videoConverter = PiPVideoConverter()
   private var outputSize = CGSize.zero
   private var pool: CVPixelBufferPool?
-  private var clock = CommentPlaybackClock()
+  private var clock = CommentPresentationClock()
   private var resumeGate: CommentSeekResumeGate?
   private var seekTarget = 0.0
   private var composing = false, primed = false, dirty = true
   private var lastTime = -1.0
   private var errorReported = false
+  private var lastMetrics = 0.0, compositionMilliseconds = 0.0, metricFrames = 0
   private var failed = false
   @objc private(set) var active = false
   @objc private(set) var possible = false
@@ -115,6 +134,15 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   @objc var composedFrameCount: Int { frameLock.lock(); defer { frameLock.unlock() }; return composed }
   @objc var consumedFrameCount: Int { frameLock.lock(); defer { frameLock.unlock() }; return consumed }
   @objc var capturingForPiP: Bool { frameLock.lock(); defer { frameLock.unlock() }; return capturing }
+  // VLC samples carry scheduled host presentation times, not arrival times.
+  @objc var videoPresentationHostTime: Double {
+    let now = CACurrentMediaTime()
+    frameLock.lock(); defer { frameLock.unlock() }
+    if let index = presentationTimes.lastIndex(where: { $0 <= now }) {
+      lastPresentedHost = presentationTimes[index]; presentationTimes.removeFirst(index + 1)
+    }
+    return lastPresentedHost
+  }
 
   @objc override init() {
     let surface = NeoPiPSurface(frame: .zero)
@@ -153,6 +181,8 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     frameLock.lock(); defer { frameLock.unlock() }
     guard !closed else { return }
     received += 1
+    presentationTimes.append(pts)
+    if presentationTimes.count > 64 { presentationTimes.removeFirst(presentationTimes.count - 64) }
     frames.append(CapturedVideoFrame(sample: sampleBuffer, hostTime: pts))
     // Bound retained decoder surfaces and prefer recent frames after a stall.
     // VLC submits frames ahead of their display time. Keeping only the newest
@@ -178,9 +208,9 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   @objc func invalidatePlaybackState() { pip?.invalidatePlaybackState() }
   // A seek flushes stale samples without stopping the active PiP session.
   @objc func seekDiscontinuity(_ target: Double) {
-    frameLock.lock(); frames.removeAll(); frameLock.unlock()
+    frameLock.lock(); frames.removeAll(); presentationTimes.removeAll(); lastPresentedHost = 0; frameLock.unlock()
     work.async { [weak self] in
-      self?.current = nil; self?.image = nil; self?.clock = CommentPlaybackClock()
+      self?.current = nil; self?.image = nil; self?.clock = CommentPresentationClock()
       self?.resumeGate = CommentSeekResumeGate()
       self?.seekTarget = max(0, target)
       self?.lastTime = -1; self?.dirty = true; self?.renderer?.seekWindow(); self?.displayLayer.flush()
@@ -191,15 +221,27 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     pip?.stopPictureInPicture()
     work.async { [weak self] in
       guard let self = self else { return }
-      self.frameLock.lock(); self.frames.removeAll(); self.frameLock.unlock()
+      self.frameLock.lock(); self.frames.removeAll(); self.presentationTimes.removeAll(); self.lastPresentedHost = 0; self.frameLock.unlock()
       self.current = nil; self.image = nil; self.primed = false; self.dirty = true
-      self.clock = CommentPlaybackClock(); self.lastTime = -1
+      self.clock = CommentPresentationClock(); self.lastTime = -1
       self.displayLayer.flushAndRemoveImage()
     }
   }
 #if targetEnvironment(simulator)
   @objc func beginCompositionSmoke() {
     work.async { [weak self] in self?.composing = true; self?.dirty = true }
+  }
+  static func converterSmoke() throws -> Bool {
+    let converter = PiPVideoConverter(), size = CGSize(width: 320, height: 180)
+    let first = try converter.image(NeoPiPSmoke.colorPixel(kCVPixelFormatType_32BGRA), outputSize: size)
+    guard let providerData = first.dataProvider?.data else { return false }
+    let bytes = providerData as Data
+    for _ in 0..<12 {
+      let next = try converter.image(NeoPiPSmoke.colorPixel(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange), outputSize: size)
+      guard next.width == 320, next.height == 180 else { return false }
+    }
+    guard let stillRetained = first.dataProvider?.data else { return false }
+    return first.width == 320 && first.height == 180 && bytes == stillRetained as Data
   }
 #endif
   @objc func stop() {
@@ -229,12 +271,11 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
       let ready = gate.allows(media: media, running: running, wantsPlayback: wantsPlaybackProvider?() ?? running)
       resumeGate = ready ? nil : gate; composition.enabled = composition.enabled && ready; clock.reset()
     }
-    let time = clock.time(media: media, running: running, now: now, rate: rateProvider?() ?? 1)
+    let time = clock.time(media: media, running: running, now: now, rate: rateProvider?() ?? 1, videoHost: videoPresentationHostTime)
     guard next != nil || current != nil else { return }
     if next == nil && !running && !dirty && time == lastTime { return }
     do {
       if let next = next, let pixel = CMSampleBufferGetImageBuffer(next.sample) {
-        image = try videoConverter.image(pixel)
         frameLock.lock(); consumed += 1; frameLock.unlock()
         current = next
         guard let format = CMSampleBufferGetFormatDescription(next.sample) else { throw CommentParseError.invalid("PiP映像形式") }
@@ -242,15 +283,16 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
         guard presentation.width.isFinite, presentation.height.isFinite, presentation.width > 0, presentation.height > 0 else {
           throw CommentParseError.invalid("PiP映像サイズ")
         }
-        let scale = min(1, min(960 / presentation.width, 540 / presentation.height))
+        let scale = min(1, min(1280 / presentation.width, 720 / presentation.height))
         let size = CGSize(width: max(2, floor(presentation.width * scale / 2) * 2),
           height: max(2, floor(presentation.height * scale / 2) * 2))
         if size != outputSize { outputSize = size; pool = try Self.makePool(size: size); displayLayer.flush() }
+        image = try videoConverter.image(pixel, outputSize: size)
       }
       guard let image = image, let pool = pool, let renderer = renderer else { return }
       if resumeGate != nil, let timeline = state.timeline {
         let scale = max(Double(outputSize.width)/timeline.width, Double(outputSize.height)/timeline.height)
-        renderer.prepareAhead(timeline, time: seekTarget, pixelScale: scale, opacity: state.usesSourceOpacity ? nil : state.opacity)
+        renderer.prepareAhead(timeline, time: seekTarget, pixelScale: scale * max(1, state.size), opacity: state.usesSourceOpacity ? nil : state.opacity)
         renderer.prepareLayout(timeline, size: state.size, pixelScale: scale)
       }
       let layer = displayLayer
@@ -261,6 +303,13 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
       layer.enqueue(sample)
       frameLock.lock(); composed += 1; frameLock.unlock()
       lastTime = time; dirty = renderer.hasPendingImages
+      compositionMilliseconds += (CACurrentMediaTime() - now) * 1000; metricFrames += 1
+      if now - lastMetrics >= 1 {
+        NeoPlaybackDiagnostics.record("pip.sample", fields: ["width": outputSize.width, "height": outputSize.height,
+          "frames": metricFrames, "meanComposeMs": compositionMilliseconds / Double(max(1, metricFrames)),
+          "media": media, "commentTime": time, "videoAge": max(0, now - videoPresentationHostTime)])
+        lastMetrics = now; metricFrames = 0; compositionMilliseconds = 0
+      }
       if !primed {
         primed = true
         DispatchQueue.main.async { [weak self] in
@@ -295,9 +344,11 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     context.draw(image, in: CGRect(origin: .zero, size: size))
     if state.enabled, let timeline = state.timeline {
       let scale = max(Double(size.width) / timeline.width, Double(size.height) / timeline.height)
-      renderer.prepareAhead(timeline, time: time, pixelScale: scale, opacity: state.usesSourceOpacity ? nil : state.opacity)
+      // Rasterize at the displayed text size; enlarging comments must not just
+      // magnify a small bitmap. Placement/lane geometry remains unchanged.
+      renderer.prepareAhead(timeline, time: time, pixelScale: scale * max(1, state.size), opacity: state.usesSourceOpacity ? nil : state.opacity)
       _ = renderer.drawCPU(timeline: timeline, time: time, viewport: size,
-        sizeMultiplier: state.size, opacity: state.opacity, pixelScale: scale, usesSourceOpacity: state.usesSourceOpacity, context: context)
+        sizeMultiplier: state.size, opacity: state.opacity, pixelScale: scale, rasterScale: scale * max(1, state.size), usesSourceOpacity: state.usesSourceOpacity, context: context)
       if let failure = renderer.error { throw CommentParseError.invalid(failure) }
     }
     return output

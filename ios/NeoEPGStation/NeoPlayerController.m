@@ -78,6 +78,9 @@
 @property (nonatomic) NSInteger reloadGeneration;
 @property (nonatomic) int64_t backgroundTime;
 @property (nonatomic, copy) NSString *subtitleSignature;
+@property (nonatomic) NSTimeInterval lastDiagnosticSample;
+@property (nonatomic) NSTimeInterval seekStartedAt;
+@property (nonatomic) BOOL awaitingSeekVideo;
 #if TARGET_OS_SIMULATOR
 @property (nonatomic) CGRect smokeSavedFrame;
 #endif
@@ -98,6 +101,8 @@
 
 - (void)viewDidLoad {
   [super viewDidLoad]; self.view.backgroundColor = UIColor.blackColor;
+  [NeoPlaybackDiagnostics begin];
+  [NeoPlaybackDiagnostics record:@"player.start" fields:@{@"networkCachingMs": @(self.networkCaching)}];
   self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
   self.chrome = [[NeoPlayerChrome alloc] initWithTitle:self.mediaTitle];
   self.chrome.frame = self.view.bounds; self.chrome.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -146,6 +151,7 @@
   [self.chrome bindCommentSettings:self.comments];
   [self.movieView addSubview:self.comments];
   self.frameTapInstalled = [NeoVLCFrameTap install];
+  if (self.frameTapInstalled) { self.comments.videoHostProvider = ^double { return weakSelf.commentPiP.videoPresentationHostTime; }; }
   self.commentPiP = [NeoCommentPiP new];
   self.commentPiP.view.frame = self.movieView.bounds;
   self.commentPiP.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -264,6 +270,15 @@
   else if ([action isEqualToString:@"scrub-end"]) { [self endScrubbing]; }
   else if ([action isEqualToString:@"scrub-cancel"]) { [self cancelScrubbing]; }
   else if ([action isEqualToString:@"reload"]) { [self reloadPlayback]; }
+  else if ([action isEqualToString:@"export-diagnostics"]) {
+    NSURL *url = [NeoPlaybackDiagnostics exportURL];
+    if (url) {
+      UIActivityViewController *share = [[UIActivityViewController alloc] initWithActivityItems:@[url] applicationActivities:nil];
+      share.popoverPresentationController.sourceView = self.chrome;
+      share.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(self.chrome.bounds), CGRectGetMidY(self.chrome.bounds), 1, 1);
+      [self presentViewController:share animated:YES completion:nil];
+    }
+  }
   else if ([action isEqualToString:@"rotate"]) { [self setOrientation:self.landscape ? @"portrait" : @"landscape"]; }
   else if ([action hasPrefix:@"orientation:"]) { [self setOrientation:[action substringFromIndex:12]]; }
   else if ([action hasPrefix:@"jump:"]) { [self seekBy:[action substringFromIndex:5].longLongValue * 1000 completion:^{}]; }
@@ -351,6 +366,8 @@
 }
 - (void)restartMedia {
   self.playbackEnded = NO; self.playbackFailed = NO; self.buffering = NO;
+  [self.chrome updateBuffering:NO progress:1];
+  [NeoPlaybackDiagnostics record:@"input.restart" fields:@{@"restoring": @(self.reloading), @"targetMs": @(self.reloadTime)}];
   self.lastObservedTime = 0; self.subtitleSignature = nil;
   [self.comments beginSeek:(self.reloading ? self.reloadTime / 1000.0 : 0)];
   VLCMedia *media = [VLCMedia mediaWithURL:self.playbackURL ?: self.sourceURL];
@@ -413,7 +430,7 @@
     seeking:self.seeking || self.scrubbing || self.reloading rate:self.playbackRate];
 }
 - (void)beginScrubbing { [self showControls]; self.scrubbing = YES; }
-- (void)cancelScrubbing { self.scrubbing = NO; [self showControls]; }
+- (void)cancelScrubbing { self.scrubbing = NO; [self.chrome finishSeekPreview]; [self showControls]; }
 - (void)endScrubbing {
   if (self.player.isSeekable) { [self seekBy:(int64_t)(self.timeline.value * [self mediaLength]) - self.player.time.value.longLongValue completion:^{}]; }
   self.scrubbing = NO; [self showControls];
@@ -495,13 +512,32 @@
   }
   self.comments.videoSize = size;
   [self updateCommentState];
+  [self.chrome updateDiagnostics];
+  NSTimeInterval now = CACurrentMediaTime();
+  if (self.awaitingSeekVideo && !self.seeking && !self.buffering && self.commentPiP.videoPresentationHostTime > self.seekStartedAt) {
+    self.awaitingSeekVideo = NO;
+    [NeoPlaybackDiagnostics record:@"seek.videoResume" fields:@{@"mediaMs": self.player.time.value ?: @0,
+      @"durationMs": @((now - self.seekStartedAt) * 1000)}];
+  }
+  if (now - self.lastDiagnosticSample >= 1) {
+    self.lastDiagnosticSample = now;
+    [NeoPlaybackDiagnostics record:@"player.sample" fields:@{@"mediaMs": self.player.time.value ?: @0,
+      @"state": @(self.player.state), @"buffering": @(self.buffering), @"seeking": @(self.seeking),
+      @"wantsPlayback": @(self.wantsPlayback), @"pip": @(self.pipActive),
+      @"videoAge": @(MAX(0, now - self.commentPiP.videoPresentationHostTime)),
+      @"capturedFrames": @(self.commentPiP.capturedFrameCount)}];
+  }
 }
 
 - (void)mediaPlayerStateChanged:(VLCMediaPlayerState)state {
   dispatch_async(dispatch_get_main_queue(), ^{
+    [NeoPlaybackDiagnostics record:@"player.state" fields:@{@"state": @(state), @"mediaMs": self.player.time.value ?: @0}];
     if (self.closing) {
       if (state == VLCMediaPlayerStateStopped) { [self finishClosing]; }
       return;
+    }
+    if (state == VLCMediaPlayerStateStopped || state == VLCMediaPlayerStateError) {
+      self.buffering = NO; [self.chrome updateBuffering:NO progress:1];
     }
     if (self.reloading && state == VLCMediaPlayerStateStopped && !self.restoringReload && !self.awaitingEndpoint) { [self restartMedia]; return; }
     if (state == VLCMediaPlayerStateError && (self.transportSuspended || self.awaitingEndpoint || self.player.state != state)) { return; }
@@ -536,7 +572,10 @@
 
 - (void)mediaPlayerBufferingChanged:(float)progress {
   dispatch_async(dispatch_get_main_queue(), ^{
+    if (self.closing) { return; }
     self.buffering = progress < 1;
+    [NeoPlaybackDiagnostics record:@"player.buffering" fields:@{@"progress": @(progress), @"mediaMs": self.player.time.value ?: @0}];
+    [self.chrome updateBuffering:self.buffering progress:progress];
     if (!self.closing) {
       self.statusLabel.text = progress < 1 ? [NSString stringWithFormat:@"バッファリング %.0f%%", progress * 100]
         : self.reloading ? @"プレイヤーを再読み込みしています…" : @"PLAY · 再生準備完了";
@@ -650,6 +689,7 @@
   if (self.closing) { return; }
   BOOL wasActive = self.pipActive; self.pipActive = self.commentPiP.active;
   [self.chrome updatePiP:self.pipActive];
+  if (self.comments.coveredByPiP != self.pipActive) { self.comments.coveredByPiP = self.pipActive; }
   self.pipButton.enabled = self.frameTapInstalled && self.commentPiP.possible;
   if (!self.frameTapInstalled) { self.commentLabel.text = @"PiP · VLCの映像出力を取得できません。"; }
   if (wasActive && !self.pipActive && UIApplication.sharedApplication.applicationState == UIApplicationStateBackground) {
@@ -956,11 +996,18 @@
   self.playbackEnded = NO; self.seeking = YES; self.seekCompletion = completion;
   self.lastSeekFailed = NO;
   NSInteger generation = ++self.seekGeneration;
+  self.seekStartedAt = CACurrentMediaTime();
+  self.awaitingSeekVideo = YES;
+  [NeoPlaybackDiagnostics beginSeek:generation];
+  [NeoPlaybackDiagnostics record:@"seek.start" fields:@{@"fromMs": self.player.time.value ?: @0, @"targetMs": @(target),
+    @"pip": @(self.pipActive), @"restoring": @(self.restoringReload)}];
+  [self.chrome previewSeek:target / 1000];
   [self.rewindCache beginSeek:target / 1000.0]; [self.comments beginSeek:target / 1000.0]; [self.commentPiP seekDiscontinuity:target / 1000.0];
   __weak typeof(self) weakSelf = self;
   self.seekTimer = [NSTimer timerWithTimeInterval:20 repeats:NO block:^(NSTimer *timer) {
     if (weakSelf.seekGeneration != generation || !weakSelf.seeking || weakSelf.closing) { return; }
     BOOL wasRestoring = weakSelf.restoringReload;
+    [NeoPlaybackDiagnostics record:@"seek.timeout" fields:@{@"restart": @(!wasRestoring), @"targetMs": @(target)}];
     [weakSelf completeSeek:generation failed:YES];
     if (wasRestoring) { return; }
     // Re-open the same Range endpoint at the requested time. Keep PiP alive;
@@ -975,6 +1022,7 @@
   }];
   [NSRunLoop.mainRunLoop addTimer:self.seekTimer forMode:NSRunLoopCommonModes];
   dispatch_block_t finished = ^{
+    [NeoPlaybackDiagnostics record:@"seek.callback" fields:@{@"generation": @(generation)}];
     [weakSelf completeSeek:generation failed:NO];
   };
   BOOL accepted;
@@ -988,6 +1036,7 @@
     accepted = [self.player jumpWithOffset:(int)(target - self.player.time.value.longLongValue) completion:finished];
   }
   if (!accepted) { [self completeSeek:generation failed:YES]; }
+  [NeoPlaybackDiagnostics record:@"seek.accepted" fields:@{@"accepted": @(accepted), @"bytePositionFallback": @(!self.hasInputLength && self.player.media.length.value.longLongValue <= 0 && length > 0)}];
   [self.commentPiP invalidatePlaybackState]; [self scheduleControlsHide];
 }
 - (void)completeSeek:(NSInteger)generation failed:(BOOL)failed {
@@ -998,6 +1047,10 @@
   [self.seekTimer invalidate]; self.seekTimer = nil; self.seeking = NO; [self.comments endSeek];
   if (!failed && !self.playbackEnded) { [self rememberPlaybackTime]; }
   self.lastSeekFailed = failed;
+  [NeoPlaybackDiagnostics record:@"seek.complete" fields:@{@"failed": @(failed), @"mediaMs": self.player.time.value ?: @0,
+    @"durationMs": @((CACurrentMediaTime() - self.seekStartedAt) * 1000)}];
+  [self.chrome updatePlayback:self.wantsPlayback current:self.player.time.value.longLongValue / 1000 duration:[self mediaLength] / 1000];
+  [self.chrome finishSeekPreview];
   dispatch_block_t completion = self.seekCompletion; self.seekCompletion = nil;
   if (!self.closing) {
     [self applyPlaybackIntent]; [self sampleHistory]; [self.history flush];
@@ -1025,6 +1078,7 @@
 
 - (void)closePlayer {
   if (self.closing) { return; }
+  [NeoPlaybackDiagnostics record:@"player.close" fields:@{}];
   [self sampleHistory]; [self.history finish]; self.closing = YES;
   [self completeSeek:self.seekGeneration failed:NO];
   [self.reloadTimer invalidate]; self.reloadTimer = nil;

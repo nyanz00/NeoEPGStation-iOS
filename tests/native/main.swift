@@ -194,3 +194,22 @@ check(NeoSubtitlePreference.preferredIndex(["English", "日本語"]) == 0 && Neo
 check(NeoSubtitlePreference.preferredIndex(["日本語"]) == -1, "Missing saved subtitle does not select an unrelated track")
 if let oldSubtitle { UserDefaults.standard.set(oldSubtitle, forKey: subtitleKey) } else { UserDefaults.standard.removeObject(forKey: subtitleKey) }
 print("Native ASS parser, timeline, clock, packing, subtitle preferences: all checks passed")
+
+var presentationClock = CommentPresentationClock()
+_ = presentationClock.time(media: 10, running: true, now: 100, videoHost: 100)
+let beforeStall = presentationClock.time(media: 10.1, running: true, now: 100.1, videoHost: 100.1)
+for step in 1...100 {
+  let host = 100.5 + Double(step) / 10
+  check(presentationClock.time(media: host - 90, running: true, now: host, videoHost: 100.1) == beforeStall,
+    "Video stall freezes comments even when VLC time advances for more than 1.5 seconds")
+}
+check(presentationClock.time(media: 40, running: false, now: 112, videoHost: 112) == beforeStall,
+  "Buffering notification freezes comments despite fresh queued frames and advancing media time")
+check(presentationClock.time(media: 22, running: true, now: 112.1, videoHost: 112.1) == 22,
+  "Fresh video reanchors comments on recovery")
+presentationClock.reset()
+check(presentationClock.time(media: 3, running: false, now: 113, videoHost: 0) == 3,
+  "Explicitly paused seek shows destination after reset")
+check(presentationClock.time(media: 3.1, running: true, now: 113.1, videoHost: 120) == 3,
+  "Future enqueued frames do not count as displayed video")
+print("Video-stall-aware comment clock: all checks passed")

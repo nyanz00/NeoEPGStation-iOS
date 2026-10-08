@@ -7,6 +7,8 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   @objc var rateProvider: (() -> Double)?
   @objc var runningProvider: (() -> Bool)?
   @objc var wantsPlaybackProvider: (() -> Bool)?
+  @objc var videoHostProvider: (() -> Double)?
+  @objc var coveredByPiP = false { didSet { clock.reset(); refreshRendering() } }
   @objc var onChange: (() -> Void)?
   @objc var videoSize: CGSize = .zero
   @objc private(set) var status = "コメントを確認中…"
@@ -36,7 +38,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   }
   private var settled = false, warming = false, seeking = false, seekVersion = 0
   private var preparationCompletion: (() -> Void)?, preparationTimer: Timer?
-  private var clock = CommentPlaybackClock()
+  private var clock = CommentPresentationClock()
   private var resumeGate: CommentSeekResumeGate?
   private var seekTarget: Double?
   private var drawn = 0, lastFrame = 0.0, frameCount = 0, fps = 0.0
@@ -245,7 +247,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     loader?.close(); loader = nil
     metal?.isPaused = true; metal?.delegate = nil
     renderer?.reset(); renderer = nil; timeline = nil
-    timeProvider = nil; runningProvider = nil; wantsPlaybackProvider = nil; rateProvider = nil; onChange = nil
+    timeProvider = nil; runningProvider = nil; wantsPlaybackProvider = nil; rateProvider = nil; videoHostProvider = nil; onChange = nil
     NotificationCenter.default.removeObserver(self)
   }
   deinit { loader?.close(); NotificationCenter.default.removeObserver(self) }
@@ -256,12 +258,12 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   private func refreshRendering() {
     let show = enabled && ready && !closed && !seeking
     metal?.isHidden = !show
-    metal?.isPaused = !show || background || window == nil
+    metal?.isPaused = !show || background || coveredByPiP || window == nil
   }
 
   func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
   func draw(in view: MTKView) {
-    guard enabled, ready, !background, !closed, !seeking, let timeline = timeline, let renderer = renderer else { return }
+    guard enabled, ready, !background, !coveredByPiP, !closed, !seeking, let timeline = timeline, let renderer = renderer else { return }
     if let error = renderer.error {
       ready = false; status = error; refreshRendering(); onChange?(); return
     }
@@ -275,7 +277,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
       if canDraw { seekTarget = nil }
       clock.reset()
     }
-    let time = clock.time(media: media, running: running, now: now, rate: rateProvider?() ?? 1)
+    let time = clock.time(media: media, running: running, now: now, rate: rateProvider?() ?? 1, videoHost: videoHostProvider?())
     let viewport = view.drawableSize
     let ratio = videoSize.width > 0 && videoSize.height > 0 ? videoSize.width / videoSize.height : CGFloat(timeline.width / timeline.height)
     let fittedWidth = min(viewport.width, viewport.height * ratio), fittedHeight = fittedWidth / ratio

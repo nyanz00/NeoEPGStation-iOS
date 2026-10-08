@@ -332,6 +332,28 @@ struct CommentPlaybackClock {
   }
 }
 
+// Native time may continue advancing while decoded video is stalled. Freeze
+// the rendered time (including coarse-clock interpolation) until due video
+// frames resume. A seek explicitly resets this clock to its new destination.
+struct CommentPresentationClock {
+  private var clock = CommentPlaybackClock()
+  private var last: Double?, advancing = false
+  mutating func reset() { self = CommentPresentationClock() }
+  mutating func time(media: Double, running: Bool, now: Double, rate: Double = 1, videoHost: Double? = nil) -> Double {
+    let fresh = videoHost.map { $0.isFinite && $0 > 0 && now - $0 <= 0.25 && $0 <= now } ?? true
+    let active = running && fresh
+    if !active {
+      advancing = false
+      if last == nil { last = media.isFinite ? max(0, media) : 0 }
+      return last ?? 0
+    }
+    if !advancing { clock.reset() }
+    last = clock.time(media: media, running: true, now: now, rate: rate)
+    advancing = true
+    return last ?? 0
+  }
+}
+
 // Do not show a stationary comment at the seek destination while VLC is still
 // acquiring its first advancing playback timestamp. Explicit pause can show it.
 struct CommentSeekResumeGate {
