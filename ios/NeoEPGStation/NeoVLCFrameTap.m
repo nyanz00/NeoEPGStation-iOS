@@ -18,7 +18,11 @@
   return self;
 }
 - (void)backgrounded { self.appBackground = YES; }
-- (void)foregrounded { self.appBackground = NO; [super flushAndRemoveImage]; }
+- (void)foregrounded {
+  self.appBackground = NO;
+  // Keep the paused image and queued VLC output on ordinary foregrounding.
+  if (super.status == AVQueuedSampleBufferRenderingStatusFailed) { [super flush]; }
+}
 - (AVQueuedSampleBufferRenderingStatus)status {
   AVQueuedSampleBufferRenderingStatus status = super.status;
   // The inactive inline layer can lose renderer resources in the background.
