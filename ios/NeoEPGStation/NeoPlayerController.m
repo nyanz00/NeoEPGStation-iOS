@@ -443,6 +443,10 @@
   else { [self.player stop]; }
 }
 - (void)restartMedia {
+  // Opening the replacement input is asynchronous. An older Stopped event
+  // must not open it again while start-paused is still preparing it.
+  if (self.reloading && self.restoringReload) { return; }
+  self.restoringReload = self.reloading;
   self.playbackEnded = NO; self.playbackFailed = NO; self.buffering = NO;
   self.inputBufferReady = NO; self.lastIntentCommandAt = 0;
   [self.chrome updateBuffering:NO progress:1];
@@ -651,6 +655,10 @@
     [NeoPlaybackDiagnostics record:@"player.state" fields:@{@"state": @(state), @"mediaMs": @([self mediaTime])}];
     if (self.closing) {
       if (state == VLCMediaPlayerStateStopped) { [self finishClosing]; }
+      return;
+    }
+    if ((state == VLCMediaPlayerStateStopped || state == VLCMediaPlayerStateError) && self.player.state != state) {
+      [NeoPlaybackDiagnostics record:@"player.staleTerminalState" fields:@{@"state": @(state), @"currentState": @(self.player.state)}];
       return;
     }
     if (state == VLCMediaPlayerStateStopped || state == VLCMediaPlayerStateError) {

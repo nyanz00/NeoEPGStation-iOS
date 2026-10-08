@@ -146,6 +146,9 @@ enum NeoPiPSmoke {
                         player.runReloadSmoke { playback in
                           save("playback-phase-smoke", ["phase": "reload", "success": playback["success"] ?? false])
                           save("player-playback-smoke", playback)
+                          if let diagnostics = NeoPlaybackDiagnostics.exportURL(), let data = try? Data(contentsOf: diagnostics) {
+                            try? data.write(to: directory.appendingPathComponent("player-reload-diagnostics-smoke.json"))
+                          }
                           player.runExitSmoke(host: root) { exit in
                             save("playback-phase-smoke", ["phase": "exit", "success": exit["success"] ?? false])
                             save("player-exit-smoke", exit)
