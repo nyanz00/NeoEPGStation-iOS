@@ -433,6 +433,7 @@
 - (void)cancelScrubbing { self.scrubbing = NO; [self.chrome finishSeekPreview]; [self showControls]; }
 - (void)endScrubbing {
   if (self.player.isSeekable) { [self seekBy:(int64_t)(self.timeline.value * [self mediaLength]) - self.player.time.value.longLongValue completion:^{}]; }
+  else { [self.chrome finishSeekPreview]; }
   self.scrubbing = NO; [self showControls];
 }
 

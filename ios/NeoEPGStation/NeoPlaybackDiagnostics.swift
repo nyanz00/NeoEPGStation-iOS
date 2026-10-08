@@ -11,7 +11,8 @@ final class NeoPlaybackDiagnostics: NSObject {
   @objc static var seekID: Int { lock.lock(); defer { lock.unlock() }; return currentSeek }
   @objc static func begin() {
     lock.lock(); events.removeAll(); started = ProcessInfo.processInfo.systemUptime; currentSeek = 0; lock.unlock()
-    record("session.start", fields: ["rewindSeconds": NeoPlaybackCache.savedSeconds])
+    record("session.start", fields: ["rewindSeconds": NeoPlaybackCache.savedSeconds,
+      "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"])
   }
   @objc static func beginSeek(_ identifier: Int) {
     lock.lock(); currentSeek = identifier; lock.unlock()

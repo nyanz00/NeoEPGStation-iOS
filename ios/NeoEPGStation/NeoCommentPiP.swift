@@ -273,7 +273,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     }
     let time = clock.time(media: media, running: running, now: now, rate: rateProvider?() ?? 1, videoHost: videoPresentationHostTime)
     guard next != nil || current != nil else { return }
-    if next == nil && !running && !dirty && time == lastTime { return }
+    if next == nil && !dirty && time == lastTime { return }
     do {
       if let next = next, let pixel = CMSampleBufferGetImageBuffer(next.sample) {
         frameLock.lock(); consumed += 1; frameLock.unlock()

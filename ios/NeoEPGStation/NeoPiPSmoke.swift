@@ -58,7 +58,7 @@ enum NeoPiPSmoke {
       let input = try colorPixel(kCVPixelFormatType_32BGRA), image = try NeoCommentPiP.videoImage(input)
       renderer.prepare(timeline.comments); renderer.waitForPreparedImages()
       func frame(_ time: Double, _ opacity: Float = 1, _ scale: Double = 1, _ enabled: Bool = true) throws -> CVPixelBuffer {
-        renderer.prepare(timeline.comments, absoluteOpacity: opacity)
+        renderer.prepare(timeline.comments, pixelScale: max(1, scale), absoluteOpacity: opacity)
         renderer.prepareLayout(timeline, size: scale); renderer.waitForPreparedImages()
         guard let output = try NeoCommentPiP.compose(image: image, size: size, pool: pool, renderer: renderer,
           state: CommentCompositionState(timeline: timeline, version: 0, enabled: enabled, size: scale, opacity: opacity), time: time)

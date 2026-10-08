@@ -682,6 +682,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
 
 #if targetEnvironment(simulator)
   private func runDiagnosticsChecks() -> [String: Bool] {
+    let handler = onAction; onAction = { _ in }; defer { onAction = handler }
     let oldTime = current, oldDuration = duration, oldRemaining = remainingTime, oldStatus = statusLabel.text
     updatePlayback(true, current: 60, duration: 120)
     timeline.sendActions(for: .touchDown); timeline.value = 0.75; timeline.sendActions(for: .valueChanged)
