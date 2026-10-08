@@ -54,10 +54,14 @@ final class NeoNowPlaying: NSObject {
   private func register(_ command: MPRemoteCommand, action: @escaping (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus) {
     command.isEnabled = true
     let target = command.addTarget { [weak self] event in
-      guard let self, !self.closed, Self.owner === self else { return .noSuchContent }
-      if Thread.isMainThread { return action(event) }
-      // The handlers only enqueue native commands; never wait for decoding here.
-      return DispatchQueue.main.sync { self.closed ? .noSuchContent : action(event) }
+      // MediaPlayer may hold its command lock while calling the handler.
+      // Never wait synchronously for main, which also registers/removes targets
+      // and updates Now Playing. Native playback commands are asynchronous too.
+      DispatchQueue.main.async { [weak self] in
+        guard let self, !self.closed, Self.owner === self else { return }
+        _ = action(event)
+      }
+      return .success
     }
     targets.append((command, target))
   }

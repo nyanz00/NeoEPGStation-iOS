@@ -103,7 +103,7 @@ except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
     raise
 pid = launch.rsplit(':', 1)[1].strip()
 container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], 'io.github.nyanz00.NeoEPGStation', 'data'))
-for attempt in range(24):
+for attempt in range(36):
     time.sleep(5)
     if (container / 'Documents/pip-player-smoke.json').exists() and (container / 'Documents/pip-composition-smoke.json').exists() and (container / 'Documents/player-tap-smoke.json').exists():
         break
@@ -131,6 +131,12 @@ for source in (container / 'Documents').glob('*-smoke.json'):
 for source in (container / 'Documents').glob('*.png'):
     Path('dist', source.name).write_bytes(source.read_bytes())
 if not (container / 'Documents/player-tap-smoke.json').exists():
+    # A stalled main thread can leave the process alive without completing the
+    # native suite. Capture its stacks before subsequent assertions fail.
+    try:
+        run('sample', pid, '3', '-file', str(Path('dist/simulator-stalled-stacks.log').resolve()), timeout=20)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        pass
     logs = run('xcrun', 'simctl', 'spawn', device['udid'], 'log', 'show', '--last', '3m',
                '--style', 'compact', '--predicate', 'process == "NeoEPGStation"')
     Path('dist/simulator-native.log').write_text(logs)
