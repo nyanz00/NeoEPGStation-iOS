@@ -980,6 +980,7 @@
   if (!self.reloading && !self.restoringReload && !self.transportSuspended && self.player.isSeekable && self.player.state == VLCMediaPlayerStatePaused) {
     BOOL position = llabs([self mediaTime]-self.backgroundTime) < 1000;
     BOOL endpoint = self.rewindCache != nil && [oldEndpoint isEqual:self.playbackURL];
+    int64_t originalLength = [self mediaLength];
     [self seekBy:2000-[self mediaTime] completion:^{
       NSInteger frames = self.commentPiP.capturedFrameCount;
       [self setPlaybackIntent:YES];
@@ -996,12 +997,20 @@
           BOOL restoring = self.reloading;
           self.nowPlaying.playAction();
           [self pollLatestRecoveryIntent:0 completion:^(BOOL resumed) {
-            completion(@{@"success": @(position && endpoint && advancing && paused && restoring && resumed),
+            BOOL savedStart = self.inputStartTime > 0 && llabs(self.inputStartTime-self.backgroundTime) < 1000;
+            BOOL duration = llabs([self mediaLength]-originalLength) < 100;
+            [self seekBy:-[self mediaTime] completion:^{
+            BOOL earlier = !self.lastSeekFailed && self.inputStartTime == 0 && [self mediaTime] < 1000;
+            [self pollLatestRecoveryIntent:0 completion:^(BOOL rewound) {
+            completion(@{@"success": @(position && endpoint && advancing && paused && restoring && resumed && savedStart && duration && earlier && rewound),
               @"positionRestored": @(position), @"pausedEndpointPreserved": @(endpoint), @"rewindResumesVideoAndClock": @(advancing),
               @"remotePauseUpdatesMetadata": @(paused), @"remotePlayDuringRestoreResumes": @((BOOL)(restoring && resumed)),
-              @"recoveryStartsAtSavedTime": @(self.inputStartTime > 0),
-              @"originalDurationPreserved": @([self mediaLength] > self.inputStartTime),
+              @"recoveryStartsAtSavedTime": @(savedStart),
+              @"originalDurationPreserved": @(duration),
+              @"rewindBeforeRecoveryPositionResumes": @(earlier && rewound),
               @"time": @([self mediaTime])});
+            }];
+            }];
           }];
         });
       });
@@ -1333,6 +1342,8 @@
   [self.bufferingUpdates reset]; self.bufferingUpdates.onUpdate = nil;
   [self completeSeek:self.seekGeneration failed:NO];
   [self.reloadTimer invalidate]; self.reloadTimer = nil;
+  dispatch_block_t reloadCompletion = self.reloadCompletion; self.reloadCompletion = nil;
+  if (reloadCompletion) { reloadCompletion(); }
   [self.rewindCache close]; self.rewindCache.onChange = nil; self.rewindCache.onTransportFailure = nil;
   self.view.userInteractionEnabled = NO;
   [self.timer invalidate]; self.timer = nil;
