@@ -484,9 +484,11 @@
 - (void)restoreReloadIfReady {
   VLCMediaPlayerState state = self.player.state;
   if (!self.reloading || self.awaitingEndpoint || !self.inputBufferReady || self.buffering ||
-      (state != VLCMediaPlayerStatePlaying && state != VLCMediaPlayerStatePaused)) { return; }
+      state != VLCMediaPlayerStatePaused) { return; }
   // start-time is handled by the demuxer during initialisation. There is no
   // second, post-buffering seek from the beginning of the recording.
+  // Opening also announces Playing before start-paused takes effect. Wait
+  // for that initial pause before applying the user's latest playback intent.
   [NeoPlaybackDiagnostics record:@"input.restoreReady" fields:@{@"targetMs": @(self.reloadTime),
     @"mediaMs": @([self mediaTime]), @"bufferReady": @(self.inputBufferReady), @"wantsPlayback": @(self.wantsPlayback)}];
   [self finishReload:NO];
@@ -925,8 +927,7 @@
         // Queue pause then play without waiting for VLC's pause notification.
         // This reproduces the window in which isPlaying still reads true.
         [self.player pause]; self.nowPlaying.playAction();
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        BOOL intentOrdered = self.player.isPlaying && self.wantsPlayback;
+        [self pollLatestRecoveryIntent:0 completion:^(BOOL intentOrdered) {
         [self updateNowPlaying]; NSDictionary *metadata = [self.nowPlaying smokeMetadata];
         BOOL registered = [metadata[@"titleRegistered"] boolValue] && [metadata[@"targets"] integerValue] == 6 &&
           [metadata[@"seekEnabled"] boolValue] && [metadata[@"rate"] doubleValue] > 0;
@@ -938,7 +939,7 @@
           checks[@"invalidRemoteSeekRejected"] = @(invalidRemoteSeek);
           checks[@"success"] = @((BOOL)([result[@"success"] boolValue] && coalesced && reset && intentOrdered && registered && invalidRemoteSeek)); completion(checks);
         }];
-        });
+        }];
       });
     });
   });
@@ -1020,20 +1021,25 @@
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self pollRecoverySmoke:attempt+1 oldEndpoint:oldEndpoint completion:completion]; });
 }
 - (void)pollLatestRecoveryIntent:(NSInteger)attempt completion:(void (^)(BOOL))completion {
-  if (!self.reloading && !self.restoringReload && self.player.isPlaying && self.wantsPlayback) {
+  if (attempt >= 100) { completion(NO); return; }
+  if (!self.reloading && !self.restoringReload && !self.buffering && self.player.isPlaying && self.wantsPlayback) {
     int64_t time = [self mediaTime];
     NSInteger frames = self.commentPiP.capturedFrameCount;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-      completion(self.player.isPlaying && [self mediaTime] > time+400 && self.commentPiP.capturedFrameCount > frames);
+      BOOL advancing = self.player.isPlaying && [self mediaTime] > time+400 && self.commentPiP.capturedFrameCount > frames;
+      [NeoPlaybackDiagnostics record:@"smoke.playbackProgress" fields:@{@"fromMs": @(time), @"mediaMs": @([self mediaTime]),
+        @"framesBefore": @(frames), @"framesAfter": @(self.commentPiP.capturedFrameCount), @"state": @(self.player.state), @"advancing": @(advancing)}];
+      if (advancing) { completion(YES); }
+      else { [self pollLatestRecoveryIntent:attempt+5 completion:completion]; }
     }); return;
   }
-  if (attempt >= 100) { completion(NO); return; }
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self pollLatestRecoveryIntent:attempt+1 completion:completion]; });
 }
 - (void)waitForTapSmokePlayback:(NSInteger)attempt completion:(void (^)(NSDictionary<NSString *, id> *))completion {
   UIView *video = [NeoVLCFrameTap videoViewInView:self.movieView];
   if (!self.player.isPlaying || !video) {
-    if (attempt >= 30) { completion(@{@"success": @NO, @"error": @"tap fixture playback did not start"}); return; }
+    if (attempt >= 100) { completion(@{@"success": @NO, @"error": @"tap fixture playback did not start",
+      @"state": @(self.player.state), @"wantsPlayback": @(self.wantsPlayback), @"buffering": @(self.buffering)}); return; }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
       [self waitForTapSmokePlayback:attempt + 1 completion:completion];
     }); return;

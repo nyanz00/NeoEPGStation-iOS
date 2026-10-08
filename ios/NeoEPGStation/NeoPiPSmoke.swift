@@ -223,6 +223,9 @@ enum NeoPiPSmoke {
       player.runVideoTapSmoke { taps in
         player.runRecoverySmoke { recovery in
           save("player-recovery-smoke", recovery)
+          if let diagnostics = NeoPlaybackDiagnostics.exportURL(), let data = try? Data(contentsOf: diagnostics) {
+            try? data.write(to: directory.appendingPathComponent("player-diagnostics-smoke.json"))
+          }
           player.onClose = { completion(taps["success"] as? Bool == true && recovery["success"] as? Bool == true) }
           player.closeTapSmoke()
         }
