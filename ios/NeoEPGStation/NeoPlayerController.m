@@ -701,7 +701,13 @@
     self.lastObservedTime = MAX(0, self.player.time.value.longLongValue);
   }
 }
-- (void)mediaPlayerTimeChanged:(NSNotification *)notification { [self rememberPlaybackTime]; [self updateNowPlaying]; }
+- (void)mediaPlayerTimeChanged:(NSNotification *)notification {
+  // Discontinuity callbacks can run on VLC's decoder thread while its player
+  // lock is held. Never query isSeekable/isPlaying or UIKit from that callback.
+  // Now Playing is updated by the UI timer and explicit state/intent changes.
+  if (NSThread.isMainThread) { [self rememberPlaybackTime]; }
+  else { dispatch_async(dispatch_get_main_queue(), ^{ if (!self.closing) { [self rememberPlaybackTime]; } }); }
+}
 - (void)updateNowPlaying {
   [self.nowPlaying updateWithPosition:self.reloading ? self.reloadTime/1000.0 : (self.playbackEnded ? self.lastObservedLength/1000.0 : MAX(0, self.player.time.value.doubleValue/1000.0))
     duration:[self mediaLength]/1000.0 rate:self.playbackRate
