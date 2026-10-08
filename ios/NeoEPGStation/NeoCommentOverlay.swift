@@ -70,7 +70,10 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
       view.delegate = self; view.isPaused = true
       addSubview(view); metal = view
     } catch { status = "Metal描画を開始できません。VLCの字幕表示を利用してください。" }
-    NotificationCenter.default.addObserver(self, selector: #selector(didBackground), name: UIApplication.willResignActiveNotification, object: nil)
+    // Control/Notification Center only makes the app inactive. Keep rendering
+    // there; submitting Metal work must stop only on actual background entry.
+    background = UIApplication.shared.applicationState == .background
+    NotificationCenter.default.addObserver(self, selector: #selector(didBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
     NotificationCenter.default.addObserver(self, selector: #selector(willForeground), name: UIApplication.didBecomeActiveNotification, object: nil)
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -83,6 +86,13 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
       var checks: [String: Bool] = [:]
       let overlay = NeoCommentOverlay(frame: CGRect(x: 0, y: 0, width: 640, height: 360))
       overlay.enabled = true; overlay.loadSmokeComments()
+      let testWindow = UIWindow(frame: overlay.bounds); testWindow.addSubview(overlay)
+      NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+      checks["inactiveCenterKeepsCommentRendering"] = !overlay.background && overlay.metal?.isPaused == false
+      overlay.didBackground()
+      checks["actualBackgroundStopsMetal"] = overlay.background && overlay.metal?.isPaused == true
+      overlay.willForeground()
+      checks["foregroundRestoresRenderingEligibility"] = !overlay.background && overlay.metal?.isPaused == false
       var returned = false
       await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
         overlay.prepareBeforePlayback {

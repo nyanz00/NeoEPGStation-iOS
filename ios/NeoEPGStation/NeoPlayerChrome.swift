@@ -18,6 +18,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   @objc private(set) var panelOpen = false
   @objc var autoHide = true
   private let logo = UIImageView(), channel = NeoStyle.label(size: 11), title = NeoStyle.label(size: 15, bold: true)
+  @objc var channelArtwork: UIImage? { logo.image }
   private let leftHeader = UIView(), rightHeader = UIView(), videoDim = UIView()
   private let videoTap = UITapGestureRecognizer()
   private let navigationPan = UIPanGestureRecognizer()

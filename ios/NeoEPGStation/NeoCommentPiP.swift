@@ -102,6 +102,8 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   private var presentationTimes: [Double] = [], lastPresentedHost = 0.0
   private var lastDecodedHost = 0.0
   private var automaticStartPending = false, automaticStartAttempted = false
+  private var startInFlight = false, backgroundGeneration = 0
+  private var automaticStartEligibleAt = 0.0
   private var closed = false, received = 0, composed = 0, consumed = 0
   private var capturing = false
   private var timer: DispatchSourceTimer?
@@ -214,7 +216,8 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   }
 
   @objc func start() {
-    guard possible, !active, !(pip?.isPictureInPictureActive ?? false) else { return }
+    guard !closed, possible, !active, !startInFlight, !(pip?.isPictureInPictureActive ?? false) else { return }
+    startInFlight = true
     NeoPlaybackDiagnostics.record("pip.startRequest", fields: ["background": UIApplication.shared.applicationState == .background])
     work.async { [weak self] in self?.composing = true; self?.dirty = true }
     pip?.invalidatePlaybackState(); pip?.startPictureInPicture()
@@ -232,15 +235,25 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   @objc func enterBackground() {
     automaticStartPending = wantsPlaybackProvider?() ?? false
     automaticStartAttempted = false
-    startAutomaticIfPossible()
+    automaticStartEligibleAt = CACurrentMediaTime() + 0.3
+    backgroundGeneration += 1
+    let generation = backgroundGeneration
+    // Let iOS finish its automatic inline start before issuing a fallback.
+    // Starting both at the background notification can race the transition.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+      guard let self, self.backgroundGeneration == generation else { return }
+      self.startAutomaticIfPossible()
+    }
   }
   private func startAutomaticIfPossible() {
-    guard automaticStartPending, !automaticStartAttempted, !active, possible,
+    guard !closed, automaticStartPending, !automaticStartAttempted, !active, !startInFlight, possible,
+      CACurrentMediaTime() >= automaticStartEligibleAt,
       UIApplication.shared.applicationState == .background, wantsPlaybackProvider?() == true else { return }
     automaticStartAttempted = true
     start()
   }
   @objc func enterForeground() {
+    backgroundGeneration += 1
     automaticStartPending = false; automaticStartAttempted = false
     updateAutomaticPlayback()
     if !active {
@@ -289,6 +302,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   }
 #endif
   @objc func stop() {
+    backgroundGeneration += 1; automaticStartPending = false; startInFlight = false
     frameLock.lock(); closed = true; capturing = false; frames.removeAll(); frameLock.unlock()
     observation = nil; pip?.stopPictureInPicture(); pip?.delegate = nil; pip?.contentSource = nil; pip = nil
     active = false; possible = false; onChange = nil
@@ -444,19 +458,35 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, didTransitionToRenderSize newRenderSize: CMVideoDimensions) {}
   func pictureInPictureControllerShouldProhibitBackgroundAudioPlayback(_ pictureInPictureController: AVPictureInPictureController) -> Bool { false }
   func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+    startInFlight = true
     automaticStartPending = false
     NeoPlaybackDiagnostics.record("pip.willStart", fields: [:])
     frameLock.lock(); capturing = true; frameLock.unlock()
     active = true; work.async { [weak self] in self?.composing = true; self?.dirty = true }; onChange?()
   }
+  func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+    startInFlight = false
+    NeoPlaybackDiagnostics.record("pip.didStart", fields: [:])
+  }
   func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+    startInFlight = false
     automaticStartPending = false
     NeoPlaybackDiagnostics.record("pip.didStop", fields: [:])
     frameLock.lock(); capturing = false; frameLock.unlock()
     active = false; work.async { [weak self] in self?.composing = false }; onChange?()
   }
   func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
-    NeoPlaybackDiagnostics.record("pip.startFailed", fields: ["errorCode": (error as NSError).code])
+    startInFlight = false
+    let failure = error as NSError
+    var details: [String: Any] = ["errorCode": failure.code, "errorDomain": failure.domain,
+      "appState": UIApplication.shared.applicationState.rawValue, "possible": possible,
+      "sourceStatus": displayLayer.status.rawValue,
+      "wantsPlayback": wantsPlaybackProvider?() ?? false,
+      "decodeAge": videoDecodeHostTime > 0 ? max(0, CACurrentMediaTime()-videoDecodeHostTime) : -1]
+    if let underlying = failure.userInfo[NSUnderlyingErrorKey] as? NSError {
+      details["underlyingCode"] = underlying.code; details["underlyingDomain"] = underlying.domain
+    }
+    NeoPlaybackDiagnostics.record("pip.startFailed", fields: details)
     frameLock.lock(); capturing = false; frameLock.unlock()
     active = false; status = "PiPを開始できませんでした。"; work.async { [weak self] in self?.composing = false }; onChange?()
   }

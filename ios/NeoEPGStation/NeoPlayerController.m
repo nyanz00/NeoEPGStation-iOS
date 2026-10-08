@@ -54,6 +54,10 @@
 @property (nonatomic) UIView *inlineBacking;
 @property (nonatomic, weak) UIView *videoOutputView;
 @property (nonatomic) NeoBufferingUpdates *bufferingUpdates;
+@property (nonatomic) NeoNowPlaying *nowPlaying;
+@property (nonatomic) BOOL inputBufferReady;
+@property (nonatomic) NSTimeInterval lastIntentCommandAt;
+@property (nonatomic) BOOL lastIssuedIntent;
 @property (nonatomic) UILabel *statusLabel;
 @property (nonatomic) UILabel *timeLabel;
 @property (nonatomic) UIButton *playButton;
@@ -165,6 +169,21 @@
   self.player.timeChangeUpdateInterval = 1.0 / 60.0;
   self.playbackURL = self.sourceURL;
   self.wantsPlayback = YES;
+  self.nowPlaying = [[NeoNowPlaying alloc] initWithTitle:self.mediaTitle channel:self.recordingContext[@"channelName"] ?: @""];
+  __weak typeof(self) remoteSelf = self;
+  self.nowPlaying.playAction = ^{ [remoteSelf setPlaybackIntent:YES]; };
+  self.nowPlaying.pauseAction = ^{ [remoteSelf setPlaybackIntent:NO]; };
+  self.nowPlaying.toggleAction = ^{ [remoteSelf setPlaybackIntent:!remoteSelf.wantsPlayback]; };
+  self.nowPlaying.seekAction = ^BOOL(double seconds) {
+    if (!remoteSelf || remoteSelf.closing || remoteSelf.reloading || !remoteSelf.player.isSeekable || !isfinite(seconds)) { return NO; }
+    double bounded = fmin(fmax(0, seconds), [remoteSelf mediaLength] / 1000.0);
+    [remoteSelf seekBy:(int64_t)(bounded*1000)-remoteSelf.player.time.value.longLongValue completion:^{}]; return YES;
+  };
+  self.nowPlaying.skipAction = ^BOOL(double seconds) {
+    if (!remoteSelf || remoteSelf.closing || remoteSelf.reloading || !remoteSelf.player.isSeekable || !isfinite(seconds)) { return NO; }
+    double bounded = fmin(fmax(-[remoteSelf mediaLength] / 1000.0, seconds), [remoteSelf mediaLength] / 1000.0);
+    [remoteSelf seekBy:(int64_t)(bounded*1000) completion:^{}]; return YES;
+  };
   [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(interrupted:)
     name:AVAudioSessionInterruptionNotification object:audio];
   [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(backgrounded)
@@ -410,6 +429,7 @@
 }
 - (void)restartMedia {
   self.playbackEnded = NO; self.playbackFailed = NO; self.buffering = NO;
+  self.inputBufferReady = NO; self.lastIntentCommandAt = 0;
   [self.chrome updateBuffering:NO progress:1];
   [NeoPlaybackDiagnostics record:@"input.restart" fields:@{@"restoring": @(self.reloading), @"targetMs": @(self.reloadTime)}];
   self.lastObservedTime = 0; self.subtitleSignature = nil;
@@ -419,31 +439,37 @@
   self.player.media = media; [self.player play];
 }
 - (void)restoreReloadIfReady {
-  if (!self.reloading || self.restoringReload || self.player.state != VLCMediaPlayerStatePlaying) { return; }
+  // Playing is announced before the new input has finished its initial
+  // buffering. Seeking then can complete immediately without a usable index.
+  if (!self.reloading || self.restoringReload || !self.inputBufferReady || self.buffering ||
+      self.player.state != VLCMediaPlayerStatePlaying) { return; }
   if (!self.player.isSeekable) {
     if (!self.wantsPlayback) { [self.player pause]; }
-    self.player.rate = self.playbackRate; self.reloading = NO;
+    if (fabs(self.player.rate-self.playbackRate) > 0.001) { self.player.rate = self.playbackRate; }
+    self.reloading = NO;
     self.statusLabel.text = @"再読み込み · このファイルは再生位置を復元できません。";
     [self.comments endSeek]; [self.reloadTimer invalidate]; self.reloadTimer = nil;
     [self.chrome updateDiagnostics]; [self.commentPiP invalidatePlaybackState]; return;
   }
   self.restoringReload = YES;
+  [NeoPlaybackDiagnostics record:@"input.restoreReady" fields:@{@"targetMs": @(self.reloadTime),
+    @"bufferReady": @(self.inputBufferReady), @"seekable": @(self.player.isSeekable), @"wantsPlayback": @(self.wantsPlayback)}];
   // A paused reload must not keep advancing while the asynchronous seek
   // completion waits for the main queue. Seek with playback already paused.
-  self.player.rate = self.playbackRate;
+  if (fabs(self.player.rate-self.playbackRate) > 0.001) { self.player.rate = self.playbackRate; }
   if (!self.wantsPlayback) { [self.player pause]; }
   NSInteger generation = self.reloadGeneration;
   __weak typeof(self) weakSelf = self;
   dispatch_block_t restore = ^{
     dispatch_async(dispatch_get_main_queue(), ^{
       if (weakSelf.closing || !weakSelf.reloading || weakSelf.reloadGeneration != generation) { return; }
-      weakSelf.player.rate = weakSelf.playbackRate;
+      if (fabs(weakSelf.player.rate-weakSelf.playbackRate) > 0.001) { weakSelf.player.rate = weakSelf.playbackRate; }
       if (weakSelf.lastSeekFailed) { weakSelf.reloading = NO; weakSelf.restoringReload = NO; [weakSelf setPlaybackIntent:NO]; return; }
       [weakSelf.player deselectAllTextTracks];
       for (VLCMediaPlayerTrack *track in weakSelf.player.textTracks) { if ([weakSelf.reloadTextTracks containsObject:track.trackId]) { track.selected = YES; } }
       weakSelf.reloading = NO; weakSelf.restoringReload = NO;
       [weakSelf.reloadTimer invalidate]; weakSelf.reloadTimer = nil;
-      [weakSelf applyPlaybackIntent];
+      [weakSelf applyPlaybackIntentForced:YES];
       weakSelf.statusLabel.text = weakSelf.wantsPlayback ? @"PLAY · 再生中" : @"PLAY · 一時停止";
       [weakSelf.commentPiP invalidatePlaybackState]; [weakSelf updateControls];
     });
@@ -454,19 +480,32 @@
 - (void)setPlaybackIntent:(BOOL)playing {
   [self sampleHistory]; [self.history flush];
   self.wantsPlayback = playing;
+  [NeoPlaybackDiagnostics record:@"playback.intent" fields:@{@"playing": @(playing), @"reloading": @(self.reloading)}];
   [self.commentPiP updateAutomaticPlayback];
-  if (playing && (self.playbackEnded || self.playbackFailed || self.player.state == VLCMediaPlayerStateStopped)) {
+  if (!self.reloading && playing && (self.playbackEnded || self.playbackFailed || self.player.state == VLCMediaPlayerStateStopped)) {
     self.lastObservedTime = 0; [self.rewindCache beginSeek:0]; if (!self.awaitingComments && !self.transportSuspended && !self.reloading) { [self restartMedia]; }
-  } else { [self applyPlaybackIntent]; }
+  } else { [self applyPlaybackIntentForced:YES]; }
   [self.commentPiP invalidatePlaybackState]; [self updateControls]; [self scheduleControlsHide];
 }
 - (void)applyPlaybackIntent {
+  [self applyPlaybackIntentForced:NO];
+}
+- (void)applyPlaybackIntentForced:(BOOL)force {
   if (self.closing || self.reloading || self.playbackEnded || self.playbackFailed) { return; }
   // Buffering/seek callbacks can arrive after EOF. Only reconcile an active
   // input; starting a stopped input belongs to an explicit play/reload action.
   if (self.player.state != VLCMediaPlayerStatePlaying && self.player.state != VLCMediaPlayerStatePaused) { return; }
-  if (self.wantsPlayback) { if (!self.player.isPlaying) { [self.player play]; } }
-  else if (self.player.isPlaying) { [self.player pause]; }
+  BOOL playing = self.wantsPlayback;
+  if (!force && self.player.isPlaying == playing) { return; }
+  NSTimeInterval now = CACurrentMediaTime();
+  if (!force && self.lastIssuedIntent == playing && now-self.lastIntentCommandAt < 1) { return; }
+  self.lastIssuedIntent = playing; self.lastIntentCommandAt = now;
+  [NeoPlaybackDiagnostics record:@"playback.command" fields:@{@"playing": @(playing), @"forced": @(force),
+    @"nativePlaying": @(self.player.isPlaying), @"state": @(self.player.state), @"reload": @(self.reloadGeneration)}];
+  // VLC enqueues play/pause on its own serial queue. A preceding pause may
+  // still be pending even when isPlaying is true. Explicit intent must always
+  // enqueue the final command behind it, including paused reload completion.
+  if (playing) { [self.player play]; } else { [self.player pause]; }
 }
 - (void)sampleHistory {
   [self.history sample:self.playbackEnded ? self.lastObservedLength / 1000.0 : MAX(0, self.player.time.value.doubleValue / 1000.0)
@@ -539,6 +578,8 @@
 - (void)updateControls {
   if (self.closing) { return; }
   [self restoreReloadIfReady];
+  [self applyPlaybackIntent];
+  [self updateNowPlaying];
   [self sampleHistory];
   self.timeline.enabled = self.player.isSeekable && !self.reloading; self.playButton.enabled = YES;
   int64_t current = MAX(0, self.player.time.value.longLongValue / 1000);
@@ -612,7 +653,9 @@
       [self completeSeek:self.seekGeneration failed:YES]; [self.history flush]; [self showControls];
     }
     if (state == VLCMediaPlayerStatePlaying && !self.seeking && !self.reloading) { [self.comments endSeek]; }
-    if (state == VLCMediaPlayerStatePlaying && !self.reloading && !self.wantsPlayback) { [self.player pause]; }
+    if ((state == VLCMediaPlayerStatePlaying || state == VLCMediaPlayerStatePaused) && self.player.state == state) {
+      [self applyPlaybackIntent];
+    }
     self.statusLabel.text = state == VLCMediaPlayerStateError || self.playbackFailed
       ? @"再生エラー · 接続・ファイル形式・認証を確認してください。"
       : [NSString stringWithFormat:@"PLAY · %@ · キャッシュ %ld秒", VLCMediaPlayerStateToString(state), (long)self.networkCaching / 1000];
@@ -629,6 +672,7 @@
     if (self.closing) { return; }
     BOOL changed = self.buffering != (progress < 1);
     self.buffering = progress < 1;
+    if (progress >= 1) { self.inputBufferReady = YES; }
     [NeoPlaybackDiagnostics record:@"player.buffering" fields:@{@"progress": @(progress), @"notifications": @(count),
       @"nativePlaying": @(self.player.isPlaying), @"mediaMs": self.player.time.value ?: @0}];
     [self.chrome updateBuffering:self.buffering progress:progress];
@@ -657,7 +701,13 @@
     self.lastObservedTime = MAX(0, self.player.time.value.longLongValue);
   }
 }
-- (void)mediaPlayerTimeChanged:(NSNotification *)notification { [self rememberPlaybackTime]; }
+- (void)mediaPlayerTimeChanged:(NSNotification *)notification { [self rememberPlaybackTime]; [self updateNowPlaying]; }
+- (void)updateNowPlaying {
+  [self.nowPlaying updateWithPosition:self.reloading ? self.reloadTime/1000.0 : (self.playbackEnded ? self.lastObservedLength/1000.0 : MAX(0, self.player.time.value.doubleValue/1000.0))
+    duration:[self mediaLength]/1000.0 rate:self.playbackRate
+    playing:self.wantsPlayback && self.player.isPlaying && !self.buffering && !self.reloading && !self.playbackEnded
+    seekable:self.player.isSeekable && !self.reloading artwork:self.chrome.channelArtwork];
+}
 
 - (void)interrupted:(NSNotification *)notification {
   if ([notification.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue] == AVAudioSessionInterruptionTypeBegan) {
@@ -832,11 +882,23 @@
       [updates submit:0]; [updates reset];
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         BOOL reset = notifications == 2001;
+        // Queue pause then play without waiting for VLC's pause notification.
+        // This reproduces the window in which isPlaying still reads true.
+        [self.player pause]; self.nowPlaying.playAction();
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        BOOL intentOrdered = self.player.isPlaying && self.wantsPlayback;
+        [self updateNowPlaying]; NSDictionary *metadata = [self.nowPlaying smokeMetadata];
+        BOOL registered = [metadata[@"titleRegistered"] boolValue] && [metadata[@"targets"] integerValue] == 6 &&
+          [metadata[@"seekEnabled"] boolValue] && [metadata[@"rate"] doubleValue] > 0;
+        BOOL invalidRemoteSeek = !self.nowPlaying.seekAction(NAN);
         [self runLifecycleRecoverySmoke:^(NSDictionary *result) {
           NSMutableDictionary *checks = [result mutableCopy];
           checks[@"bufferingBurstCoalesced"] = @(coalesced); checks[@"bufferingResetDropsOldUpdate"] = @(reset);
-          checks[@"success"] = @((BOOL)([result[@"success"] boolValue] && coalesced && reset)); completion(checks);
+          checks[@"latestPlayFollowsQueuedPause"] = @(intentOrdered); checks[@"nowPlayingRegistered"] = @(registered);
+          checks[@"invalidRemoteSeekRejected"] = @(invalidRemoteSeek);
+          checks[@"success"] = @((BOOL)([result[@"success"] boolValue] && coalesced && reset && intentOrdered && registered && invalidRemoteSeek)); completion(checks);
         }];
+        });
       });
     });
   });
@@ -877,13 +939,36 @@
       [self setPlaybackIntent:YES];
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         BOOL advancing = self.player.isPlaying && self.player.time.value.longLongValue > 2500 && self.commentPiP.capturedFrameCount > frames;
-        completion(@{@"success": position && endpoint && advancing ? @YES : @NO, @"positionRestored": @(position),
-          @"endpointRecreated": @(endpoint), @"rewindResumesVideoAndClock": @(advancing), @"time": self.player.time.value ?: @0});
+        self.nowPlaying.pauseAction();
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+          [self updateNowPlaying]; NSDictionary *metadata = [self.nowPlaying smokeMetadata];
+          BOOL paused = !self.player.isPlaying && !self.wantsPlayback && [metadata[@"rate"] doubleValue] == 0;
+          [self backgrounded]; [self foregrounded];
+          BOOL restoring = self.reloading;
+          self.nowPlaying.playAction();
+          [self pollLatestRecoveryIntent:0 completion:^(BOOL resumed) {
+            completion(@{@"success": @(position && endpoint && advancing && paused && restoring && resumed),
+              @"positionRestored": @(position), @"endpointRecreated": @(endpoint), @"rewindResumesVideoAndClock": @(advancing),
+              @"remotePauseUpdatesMetadata": @(paused), @"remotePlayDuringRestoreResumes": @(restoring && resumed),
+              @"time": self.player.time.value ?: @0});
+          }];
+        });
       });
     }]; return;
   }
   if (attempt >= 100) { completion(@{@"success": @NO, @"error": @"recovery timed out", @"state": VLCMediaPlayerStateToString(self.player.state), @"reloading": @(self.reloading), @"restoring": @(self.restoringReload)}); return; }
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self pollRecoverySmoke:attempt+1 oldEndpoint:oldEndpoint completion:completion]; });
+}
+- (void)pollLatestRecoveryIntent:(NSInteger)attempt completion:(void (^)(BOOL))completion {
+  if (!self.reloading && !self.restoringReload && self.player.isPlaying && self.wantsPlayback) {
+    int64_t time = self.player.time.value.longLongValue;
+    NSInteger frames = self.commentPiP.capturedFrameCount;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      completion(self.player.isPlaying && self.player.time.value.longLongValue > time+400 && self.commentPiP.capturedFrameCount > frames);
+    }); return;
+  }
+  if (attempt >= 100) { completion(NO); return; }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self pollLatestRecoveryIntent:attempt+1 completion:completion]; });
 }
 - (void)waitForTapSmokePlayback:(NSInteger)attempt completion:(void (^)(NSDictionary<NSString *, id> *))completion {
   UIView *video = [NeoVLCFrameTap videoViewInView:self.movieView];
@@ -1190,6 +1275,7 @@
   if (self.closing) { return; }
   [NeoPlaybackDiagnostics record:@"player.close" fields:@{}];
   [self sampleHistory]; [self.history finish]; self.closing = YES;
+  [self.nowPlaying stop];
   [self.bufferingUpdates reset]; self.bufferingUpdates.onUpdate = nil;
   [self completeSeek:self.seekGeneration failed:NO];
   [self.reloadTimer invalidate]; self.reloadTimer = nil;
@@ -1235,5 +1321,5 @@
     else if (recordingID > 0 && recording) { recording(recordingID); }
   }];
 }
-- (void)dealloc { [self.timer invalidate]; [self.controlsHideTimer invalidate]; [NSNotificationCenter.defaultCenter removeObserver:self]; }
+- (void)dealloc { [self.nowPlaying stop]; [self.timer invalidate]; [self.controlsHideTimer invalidate]; [NSNotificationCenter.defaultCenter removeObserver:self]; }
 @end
