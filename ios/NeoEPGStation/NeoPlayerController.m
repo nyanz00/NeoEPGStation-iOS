@@ -115,6 +115,8 @@
 @property (nonatomic) BOOL backgroundPositionValid;
 @property (nonatomic) BOOL inputInBackground;
 @property (nonatomic) int64_t inputStartTime;
+@property (atomic) BOOL invalidClockReported;
+@property (nonatomic) NSTimeInterval inputClockGuardUntil;
 @property (nonatomic, copy) dispatch_block_t reloadCompletion;
 @property (nonatomic, copy) NSString *subtitleSignature;
 @property (nonatomic) NSTimeInterval lastDiagnosticSample;
@@ -447,6 +449,8 @@
   [NeoPlaybackDiagnostics record:@"input.restart" fields:@{@"restoring": @(self.reloading), @"targetMs": @(self.reloadTime)}];
   self.subtitleSignature = nil;
   self.inputStartTime = self.reloading ? self.reloadTime : 0;
+  self.invalidClockReported = NO;
+  self.inputClockGuardUntil = CACurrentMediaTime()+3;
   self.lastObservedTime = self.inputStartTime;
   [self.rewindCache beginSeek:self.inputStartTime / 1000.0];
   [self.comments beginSeek:self.inputStartTime / 1000.0];
@@ -463,6 +467,7 @@
 }
 - (void)finishReload:(BOOL)failed {
   self.reloading = NO; self.restoringReload = NO;
+  self.inputClockGuardUntil = CACurrentMediaTime()+3;
   [self.reloadTimer invalidate]; self.reloadTimer = nil;
   self.lastSeekFailed = failed;
   [self.comments endSeek];
@@ -1024,6 +1029,7 @@
   if (attempt >= 100) { completion(NO); return; }
   if (!self.reloading && !self.restoringReload && !self.buffering && self.player.isPlaying && self.wantsPlayback) {
     int64_t time = [self mediaTime];
+    if (time < 0 || (self.lastObservedLength > 0 && time > self.lastObservedLength+1500)) { completion(NO); return; }
     NSInteger frames = self.commentPiP.capturedFrameCount;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
       BOOL advancing = self.player.isPlaying && [self mediaTime] > time+400 && self.commentPiP.capturedFrameCount > frames;
@@ -1258,6 +1264,7 @@
   if (target < self.inputStartTime) {
     [self reloadPlaybackAtTime:target completion:completion]; return;
   }
+  self.inputClockGuardUntil = 0; // An explicit seek can legitimately jump far ahead.
   self.playbackEnded = NO; self.seeking = YES; self.seekCompletion = completion;
   self.lastSeekFailed = NO;
   NSInteger generation = ++self.seekGeneration;
@@ -1336,7 +1343,26 @@
   [NSRunLoop.mainRunLoop addTimer:self.reloadTimer forMode:NSRunLoopCommonModes];
 }
 - (int64_t)mediaLength { return MAX(self.lastObservedLength, MAX(0, self.player.media.length.value.longLongValue)); }
-- (int64_t)mediaTime { return self.inputStartTime + MAX(0, self.player.time.value.longLongValue); }
+- (int64_t)mediaTime {
+  int64_t raw = self.player.time.value.longLongValue;
+  int64_t time = self.inputStartTime + MAX(0, raw);
+  int64_t length = self.lastObservedLength;
+  // VLCKit's interpolation can briefly reuse an old host-time point when
+  // an input starts. Do not turn that impossible clock value into a seek,
+  // comment jump, history position or rewind-cache eviction.
+  BOOL startupJump = CACurrentMediaTime() < self.inputClockGuardUntil && time > self.inputStartTime+10000;
+  if (startupJump || (length > 0 && time > length+1500)) {
+    int64_t retained = MAX(self.inputStartTime, self.lastObservedTime);
+    if (length > 0) { retained = MIN(length, retained); }
+    if (!self.invalidClockReported) {
+      self.invalidClockReported = YES;
+      [NeoPlaybackDiagnostics record:@"clock.invalid" fields:@{@"rawMs": @(raw), @"mediaMs": @(time),
+        @"retainedMs": @(retained), @"lengthMs": @(length)}];
+    }
+    return retained;
+  }
+  return time;
+}
 - (BOOL)isMediaSeekable { return self.player.isSeekable; }
 - (BOOL)isMediaPlaying { return self.player.isPlaying; }
 
