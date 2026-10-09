@@ -161,6 +161,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private var shortcuts: [String] = []
   private var bottomButtons: [UIButton] = []
   private var menuOpen = false, tabletExpanded = true
+#if targetEnvironment(simulator)
+  private var startupDrawerWasStill = false
+#endif
   private var contentPan: UIPanGestureRecognizer!, closingPan: UIPanGestureRecognizer!, backdropPan: UIPanGestureRecognizer!
   private weak var closingScroll: UIScrollView?
   private var closingScrollWasEnabled = false
@@ -201,7 +204,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     shortcuts = storage.shortcuts
     view.addSubview(content); view.addSubview(bottom); view.addSubview(dim); view.addSubview(sidebar)
     sidebar.backgroundColor = NeoStyle.paper; bottom.backgroundColor = NeoStyle.paper
-    sidebar.onSelect = { [weak self] in self?.showRoute($0) }
+    sidebar.onSelect = { [weak self] in self?.selectDestination($0) }
     dim.backgroundColor = UIColor.black.withAlphaComponent(0.5); dim.alpha = 0
     dim.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(closeMenu)))
     contentPan = UIPanGestureRecognizer(target: self, action: #selector(dragContent(_:))); contentPan.delegate = self
@@ -212,6 +215,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     backdropPan = UIPanGestureRecognizer(target: self, action: #selector(dragMenu(_:))); backdropPan.delegate = self
     backdropPan.maximumNumberOfTouches = 1; dim.addGestureRecognizer(backdropPan)
     rebuildBottom()
+    setMenu(false, animated: false)
     if !smokeStage.isEmpty {
       api = NeoAPI(base: URL(string: "https://example.com")!); channels = [1: "サンプル放送 BS"]
       serverConfig = NeoServerConfig(encode: ["Sample"], developerMode: true, isEnableTSRecordedStream: true, isEnableEncodedRecordedStream: true)
@@ -222,6 +226,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         else { showConnection() }
       } catch { showConnection(message: error.localizedDescription) }
     }
+#if targetEnvironment(simulator)
+    startupDrawerWasStill = !menuOpen && (sidebar.layer.animationKeys()?.isEmpty ?? true)
+#endif
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
@@ -292,6 +299,21 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     }
     attach(nav); sidebar.selected = route; updateBottom(); setMenu(false, animated: true)
   }
+  // A navigation button returns to the retained list first. Only a second tap
+  // on that list resets pagination; programmatic route changes keep the stack.
+  private func selectDestination(_ id: String) {
+    guard api != nil, popInteraction == nil, active?.transitionCoordinator == nil else { return }
+    if let nav = controllers[id] {
+      if id == route, let list = nav.topViewController as? NeoRecordedPage {
+        list.returnToFirstPage()
+      } else if let list = nav.viewControllers.last(where: { $0 is NeoRecordedPage }) {
+        nav.popToViewController(list, animated: id == route)
+      } else {
+        nav.popToRootViewController(animated: id == route)
+      }
+    }
+    showRoute(id)
+  }
   private func attach(_ nav: UINavigationController) {
     if active !== nav {
       active?.willMove(toParent: nil); active?.view.removeFromSuperview(); active?.removeFromParent()
@@ -320,7 +342,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       "description": recording.description ?? "", "extended": recording.extended ?? "", "ruleId": recording.ruleId ?? 0]
     controller.modalPresentationStyle = .fullScreen; player = controller
     controller.onClose = { [weak self] in self?.player = nil }
-    controller.onNavigate = { [weak self] route in self?.showRoute(route) }
+    controller.onNavigate = { [weak self] route in self?.selectDestination(route) }
     controller.onRecording = { [weak self, weak api] id in
       Task { [weak self] in
         guard let self, let api else { return }
@@ -345,9 +367,12 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private func setMenu(_ open: Bool, animated: Bool) {
     guard !tablet else { return }
     if open { dismissPopup() }
+    let changed = menuOpen != open
     menuOpen = open
     let changes = { self.sidebar.frame.origin.x = open ? 0 : -self.sidebarWidth; self.dim.alpha = open ? 1 : 0 }
-    if animated { UIView.animate(withDuration: 0.22, delay: 0, options: [.beginFromCurrentState, .curveEaseOut], animations: changes) }
+    if animated && (changed || menuDragging || sidebar.bounds.width > 0 && sidebar.frame.minX > -sidebarWidth && !open) && view.window != nil {
+      UIView.animate(withDuration: 0.22, delay: 0, options: [.beginFromCurrentState, .curveEaseOut], animations: changes)
+    }
     else { changes() }
     sidebar.accessibilityViewIsModal = open
   }
@@ -491,7 +516,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       config.background = .clear()
       config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attrs in var attrs = attrs; attrs.font = .systemFont(ofSize: 10); return attrs }
       b.configuration = config; b.accessibilityLabel = item.title; b.accessibilityIdentifier = "tab-" + id
-      b.addAction(UIAction { [weak self] _ in self?.showRoute(id) }, for: .touchUpInside)
+      b.addAction(UIAction { [weak self] _ in self?.selectDestination(id) }, for: .touchUpInside)
       bottom.addSubview(b); bottomButtons.append(b)
     }
     updateBottom()
@@ -532,13 +557,17 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         let cachedFade = recorded.lastFadeDuration
         runBackSmoke(recorded) { [weak self] correct in
           guard let self else { return }
+          Task { [self] in
+          let navigationButtons = await runNavigationButtonChecks(recorded)
           let gap = self.sidebar.logo.frame.minX - self.sidebar.brand.frame.maxX
-          NeoNative.writeSmoke("ui-gestures-smoke", ["success": correct && drawerClosed && popupCycles && gap == 7 && thumbnails && freshFade == 0.5 && cachedFade == 0.32,
+          NeoNative.writeSmoke("ui-gestures-smoke", ["success": correct && navigationButtons && startupDrawerWasStill && drawerClosed && popupCycles && gap == 7 && thumbnails && freshFade == 0.5 && cachedFade == 0.32,
             "stage": "gestures", "route": self.route, "recordCount": recorded.records.count,
             "theme": "neon-teal-dark", "uiEngine": "Swift / UIKit", "retainedList": retained,
             "shortcuts": self.shortcuts, "brandGap": gap, "interactiveBack": correct, "thumbnailLoading": thumbnails,
             "freshFade": freshFade, "cachedFade": cachedFade, "backDetails": self.backSmokeDetails,
-            "drawerClosedByLeftSwipe": drawerClosed, "popupCycles": popupCycles])
+            "drawerClosedByLeftSwipe": drawerClosed, "popupCycles": popupCycles,
+            "startupDrawerDoesNotAnimate": startupDrawerWasStill, "navigationButtonReturnsThenResets": navigationButtons])
+          }
         }
       }
       return
@@ -665,6 +694,54 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         }
       }
     }
+  }
+  private func runNavigationButtonChecks(_ recorded: NeoRecordedPage) async -> Bool {
+    func waitForPage(_ list: NeoRecordedPage, _ page: Int) async -> Bool {
+      for _ in 0..<30 {
+        if list.smokeCurrentPage == page { return true }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+      }
+      return false
+    }
+    recorded.smokePageSeven()
+    guard await waitForPage(recorded, 7) else { return false }
+    let oldInset = recorded.collection.contentInset
+    recorded.collection.contentInset.bottom = 1000
+    defer { recorded.collection.contentInset = oldInset }
+    recorded.collection.setContentOffset(CGPoint(x: 0, y: 40), animated: false)
+    let offset = recorded.collection.contentOffset
+    openDetail(NeoRecordedPage.fixtures.records[0])
+    try? await Task.sleep(nanoseconds: 500_000_000)
+    selectDestination("recorded")
+    try? await Task.sleep(nanoseconds: 500_000_000)
+    let returned = active?.topViewController === recorded && recorded.smokeCurrentPage == 7 && recorded.collection.contentOffset == offset
+    selectDestination("recorded")
+    guard await waitForPage(recorded, 1) else { return false }
+    let reset = active?.topViewController === recorded && recorded.collection.contentOffset.y == 0
+    recorded.smokePageSeven()
+    guard await waitForPage(recorded, 7) else { return false }
+    showRoute("settings"); selectDestination("recorded")
+    let acrossTabs = active?.topViewController === recorded && recorded.smokeCurrentPage == 7
+    // A detail opened from a search must return to that same filtered list.
+    let search = NeoRecordedPage(shell: self, keyword: "サンプル")
+    active?.pushViewController(search, animated: false); view.layoutIfNeeded()
+    try? await Task.sleep(nanoseconds: 500_000_000)
+    search.smokePageSeven()
+    guard await waitForPage(search, 7) else { return false }
+    openDetail(NeoRecordedPage.fixtures.records[0])
+    try? await Task.sleep(nanoseconds: 500_000_000)
+    selectDestination("recorded")
+    try? await Task.sleep(nanoseconds: 500_000_000)
+    let searchReturned = active?.topViewController === search && search.smokeCurrentPage == 7
+    selectDestination("recorded")
+    let searchReset = await waitForPage(search, 1)
+    backSmokeDetails["navigationReturnsListPageAndOffset"] = returned
+    backSmokeDetails["navigationSecondTapResetsPage"] = reset
+    backSmokeDetails["navigationAcrossTabsPreservesPage"] = acrossTabs
+    backSmokeDetails["navigationPreservesSearchList"] = searchReturned && searchReset
+    active?.popToRootViewController(animated: false); recorded.returnToFirstPage()
+    _ = await waitForPage(recorded, 1)
+    return returned && reset && acrossTabs && searchReturned && searchReset
   }
 #endif
 }

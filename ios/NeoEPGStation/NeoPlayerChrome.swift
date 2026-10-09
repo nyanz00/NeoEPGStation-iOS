@@ -10,6 +10,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private let displayedStatus = NeoStyle.label(size: 12)
   private var bufferProgress: Float?
   private var previewTime: Int64?
+  private var downloadedRanges: [[NSNumber]] = []
   @objc let timeline: UISlider = NeoPlayerSeekSlider()
   @objc let playButton = UIButton(type: .system), pipButton = UIButton(type: .system)
   @objc let subtitleButton = UIButton(type: .system), commentButton = UIButton(type: .system)
@@ -113,7 +114,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     commentSize.addAction(UIAction { [weak self] _ in guard let self else { return }; self.onAction?("interaction"); self.commentOverlay?.setSize(Double(self.commentSize.value)) }, for: .valueChanged)
     commentOpacity.addAction(UIAction { [weak self] _ in guard let self else { return }; self.onAction?("interaction"); self.commentOverlay?.setOpacity(self.commentOpacity.value) }, for: .valueChanged)
     centerControls.addSubview(playButton)
-    timeline.minimumTrackTintColor = NeoStyle.accent; timeline.maximumTrackTintColor = .white.withAlphaComponent(0.35)
+    timeline.minimumTrackTintColor = NeoStyle.accent; timeline.maximumTrackTintColor = .clear
     timeline.thumbTintColor = .white; timeline.accessibilityLabel = "再生位置"
     timeline.addAction(UIAction { [weak self] _ in
       guard let self else { return }; self.previewTime = self.current
@@ -359,9 +360,14 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   }
   @objc func updatePlayback(_ running: Bool, current: Int64, duration: Int64) {
     self.current = current; self.duration = duration
+    (timeline as? NeoPlayerSeekSlider)?.updateDownloadedRanges(downloadedRanges, duration: Double(duration))
     playButton.setImage(playerIcon(running ? "Pause" : "PlayArrow", side: 60), for: .normal)
     playButton.accessibilityLabel = running ? "一時停止" : "再生"
     updateTime(); followCurrentComment(); setNeedsLayout()
+  }
+  @objc func updateDownloadedRanges(_ ranges: [[NSNumber]]) {
+    guard downloadedRanges != ranges else { return }; downloadedRanges = ranges
+    (timeline as? NeoPlayerSeekSlider)?.updateDownloadedRanges(ranges, duration: Double(duration))
   }
   @objc func previewSeek(_ seconds: Int64) { previewTime = max(0, seconds); updateTime() }
   @objc func finishSeekPreview() { previewTime = nil; updateTime() }
@@ -701,6 +707,16 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       stable = stable && !displayedStatus.isHidden && displayedStatus.text == "バッファリング \(percent)%"
     }
     updateBuffering(false, progress: 1); let cleared = displayedStatus.isHidden
+    let oldRanges = downloadedRanges
+    updateDownloadedRanges([[0, 30], [60, 90]])
+    timeline.layoutIfNeeded()
+    let painted = (timeline as? NeoPlayerSeekSlider)?.smokeDownloadedTrack() == true
+    // Growing the duration changes the mapping without altering the cached intervals.
+    updatePlayback(true, current: 62, duration: 240)
+    let durationMapped = (timeline as? NeoPlayerSeekSlider)?.smokeDownloadedTrack() == true
+    updateDownloadedRanges([])
+    let emptied = (timeline as? NeoPlayerSeekSlider)?.smokeDownloadedTrack() == true
+    updateDownloadedRanges(oldRanges)
     NeoPlaybackDiagnostics.record("smoke.numeric", fields: ["targetMs": 10000])
     let exported = NeoPlaybackDiagnostics.exportURL().flatMap { try? Data(contentsOf: $0) }
     let logValid = exported.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["events"] != nil
@@ -709,6 +725,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     return ["seekDragPreviewsTime": preview, "seekDragPreviewsRemainingTime": remaining,
       "pendingSeekKeepsTargetTime": pending, "seekCancelRestoresActualTime": restored,
       "bufferProgressSurvivesOtherStatusUpdates": stable, "bufferCompletionHidesStatus": cleared,
+      "downloadedTrackKeepsGaps": painted, "downloadedTrackRescalesWithDuration": durationMapped,
+      "downloadedTrackClearsAfterEviction": emptied,
       "numericPlaybackLogExportsJSON": logValid]
   }
   private func runSettingsChecks() -> [String: Bool] {
@@ -1027,8 +1045,14 @@ enum NeoPlayerGenres {
 
 // Explicit artwork prevents iOS 26 from substituting a large Liquid Glass thumb.
 private final class NeoPlayerSeekSlider: UISlider {
+  private let baseTrack = CAShapeLayer(), downloadedTrack = CAShapeLayer()
+  private var downloadedRanges: [[NSNumber]] = [], mediaDuration = 0.0
+  private var lastTrackRect = CGRect.null
   override init(frame: CGRect) {
     super.init(frame: frame)
+    baseTrack.fillColor = UIColor.white.withAlphaComponent(0.35).cgColor
+    downloadedTrack.fillColor = UIColor.white.withAlphaComponent(0.7).cgColor
+    layer.insertSublayer(downloadedTrack, at: 0); layer.insertSublayer(baseTrack, at: 0)
     for (state, side) in [(UIControl.State.normal, CGFloat(12)), (.highlighted, CGFloat(16)), (.disabled, CGFloat(12))] {
       let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
         NeoStyle.accent.setFill(); UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: side, height: side)).fill()
@@ -1037,6 +1061,42 @@ private final class NeoPlayerSeekSlider: UISlider {
     }
   }
   required init?(coder: NSCoder) { fatalError() }
+  func updateDownloadedRanges(_ ranges: [[NSNumber]], duration: Double) {
+    guard downloadedRanges != ranges || mediaDuration != duration else { return }
+    downloadedRanges = ranges; mediaDuration = duration; redrawTracks()
+  }
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    if lastTrackRect != trackRect(forBounds: bounds) { redrawTracks() }
+  }
+  private func redrawTracks() {
+    let track = trackRect(forBounds: bounds); lastTrackRect = track
+    let path = UIBezierPath()
+    if mediaDuration > 0 {
+      for range in downloadedRanges where range.count == 2 {
+        let start = max(0, min(1, range[0].doubleValue / mediaDuration))
+        let end = max(0, min(1, range[1].doubleValue / mediaDuration))
+        if end > start {
+          path.append(UIBezierPath(rect: CGRect(x: track.minX + CGFloat(start) * track.width, y: track.minY,
+            width: CGFloat(end - start) * track.width, height: track.height)))
+        }
+      }
+    }
+    CATransaction.begin(); CATransaction.setDisableActions(true)
+    baseTrack.path = UIBezierPath(roundedRect: track, cornerRadius: track.height / 2).cgPath
+    downloadedTrack.path = path.cgPath
+    CATransaction.commit()
+  }
+#if targetEnvironment(simulator)
+  func smokeDownloadedTrack() -> Bool {
+    let track = trackRect(forBounds: bounds)
+    guard let path = downloadedTrack.path else { return false }
+    if downloadedRanges.isEmpty { return path.isEmpty }
+    guard mediaDuration > 0, track.width > 0 else { return false }
+    let point: (Double) -> CGPoint = { CGPoint(x: track.minX + CGFloat($0 / self.mediaDuration) * track.width, y: track.midY) }
+    return path.contains(point(15)) && !path.contains(point(45)) && path.contains(point(75))
+  }
+#endif
   override func trackRect(forBounds bounds: CGRect) -> CGRect {
     CGRect(x: 6, y: bounds.midY - 1.5, width: max(0, bounds.width - 12), height: 3)
   }

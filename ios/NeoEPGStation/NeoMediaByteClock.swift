@@ -79,6 +79,19 @@ struct NeoMediaByteClock {
     }
     return begin.isFinite ? max(0, begin)...max(0, end) : nil
   }
+  // Only already-downloaded payload intervals are merged. No extra parsing or
+  // reads are required to paint the approximate buffered track.
+  static func mergedDownloadedRanges(_ values: [ClosedRange<Double>]) -> [ClosedRange<Double>] {
+    let sorted = values.filter { $0.lowerBound.isFinite && $0.upperBound.isFinite && $0.upperBound > $0.lowerBound }
+      .sorted { $0.lowerBound < $1.lowerBound }
+    var result: [ClosedRange<Double>] = []
+    for range in sorted {
+      if let last = result.last, range.lowerBound <= last.upperBound {
+        result[result.count-1] = last.lowerBound...max(last.upperBound, range.upperBound)
+      } else { result.append(range) }
+    }
+    return result
+  }
   static func number(_ data: Data, _ index: Int, bytes: Int = 4) -> UInt64? {
     guard index >= 0, index+bytes <= data.count else { return nil }
     return data[index..<index+bytes].reduce(UInt64(0)) { ($0<<8)|UInt64($1) }

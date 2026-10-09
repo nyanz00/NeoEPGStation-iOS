@@ -89,6 +89,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   let collection: UICollectionView
   private(set) var records: [NeoRecording] = []
   private var total = 0, page = 1, keyword = "", reverse = false
+  private var requestedPage = 1
   private var task: Task<Void, Never>?
   private var cache: [NeoRecordingQuery: (result: NeoRecords, stored: Date)] = [:]
   private var cacheOrder: [NeoRecordingQuery] = []
@@ -131,10 +132,15 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     message.frame = body.bounds.insetBy(dx: 24, dy: 48); spinner.center = CGPoint(x: body.bounds.midX, y: 70)
   }
   func reloadLabels() { collection.reloadData() }
+  func returnToFirstPage() {
+    if page != 1 || requestedPage != 1 { reload(targetPage: 1) }
+    else { collection.setContentOffset(CGPoint(x: 0, y: -collection.adjustedContentInset.top), animated: false) }
+  }
   @objc private func refreshList() { cache.removeAll(); cacheOrder.removeAll(); reload() }
   private func reload(targetPage: Int? = nil) {
     task?.cancel(); spinner.startAnimating(); message.text = nil
     let requestedPage = targetPage ?? page, query = keyword, oldest = reverse
+    self.requestedPage = requestedPage
     let key = NeoRecordingQuery(page: requestedPage, keyword: query, reverse: oldest)
     let entry = cache[key]
     let cached = entry.flatMap { Date().timeIntervalSince($0.stored) < 30 ? $0.result : nil }
@@ -187,6 +193,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     reload(targetPage: value)
   }
 #if targetEnvironment(simulator)
+  var smokeCurrentPage: Int { page }
   func smokePageSeven() { selectPage(7) }
   func smokePageOne() { selectPage(1) }
   var renderedPages: [String] {

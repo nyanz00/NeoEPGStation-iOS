@@ -24,6 +24,11 @@ assert(byteClock.loadMP4Moov(moov))
 assert(byteClock.timeRange(offset: 100, count: 1000) == 0...1)
 assert(byteClock.timeRange(offset: 1100, count: 1000) == 1...2)
 assert(byteClock.timeRange(offset: 0, count: 50) == nil)
+assert(NeoMediaByteClock.mergedDownloadedRanges([10...20, 0...5, 5...12, 40...50]) == [0...20, 40...50],
+  "Downloaded ranges merge overlaps but preserve unread gaps")
+assert(NeoMediaByteClock.mergedDownloadedRanges([]).isEmpty)
+assert(NeoMediaByteClock.mergedDownloadedRanges([1...1, 2...Double.infinity]).isEmpty,
+  "Empty and invalid download intervals are not painted")
 assert(!byteClock.loadMP4Moov(Data([0,1,2])))
 func tsPacket(_ seconds: UInt64) -> Data {
   let ticks = seconds*90000

@@ -59,6 +59,7 @@
 @property (nonatomic) NSTimeInterval lastIntentCommandAt;
 @property (nonatomic) BOOL lastIssuedIntent;
 @property (nonatomic) UILabel *statusLabel;
+@property (nonatomic, copy) NSString *lastPresentedWarning;
 @property (nonatomic) UILabel *timeLabel;
 @property (nonatomic) UIButton *playButton;
 @property (nonatomic) UIButton *pipButton;
@@ -619,8 +620,13 @@
   [self rememberPlaybackTime];
   [self.rewindCache observeTime:current running:self.player.isPlaying && !self.buffering && !self.seeking];
   [self.chrome updatePlayback:self.wantsPlayback && !self.playbackEnded current:self.playbackEnded ? self.lastObservedLength / 1000 : current duration:length > 0 ? length : self.lastObservedLength / 1000];
+  [self.chrome updateDownloadedRanges:self.rewindCache.downloadedRanges ?: @[]];
   NSString *warning = self.rewindCache.status.length ? self.rewindCache.status : self.history.status;
-  if (warning.length) { self.statusLabel.text = warning; [self.chrome updateDiagnostics]; }
+  if (warning.length) { self.statusLabel.text = warning; }
+  else if (self.lastPresentedWarning.length && [self.statusLabel.text isEqualToString:self.lastPresentedWarning]) {
+    self.statusLabel.text = self.playbackEnded ? @"PLAY · 再生終了" : self.wantsPlayback ? @"PLAY · 再生中" : @"PLAY · 一時停止";
+  }
+  self.lastPresentedWarning = warning;
   self.subtitleButton.enabled = !self.reloading;
   [self updateSubtitleSettings];
   CGSize size = self.player.videoSize;

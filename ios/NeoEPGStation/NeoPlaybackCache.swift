@@ -30,6 +30,8 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   private let blockSize: Int64 = 1024 * 1024
   private let limit = 2 * 1024 * 1024 * 1024
   private var blocks: [Int64: Block] = [:], bytes = 0
+  private var downloaded: [Int64: ClosedRange<Double>] = [:]
+  private var rangeUpdatePending = false
   private var mediaTime = 0.0, highWater = 0.0, lastUse = ProcessInfo.processInfo.systemUptime
   private var seconds = NeoPlaybackCache.savedSeconds
   private var listener: NWListener?, session: URLSession!
@@ -40,6 +42,8 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   private var byteClock = NeoMediaByteClock()
   private var startup: ((URL?, String?) -> Void)?
   @objc private(set) var status = ""
+  private var warnings: [String: String] = [:]
+  @objc private(set) var downloadedRanges: [[NSNumber]] = []
   @objc var onChange: (() -> Void)?
   @objc var onTransportFailure: (() -> Void)?
   private var suspended = false
@@ -112,7 +116,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
               } else if case .failed = state {
                 let starting = self.startup != nil
                 self.finishStart(nil, "巻き戻し用キャッシュの読み取り口を開始できません。")
-                if !starting { self.report("動画の読み取り接続が切れました。復旧しています…"); DispatchQueue.main.async { [weak self] in self?.onTransportFailure?() } }
+                if !starting { self.report("動画の読み取り接続が切れました。復旧しています…", kind: "transport"); DispatchQueue.main.async { [weak self] in self?.onTransportFailure?() } }
               }
             }
             server.start(queue: queue)
@@ -138,7 +142,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   private func finishStart(_ url: URL?, _ error: String?) {
     guard let callback = startup else { return }; startup = nil
     DispatchQueue.main.async { [weak self] in
-      if let error { self?.status = error; self?.onChange?() }
+      self?.setWarning(error, kind: "transport")
       callback(url, error)
     }
   }
@@ -151,6 +155,11 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     guard value.isFinite else { return }
     queue.async { [self] in
       mediaTime = max(0, value)
+      if seconds == 0 {
+        let expired = downloaded.filter { $0.value.upperBound < mediaTime }.map(\.key)
+        for offset in expired { downloaded.removeValue(forKey: offset) }
+        if !expired.isEmpty { publishDownloadedRanges() }
+      }
       if running { lastUse = ProcessInfo.processInfo.systemUptime; highWater = max(highWater, mediaTime); evict() }
     }
   }
@@ -186,7 +195,10 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
       stopTransport(); suspended = false; startup = completion; listen()
     }
   }
-  private func clearBlocks() { blocks.removeAll(); bytes = 0; try? FileManager.default.removeItem(at: directory) }
+  private func clearBlocks() {
+    blocks.removeAll(); downloaded.removeAll(); bytes = 0
+    try? FileManager.default.removeItem(at: directory); publishDownloadedRanges()
+  }
   private func file(_ offset: Int64) -> URL { directory.appendingPathComponent(String(offset)) }
   private func evict() {
     // Demux reads lead the presentation clock by network caching/keyframes.
@@ -194,16 +206,36 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     let cutoff = highWater - Double(seconds) - 15
     for (offset, block) in blocks where seconds == 0 || (block.endTime.map { $0 < cutoff } ?? false) {
       NeoPlaybackDiagnostics.record("cache.evict", fields: ["offset": offset, "bytes": block.count, "cutoff": cutoff, "endTime": block.endTime ?? -1])
-      bytes -= block.count; blocks.removeValue(forKey: offset); try? FileManager.default.removeItem(at: file(offset))
+      bytes -= block.count; blocks.removeValue(forKey: offset); downloaded.removeValue(forKey: offset)
+      try? FileManager.default.removeItem(at: file(offset)); publishDownloadedRanges()
     }
     while bytes > limit, let oldest = blocks.min(by: { $0.value.used < $1.value.used }) {
       NeoPlaybackDiagnostics.record("cache.capacityEvict", fields: ["offset": oldest.key, "bytes": oldest.value.count])
-      bytes -= oldest.value.count; blocks.removeValue(forKey: oldest.key); try? FileManager.default.removeItem(at: file(oldest.key))
-      report("巻き戻し用キャッシュが容量上限に達しました。保持範囲が設定時間より短くなっています。")
+      bytes -= oldest.value.count; blocks.removeValue(forKey: oldest.key); downloaded.removeValue(forKey: oldest.key)
+      try? FileManager.default.removeItem(at: file(oldest.key)); publishDownloadedRanges()
+      report("巻き戻し用キャッシュが容量上限に達しました。保持範囲が設定時間より短くなっています。", kind: "storage")
     }
   }
-  private func report(_ text: String) {
-    DispatchQueue.main.async { [weak self] in guard let self else { return }; self.status = text; self.onChange?() }
+  // Transport recovery must not erase a separate disk-space warning.
+  private func setWarning(_ text: String?, kind: String) {
+    if let text { warnings[kind] = text } else { warnings.removeValue(forKey: kind) }
+    let next = warnings["transport"] ?? warnings["fetch"] ?? warnings["storage"] ?? ""
+    guard next != status else { return }; status = next; onChange?()
+  }
+  private func report(_ text: String?, kind: String) {
+    DispatchQueue.main.async { [weak self] in self?.setWarning(text, kind: kind) }
+  }
+  private func publishDownloadedRanges() {
+    guard !rangeUpdatePending else { return }; rangeUpdatePending = true
+    queue.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+      guard let self else { return }; self.rangeUpdatePending = false
+      let ranges = NeoMediaByteClock.mergedDownloadedRanges(Array(self.downloaded.values))
+        .map { [NSNumber(value: $0.lowerBound), NSNumber(value: $0.upperBound)] }
+      DispatchQueue.main.async { [weak self] in
+        guard let self, self.downloadedRanges != ranges else { return }
+        self.downloadedRanges = ranges; self.onChange?()
+      }
+    }
   }
   private func accept(_ connection: NWConnection) {
     guard !closed else { connection.cancel(); return }
@@ -288,6 +320,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
       })
     }
     if var block = blocks[aligned], let data = try? Data(contentsOf: file(aligned)), data.count == block.count {
+      report(nil, kind: "fetch")
       let key = ObjectIdentifier(connection)
       if var entry = deliveries[key] { entry.diskBytes += Int64(data.count); deliveries[key] = entry }
       NeoPlaybackDiagnostics.record("cache.hit", fields: ["delivery": deliveries[key]?.id ?? 0,
@@ -302,23 +335,29 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
       guard let self, !self.closed, case .ready = connection.state else { return }
       switch result {
       case .success(let data):
+        self.report(nil, kind: "fetch")
         let key = ObjectIdentifier(connection)
         if var entry = self.deliveries[key] { entry.networkBytes += Int64(data.count); self.deliveries[key] = entry }
+        let range = self.byteClock.timeRange(offset: aligned, count: data.count) ?? self.byteClock.observeTS(data, offset: aligned) ?? self.byteClock.observeMatroska(data, offset: aligned)
+        if let range { self.downloaded[aligned] = range; self.publishDownloadedRanges() }
         if self.seconds > 0 {
           do {
             try FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
             try data.write(to: self.file(aligned), options: .atomic)
             self.bytes -= self.blocks[aligned]?.count ?? 0
-            let range = self.byteClock.timeRange(offset: aligned, count: data.count) ?? self.byteClock.observeTS(data, offset: aligned) ?? self.byteClock.observeMatroska(data, offset: aligned)
             // MP4 metadata has no media time. Keep its bounded chunks so VLC
             // can seek without fetching the same moov/index again. Unknown
             // containers fall back to observed presentation/read checkpoints.
             let endTime = range?.upperBound ?? (self.byteClock.isMP4 ? nil : self.mediaTime+Double(30))
+            self.report(nil, kind: "storage")
             self.blocks[aligned] = Block(count: data.count, endTime: endTime, used: self.lastUse); self.bytes += data.count; self.evict()
-          } catch { self.report("巻き戻し用キャッシュを保存できません。空き容量を確認してください。") }
+          } catch {
+            self.downloaded.removeValue(forKey: aligned); self.publishDownloadedRanges()
+            self.report("巻き戻し用キャッシュを保存できません。空き容量を確認してください。", kind: "storage")
+          }
         }
         deliver(data)
-      case .failure: self.report("動画データを取得できません。再読み込みで再試行できます。"); connection.cancel()
+      case .failure: self.report("動画データを取得できません。再読み込みで再試行できます。", kind: "fetch"); connection.cancel()
       }
     }
   }
@@ -380,6 +419,14 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
           let first = try await read(), bytes = cache.queue.sync { cache.networkBytes }
           let second = try await read()
           var checks = ["sameBytes": first == second, "rewindWithoutUpstreamRequest": cache.queue.sync { cache.networkBytes == bytes && cache.hitBytes > 0 }]
+          cache.setWarning("動画データを取得できません。再読み込みで再試行できます。", kind: "fetch")
+          _ = try await read()
+          checks["successfulReadClearsFetchWarning"] = cache.status.isEmpty
+          cache.setWarning("巻き戻し用キャッシュを保存できません。", kind: "storage")
+          cache.setWarning("動画データを取得できません。", kind: "fetch")
+          _ = try await read()
+          checks["readRecoveryPreservesStorageWarning"] = cache.status == "巻き戻し用キャッシュを保存できません。"
+          cache.setWarning(nil, kind: "storage")
           cache.setSeconds(0); _ = try await read()
           checks["offDoesNotRetain"] = cache.queue.sync { cache.blocks.isEmpty && cache.networkBytes > bytes }
           cache.setSeconds(30); _ = try await read()
@@ -392,6 +439,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
           cache.observeTime(1000, running: false)
           checks["idleRetainsCache"] = cache.queue.sync { !cache.blocks.isEmpty }
           let priorBytes = cache.queue.sync { cache.networkBytes }
+          cache.setWarning("動画の読み取り接続が切れました。", kind: "transport")
           cache.suspendTransport()
           let reopened: URL = try await withCheckedThrowingContinuation { continuation in
             cache.reopen { url, error in
@@ -399,6 +447,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
               else { continuation.resume(throwing: NeoError(error ?? "Reopen")) }
             }
           }
+          checks["endpointRecoveryClearsTransportWarning"] = cache.status.isEmpty
           var resumed = URLRequest(url: reopened); resumed.setValue("bytes=0-1023", forHTTPHeaderField: "Range")
           let (resumedData, resumedResponse) = try await URLSession.shared.data(for: resumed)
           checks["resumeRecreatesEndpointAndRetainsBytes"] = resumedData == first && (resumedResponse as? HTTPURLResponse)?.statusCode == 206 && cache.queue.sync { cache.networkBytes == priorBytes }
