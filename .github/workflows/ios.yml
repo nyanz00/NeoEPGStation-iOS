@@ -16,6 +16,11 @@ on:
         required: false
         default: ''
         type: string
+      recheck_iphone:
+        description: 'Recheck all iPhone playback and UI tests using the unchanged reused binary'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -136,14 +141,19 @@ jobs:
           python3 scripts/verify-reused-build.py
           ditto -x -k reused/artifact/dist/simulator-app.zip build/simulator/Build/Products/Release-iphonesimulator
           codesign --verify --deep --strict build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app
-      - name: Check iPad UI
+      - name: Check reused application UI
         run: |
-          python3 -u scripts/simulator-smoke.py --prepare --no-boot
-          python3 -u scripts/simulator-smoke.py --ipad-only
+          if [ "${{ inputs.recheck_iphone }}" = "true" ]; then
+            python3 -u scripts/simulator-smoke.py --prepare
+            python3 -u scripts/simulator-smoke.py --iphone-only
+          else
+            python3 -u scripts/simulator-smoke.py --prepare --no-boot
+            python3 -u scripts/simulator-smoke.py --ipad-only
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: NeoEPGStation-iPad-UI-${{ github.run_number }}
+          name: NeoEPGStation-Reused-UI-${{ github.run_number }}
           path: dist/
           retention-days: 7
           if-no-files-found: error
