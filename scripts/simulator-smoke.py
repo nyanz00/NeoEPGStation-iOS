@@ -90,8 +90,8 @@ run('xcrun', 'simctl', 'install', device['udid'], str(app))
 if '--ui-only' in sys.argv:
     # Recheck navigation against the exact same binary independently of the
     # synthetic video encoder used by the native playback suite.
-    for stage in ui_stages:
-        capture_ui(device['udid'], stage, 'ui-iphone')
+    for index, stage in enumerate(ui_stages):
+        capture_ui(device['udid'], stage, 'ui-iphone', terminate_existing=index > 0)
     sys.exit(0)
 fixture_container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], 'io.github.nyanz00.NeoEPGStation', 'data'))
 (fixture_container / 'Documents').mkdir(exist_ok=True)
