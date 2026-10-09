@@ -123,6 +123,13 @@
 @property (nonatomic) NSTimeInterval lastDiagnosticSample;
 @property (nonatomic) NSTimeInterval seekStartedAt;
 @property (nonatomic) BOOL awaitingSeekVideo;
+@property (nonatomic) NSTimeInterval videoWatchStarted;
+@property (nonatomic) NSTimeInterval videoWatchUntil;
+@property (nonatomic) NSUInteger videoWatchSamples;
+@property (nonatomic) int64_t videoWatchMedia;
+@property (nonatomic) NSInteger videoRepairStage;
+@property (nonatomic) NSInteger videoRepairGeneration;
+@property (nonatomic) BOOL repairingVideo;
 #if TARGET_OS_SIMULATOR
 @property (nonatomic) CGRect smokeSavedFrame;
 #endif
@@ -209,7 +216,7 @@
   self.comments.runningProvider = ^BOOL {
     return weakSelf.player.isPlaying && weakSelf.wantsPlayback && !weakSelf.seeking && !weakSelf.scrubbing && !weakSelf.buffering && !weakSelf.closing && !weakSelf.reloading;
   };
-  self.comments.onChange = ^{ [weakSelf updateCommentState]; };
+  self.comments.onChange = ^{ [weakSelf updateCommentState]; [weakSelf updateLoadingState]; };
   [self.chrome bindCommentSettings:self.comments];
   [self.movieView addSubview:self.comments];
   self.frameTapInstalled = [NeoVLCFrameTap install];
@@ -426,14 +433,73 @@
     }];
   } else { [self restartInputAfterEndpointReady]; }
 }
+- (void)updateLoadingState {
+  NSString *message = nil;
+  if (!self.closing && !self.playbackEnded && !self.playbackFailed) {
+    if (self.awaitingComments) { message = self.comments.preparationStage.length ? self.comments.preparationStage : @"コメントを準備中"; }
+    else if (self.reloading || self.transportSuspended) { message = @"再接続中"; }
+    else if (self.repairingVideo) { message = @"映像を復旧中"; }
+    else if (self.seeking || self.awaitingSeekVideo) { message = @"シーク先を読み込み中"; }
+    else if (self.awaitingEndpoint || self.player.state == VLCMediaPlayerStateOpening ||
+      (self.wantsPlayback && self.commentPiP.capturedFrameCount == 0)) { message = @"動画を読み込み中"; }
+  }
+  if (self.playbackEnded || self.playbackFailed || self.closing) { [self.chrome updateBuffering:NO progress:1]; }
+  [self.chrome updateLoading:message];
+}
+- (void)checkVideoRecovery {
+  NSTimeInterval now = CACurrentMediaTime();
+  if (!self.videoWatchUntil || now > self.videoWatchUntil || self.closing || self.inputInBackground || self.pipActive ||
+      self.reloading || self.seeking || self.buffering || !self.wantsPlayback || !self.player.isPlaying) {
+    self.videoWatchStarted = 0; return;
+  }
+  NSDictionary *stats = [NeoVLCFrameTap snapshot:self.movieView];
+  if (!stats.count) { return; }
+  if (!self.videoWatchStarted) {
+    self.videoWatchStarted = now; self.videoWatchSamples = [stats[@"samples"] unsignedIntegerValue]; self.videoWatchMedia = [self mediaTime]; return;
+  }
+  double elapsed = now-self.videoWatchStarted;
+  if (elapsed < 3 || [self mediaTime]-self.videoWatchMedia < 1500) { return; }
+  double fps = ([stats[@"samples"] unsignedIntegerValue]-self.videoWatchSamples)/elapsed;
+  double age = [stats[@"contentAge"] doubleValue];
+  // Static scenes alone must not trigger a repair: also require the paused
+  // refresh cadence, missing output or a failed/blocked presentation queue.
+  BOOL frozen = (age >= 2.5 && (fps < 15 || [stats[@"scheduledInMs"] doubleValue] > 500)) ||
+    [stats[@"layerStatus"] integerValue] == AVQueuedSampleBufferRenderingStatusFailed || [stats[@"requiresFlush"] boolValue];
+  if (!frozen) {
+    self.videoWatchStarted = now; self.videoWatchSamples = [stats[@"samples"] unsignedIntegerValue]; self.videoWatchMedia = [self mediaTime]; return;
+  }
+  NSMutableDictionary *fields = [stats mutableCopy]; fields[@"stage"] = @(self.videoRepairStage); fields[@"mediaMs"] = @([self mediaTime]); fields[@"sampleFPS"] = @(fps);
+  [NeoPlaybackDiagnostics record:@"video.repair" fields:fields];
+  self.videoWatchStarted = 0;
+  if (self.videoRepairStage == 0) {
+    self.videoRepairStage = 1; [NeoVLCFrameTap flushVideoQueue:self.movieView]; [self alignVideoOutput]; return;
+  }
+  if (self.videoRepairStage != 1) { return; }
+  self.videoRepairStage = 2;
+  VLCMediaPlayerTrack *selected = nil;
+  for (VLCMediaPlayerTrack *track in self.player.videoTracks) { if (track.isSelected) { selected = track; break; } }
+  if (!selected) { return; }
+  self.repairingVideo = YES; NSInteger generation = ++self.videoRepairGeneration; VLCMedia *mediaAtRepair = self.player.media;
+  // Only restart the selected video decoder/output. Input, audio, cache and
+  // media position stay alive; never seek to the beginning to repair video.
+  selected.selected = NO;
+  __weak typeof(self) weakSelf = self;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    if (!weakSelf || weakSelf.closing || weakSelf.player.media != mediaAtRepair) { return; }
+    selected.selected = YES;
+    if (weakSelf.videoRepairGeneration != generation) { return; } weakSelf.repairingVideo = NO;
+    [weakSelf applyPlaybackIntentForced:YES]; [weakSelf updateLoadingState];
+    [NeoPlaybackDiagnostics record:@"video.trackRestored" fields:@{@"mediaMs": @([weakSelf mediaTime])}];
+  });
+}
 - (void)startWhenCommentsReady {
   if (self.closing || self.transportSuspended || self.reloading) { return; }
   if (![NeoCommentOverlay waitBeforePlayback] || !self.comments.enabled) { [self restartMedia]; return; }
-  self.awaitingComments = YES; self.statusLabel.text = @"コメントを準備しています…";
+  self.awaitingComments = YES; [self updateLoadingState]; self.statusLabel.text = @"コメントを準備しています…";
   __weak typeof(self) weakSelf = self;
   [self.comments prepareBeforePlayback:^{
     if (!weakSelf || weakSelf.closing) { return; }
-    weakSelf.awaitingComments = NO;
+    weakSelf.awaitingComments = NO; [weakSelf updateLoadingState];
     if (!weakSelf.transportSuspended && !weakSelf.reloading) { [weakSelf restartMedia]; }
   }];
 }
@@ -458,7 +524,7 @@
   self.inputClockGuardUntil = CACurrentMediaTime()+3;
   self.lastObservedTime = self.inputStartTime;
   [self.rewindCache beginSeek:self.inputStartTime / 1000.0];
-  [self.comments beginSeek:self.inputStartTime / 1000.0];
+  if (self.reloading) { [self.comments beginSeek:self.inputStartTime / 1000.0]; }
   VLCMedia *media = [VLCMedia mediaWithURL:self.playbackURL ?: self.sourceURL];
   [media addOption:[NSString stringWithFormat:@":network-caching=%ld", (long)self.networkCaching]];
   if (self.inputStartTime > 0) {
@@ -635,6 +701,9 @@
     size.width *= (double)video.sourceAspectRatio / video.sourceAspectRatioDenominator;
   }
   self.comments.videoSize = size;
+  [self.comments updateDuration:[self mediaLength] / 1000.0];
+  [self checkVideoRecovery];
+  [self updateLoadingState];
   [self updateCommentState];
   [self.chrome updateDiagnostics];
   NSTimeInterval now = CACurrentMediaTime();
@@ -645,6 +714,7 @@
   }
   if (now - self.lastDiagnosticSample >= 1) {
     self.lastDiagnosticSample = now;
+    [NeoPlaybackDiagnostics record:@"video.sample" fields:[NeoVLCFrameTap snapshot:self.movieView]];
     [NeoPlaybackDiagnostics record:@"player.sample" fields:@{@"mediaMs": @([self mediaTime]),
       @"state": @(self.player.state), @"buffering": @(self.buffering), @"seeking": @(self.seeking),
       @"nativePlaying": @(self.player.isPlaying), @"appState": @(UIApplication.sharedApplication.applicationState),
@@ -709,7 +779,7 @@
       self.playbackFailed = YES; self.wantsPlayback = NO;
       [self completeSeek:self.seekGeneration failed:YES]; [self.history flush]; [self showControls];
     }
-    if (state == VLCMediaPlayerStatePlaying && !self.seeking && !self.reloading) { [self.comments endSeek]; }
+
     if ((state == VLCMediaPlayerStatePlaying || state == VLCMediaPlayerStatePaused) && self.player.state == state) {
       [self applyPlaybackIntent];
     }
@@ -733,6 +803,7 @@
     [NeoPlaybackDiagnostics record:@"player.buffering" fields:@{@"progress": @(progress), @"notifications": @(count),
       @"nativePlaying": @(self.player.isPlaying), @"mediaMs": @([self mediaTime])}];
     [self.chrome updateBuffering:self.buffering progress:progress];
+    [self updateLoadingState];
     if (!self.closing) {
       self.statusLabel.text = progress < 1 ? [NSString stringWithFormat:@"バッファリング %.0f%%", progress * 100]
         : self.reloading ? @"プレイヤーを再読み込みしています…" : @"PLAY · 再生準備完了";
@@ -785,6 +856,7 @@
   [self.history flush];
   [NeoPlaybackDiagnostics record:@"lifecycle.background" fields:@{@"wantsPlayback": @(self.wantsPlayback), @"pip": @(self.pipActive), @"mediaMs": @([self mediaTime])}];
   if (self.closing) { return; }
+  self.videoWatchStarted = 0; self.videoWatchUntil = 0; self.repairingVideo = NO;
   self.inputInBackground = YES;
   self.backgroundTime = self.reloading ? self.reloadTime : MAX(0, [self mediaTime]);
   self.backgroundPositionValid = YES;
@@ -799,6 +871,10 @@
   [self.commentPiP enterForeground];
   [AVAudioSession.sharedInstance setActive:YES error:nil];
   [self alignVideoOutput];
+  [NeoVLCFrameTap prepareForeground:self.movieView];
+  self.videoWatchUntil = CACurrentMediaTime()+45; self.videoWatchStarted = 0; self.videoRepairStage = 0;
+  self.repairingVideo = NO; self.videoRepairGeneration += 1;
+  [NeoPlaybackDiagnostics record:@"video.foregroundFlush" fields:[NeoVLCFrameTap snapshot:self.movieView]];
   VLCMediaPlayerState state = self.player.state;
   if (!self.reloading && !self.playbackEnded && self.backgroundPositionValid &&
       (self.transportSuspended || state == VLCMediaPlayerStateError || state == VLCMediaPlayerStateStopped)) {

@@ -211,6 +211,9 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     work.async { [weak self] in
       guard let self = self else { return }
       if self.state.version != snapshot.version { self.renderer?.reset() }
+      else if self.state.timeline?.identity != snapshot.timeline?.identity {
+        self.renderer?.replaceTimeline(self.state.timeline, at: max(0, self.lastTime))
+      }
       self.state = snapshot; self.dirty = true
     }
   }

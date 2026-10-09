@@ -11,6 +11,9 @@ NS_ASSUME_NONNULL_BEGIN
 // patched: only VLC's own display-view factory returns our layer subclass.
 @interface NeoVLCFrameTap : NSObject
 + (BOOL)install;
++ (void)prepareForeground:(UIView *)view;
++ (void)flushVideoQueue:(UIView *)view;
++ (NSDictionary<NSString *, NSNumber *> *)snapshot:(UIView *)view;
 + (void)bindView:(UIView *)view sink:(nullable id<NeoVideoFrameSink>)sink;
 #if TARGET_OS_SIMULATOR
 + (nullable UIView *)videoViewInView:(UIView *)view;

@@ -26,8 +26,8 @@ struct CommentStyle: Hashable {
   var alignment = 2, marginL = 20.0, marginR = 20.0, marginV = 20.0
 }
 
-struct CommentPoint: Equatable { var x: Double; var y: Double }
-struct CommentMotion {
+struct CommentPoint: Hashable { var x: Double; var y: Double }
+struct CommentMotion: Hashable {
   var from: CommentPoint, to: CommentPoint
   var start: Double, end: Double
   func point(elapsed: Double) -> CommentPoint {
@@ -60,6 +60,7 @@ enum CommentTiming: Equatable {
 }
 
 struct CommentTimeline {
+  let identity = UUID()
   var width: Double, height: Double
   var comments: [NativeComment]
   private var endTree: [Double]
@@ -75,6 +76,40 @@ struct CommentTimeline {
     if leaves > 1 {
       for node in stride(from: leaves - 1, through: 1, by: -1) { endTree[node] = max(endTree[node * 2], endTree[node * 2 + 1]) }
     }
+  }
+
+  // Full extraction preserves preview identities, including repeated identical events.
+  func preservingIDs(from previous: CommentTimeline) -> CommentTimeline {
+    struct Key: Hashable {
+      let start: Double, end: Double, layer: Int, text: String, style: CommentStyle
+      let position: CommentPoint?, motion: CommentMotion?
+      init(_ c: NativeComment) { start = c.start; end = c.end; layer = c.layer; text = c.text; style = c.style; position = c.position; motion = c.motion }
+    }
+    var ids: [Key: [Int]] = [:], used: [Key: Int] = [:]
+    for c in previous.comments { ids[Key(c), default: []].append(c.id) }
+    var next = (previous.comments.map(\.id).max() ?? -1) + 1
+    let mapped = comments.map { c -> NativeComment in
+      var result = c; let key = Key(c), index = used[key, default: 0]
+      if let matches = ids[key], index < matches.count { result.id = matches[index]; used[key] = index + 1 }
+      else { result.id = next; next += 1 }
+      return result
+    }
+    return CommentTimeline(width: width, height: height, comments: mapped)
+  }
+  func fittingEnd(duration: Double, textWidth: (NativeComment) -> Double) -> CommentTimeline {
+    guard duration.isFinite, duration > 0 else { return self }
+    var changed = false
+    let adjusted = comments.map { c -> NativeComment in
+      guard c.usesDanmakuTiming, c.motion != nil, c.start <= duration,
+            c.start > duration - CommentTiming.scrollingDuration else { return c }
+      let inkWidth = max(0, textWidth(c)), lifetime = c.end-c.start
+      let enter = lifetime * inkWidth / (width + inkWidth) + 0.05
+      let start = min(c.start, max(0, duration-enter))
+      guard start < c.start else { return c }
+      var result = c; result.start = start; result.end = start+lifetime; changed = true
+      return result
+    }
+    return changed ? CommentTimeline(width: width, height: height, comments: adjusted) : self
   }
 
   // Interval tree also handles very long fixed comments without forcing a scan
@@ -116,7 +151,7 @@ enum NeoASSComments {
       options: [.regularExpression, .caseInsensitive]) != nil
   }
 
-  static func parse(_ ass: String, timing: CommentTiming = .ass) throws -> CommentTimeline {
+  static func parse(_ ass: String, timing: CommentTiming = .ass, allowEmpty: Bool = false) throws -> CommentTimeline {
     var section = "", width = 384.0, height = 288.0
     var styleFormat: [String] = [], eventFormat: [String] = []
     var styles: [String: CommentStyle] = [:], comments: [NativeComment] = []
@@ -198,7 +233,7 @@ enum NeoASSComments {
         }
       } else if section == "v4 styles" { throw CommentParseError.unsupported("旧SSAスタイル") }
     }
-    guard !comments.isEmpty else { throw CommentParseError.empty }
+    guard allowEmpty || !comments.isEmpty else { throw CommentParseError.empty }
     return CommentTimeline(width: width, height: height, comments: comments)
   }
 

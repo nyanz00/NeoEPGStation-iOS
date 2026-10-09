@@ -5,6 +5,14 @@
 @interface NeoTappedVideoLayer : AVSampleBufferDisplayLayer
 @property (atomic, weak) id<NeoVideoFrameSink> frameSink;
 @property (atomic) BOOL appBackground;
+@property (atomic) double monitorUntil;
+@property (atomic) double lastFingerprintHost;
+@property (atomic) double changedHost;
+@property (atomic) double scheduledHost;
+@property (atomic) NSUInteger changes;
+@property (atomic) NSUInteger samples;
+@property (atomic) uint64_t fingerprint;
+@property (atomic) BOOL hasFingerprint;
 @end
 @implementation NeoTappedVideoLayer
 - (instancetype)init {
@@ -20,8 +28,45 @@
 - (void)backgrounded { self.appBackground = YES; }
 - (void)foregrounded {
   self.appBackground = NO;
-  // Keep the paused image and queued VLC output on ordinary foregrounding.
-  if (super.status == AVQueuedSampleBufferRenderingStatusFailed) { [super flush]; }
+  // flush keeps the paused image, but removes stale scheduled frames even
+  // when AVFoundation has not marked the renderer failed.
+  [self prepareResume];
+}
+- (void)prepareResume {
+  @synchronized(self) { [super flush]; self.monitorUntil = CACurrentMediaTime()+60; self.hasFingerprint = NO; }
+}
+- (void)flushQueue { @synchronized(self) { [super flush]; } }
+- (NSDictionary *)snapshot {
+  @synchronized(self) {
+    double now = CACurrentMediaTime();
+    return @{ @"samples": @(self.samples), @"changes": @(self.changes),
+      @"contentAge": @(self.changedHost > 0 ? now-self.changedHost : -1),
+      @"scheduledInMs": @((self.scheduledHost-now)*1000), @"layerStatus": @(super.status),
+      @"layerReady": @(super.readyForMoreMediaData), @"requiresFlush": @(self.requiresFlushToResumeDecoding) };
+  }
+}
+- (void)observeContent:(CMSampleBufferRef)sample {
+  self.samples += 1;
+  double now = CACurrentMediaTime(); self.scheduledHost = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample));
+  if (now > self.monitorUntil || now-self.lastFingerprintHost < 0.1) { return; }
+  CVPixelBufferRef pixel = CMSampleBufferGetImageBuffer(sample); if (!pixel) { return; }
+  if (CVPixelBufferLockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly) != kCVReturnSuccess) { return; }
+  BOOL planar = CVPixelBufferIsPlanar(pixel);
+  size_t width = planar ? CVPixelBufferGetWidthOfPlane(pixel,0) : CVPixelBufferGetWidth(pixel);
+  size_t height = planar ? CVPixelBufferGetHeightOfPlane(pixel,0) : CVPixelBufferGetHeight(pixel);
+  size_t row = planar ? CVPixelBufferGetBytesPerRowOfPlane(pixel,0) : CVPixelBufferGetBytesPerRow(pixel);
+  const uint8_t *base = planar ? CVPixelBufferGetBaseAddressOfPlane(pixel,0) : CVPixelBufferGetBaseAddress(pixel);
+  OSType format = CVPixelBufferGetPixelFormatType(pixel);
+  size_t step = planar ? (format == kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange || format == kCVPixelFormatType_420YpCbCr10BiPlanarFullRange ? 2 : 1) : 4;
+  uint64_t hash = 1469598103934665603ULL;
+  if (base && width > 0 && height > 0 && width*step <= row) {
+    for (int y=0; y<8; y++) { for (int x=0; x<8; x++) {
+      hash ^= base[(height*(2*y+1)/16)*row+(width*(2*x+1)/16)*step]; hash *= 1099511628211ULL;
+    } }
+    if (!self.hasFingerprint || hash != self.fingerprint) { self.changedHost = now; self.changes += 1; }
+    self.hasFingerprint = YES; self.fingerprint = hash; self.lastFingerprintHost = now;
+  }
+  CVPixelBufferUnlockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly);
 }
 - (AVQueuedSampleBufferRenderingStatus)status {
   AVQueuedSampleBufferRenderingStatus status = super.status;
@@ -33,6 +78,7 @@
   return status;
 }
 - (void)enqueueSampleBuffer:(CMSampleBufferRef)sampleBuffer {
+  [self observeContent:sampleBuffer];
   id<NeoVideoFrameSink> sink = self.frameSink;
   if (sink && CMSampleBufferGetImageBuffer(sampleBuffer)) {
     [sink receiveVideoSampleBuffer:sampleBuffer];
@@ -47,6 +93,14 @@
 static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideoLayer.class; }
 
 @implementation NeoVLCFrameTap
++ (NeoTappedVideoLayer *)layerIn:(UIView *)view {
+  if ([view.layer isKindOfClass:NeoTappedVideoLayer.class]) { return (NeoTappedVideoLayer *)view.layer; }
+  for (UIView *child in view.subviews) { NeoTappedVideoLayer *layer = [self layerIn:child]; if (layer) { return layer; } }
+  return nil;
+}
++ (void)prepareForeground:(UIView *)view { [[self layerIn:view] prepareResume]; }
++ (void)flushVideoQueue:(UIView *)view { [[self layerIn:view] flushQueue]; }
++ (NSDictionary *)snapshot:(UIView *)view { return [[self layerIn:view] snapshot] ?: @{}; }
 + (BOOL)install {
   static BOOL installed;
   static dispatch_once_t once;

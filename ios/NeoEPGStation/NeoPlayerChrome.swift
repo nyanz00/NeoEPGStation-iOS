@@ -9,6 +9,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   @objc let timeLabel = NeoStyle.label(size: 13)
   private let displayedStatus = NeoStyle.label(size: 12)
   private var bufferProgress: Float?
+  private var loadingMessage: String?
+  private let loadingButton = UIButton(type: .custom)
+  private let loadingSpinner = UIActivityIndicatorView(style: .large)
+  private var pipShowing = false
   private var previewTime: Int64?
   private var downloadedRanges: [[NSNumber]] = []
   @objc let timeline: UISlider = NeoPlayerSeekSlider()
@@ -66,7 +70,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     videoView.clipsToBounds = true
     self.title.text = title; self.title.lineBreakMode = .byTruncatingTail
     channel.textColor = NeoStyle.muted; logo.contentMode = .scaleAspectFit
-    [videoView, pipCover, videoDim, header, controls, centerControls, panel, displayedStatus, drawerDim, drawer].forEach(addSubview)
+    [videoView, pipCover, videoDim, header, controls, centerControls, panel, loadingButton, displayedStatus, drawerDim, drawer].forEach(addSubview)
     header.addSubview(leftHeader); header.addSubview(rightHeader)
     [menuButton, backButton, logo, channel, self.title].forEach(leftHeader.addSubview)
     [infoButton, pipButton, commentButton, settingsButton].forEach(rightHeader.addSubview)
@@ -174,7 +178,13 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     statusLabel.backgroundColor = .clear; statusLabel.numberOfLines = 2; statusLabel.isHidden = true
     statusLabel.layer.shadowColor = UIColor.black.cgColor; statusLabel.layer.shadowOpacity = 1
     statusLabel.layer.shadowRadius = 2; statusLabel.layer.shadowOffset = .zero
-    displayedStatus.numberOfLines = 2; displayedStatus.isHidden = true
+    loadingButton.addSubview(loadingSpinner); loadingSpinner.color = .white
+    loadingButton.addAction(UIAction { [weak self] _ in self?.perform("play") }, for: .touchUpInside)
+    loadingButton.accessibilityIdentifier = "player-loading"
+    loadingButton.isHidden = true
+    displayedStatus.textAlignment = .center
+    displayedStatus.font = .systemFont(ofSize: 14, weight: .medium)
+    displayedStatus.numberOfLines = 3; displayedStatus.isHidden = true
     displayedStatus.layer.shadowColor = UIColor.black.cgColor; displayedStatus.layer.shadowOpacity = 1
     displayedStatus.layer.shadowRadius = 2; displayedStatus.layer.shadowOffset = .zero
   }
@@ -303,8 +313,11 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     scroll.frame = contentFrame; commentList.frame = contentFrame
     if tab == "comments" { commentList.frame.size.height = max(0, contentFrame.height - 36) }
     followButton.frame = CGRect(x: 0, y: commentList.frame.maxY, width: panel.bounds.width, height: 36)
-    displayedStatus.frame = CGRect(x: safe.left + 16, y: header.frame.maxY + 4,
-      width: max(0, videoWidth - safe.left - rightInset - 24), height: 32)
+    loadingButton.frame = playButton.frame.offsetBy(dx: centerControls.frame.minX, dy: centerControls.frame.minY)
+    loadingSpinner.frame = loadingButton.bounds.insetBy(dx: 8, dy: 8)
+    let messageWidth = min(320, max(0, videoWidth-safe.left-rightInset-24))
+    displayedStatus.frame = CGRect(x: videoView.frame.midX-messageWidth/2,
+      y: loadingButton.frame.maxY+4, width: messageWidth, height: 54)
     drawerDim.frame = bounds
     let drawerWidth = min(240 + safe.left, bounds.width * 0.8)
     drawer.frame = CGRect(x: drawerDragging ? drawer.frame.minX : drawerOpen ? 0 : -drawerWidth, y: 0, width: drawerWidth, height: bounds.height)
@@ -323,6 +336,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   @objc func updatePiP(_ active: Bool) {
     // Cover the drawable rather than hiding it: VLC must keep supplying frames
     // for the PiP compositor, including while the app remains in foreground.
+    pipShowing = active; updateDiagnostics()
     pipCover.isHidden = !active
     centerControls.isHidden = active
   }
@@ -361,7 +375,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   @objc func updatePlayback(_ running: Bool, current: Int64, duration: Int64) {
     self.current = current; self.duration = duration
     (timeline as? NeoPlayerSeekSlider)?.updateDownloadedRanges(downloadedRanges, duration: Double(duration))
-    playButton.setImage(playerIcon(running ? "Pause" : "PlayArrow", side: 60), for: .normal)
+    playButton.setImage(loadingMessage != nil || bufferProgress != nil ? nil : playerIcon(running ? "Pause" : "PlayArrow", side: 60), for: .normal)
     playButton.accessibilityLabel = running ? "一時停止" : "再生"
     updateTime(); followCurrentComment(); setNeedsLayout()
   }
@@ -376,12 +390,24 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     func format(_ seconds: Int64) -> String { seconds >= 3600 ? String(format: "%lld:%02lld:%02lld", seconds/3600, seconds/60%60, seconds%60) : String(format: "%lld:%02lld", seconds/60, seconds%60) }
     timeLabel.text = remainingTime ? "−\(format(max(0, duration - current))) / \(format(duration))" : "\(format(current)) / \(format(duration))"
   }
+  @objc func updateLoading(_ message: String?) {
+    loadingMessage = message?.isEmpty == false ? message : nil
+    updateDiagnostics()
+  }
   @objc func updateDiagnostics() {
     let status = statusLabel.text ?? ""
-    let important = status.contains("エラー") || status.contains("できません") || status.contains("再読み込み")
-    displayedStatus.text = bufferProgress.map { String(format: "バッファリング %.0f%%", $0 * 100) } ?? status
-    displayedStatus.isHidden = bufferProgress == nil && !important
-    statusLabel.isHidden = displayedStatus.isHidden
+    let important = status.contains("エラー") || status.contains("できません")
+    let busy = loadingMessage != nil || bufferProgress != nil
+    let progress = bufferProgress.map { String(format: "バッファリング %.0f%%", $0*100) }
+    displayedStatus.text = [loadingMessage, progress].compactMap { $0 }.joined(separator: "\n")
+    if !busy { displayedStatus.text = important ? status : nil }
+    displayedStatus.isHidden = pipShowing || (!busy && !important)
+    loadingButton.isHidden = pipShowing || !busy
+    if busy { loadingSpinner.startAnimating() } else { loadingSpinner.stopAnimating() }
+    playButton.setImage(busy ? nil : playerIcon(playButton.accessibilityLabel == "一時停止" ? "Pause" : "PlayArrow", side: 60), for: .normal)
+    loadingButton.accessibilityLabel = "\(displayedStatus.text ?? "読み込み中")、\(playButton.accessibilityLabel ?? "再生・一時停止")"
+    // Keep the old label only as an internal diagnostic source.
+    statusLabel.isHidden = true
     diagnostic = status; commentDiagnostic = commentLabel.text ?? ""
   }
   @objc func updateBuffering(_ active: Bool, progress: Float) {
@@ -707,6 +733,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       stable = stable && !displayedStatus.isHidden && displayedStatus.text == "バッファリング \(percent)%"
     }
     updateBuffering(false, progress: 1); let cleared = displayedStatus.isHidden
+    updateLoading("コメント字幕を抽出・取得中"); showControls(false)
+    let loadingCenter = !loadingButton.isHidden && loadingSpinner.isAnimating && statusLabel.isHidden && displayedStatus.text == "コメント字幕を抽出・取得中"
+    let aligned = abs(loadingButton.frame.midX-centerControls.frame.midX) < 1
+    updateLoading(nil); showControls(true)
     let oldRanges = downloadedRanges
     updateDownloadedRanges([[0, 30], [60, 90]])
     timeline.layoutIfNeeded()
@@ -727,6 +757,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       "bufferProgressSurvivesOtherStatusUpdates": stable, "bufferCompletionHidesStatus": cleared,
       "downloadedTrackKeepsGaps": painted, "downloadedTrackRescalesWithDuration": durationMapped,
       "downloadedTrackClearsAfterEviction": emptied,
+      "centralLoadingIgnoresHUDVisibility": loadingCenter, "spinnerReplacesCentralPlay": aligned,
       "numericPlaybackLogExportsJSON": logValid]
   }
   private func runSettingsChecks() -> [String: Bool] {

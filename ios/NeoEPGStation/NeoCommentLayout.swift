@@ -6,9 +6,15 @@ enum CommentLanePlan {
   // Horizontal separation is checked at both ends of the shared lifetime:
   // linear trajectories cannot collide between two separated endpoints.
   static func build(_ timeline: CommentTimeline, size: Double,
-                    cancelled: () -> Bool = { false }, measure: (NativeComment) -> CommentExtent) -> [Int: Double] {
+                    cancelled: () -> Bool = { false }, fixedPositions: [Int: Double] = [:], measure: (NativeComment) -> CommentExtent) -> [Int: Double] {
     struct Active { let comment: NativeComment; let extent: CommentExtent; let top: Double }
     var active: [Active] = [], positions: [Int: Double] = [:]
+    // Reserve moving comments before scheduling newly available full-file events.
+    for c in timeline.comments where fixedPositions[c.id] != nil {
+      let measured = measure(c)
+      active.append(Active(comment: c, extent: CommentExtent(width: measured.width*c.style.scaleX*size,
+        height: measured.height*c.style.scaleY*size), top: fixedPositions[c.id]!))
+    }
     func left(_ c: NativeComment, _ e: CommentExtent, _ time: Double) -> Double {
       if let x = c.scrollingX(viewportWidth: timeline.width, textWidth: e.width, elapsed: time-c.start) { return x }
       let column = (c.style.alignment-1)%3
@@ -32,9 +38,10 @@ enum CommentLanePlan {
       if row == 2 { candidates.sort() }
       else if row == 0 { candidates.sort(by: >) }
       else { candidates.sort { abs($0-preferred) < abs($1-preferred) } }
-      let top = candidates.first { y in
+      let top = fixedPositions[comment.id] ?? candidates.first { y in
         guard y >= 0, y+extent.height <= timeline.height else { return false }
         return !active.contains { item in
+          guard item.comment.id != comment.id, comment.end > item.comment.start else { return false }
           guard y < item.top+item.extent.height+1, y+extent.height+1 > item.top else { return false }
           let end = min(comment.end, item.comment.end)
           let a0 = left(comment, extent, comment.start), a1 = left(comment, extent, end)
@@ -46,7 +53,7 @@ enum CommentLanePlan {
       }
       // At densities exceeding the physical screen, suppress overflow rather
       // than paint unreadable overlapping text; later comments still get lanes.
-      if let top { positions[comment.id] = top; active.append(Active(comment: comment, extent: extent, top: top)) }
+      if let top { positions[comment.id] = top; if fixedPositions[comment.id] == nil { active.append(Active(comment: comment, extent: extent, top: top)) } }
     }
     return positions
   }

@@ -30,6 +30,7 @@ enum CommentLoadError: Error, LocalizedError {
 // Credentials are only sent to the configured origin; redirects cannot downgrade
 // TLS or move authentication to a different host/port.
 final class NeoCommentLoader: NSObject, URLSessionTaskDelegate {
+  var onMetric: ((String, Double, Int) -> Void)?
   private let source: URL
   private let authorization: String?
   private let parsing = DispatchQueue(label: "neo.comments.parse", qos: .userInitiated)
@@ -47,7 +48,9 @@ final class NeoCommentLoader: NSObject, URLSessionTaskDelegate {
   }
 
   func tracks(completion: @escaping (Result<[NativeCommentTrack], Error>) -> Void) -> URLSessionDataTask {
-    request(source.appendingPathComponent("subtitles")) { result in
+    let began = ProcessInfo.processInfo.systemUptime
+    return request(source.appendingPathComponent("subtitles")) { [weak self] result in
+      self?.onMetric?("comments.tracks", (ProcessInfo.processInfo.systemUptime-began)*1000, (try? result.get().count) ?? 0)
       completion(result.flatMap { data in
         do {
           let items = try JSONDecoder().decode(CommentTrackList.self, from: data).items
@@ -59,20 +62,34 @@ final class NeoCommentLoader: NSObject, URLSessionTaskDelegate {
     }
   }
 
-  func text(track: NativeCommentTrack, completion: @escaping (Result<CommentTimeline, Error>) -> Void) -> URLSessionDataTask {
-    let url = source.appendingPathComponent("subtitles").appendingPathComponent(String(track.subtitleIndex)).appendingPathComponent("text")
+  func text(track: NativeCommentTrack, range: (startAt: Double, duration: Double)? = nil, completion: @escaping (Result<CommentTimeline, Error>) -> Void) -> URLSessionDataTask {
+    var url = source.appendingPathComponent("subtitles").appendingPathComponent(String(track.subtitleIndex)).appendingPathComponent("text")
+    if let range {
+      var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+      components.queryItems = [URLQueryItem(name: "startAt", value: String(range.startAt)), URLQueryItem(name: "duration", value: String(range.duration))]
+      url = components.url!
+    }
+    let began = ProcessInfo.processInfo.systemUptime
     return request(url) { [weak self] result in
       guard let self = self else { return }
+      self.onMetric?(range == nil ? "comments.fullFetch" : "comments.previewFetch", (ProcessInfo.processInfo.systemUptime-began)*1000, (try? result.get().count) ?? 0)
       self.parsing.async {
-        completion(result.flatMap { data in
+        let parseBegan = ProcessInfo.processInfo.systemUptime
+        let parsed = result.flatMap { data -> Result<CommentTimeline, Error> in
           do {
             let response = try JSONDecoder().decode(CommentTextResponse.self, from: data)
-            return .success(try NeoASSComments.parse(response.subtitleText, timing: .danmaku))
-          } catch let error as CommentParseError { return .failure(error) }
-          catch { return .failure(CommentLoadError.response) }
-        })
+            return .success(try NeoASSComments.parse(response.subtitleText, timing: .danmaku, allowEmpty: range != nil))
+          } catch { return .failure(error) }
+        }
+        self.onMetric?(range == nil ? "comments.fullParse" : "comments.previewParse", (ProcessInfo.processInfo.systemUptime-parseBegan)*1000, (try? parsed.get().comments.count) ?? 0)
+        completion(parsed)
+
       }
     }
+  }
+
+  static func previewRange(at time: Double) -> (startAt: Double, duration: Double) {
+    (max(0, (time.isFinite ? time : 0)-30), 210)
   }
 
   func close() { session.invalidateAndCancel() }

@@ -27,6 +27,8 @@ final class NeoDanmakuRenderer {
   private let cpuOnly: Bool
   private var laneSize: Double?, requestedLaneSize: Double?
   private var lanes: [Int: Double] = [:]
+  private var requestedTimeline: UUID?
+  private var pinnedLanes: [Int: Double] = [:]
   private var laneScale: Double?, requestedLaneScale: Double?, layoutVersion = 0
   private var cursor = CommentFrameCursor()
   private var preparedIDs: [Int] = [], preparedScale = -1.0, preparedOpacity: Float?
@@ -58,7 +60,7 @@ final class NeoDanmakuRenderer {
   func reset() {
     lock.lock(); defer { lock.unlock() }
     generation += 1; cache.removeAll(); pending.removeAll(); wanted.removeAll(); cost = 0; failure = nil
-    laneSize = nil; requestedLaneSize = nil; laneScale = nil; requestedLaneScale = nil; layoutVersion += 1; lanes.removeAll()
+    requestedTimeline = nil; pinnedLanes.removeAll(); laneSize = nil; requestedLaneSize = nil; laneScale = nil; requestedLaneScale = nil; layoutVersion += 1; lanes.removeAll()
     cursor.reset(); preparedIDs.removeAll(); preparationGeneration = -1
     renderRevision += 1; frameImages.removeAll(); snapshotRevision = -1
   }
@@ -133,6 +135,20 @@ final class NeoDanmakuRenderer {
     prepare(timeline.visible(at: time, lookAhead: 1.5), pixelScale: pixelScale, absoluteOpacity: opacity)
   }
   func seekWindow() { cursor.reset(); preparedTime = -.infinity; preparationGeneration = -1 }
+  func replaceTimeline(_ previous: CommentTimeline?, at time: Double) {
+    lock.lock()
+    pinnedLanes = Dictionary(uniqueKeysWithValues: (previous?.visible(at: time) ?? []).compactMap { c in
+      lanes[c.id].map { (c.id, $0) }
+    })
+    requestedTimeline = nil; renderRevision += 1
+    lock.unlock()
+    seekWindow()
+  }
+  func fittingEnd(_ timeline: CommentTimeline, duration: Double, size: Double, pixelScale: Double) -> CommentTimeline {
+    timeline.fittingEnd(duration: duration) { c in
+      Double(self.geometry(CommentTextureKey(text: c.text, style: c.style, pixelScale: max(0.25, pixelScale))).size.width) * c.style.scaleX * size
+    }
+  }
 
   private struct RasterGeometry {
     let font: CTFont, lines: [CTLine], bounds: CGRect, lineHeight: CGFloat
@@ -169,7 +185,9 @@ final class NeoDanmakuRenderer {
   func prepareLayout(_ timeline: CommentTimeline, size: Double, pixelScale: Double = 1) {
     let scale = min(2, max(0.25, ceil(pixelScale*4)/4))
     lock.lock()
-    guard requestedLaneSize != size || requestedLaneScale != scale else { lock.unlock(); return }
+    guard requestedTimeline != timeline.identity || requestedLaneSize != size || requestedLaneScale != scale else { lock.unlock(); return }
+    let pins = laneSize == size && laneScale == scale ? pinnedLanes : [:]
+    requestedTimeline = timeline.identity
     requestedLaneSize = size; requestedLaneScale = scale; layoutVersion += 1
     let version = generation, layout = layoutVersion; lock.unlock()
     layoutQueue.async { [weak self] in
@@ -180,13 +198,15 @@ final class NeoDanmakuRenderer {
       }
       guard !cancelled() else { return }
       var metrics: [CommentTextureKey: CommentExtent] = [:]
-      let plan = CommentLanePlan.build(timeline, size: size, cancelled: cancelled) { comment in
+      let began = CACurrentMediaTime()
+      let plan = CommentLanePlan.build(timeline, size: size, cancelled: cancelled, fixedPositions: pins) { comment in
         let key = CommentTextureKey(text: comment.text, style: comment.style, pixelScale: scale)
         if let value = metrics[key] { return value }
         let raster = self.geometry(key)
         let value = CommentExtent(width: Double(raster.size.width), height: Double(raster.size.height))
         metrics[key] = value; return value
       }
+      NeoPlaybackDiagnostics.record("comments.layout", fields: ["durationMs": (CACurrentMediaTime()-began)*1000, "count": timeline.comments.count])
       self.lock.lock(); defer { self.lock.unlock() }
       if self.generation == version && self.layoutVersion == layout { self.lanes = plan; self.laneSize = size; self.laneScale = scale; self.renderRevision += 1 }
     }

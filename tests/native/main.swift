@@ -227,3 +227,29 @@ check(obscuredClock.time(media: 14, running: false, now: 104, videoHost: 100, de
   "Real buffering still freezes comments even with fresh decoded frames")
 check(obscuredClock.time(media: 20, running: true, now: 110, videoHost: 100, decodedHost: 104) == 13,
   "Both decode and presentation stalled must freeze comments")
+
+// Preview-to-full identities, duplicate events and terminal text entry.
+let previewRange = NeoCommentLoader.previewRange(at: 100)
+check(previewRange.startAt == 70 && previewRange.duration == 210, "Preview matches Web look-behind and 3.5-minute span")
+check(NeoCommentLoader.previewRange(at: 0).startAt == 0, "Initial preview never requests negative time")
+let previewEvent = NativeComment(id: 0, layer: 0, start: 50, end: 55.25, text: "same", style: CommentStyle(),
+  motion: CommentMotion(from: CommentPoint(x: 1920,y: 80), to: CommentPoint(x: -100,y: 80), start: 0,end: 5.25), usesDanmakuTiming: true)
+var previewDuplicate = previewEvent; previewDuplicate.id = 1
+let previewTimeline = CommentTimeline(width: 1920,height: 1080,comments: [previewEvent,previewDuplicate])
+var earlier = previewEvent; earlier.id = 0; earlier.start = 1; earlier.end = 6.25
+var fullEvent = previewEvent; fullEvent.id = 1
+var fullDuplicate = previewDuplicate; fullDuplicate.id = 2
+var later = previewEvent; later.id = 3; later.start = 500; later.end = 505.25
+let expanded = CommentTimeline(width: 1920,height: 1080,comments: [earlier,fullEvent,fullDuplicate,later]).preservingIDs(from: previewTimeline)
+check(expanded.visible(at: 51).map(\.id) == [0,1], "Moving preview IDs survive extra earlier full-file events and exact duplicates")
+check(Set(expanded.comments.map(\.id)).count == 4, "Full swap never duplicates IDs")
+let pinned = CommentLanePlan.build(expanded, size: 1, fixedPositions: [0: 80,1: 160]) { _ in CommentExtent(width: 100,height: 40) }
+check(pinned[0] == 80 && pinned[1] == 160, "Full layout retains moving preview lanes")
+var tail = previewEvent; tail.id = 20; tail.start = 600; tail.end = 605.25
+let terminal = CommentTimeline(width: 1920,height: 1080,comments: [earlier,tail]).fittingEnd(duration: 600) { _ in 500 }
+let adjustedTail = terminal.comments.first(where: { $0.id == 20 })!
+check(adjustedTail.start < 600 && abs(adjustedTail.end-adjustedTail.start-5.25) < 0.00001, "Terminal correction retains the requested scrolling speed")
+let terminalX = adjustedTail.scrollingX(viewportWidth: 1920,textWidth: 500,elapsed: 600-adjustedTail.start)!
+check(terminalX+500 <= 1920 && terminalX >= 0, "Last timestamp comment enters the screen fully before EOF")
+check(terminal.comments.first(where: { $0.id == earlier.id })!.start == earlier.start, "Ordinary comment timestamps remain unchanged")
+print("Preview handoff and terminal timing: all checks passed")
