@@ -125,6 +125,7 @@
 @property (nonatomic) BOOL awaitingSeekVideo;
 @property (nonatomic) NSTimeInterval videoWatchStarted;
 @property (nonatomic) NSTimeInterval videoWatchUntil;
+@property (nonatomic) BOOL videoWatchPending;
 @property (nonatomic) NSUInteger videoWatchSamples;
 @property (nonatomic) int64_t videoWatchMedia;
 @property (nonatomic) NSInteger videoRepairStage;
@@ -449,10 +450,17 @@
 }
 - (void)checkVideoRecovery {
   NSTimeInterval now = CACurrentMediaTime();
-  if (!self.videoWatchUntil || now > self.videoWatchUntil || self.closing || self.inputInBackground || self.pipActive ||
+  if (self.closing || self.inputInBackground || self.pipActive ||
       self.reloading || self.seeking || self.buffering || !self.wantsPlayback || !self.player.isPlaying) {
     self.videoWatchStarted = 0; return;
   }
+  if (self.videoWatchPending) {
+    self.videoWatchPending = NO; self.videoWatchUntil = now+45;
+    // A retained pause can outlast the foreground monitoring window. Start
+    // sampling when playback actually resumes, keeping the paused image.
+    [NeoVLCFrameTap prepareForeground:self.movieView];
+  }
+  if (!self.videoWatchUntil || now > self.videoWatchUntil) { self.videoWatchStarted = 0; return; }
   NSDictionary *stats = [NeoVLCFrameTap snapshot:self.movieView];
   if (!stats.count) { return; }
   if (!self.videoWatchStarted) {
@@ -857,7 +865,7 @@
   [self.history flush];
   [NeoPlaybackDiagnostics record:@"lifecycle.background" fields:@{@"wantsPlayback": @(self.wantsPlayback), @"pip": @(self.pipActive), @"mediaMs": @([self mediaTime])}];
   if (self.closing) { return; }
-  self.videoWatchStarted = 0; self.videoWatchUntil = 0; self.repairingVideo = NO;
+  self.videoWatchStarted = 0; self.videoWatchUntil = 0; self.videoWatchPending = NO; self.repairingVideo = NO;
   self.inputInBackground = YES;
   self.backgroundTime = self.reloading ? self.reloadTime : MAX(0, [self mediaTime]);
   self.backgroundPositionValid = YES;
@@ -873,7 +881,7 @@
   [AVAudioSession.sharedInstance setActive:YES error:nil];
   [self alignVideoOutput];
   [NeoVLCFrameTap prepareForeground:self.movieView];
-  self.videoWatchUntil = CACurrentMediaTime()+45; self.videoWatchStarted = 0; self.videoRepairStage = 0;
+  self.videoWatchUntil = 0; self.videoWatchPending = YES; self.videoWatchStarted = 0; self.videoRepairStage = 0;
   self.repairingVideo = NO; self.videoRepairGeneration += 1;
   [NeoPlaybackDiagnostics record:@"video.foregroundFlush" fields:[NeoVLCFrameTap snapshot:self.movieView]];
   VLCMediaPlayerState state = self.player.state;
