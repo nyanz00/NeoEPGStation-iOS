@@ -346,6 +346,7 @@
   else if ([action isEqualToString:@"pip"]) { [self startPiP]; }
   else if ([action isEqualToString:@"subtitles"]) { [self showSubtitles]; }
   else if ([action isEqualToString:@"comments-settings"]) { [self showComments]; }
+  else if ([action isEqualToString:@"comment-list"]) { [self updateCommentState]; }
   else if ([action isEqualToString:@"scrub-begin"]) { [self beginScrubbing]; }
   else if ([action isEqualToString:@"scrub-end"]) { [self endScrubbing]; }
   else if ([action isEqualToString:@"scrub-cancel"]) { [self cancelScrubbing]; }
@@ -658,7 +659,7 @@
     self.frameTapInstalled ? self.commentPiP.status ?: @"PiP · 準備中" : @"PiP · VLCの映像出力を取得できません。",
     self.comments.enabled ? @"" : @" · 専用描画オフ"];
   [self.commentPiP updateCommentsFrom:self.comments];
-  if (self.chrome.commentVersion != self.comments.panelVersion) { [self.chrome setCommentRows:[self.comments panelComments] version:self.comments.panelVersion]; }
+  if (self.chrome.wantsCommentRows && self.chrome.commentVersion != self.comments.panelVersion) { [self.chrome setCommentRows:[self.comments panelComments] version:self.comments.panelVersion]; }
   [self.chrome updateCommentMessage:self.comments.status];
   [self.chrome refreshCommentSettings];
   [self.chrome updateDiagnostics];

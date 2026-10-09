@@ -29,6 +29,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   private var task: URLSessionDataTask?
   private var fullTask: URLSessionDataTask?
   private var rawTimeline: CommentTimeline?
+  private let timelineQueue = DispatchQueue(label: "neo.comments.timeline", qos: .userInitiated)
   private var fullLoaded = false, windowRequest = 0, contentVersion = 0
   private var previewStart = 0.0, videoDuration = 0.0
   @objc private(set) var preparationStage = "コメント字幕を確認中"
@@ -114,6 +115,8 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
         }
         returned = true
       }
+      overlay.renderedTime = 1
+      _ = overlay.clock.time(media: 1, running: true, now: 100, videoHost: 100)
       let preservedClock = overlay.renderedTime
       overlay.endSeek()
       checks["ordinaryPlayDoesNotStartSeekWarmup"] = !overlay.seeking && overlay.resumeGate == nil && overlay.renderedTime == preservedClock
@@ -123,7 +126,8 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
       var added = oldTimeline.comments[0]; added.id = 100; added.start = 10; added.end = 15.25
       overlay.rawTimeline = oldTimeline
       overlay.publish(CommentTimeline(width: oldTimeline.width, height: oldTimeline.height, comments: oldTimeline.comments+[added]))
-      checks["fullSwapKeepsVisibleIDsAndClock"] = overlay.timeline!.visible(at: 0).map(\.id) == oldTimeline.visible(at: 0).map(\.id) && overlay.renderedTime == preservedClock
+      checks["fullSwapKeepsVisibleIDsAndClock"] = overlay.timeline!.visible(at: 1).map(\.id) == oldTimeline.visible(at: 1).map(\.id) && overlay.renderedTime == preservedClock
+        && abs(overlay.clock.time(media: 1, running: true, now: 100.02, videoHost: 100.02)-1.02) < 0.001
       overlay.rawTimeline = oldRaw
       overlay.stop()
       let empty = NeoCommentOverlay(frame: .zero)
@@ -202,7 +206,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   private func sourceOpacity(_ incoming: CommentTimeline) {
     guard usesSourceOpacity, !incoming.comments.isEmpty else { return }
     opacity = Float(incoming.comments.first!.style.color.alpha)
-    mixedOpacity = Set(incoming.comments.map { $0.style.color.alpha }).count > 1
+    mixedOpacity = incoming.comments.contains { $0.style.color.alpha != incoming.comments.first!.style.color.alpha }
     if let old = UserDefaults.standard.object(forKey: "player.comments.opacity") as? Float, old.isFinite, old < 1 {
       setOpacity(opacity * max(0, old))
     }
@@ -220,6 +224,33 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     rawTimeline = raw; timeline = adjusted; contentVersion += 1
     // Do not reset clock, seek gate, texture cache or currently assigned lanes.
     refreshRendering(); onChange?()
+  }
+  private func publishFull(_ incoming: CommentTimeline, version requestVersion: Int) {
+    // Reconciliation and rebuilding the full time index must not stall Metal's
+    // main-thread draw callback after the preview has started moving.
+    let previousRaw = rawTimeline, previous = timeline, revision = contentVersion
+    let duration = videoDuration, size = sizeMultiplier, scale = renderScale, renderer = renderer
+    let moving = Dictionary(uniqueKeysWithValues: (previous?.visible(at: renderedTime) ?? []).map { ($0.id, $0) })
+    timelineQueue.async { [weak self] in
+      let began = CACurrentMediaTime()
+      let raw = previousRaw.map { incoming.preservingIDs(from: $0) } ?? incoming
+      let fitted = renderer?.fittingEnd(raw, duration: duration, size: size, pixelScale: scale) ?? raw
+      let adjusted = CommentTimeline(width: fitted.width, height: fitted.height,
+        comments: fitted.comments.map { moving[$0.id] ?? $0 })
+      DispatchQueue.main.async { [weak self] in
+        guard let self, !self.closed, self.version == requestVersion else { return }
+        guard self.contentVersion == revision, self.renderScale == scale else {
+          self.publishFull(incoming, version: requestVersion); return
+        }
+        self.renderer?.replaceTimeline(self.timeline, at: self.renderedTime)
+        self.rawTimeline = raw; self.timeline = adjusted; self.contentVersion += 1
+        self.sourceOpacity(incoming); self.ready = true; self.settled = true; self.preparationStage = ""
+        self.status = "専用描画 · \(incoming.comments.count)件"
+        self.finishPreparationIfPossible(); self.refreshRendering(); self.onChange?()
+        NeoPlaybackDiagnostics.record("comments.fullSwap", fields: ["media": self.renderedTime,
+          "count": incoming.comments.count, "durationMs": (CACurrentMediaTime()-began)*1000])
+      }
+    }
   }
   private func loadWindow(_ track: NativeCommentTrack, at time: Double) {
     guard !closed, let loader else { return }
@@ -264,10 +295,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
         self.fullTask = nil
         if case .success(let incoming) = result {
           self.warming = false; self.fullLoaded = true; self.windowRequest += 1; self.task?.cancel(); self.task = nil
-          self.publish(incoming); self.sourceOpacity(incoming); self.ready = true; self.settled = true; self.preparationStage = ""
-          self.status = "専用描画 · \(incoming.comments.count)件"
-          self.finishPreparationIfPossible(); self.refreshRendering(); self.onChange?()
-          NeoPlaybackDiagnostics.record("comments.fullSwap", fields: ["media": self.renderedTime, "count": incoming.comments.count])
+          self.publishFull(incoming, version: requestVersion)
         } else {
           // Keep the working preview; following windows can still be requested.
           NeoPlaybackDiagnostics.record("comments.fullFailed", fields: [:])

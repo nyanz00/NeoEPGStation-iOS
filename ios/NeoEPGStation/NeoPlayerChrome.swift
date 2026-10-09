@@ -414,6 +414,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     bufferProgress = active ? min(1, max(0, progress)) : nil
     updateDiagnostics()
   }
+  @objc var wantsCommentRows: Bool { panelVisible && tab == "comments" }
   @objc func setCommentRows(_ rows: [[String: Any]], version: Int) {
     commentVersion = version; comments = rows.compactMap { row in
       guard let time = row["time"] as? Double, let text = row["text"] as? String else { return nil }; return (time, text)
@@ -429,6 +430,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private func selectPanel(_ id: String, toggle: Bool) {
     if toggle && isWide && panelOpen && tab == id { setPanel(false); return }
     tab = id; renderPanel(); setPanel(true)
+    if id == "comments" { onAction?("comment-list") }
     if id == "rules" { loadRelated() }
   }
   private func setPanel(_ open: Bool) {
