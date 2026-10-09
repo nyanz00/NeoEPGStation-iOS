@@ -558,15 +558,15 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         runBackSmoke(recorded) { [weak self] correct in
           guard let self else { return }
           Task { [self] in
-          let navigationButtons = await runNavigationButtonChecks(recorded)
-          let gap = self.sidebar.logo.frame.minX - self.sidebar.brand.frame.maxX
-          NeoNative.writeSmoke("ui-gestures-smoke", ["success": correct && navigationButtons && startupDrawerWasStill && drawerClosed && popupCycles && gap == 7 && thumbnails && freshFade == 0.5 && cachedFade == 0.32,
-            "stage": "gestures", "route": self.route, "recordCount": recorded.records.count,
-            "theme": "neon-teal-dark", "uiEngine": "Swift / UIKit", "retainedList": retained,
-            "shortcuts": self.shortcuts, "brandGap": gap, "interactiveBack": correct, "thumbnailLoading": thumbnails,
-            "freshFade": freshFade, "cachedFade": cachedFade, "backDetails": self.backSmokeDetails,
-            "drawerClosedByLeftSwipe": drawerClosed, "popupCycles": popupCycles,
-            "startupDrawerDoesNotAnimate": startupDrawerWasStill, "navigationButtonReturnsThenResets": navigationButtons])
+            let navigationButtons = await self.runNavigationButtonChecks(recorded)
+            let gap = self.sidebar.logo.frame.minX - self.sidebar.brand.frame.maxX
+            NeoNative.writeSmoke("ui-gestures-smoke", ["success": correct && navigationButtons && self.startupDrawerWasStill && drawerClosed && popupCycles && gap == 7 && thumbnails && freshFade == 0.5 && cachedFade == 0.32,
+              "stage": "gestures", "route": self.route, "recordCount": recorded.records.count,
+              "theme": "neon-teal-dark", "uiEngine": "Swift / UIKit", "retainedList": retained,
+              "shortcuts": self.shortcuts, "brandGap": gap, "interactiveBack": correct, "thumbnailLoading": thumbnails,
+              "freshFade": freshFade, "cachedFade": cachedFade, "backDetails": self.backSmokeDetails,
+              "drawerClosedByLeftSwipe": drawerClosed, "popupCycles": popupCycles,
+              "startupDrawerDoesNotAnimate": self.startupDrawerWasStill, "navigationButtonReturnsThenResets": navigationButtons])
           }
         }
       }

@@ -419,6 +419,8 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
           let first = try await read(), bytes = cache.queue.sync { cache.networkBytes }
           let second = try await read()
           var checks = ["sameBytes": first == second, "rewindWithoutUpstreamRequest": cache.queue.sync { cache.networkBytes == bytes && cache.hitBytes > 0 }]
+          try? await Task.sleep(nanoseconds: 300_000_000)
+          checks["downloadedRangesPublishedWithoutExtraFetch"] = !cache.downloadedRanges.isEmpty && cache.queue.sync { cache.networkBytes == bytes }
           cache.setWarning("動画データを取得できません。再読み込みで再試行できます。", kind: "fetch")
           _ = try await read()
           checks["successfulReadClearsFetchWarning"] = cache.status.isEmpty
@@ -432,6 +434,8 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
           cache.setSeconds(30); _ = try await read()
           cache.observeTime(1000, running: true)
           checks["expiredMediaEvicted"] = cache.queue.sync { cache.blocks.isEmpty }
+          try? await Task.sleep(nanoseconds: 300_000_000)
+          checks["evictedRangesDisappear"] = cache.downloadedRanges.isEmpty
           cache.beginSeek(0)
           _ = try await read()
           checks["cacheRecreatedAfterEviction"] = cache.queue.sync { !cache.blocks.isEmpty }
