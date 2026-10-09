@@ -17,7 +17,7 @@ on:
         default: ''
         type: string
       recheck_iphone:
-        description: 'Recheck all iPhone playback and UI tests using the unchanged reused binary'
+        description: 'Recheck iPhone UI tests using the unchanged reused binary'
         required: false
         default: false
         type: boolean
@@ -145,7 +145,7 @@ jobs:
         run: |
           if [ "${{ inputs.recheck_iphone }}" = "true" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
-            python3 -u scripts/simulator-smoke.py --iphone-only
+            python3 -u scripts/simulator-smoke.py --iphone-only --ui-only
           else
             python3 -u scripts/simulator-smoke.py --prepare --no-boot
             python3 -u scripts/simulator-smoke.py --ipad-only

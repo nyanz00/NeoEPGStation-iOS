@@ -61,6 +61,8 @@ def capture_ipad(app, device):
     capture_ui(pad, 'detail', 'ui-ipad')
 
 Path('dist').mkdir(exist_ok=True)
+ui_stages = ['recorded', 'pagination', 'detail', 'record-actions', 'detail-actions', 'play-popup',
+             'list-actions', 'drop-dialog', 'menu', 'settings', 'gestures']
 device_file = Path('dist/simulator-device.json')
 if '--prepare' in sys.argv or not device_file.exists():
     available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '--json'))['devices']
@@ -85,6 +87,12 @@ if '--ipad-only' in sys.argv:
     sys.exit(0)
 run('xcrun', 'simctl', 'bootstatus', device['udid'], '-b', timeout=600)
 run('xcrun', 'simctl', 'install', device['udid'], str(app))
+if '--ui-only' in sys.argv:
+    # Recheck navigation against the exact same binary independently of the
+    # synthetic video encoder used by the native playback suite.
+    for stage in ui_stages:
+        capture_ui(device['udid'], stage, 'ui-iphone')
+    sys.exit(0)
 fixture_container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], 'io.github.nyanz00.NeoEPGStation', 'data'))
 (fixture_container / 'Documents').mkdir(exist_ok=True)
 shutil.copyfile('tests/fixtures/player-tap.ts', fixture_container / 'Documents/player-tap.ts')
@@ -182,7 +190,7 @@ del os.environ['SIMCTL_CHILD_NEO_EPG_RANGE_SMOKE']
 # Further launches check the actual UIKit Release UI and interactive transitions.
 # Fixtures are enabled only on the simulator, never in the device application.
 del os.environ['SIMCTL_CHILD_NEO_EPG_STORAGE_SMOKE']
-for stage in ['recorded', 'pagination', 'detail', 'record-actions', 'detail-actions', 'play-popup', 'list-actions', 'drop-dialog', 'menu', 'settings', 'gestures']:
+for stage in ui_stages:
     capture_ui(device['udid'], stage, 'ui-iphone')
 if '--iphone-only' not in sys.argv:
     capture_ipad(app, device)
