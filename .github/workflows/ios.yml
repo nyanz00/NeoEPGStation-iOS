@@ -21,6 +21,12 @@ on:
         required: false
         default: false
         type: boolean
+      ui_stage:
+        description: 'Optional single iPhone UI stage to recheck'
+        required: false
+        default: ''
+        type: choice
+        options: ['', recorded, pagination, detail, record-actions, detail-actions, play-popup, list-actions, drop-dialog, menu, settings, gestures]
 
 permissions:
   contents: read
@@ -126,6 +132,7 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       REUSE_RUN: ${{ inputs.reuse_run }}
+      UI_STAGE: ${{ inputs.ui_stage }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -145,7 +152,9 @@ jobs:
         run: |
           if [ "${{ inputs.recheck_iphone }}" = "true" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
-            python3 -u scripts/simulator-smoke.py --iphone-only --ui-only
+            extra=()
+            if [ -n "$UI_STAGE" ]; then extra+=("--ui-stage=$UI_STAGE"); fi
+            python3 -u scripts/simulator-smoke.py --iphone-only --ui-only "${extra[@]}"
           else
             python3 -u scripts/simulator-smoke.py --prepare --no-boot
             python3 -u scripts/simulator-smoke.py --ipad-only

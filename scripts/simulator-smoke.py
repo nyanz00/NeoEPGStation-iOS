@@ -90,7 +90,10 @@ run('xcrun', 'simctl', 'install', device['udid'], str(app))
 if '--ui-only' in sys.argv:
     # Recheck navigation against the exact same binary independently of the
     # synthetic video encoder used by the native playback suite.
-    for index, stage in enumerate(ui_stages):
+    requested_stage = next((arg.split('=', 1)[1] for arg in sys.argv if arg.startswith('--ui-stage=')), None)
+    if requested_stage is not None and requested_stage not in ui_stages:
+        raise ValueError('Unknown iPhone UI stage')
+    for index, stage in enumerate([requested_stage] if requested_stage else ui_stages):
         capture_ui(device['udid'], stage, 'ui-iphone', terminate_existing=index > 0)
     sys.exit(0)
 fixture_container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], 'io.github.nyanz00.NeoEPGStation', 'data'))
