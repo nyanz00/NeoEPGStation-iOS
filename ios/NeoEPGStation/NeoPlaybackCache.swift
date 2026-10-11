@@ -37,6 +37,9 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   private var listener: NWListener?, session: URLSession!
   private var connections: [ObjectIdentifier: NWConnection] = [:]
   private var requests: [ObjectIdentifier: URLSessionDataTask] = [:]
+  private var retries: [ObjectIdentifier: DispatchWorkItem] = [:]
+  private var retryActions: [ObjectIdentifier: () -> Void] = [:]
+  private var fetchEpoch = 0
   private var length: Int64 = 0, closed = false
   private var validator: String?, validatorHeader: String?
   private var byteClock = NeoMediaByteClock()
@@ -71,11 +74,31 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     super.init()
     Self.cleanAbandoned()
     Self.activeLock.lock(); Self.activeDirectories.insert(directory); Self.activeLock.unlock()
+    session = makeSession()
+  }
+  private func makeSession() -> URLSession {
     let config = URLSessionConfiguration.ephemeral; config.urlCache = nil
     config.requestCachePolicy = .reloadIgnoringLocalCacheData
     config.httpCookieStorage = .shared; config.urlCredentialStorage = .shared
     config.timeoutIntervalForRequest = 15; config.timeoutIntervalForResource = 20
-    session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+#if targetEnvironment(simulator)
+    if source.host == "retry.example.test" { config.protocolClasses = [NeoCacheFaultProtocol.self] }
+#endif
+    return URLSession(configuration: config, delegate: self, delegateQueue: nil)
+  }
+  private func renewUpstreamSession() {
+    let old = session; session = makeSession(); old?.finishTasksAndInvalidate()
+  }
+  // Recreate only the upstream HTTP pool; the local listener and VLC input stay.
+  @objc func resumeFetching() {
+    queue.async { [self] in
+      guard !closed, !suspended else { return }
+      renewUpstreamSession()
+      let actions = Array(retryActions.values); retryActions.removeAll()
+      retries.values.forEach { $0.cancel() }; retries.removeAll()
+      actions.forEach { $0() }
+      NeoPlaybackDiagnostics.record("range.foregroundResume", fields: ["pendingRetries": actions.count])
+    }
   }
   @objc func start(_ completion: @escaping (URL?, String?) -> Void) {
     queue.async { [self] in
@@ -180,6 +203,8 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   }
   // Suspending transport does not destroy retained video blocks or metadata.
   private func stopTransport() {
+    fetchEpoch += 1
+    retries.values.forEach { $0.cancel() }; retries.removeAll(); retryActions.removeAll()
     let old = listener; listener = nil; old?.cancel()
     requests.values.forEach { $0.cancel() }; requests.removeAll()
     let oldConnections = Array(connections.values); connections.removeAll()
@@ -247,6 +272,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
         self?.finishDelivery(connection, reason: 1)
         let id = ObjectIdentifier(connection); self?.connections.removeValue(forKey: id)
         self?.requests.removeValue(forKey: id)?.cancel()
+        self?.retries.removeValue(forKey: id)?.cancel(); self?.retryActions.removeValue(forKey: id)
         if case .failed = state { connection.cancel() }
       }
     }
@@ -357,37 +383,87 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
           }
         }
         deliver(data)
-      case .failure: self.report("動画データを取得できません。再読み込みで再試行できます。", kind: "fetch"); connection.cancel()
+      case .failure:
+        self.report("動画データを取得できません。再接続しています…", kind: "fetch")
+        self.finishDelivery(connection, reason: 4); connection.cancel()
+        DispatchQueue.main.async { [weak self] in self?.onTransportFailure?() }
       }
     }
   }
-  private func fetch(offset: Int64, count: Int, connection: NWConnection? = nil, completion: @escaping (Result<Data, Error>) -> Void) {
+  private func fetch(offset: Int64, count: Int, connection: NWConnection? = nil,
+                     attempt: Int = 0, transferBegan: Double? = nil, completion: @escaping (Result<Data, Error>) -> Void) {
+    guard !closed, !suspended else { return }
+    if let connection, connections[ObjectIdentifier(connection)] == nil { return }
     requestSequence += 1
-    let requestID = requestSequence, seek = NeoPlaybackDiagnostics.seekID, began = ProcessInfo.processInfo.systemUptime
-    NeoPlaybackDiagnostics.record("range.fetchStart", fields: ["request": requestID, "originSeek": seek, "offset": offset, "bytes": count])
+    let requestID = requestSequence, seek = NeoPlaybackDiagnostics.seekID
+    let began = ProcessInfo.processInfo.systemUptime, original = transferBegan ?? began, epoch = fetchEpoch
+    NeoPlaybackDiagnostics.record("range.fetchStart", fields: ["request": requestID, "originSeek": seek,
+      "offset": offset, "bytes": count, "attempt": attempt])
     var request = URLRequest(url: source); request.setValue("bytes=\(offset)-\(offset + Int64(count) - 1)", forHTTPHeaderField: "Range")
+    if connection != nil { request.timeoutInterval = min(15, max(1, 24-(began-original))) }
     request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
     if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
     if let validator, let validatorHeader { request.setValue(validator, forHTTPHeaderField: validatorHeader) }
     let task = session.dataTask(with: request) { [weak self] data, response, error in
       guard let self else { return }
       self.queue.async {
-        NeoPlaybackDiagnostics.record("range.fetchEnd", fields: ["request": requestID, "originSeek": seek,
-          "offset": offset, "bytes": data?.count ?? 0, "httpStatus": (response as? HTTPURLResponse)?.statusCode ?? 0,
-          "errorCode": (error as NSError?)?.code ?? 0, "durationMs": (ProcessInfo.processInfo.systemUptime - began) * 1000])
-        if let connection { self.requests.removeValue(forKey: ObjectIdentifier(connection)) }
-        guard !self.closed else { return }
-        guard error == nil, let http = response as? HTTPURLResponse, http.statusCode == 206,
-          let range = http.value(forHTTPHeaderField: "Content-Range"),
-          let total = Int64(range.split(separator: "/").last ?? ""), total > 0,
-          range.hasPrefix("bytes \(offset)-"), let data, data.count == min(count, Int(total-offset)),
-          self.length == 0 || self.length == total else { completion(.failure(error ?? URLError(.badServerResponse))); return }
-        self.length = total; self.networkBytes += Int64(data.count)
-        if self.validator == nil {
-          if let etag = http.value(forHTTPHeaderField: "ETag"), !etag.hasPrefix("W/") { self.validator = etag; self.validatorHeader = "If-Match" }
-          else if let modified = http.value(forHTTPHeaderField: "Last-Modified") { self.validator = modified; self.validatorHeader = "If-Unmodified-Since" }
+        guard !self.closed, !self.suspended, self.fetchEpoch == epoch else { return }
+        if let connection {
+          let key = ObjectIdentifier(connection)
+          guard self.connections[key] != nil, case .ready = connection.state else { return }
+          self.requests.removeValue(forKey: key)
         }
-        completion(.success(data))
+        let http = response as? HTTPURLResponse, code = (error as NSError?)?.code ?? 0
+        NeoPlaybackDiagnostics.record("range.fetchEnd", fields: ["request": requestID, "originSeek": seek,
+          "offset": offset, "bytes": data?.count ?? 0, "httpStatus": http?.statusCode ?? 0,
+          "errorCode": code, "attempt": attempt, "durationMs": (ProcessInfo.processInfo.systemUptime-began)*1000])
+        let range = http?.value(forHTTPHeaderField: "Content-Range")
+        let total = range.flatMap { Int64($0.split(separator: "/").last ?? "") } ?? 0
+        let expected = min(count, Int(max(0,total-offset)))
+        let valid = error == nil && http?.statusCode == 206 && total > 0 && expected > 0 &&
+          range == "bytes \(offset)-\(offset+Int64(expected)-1)/\(total)" && data?.count == expected &&
+          (self.length == 0 || self.length == total)
+        if valid, let data, !data.isEmpty {
+          self.length = total; self.networkBytes += Int64(data.count)
+          if self.validator == nil {
+            if let etag = http?.value(forHTTPHeaderField: "ETag"), !etag.hasPrefix("W/") { self.validator = etag; self.validatorHeader = "If-Match" }
+            else if let modified = http?.value(forHTTPHeaderField: "Last-Modified") { self.validator = modified; self.validatorHeader = "If-Unmodified-Since" }
+          }
+          if attempt > 0 {
+            self.report(nil, kind: "fetch")
+            NeoPlaybackDiagnostics.record("range.retrySucceeded", fields: ["offset": offset, "attempt": attempt,
+              "durationMs": (ProcessInfo.processInfo.systemUptime-original)*1000])
+          }
+          completion(.success(data)); return
+        }
+        let networkTransient = [-1001, -1003, -1004, -1005, -1006, -1009, -1018, -1019, -1020].contains(code)
+        let httpTransient = [408,429,500,502,503,504].contains(http?.statusCode ?? 0)
+        // Never retry a changed file, an invalid Range or authentication failure
+        // into the existing stream. Already delivered bytes must remain valid.
+        if attempt < 2 && ProcessInfo.processInfo.systemUptime-original < 24 && (networkTransient || httpTransient) {
+          self.renewUpstreamSession()
+          if connection != nil { self.report("動画データの取得を再試行しています…", kind: "fetch") }
+          NeoPlaybackDiagnostics.record("range.retry", fields: ["offset": offset, "bytes": count,
+            "attempt": attempt+1, "httpStatus": http?.statusCode ?? 0, "errorCode": code])
+          let action = { [weak self] in
+            guard let self, !self.closed, !self.suspended, self.fetchEpoch == epoch else { return }
+            self.fetch(offset: offset, count: count, connection: connection, attempt: attempt+1,
+              transferBegan: original, completion: completion)
+          }
+          if let connection {
+            let key = ObjectIdentifier(connection)
+            self.retryActions[key] = action
+            let work = DispatchWorkItem { [weak self] in
+              guard let self, let action = self.retryActions.removeValue(forKey: key) else { return }
+              self.retries.removeValue(forKey: key); action()
+            }
+            self.retries[key] = work; self.queue.asyncAfter(deadline: .now()+(attempt == 0 ? 0.25 : 0.75), execute: work)
+          } else { self.queue.asyncAfter(deadline: .now()+0.25, execute: action) }
+          return
+        }
+        NeoPlaybackDiagnostics.record("range.retryFailed", fields: ["offset": offset, "attempt": attempt,
+          "httpStatus": http?.statusCode ?? 0, "errorCode": code])
+        completion(.failure(error ?? URLError(.badServerResponse)))
       }
     }
     if let connection { requests[ObjectIdentifier(connection)] = task }; task.resume()
@@ -463,10 +539,125 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
           another.close()
           cache.close()
           checks["closeCleanup"] = cache.queue.sync { cache.closed && cache.blocks.isEmpty && !FileManager.default.fileExists(atPath: cache.directory.path) }
+          checks.merge(try await retrySmoke()) { _, new in new }
           NeoPiPSmoke.save("rewind-cache-smoke", ["success": checks.values.allSatisfy { $0 }, "checks": checks])
         } catch { NeoPiPSmoke.save("rewind-cache-smoke", ["success": false, "error": error.localizedDescription]) }
       }
     }
   }
+  @MainActor private static func retrySmoke() async throws -> [String: Bool] {
+    let source = URL(string: "https://retry.example.test/fixture")!
+    let fixture = Data(repeating: 37, count: 2*1024*1024)
+    var checks: [String: Bool] = [:]
+    func endpoint(_ cache: NeoPlaybackCache) async throws -> URL {
+      try await withCheckedThrowingContinuation { continuation in
+        cache.start { url, error in
+          if let url { continuation.resume(returning: url) }
+          else { continuation.resume(throwing: NeoError(error ?? "Fixture startup")) }
+        }
+      }
+    }
+    func read(_ url: URL) async throws -> (Data, URLResponse) {
+      var request = URLRequest(url: url); request.timeoutInterval = 4
+      request.setValue("bytes=0-1023", forHTTPHeaderField: "Range")
+      return try await URLSession.shared.data(for: request)
+    }
+    NeoCacheFaultProtocol.configure(fixture, failures: 2)
+    let cache = NeoPlaybackCache(source: source, username: "", password: "")
+    defer { cache.close() }
+    var failures = 0, warningShown = false
+    cache.onTransportFailure = { failures += 1 }
+    cache.onChange = { if cache.status.contains("再試行") { warningShown = true } }
+    let url = try await endpoint(cache)
+    let (data, response) = try await read(url)
+    checks["upstreamRetryKeepsDownstreamRangeConnection"] = data == fixture.prefix(1024) && (response as? HTTPURLResponse)?.statusCode == 206 && failures == 0
+    checks["retryUsesSameByteRange"] = NeoCacheFaultProtocol.offsets == [0,0,0]
+    checks["transientRetryWarningClearsOnSuccess"] = warningShown && cache.status.isEmpty
+    cache.close()
+
+    NeoCacheFaultProtocol.configure(fixture, failures: 1, status: 503)
+    let unavailable = NeoPlaybackCache(source: source, username: "", password: "")
+    defer { unavailable.close() }
+    let unavailableURL = try await endpoint(unavailable)
+    let (availableData, _) = try await read(unavailableURL)
+    checks["temporaryServerFailureRetriesSameRange"] = availableData == fixture.prefix(1024) && NeoCacheFaultProtocol.offsets == [0,0]
+    unavailable.close()
+
+    NeoCacheFaultProtocol.configure(fixture, failures: 1)
+    let resumed = NeoPlaybackCache(source: source, username: "", password: "")
+    defer { resumed.close() }
+    var resumedWarnings = 0
+    resumed.onChange = {
+      if resumed.status.contains("再試行") { resumedWarnings += 1; resumed.resumeFetching() }
+    }
+    let resumedURL = try await endpoint(resumed)
+    let (resumedData, _) = try await read(resumedURL)
+    try? await Task.sleep(nanoseconds: 350_000_000)
+    checks["foregroundRetryRunsOnceWithoutReplacingEndpoint"] = resumedData == fixture.prefix(1024) && resumedWarnings > 0 && NeoCacheFaultProtocol.offsets == [0,0]
+    resumed.close()
+
+    NeoCacheFaultProtocol.configure(fixture, failures: 3, status: 412)
+    let changed = NeoPlaybackCache(source: source, username: "", password: "")
+    defer { changed.close() }
+    var changedFailures = 0
+    changed.onTransportFailure = { changedFailures += 1 }
+    let changedURL = try await endpoint(changed)
+    _ = try? await read(changedURL)
+    try? await Task.sleep(nanoseconds: 150_000_000)
+    checks["changedFileIsNotRetriedIntoExistingStream"] = NeoCacheFaultProtocol.offsets == [0] && changedFailures == 1
+    changed.close()
+
+    NeoCacheFaultProtocol.configure(fixture, failures: 3)
+    let closing = NeoPlaybackCache(source: source, username: "", password: "")
+    defer { closing.close() }
+    closing.onChange = { if closing.status.contains("再試行") { closing.close() } }
+    let closingURL = try await endpoint(closing)
+    _ = try? await read(closingURL)
+    try? await Task.sleep(nanoseconds: 400_000_000)
+    checks["closeCancelsPendingUpstreamRetry"] = NeoCacheFaultProtocol.offsets == [0] && closing.queue.sync { closing.closed && closing.retryActions.isEmpty && closing.retries.isEmpty }
+    return checks
+  }
 #endif
 }
+
+#if targetEnvironment(simulator)
+// Fault injection is limited to the reserved fixture host in simulator builds.
+// It exercises real URLSession -> loopback listener -> Range delivery/retry.
+private final class NeoCacheFaultProtocol: URLProtocol {
+  private static let lock = NSLock()
+  private static var fixture = Data(), remaining = 0, failureStatus = 0, requests: [Int64] = []
+  static var offsets: [Int64] { lock.lock(); defer { lock.unlock() }; return requests }
+  static func configure(_ data: Data, failures: Int, status: Int = 0) {
+    lock.lock(); defer { lock.unlock() }
+    fixture = data; remaining = failures; failureStatus = status; requests = []
+  }
+  override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "retry.example.test" }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    guard let value = request.value(forHTTPHeaderField: "Range"), value.hasPrefix("bytes=") else {
+      client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse)); return
+    }
+    let parts = value.dropFirst(6).split(separator: "-")
+    guard parts.count == 2, let start = Int(parts[0]), let end = Int(parts[1]) else {
+      client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse)); return
+    }
+    Self.lock.lock()
+    let data = Self.fixture, status = Self.failureStatus
+    // Tiny metadata reads succeed; fail only actual media-block transfers.
+    let media = end-start+1 > 1024
+    if media { Self.requests.append(Int64(start)) }
+    let fail = media && Self.remaining > 0
+    if fail { Self.remaining -= 1 }
+    Self.lock.unlock()
+    if fail && status == 0 { client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost)); return }
+    let finish = min(end, data.count-1)
+    guard start >= 0, start <= finish else { client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse)); return }
+    let response = HTTPURLResponse(url: request.url!, statusCode: fail ? status : 206, httpVersion: "HTTP/1.1",
+      headerFields: ["Content-Range": "bytes \(start)-\(finish)/\(data.count)", "ETag": "\"fixture-v1\"", "Content-Length": "\(finish-start+1)"])!
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: data.subdata(in: start..<finish+1))
+    client?.urlProtocolDidFinishLoading(self)
+  }
+  override func stopLoading() {}
+}
+#endif

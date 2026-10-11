@@ -286,3 +286,46 @@ let terminalX = adjustedTail.scrollingX(viewportWidth: 1920,textWidth: 500,elaps
 check(terminalX+500 <= 1920 && terminalX >= 0, "Last timestamp comment enters the screen fully before EOF")
 check(terminal.comments.first(where: { $0.id == earlier.id })!.start == earlier.start, "Ordinary comment timestamps remain unchanged")
 print("Preview handoff and terminal timing: all checks passed")
+
+func outputStats(_ id: Int = 1, samples: Int, changes: Int, age: Double, scheduled: Double = 0) -> [String: NSNumber] {
+  ["outputID": NSNumber(value: id), "samples": NSNumber(value: samples), "changes": NSNumber(value: changes),
+   "contentAge": NSNumber(value: age), "scheduledInMs": NSNumber(value: scheduled), "layerStatus": 1]
+}
+let recovery = NeoVideoRecovery()
+recovery.begin(100, timeout: 10)
+_ = recovery.evaluate(outputStats(samples: 0, changes: 1, age: 0), mediaMs: 5000, now: 100)
+check(recovery.evaluate(outputStats(samples: 36, changes: 1, age: 3), mediaMs: 8000, now: 103) == 2,
+  "Repeated paused pictures with advancing audio initiate a queue flush")
+check(recovery.evaluate(outputStats(samples: 48, changes: 1, age: 4), mediaMs: 9000, now: 104) == 0,
+  "A track-selected callback or more identical pictures never confirms recovery")
+check(recovery.evaluate(outputStats(samples: 72, changes: 1, age: 6), mediaMs: 11000, now: 106) == 3,
+  "Failed flush escalates to video-track restart once")
+check(recovery.evaluate(outputStats(2, samples: 1, changes: 1, age: 0), mediaMs: 12000, now: 107) == 0,
+  "Newly created output and its first fingerprint are not recovery evidence")
+check(recovery.evaluate(outputStats(2, samples: 24, changes: 3, age: 0, scheduled: 4200), mediaMs: 13000, now: 108) == 0,
+  "Changing frames scheduled far in the future do not confirm displayed-video recovery")
+check(recovery.evaluate(outputStats(2, samples: 48, changes: 4, age: 0), mediaMs: 14000, now: 109) == 1,
+  "A new output confirms recovery only after changing pictures become due")
+
+recovery.begin(200, timeout: 10)
+_ = recovery.evaluate([:], mediaMs: 10000, now: 200)
+check(recovery.evaluate([:], mediaMs: 13000, now: 203) == 2, "Missing output is detected after the observation window")
+check(recovery.evaluate([:], mediaMs: 16000, now: 206) == 3, "Missing output still escalates")
+check(recovery.evaluate(outputStats(3, samples: 0, changes: 0, age: -1), mediaMs: 25000, now: 215) == 0,
+  "Layer recreation does not restart the repair deadline")
+check(recovery.evaluate([:], mediaMs: 26000, now: 216) == 4, "Restart without actual pictures falls back to position-preserving input recovery")
+check(recovery.evaluate([:], mediaMs: 41000, now: 231) == 5, "Recovery timeout is bounded")
+recovery.hold(240)
+check(recovery.evaluate([:], mediaMs: 50000, now: 260) == 0, "A failed recovery never loops through whole-player reloads")
+
+recovery.begin(300, timeout: 10)
+_ = recovery.evaluate(outputStats(samples: 0, changes: 1, age: 0), mediaMs: 0, now: 300)
+check(recovery.evaluate(outputStats(samples: 72, changes: 1, age: 3), mediaMs: 3000, now: 303) == 0,
+  "A normally delivered 24fps static scene does not trigger recovery")
+_ = recovery.evaluate(outputStats(samples: 108, changes: 1, age: 6), mediaMs: 6000, now: 306)
+recovery.hold(350)
+check(recovery.evaluate(outputStats(samples: 108, changes: 1, age: 50), mediaMs: 6000, now: 350) == 0,
+  "Paused or buffering time never consumes a repair deadline")
+check(recovery.evaluate(outputStats(samples: 132, changes: 3, age: 0), mediaMs: 7000, now: 351) == 1,
+  "A held repair still verifies actual picture recovery")
+print("Video-output identity, confirmed recovery and bounded escalation: all checks passed")

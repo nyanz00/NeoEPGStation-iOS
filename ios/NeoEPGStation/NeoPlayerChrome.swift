@@ -754,7 +754,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     [videoView, pipCover, videoDim].forEach { $0.transform = transform }
     let hud = CGAffineTransform(translationX: 0, y: y)
     [header, controls, centerControls, loadingButton, displayedStatus].forEach { $0.transform = hud }
-    if !orientationWasWide { panel.transform = CGAffineTransform(translationX: 0, y: y+videoView.bounds.height*(scale-1)/2) }
+    // The information panel stays fixed while only the movie previews rotation.
   }
   // Called inside the system rotation transaction, so the preview morphs into
   // the new fitted frame instead of snapping back before the screen rotates.
@@ -978,9 +978,9 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       !acceptsVideoTap(panel.convert(CGPoint(x: 10, y: 10), to: self), target: panel)
     updateOrientation(state: .began, translation: 0, velocity: -600)
     updateOrientation(state: .changed, translation: -80, velocity: -600)
-    let expands = videoView.transform.a > 1 && videoView.transform.ty < 0 && panel.transform.ty != 0
+    let expands = videoView.transform.a > 1 && videoView.transform.ty < 0 && panel.transform == .identity
     setNeedsLayout(); layoutIfNeeded()
-    let survivesLayout = videoView.transform.a > 1
+    let survivesLayout = videoView.transform.a > 1 && panel.transform == .identity
     updateOrientation(state: .cancelled, translation: -100, velocity: -600)
     let cancelled = videoView.transform == .identity && !interactionOpen && !actions.contains("orientation:landscape")
     updateOrientation(state: .began, translation: 0, velocity: -600)
@@ -999,6 +999,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     orientationViews.forEach { $0.layer.removeAllAnimations() }
     return ["movieSwipeDirection": portraitDirection && landscapeDirection,
       "movieSwipeFollowsFinger": expands && shrinks && survivesLayout,
+      "movieSwipeKeepsInformationPanelFixed": expands && survivesLayout,
       "movieSwipeCancellationRestoresFrame": cancelled,
       "movieSwipeLocksLandscapeAndPortrait": landscape && portrait,
       "movieSwipeExcludesSliderAndPanel": excluded, "movieSwipeRecognizerOnCommonAncestor": orientationPan.view === self]

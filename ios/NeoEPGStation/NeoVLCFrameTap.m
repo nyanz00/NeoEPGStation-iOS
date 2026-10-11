@@ -13,11 +13,18 @@
 @property (atomic) NSUInteger samples;
 @property (atomic) uint64_t fingerprint;
 @property (atomic) BOOL hasFingerprint;
+@property (atomic) NSUInteger outputID;
+@property (atomic) double arrivalHost;
 @end
 @implementation NeoTappedVideoLayer
 - (instancetype)init {
   self = [super init];
   if (self) {
+    static NSUInteger nextOutputID;
+    @synchronized(NeoTappedVideoLayer.class) { self.outputID = ++nextOutputID; }
+    // A decoder repair creates a new layer after the foreground notification.
+    // Arm monitoring at creation too, without flushing its empty queue.
+    self.monitorUntil = CACurrentMediaTime()+60;
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(backgrounded)
       name:UIApplicationDidEnterBackgroundNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(foregrounded)
@@ -36,10 +43,13 @@
   @synchronized(self) { [super flush]; self.monitorUntil = CACurrentMediaTime()+60; self.hasFingerprint = NO; }
 }
 - (void)flushQueue { @synchronized(self) { [super flush]; } }
+- (void)monitorContent { @synchronized(self) { self.monitorUntil = CACurrentMediaTime()+60; } }
 - (NSDictionary *)snapshot {
   @synchronized(self) {
     double now = CACurrentMediaTime();
-    return @{ @"samples": @(self.samples), @"changes": @(self.changes),
+    return @{ @"outputID": @(self.outputID), @"samples": @(self.samples), @"changes": @(self.changes),
+      @"monitoring": @(now <= self.monitorUntil), @"arrivalAge": @(self.arrivalHost > 0 ? now-self.arrivalHost : -1),
+      @"layerErrorCode": @(super.error.code),
       @"contentAge": @(self.changedHost > 0 ? now-self.changedHost : -1),
       @"scheduledInMs": @((self.scheduledHost-now)*1000), @"layerStatus": @(super.status),
       @"layerReady": @(super.readyForMoreMediaData), @"requiresFlush": @(self.requiresFlushToResumeDecoding) };
@@ -47,7 +57,7 @@
 }
 - (void)observeContent:(CMSampleBufferRef)sample {
   self.samples += 1;
-  double now = CACurrentMediaTime(); self.scheduledHost = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample));
+  double now = CACurrentMediaTime(); self.arrivalHost = now; self.scheduledHost = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample));
   if (now > self.monitorUntil || now-self.lastFingerprintHost < 0.1) { return; }
   CVPixelBufferRef pixel = CMSampleBufferGetImageBuffer(sample); if (!pixel) { return; }
   if (CVPixelBufferLockBaseAddress(pixel, kCVPixelBufferLock_ReadOnly) != kCVReturnSuccess) { return; }
@@ -78,7 +88,7 @@
   return status;
 }
 - (void)enqueueSampleBuffer:(CMSampleBufferRef)sampleBuffer {
-  [self observeContent:sampleBuffer];
+  @synchronized(self) { [self observeContent:sampleBuffer]; }
   id<NeoVideoFrameSink> sink = self.frameSink;
   if (sink && CMSampleBufferGetImageBuffer(sampleBuffer)) {
     [sink receiveVideoSampleBuffer:sampleBuffer];
@@ -100,6 +110,7 @@ static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideo
 }
 + (void)prepareForeground:(UIView *)view { [[self layerIn:view] prepareResume]; }
 + (void)flushVideoQueue:(UIView *)view { [[self layerIn:view] flushQueue]; }
++ (void)monitorContent:(UIView *)view { [[self layerIn:view] monitorContent]; }
 + (NSDictionary *)snapshot:(UIView *)view { return [[self layerIn:view] snapshot] ?: @{}; }
 + (BOOL)install {
   static BOOL installed;
@@ -124,6 +135,30 @@ static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideo
   for (UIView *child in view.subviews) { [self bindView:child sink:sink]; }
 }
 #if TARGET_OS_SIMULATOR
++ (NSDictionary<NSString *, NSNumber *> *)monitoringSmoke {
+  NeoTappedVideoLayer *old = [NeoTappedVideoLayer new], *layer = [NeoTappedVideoLayer new];
+  BOOL fresh = [[layer snapshot][@"monitoring"] boolValue] && old.outputID != layer.outputID;
+  CVPixelBufferRef pixel = NULL; CMVideoFormatDescriptionRef format = NULL; CMSampleBufferRef sample = NULL;
+  if (CVPixelBufferCreate(kCFAllocatorDefault, 16, 16, kCVPixelFormatType_32BGRA, NULL, &pixel) != kCVReturnSuccess) {
+    return @{@"freshOutputMonitored": @(fresh), @"freshOutputContentChangesMeasured": @NO};
+  }
+  CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, pixel, &format);
+  CMSampleTimingInfo timing = { kCMTimeInvalid, CMTimeMakeWithSeconds(CACurrentMediaTime(), 1000000), kCMTimeInvalid };
+  CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault, pixel, format, &timing, &sample);
+  if (sample) {
+    for (int i=0; i<3; i++) {
+      CVPixelBufferLockBaseAddress(pixel, 0);
+      memset(CVPixelBufferGetBaseAddress(pixel), 20+i, CVPixelBufferGetBytesPerRow(pixel)*16);
+      CVPixelBufferUnlockBaseAddress(pixel, 0);
+      layer.lastFingerprintHost = 0;
+      [layer observeContent:sample];
+    }
+  }
+  NSDictionary *stats = [layer snapshot];
+  BOOL measured = [stats[@"changes"] integerValue] == 3 && [stats[@"contentAge"] doubleValue] >= 0;
+  if (sample) { CFRelease(sample); } if (format) { CFRelease(format); } CVPixelBufferRelease(pixel);
+  return @{@"freshOutputMonitored": @(fresh), @"freshOutputContentChangesMeasured": @(measured)};
+}
 + (UIView *)videoViewInView:(UIView *)view {
   if ([view.layer isKindOfClass:NeoTappedVideoLayer.class]) { return view; }
   for (UIView *child in view.subviews) {

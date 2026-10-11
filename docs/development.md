@@ -2,6 +2,7 @@
 
 ## ビルド
 
+映像復旧の成功確認・原因診断・動画だけのスワイプ・上流接続の再試行は `player-output-reconnect.md` を参照する。
 コメントの初期時計、表示中の移動維持、動画の縦スワイプ、検索からの段階的な復帰は `comment-motion-swipe-navigation.md` を参照する。
 
 Swift / UIKitの型検査・テスト・ビルドは `.github/workflows/ios.yml` のmacOSランナーで行う。

@@ -13,10 +13,12 @@ NS_ASSUME_NONNULL_BEGIN
 + (BOOL)install;
 + (void)prepareForeground:(UIView *)view;
 + (void)flushVideoQueue:(UIView *)view;
++ (void)monitorContent:(UIView *)view;
 + (NSDictionary<NSString *, NSNumber *> *)snapshot:(UIView *)view;
 + (void)bindView:(UIView *)view sink:(nullable id<NeoVideoFrameSink>)sink;
 #if TARGET_OS_SIMULATOR
 + (nullable UIView *)videoViewInView:(UIView *)view;
++ (NSDictionary<NSString *, NSNumber *> *)monitoringSmoke;
 #endif
 @end
 NS_ASSUME_NONNULL_END
