@@ -31,6 +31,8 @@
   });
 }
 - (void)handleMessage:(NSString *)message logLevel:(VLCLogLevel)level context:(VLCLogContext *)context {
+  // This fixed input-loop message distinguishes EOF from a warning/error.
+  if ([message isEqualToString:@"EOF reached"]) { [NeoPlaybackDiagnostics record:@"vlc.inputEOF" fields:@{}]; }
   if (level == kVLCLogLevelError || level == kVLCLogLevelWarning) {
     // Classify locally; raw libVLC messages can include private URLs/text.
     NSInteger kind = [message containsString:@"INPUT_CONTROL_SET_TIME"] || [message containsString:@"seek"] ? 1
