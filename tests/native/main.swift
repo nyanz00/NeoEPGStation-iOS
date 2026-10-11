@@ -313,8 +313,8 @@ check(recovery.evaluate([:], mediaMs: 13000, now: 203) == 2, "Missing output is 
 check(recovery.evaluate([:], mediaMs: 16000, now: 206) == 3, "Missing output still escalates")
 check(recovery.evaluate(outputStats(3, samples: 0, changes: 0, age: -1), mediaMs: 25000, now: 215) == 0,
   "Layer recreation does not restart the repair deadline")
-check(recovery.evaluate([:], mediaMs: 26000, now: 216) == 4, "Restart without actual pictures falls back to position-preserving input recovery")
-check(recovery.evaluate([:], mediaMs: 41000, now: 231) == 5, "Recovery timeout is bounded")
+check(recovery.evaluate([:], mediaMs: 28000, now: 218) == 4, "Restart without actual pictures falls back to position-preserving input recovery")
+check(recovery.evaluate([:], mediaMs: 45000, now: 235) == 5, "Recovery timeout is bounded")
 recovery.hold(240)
 check(recovery.evaluate([:], mediaMs: 50000, now: 260) == 0, "A failed recovery never loops through whole-player reloads")
 

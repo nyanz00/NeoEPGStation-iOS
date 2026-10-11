@@ -455,7 +455,7 @@
   if (self.videoWatchPending) {
     self.videoWatchPending = NO;
     if (!self.videoRecovery) { self.videoRecovery = [NeoVideoRecovery new]; }
-    [self.videoRecovery begin:now timeout:self.networkCaching/1000.0+5];
+    [self.videoRecovery begin:now timeout:self.networkCaching/1000.0+10];
     [NeoVLCFrameTap monitorContent:self.movieView];
   }
   NSDictionary *stats = [NeoVLCFrameTap snapshot:self.movieView];

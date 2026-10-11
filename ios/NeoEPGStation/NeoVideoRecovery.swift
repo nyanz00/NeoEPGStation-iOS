@@ -10,7 +10,9 @@ final class NeoVideoRecovery: NSObject {
   private var began = 0.0, media: Int64 = 0, samples = 0, changes = 0
   @objc func begin(_ now: Double, timeout: Double) {
     stage = 0; outputID = 0; until = now+45; deadline = 0
-    repairTimeout = min(15, max(8, timeout)); began = 0
+    // Recreated output can arrive late, with network-cache look-ahead still
+    // queued. Give it time to become due before falling back to a new input.
+    repairTimeout = min(20, max(12, timeout)); began = 0
   }
   @objc func hold(_ now: Double) {
     began = 0
