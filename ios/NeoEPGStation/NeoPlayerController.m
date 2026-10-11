@@ -1702,8 +1702,15 @@
   [self.commentPiP start]; return YES;
 }
 - (void)runExitSmokeFromHost:(UIViewController *)host completion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  __block BOOL delivered = NO;
+  void (^finish)(NSDictionary *) = ^(NSDictionary *result) { if (!delivered) { delivered = YES; completion(result); } };
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(40*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    if (!delivered) { finish(@{@"success": @NO, @"error": @"interactive exit timed out", @"closing": @(self.closing),
+      @"dismissing": @(self.dismissingPlayer), @"rotating": @(self.rotatingPlayer), @"interactive": @(self.playerTransition.interactive),
+      @"hasCoordinator": @(self.transitionCoordinator != nil), @"nativeState": @(self.player.state)}); }
+  });
   [self runInteractiveBackCancellationSmoke:host completion:^(NSDictionary *drag) {
-    [self runCommittedExitSmokeFromHost:host drag:drag completion:completion];
+    [self runCommittedExitSmokeFromHost:host drag:drag completion:finish];
   }];
 }
 - (void)runInteractiveBackCancellationSmoke:(UIViewController *)host completion:(void (^)(NSDictionary *))completion {

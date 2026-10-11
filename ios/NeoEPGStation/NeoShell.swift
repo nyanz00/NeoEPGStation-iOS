@@ -50,6 +50,28 @@ final class NeoSwipeBackAnimator: NSObject, UIViewControllerAnimatedTransitionin
   func animationEnded(_ transitionCompleted: Bool) { animator = nil; onCompletion?(transitionCompleted) }
 }
 
+// UIKit creates the dismissal context on a later run-loop iteration. Keep an
+// early update/end from a short drag until that context has actually started.
+private final class NeoPlayerInteractiveTransition: UIPercentDrivenInteractiveTransition {
+  private var ready = false
+  private var pendingProgress: CGFloat?
+  private var pendingFinish: Bool?
+  override func startInteractiveTransition(_ context: UIViewControllerContextTransitioning) {
+    super.startInteractiveTransition(context)
+    DispatchQueue.main.async { [self] in
+      ready = true
+      if let progress = pendingProgress { update(progress) }
+      if let finish = pendingFinish { if finish { self.finish() } else { cancel() } }
+      pendingProgress = nil; pendingFinish = nil
+    }
+  }
+  override func update(_ percentComplete: CGFloat) {
+    if ready { super.update(percentComplete) } else { pendingProgress = percentComplete }
+  }
+  override func finish() { if ready { super.finish() } else { pendingFinish = true } }
+  override func cancel() { if ready { super.cancel() } else { pendingFinish = false } }
+}
+
 // Retained by the player: both its back button and its completed right swipe
 // dismiss through the same horizontal animator used by detail navigation.
 @objc(NeoPlayerTransition)
@@ -59,7 +81,7 @@ final class NeoPlayerTransition: NSObject, UIViewControllerTransitioningDelegate
   @objc var interactive: Bool { interaction != nil }
   @objc func beginInteractiveDismissal(_ controller: UIViewController) -> Bool {
     guard interaction == nil, controller.presentingViewController != nil, controller.transitionCoordinator == nil else { return false }
-    let driver = UIPercentDrivenInteractiveTransition(); driver.completionCurve = .easeOut
+    let driver = NeoPlayerInteractiveTransition(); driver.completionCurve = .easeOut
     interaction = driver; controller.dismiss(animated: true); return true
   }
   @objc func updateInteractiveDismissal(_ progress: CGFloat) { interaction?.update(min(1, max(0, progress))) }
