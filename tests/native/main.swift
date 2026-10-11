@@ -234,10 +234,10 @@ check(!emissionClock.ready && emissionClock.time(media: 50, running: false, now:
   "A true seek resets to the requested position, including paused seeks")
 
 var movingStyle = CommentStyle(); movingStyle.alignment = 7
-let moving = NativeComment(id: 300, layer: 0, start: 0, end: 5.25, text: "active", style: movingStyle,
+let activeEvent = NativeComment(id: 300, layer: 0, start: 0, end: 5.25, text: "active", style: movingStyle,
   motion: CommentMotion(from: CommentPoint(x: 1920, y: 0), to: CommentPoint(x: -1400, y: 0), start: 0, end: 5.25), usesDanmakuTiming: true)
-var arriving = moving; arriving.id = 301; arriving.start = 1; arriving.end = 6.25
-let movementTimeline = CommentTimeline(width: 1920, height: 1080, comments: [moving, arriving])
+var arriving = activeEvent; arriving.id = 301; arriving.start = 1; arriving.end = 6.25
+let movementTimeline = CommentTimeline(width: 1920, height: 1080, comments: [activeEvent, arriving])
 var scheduler = CommentMotionScheduler()
 let originalMoving = scheduler.visible(movementTimeline, media: 0.2, motion: 0.2)[0]
 let corrected = scheduler.visible(movementTimeline, media: 0.9, motion: 1.1)
