@@ -194,7 +194,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   }
 #if targetEnvironment(simulator)
   var smokeCurrentPage: Int { page }
-  var smokeLoadSettled: Bool { !spinner.isAnimating && requestedPage == page }
+  var smokeLoadSettled: Bool { isViewLoaded && total > 0 && !spinner.isAnimating && requestedPage == page }
   var smokeRequestedPage: Int { requestedPage }
   func smokePageSeven() { selectPage(7) }
   func smokePageOne() { selectPage(1) }

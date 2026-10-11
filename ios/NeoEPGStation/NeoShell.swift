@@ -714,6 +714,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       }
     }
     await settledNavigation()
+    guard await waitForPage(recorded, recorded.smokeRequestedPage) else { return false }
     recorded.smokePageSeven()
     guard await waitForPage(recorded, 7) else { return false }
     let oldInset = recorded.collection.contentInset
