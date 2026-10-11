@@ -17,8 +17,19 @@
 // debug messages: they can contain the server URL, credentials or track text.
 @interface NeoNativePlaybackLogger : NSObject <VLCLogging>
 @property (nonatomic) VLCLogLevel level;
++ (void)install;
 @end
 @implementation NeoNativePlaybackLogger
++ (void)install {
+  // Empty player options use the shared library. Keep its stateless logger
+  // installed: VLCKit's setter unsets libVLC's callback on logSyncQueue while
+  // in-flight callbacks synchronously wait for that very queue (RCU deadlock).
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    NeoNativePlaybackLogger *logger = [NeoNativePlaybackLogger new]; logger.level = kVLCLogLevelDebug;
+    VLCLibrary.sharedLibrary.loggers = @[logger];
+  });
+}
 - (void)handleMessage:(NSString *)message logLevel:(VLCLogLevel)level context:(VLCLogContext *)context {
   NSString *event = nil; long long first = 0, second = 0;
   if ([message hasPrefix:@"Stream buffering done ("] &&
@@ -172,8 +183,7 @@
     self.statusLabel.text = @"音声セッションを開始できませんでした。"; return;
   }
   self.player = [[VLCMediaPlayer alloc] initWithOptions:@[]];
-  NeoNativePlaybackLogger *nativeLogger = [NeoNativePlaybackLogger new]; nativeLogger.level = kVLCLogLevelDebug;
-  self.player.libraryInstance.loggers = @[nativeLogger];
+  [NeoNativePlaybackLogger install];
   self.dialogs = [[VLCDialogProvider alloc] initWithLibrary:self.player.libraryInstance customUI:YES];
   self.dialogs.customRenderer = self;
   self.player.delegate = self; self.player.drawable = self;
@@ -1203,12 +1213,16 @@
           dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             checks[@"scrubbingStaysVisible"] = @(self.chrome.controlsVisible);
             [self cancelScrubbing];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            // Verify with the same run-loop timer ordering as auto-hide.
+            // A due main-dispatch block can run before overdue NSTimers when
+            // a loaded simulator resumes the run loop.
+            NSTimer *verifyHide = [NSTimer timerWithTimeInterval:2.7 repeats:NO block:^(NSTimer *timer) {
               checks[@"scrubbingEndRestartsHide"] = self.chrome.controlsVisible ? @NO : @YES;
               checks[@"success"] = [[checks allValues] indexOfObject:@NO] == NSNotFound ? @YES : @NO;
               if (playing) { [self setPlaybackIntent:YES]; }
               completion(checks);
-            });
+            }];
+            [NSRunLoop.mainRunLoop addTimer:verifyHide forMode:NSRunLoopCommonModes];
           });
         });
       });
@@ -1507,7 +1521,6 @@
 - (void)finishClosing {
   if (self.finishedClosing) { return; } self.finishedClosing = YES;
   self.player.delegate = nil;
-  self.player.libraryInstance.loggers = nil;
   self.player.drawable = nil;
   self.dialogs.customRenderer = nil; self.dialogs = nil;
   self.username = @""; self.password = @"";
