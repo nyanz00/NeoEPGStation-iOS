@@ -963,6 +963,7 @@
 }
 - (void)foregrounded {
   if (self.closing) { return; }
+  BOOL returningFromBackground = self.inputInBackground;
   [NeoPlaybackDiagnostics record:@"lifecycle.foreground" fields:@{@"wantsPlayback": @(self.wantsPlayback), @"needsRecovery": @(self.transportSuspended), @"mediaMs": @([self mediaTime])}];
   if (self.inputInBackground) { [self.rewindCache resumeFetching]; }
   self.inputInBackground = NO;
@@ -979,6 +980,7 @@
     self.transportRecoveryAttempted = YES;
     [self reloadPlaybackAtTime:MAX(self.backgroundTime, self.lastObservedTime) completion:nil];
   } else if (self.videoResuming) {
+    if (!returningFromBackground) { return; }
     if (self.videoResumeStage == 2) {
       [self completeSeek:self.seekGeneration failed:YES];
       self.videoResumeStage = 1; self.videoResumeSeekFinished = NO;
@@ -986,7 +988,7 @@
     self.repairingVideo = YES;
     self.videoResumeDeadline = CACurrentMediaTime()+4;
     [self pollVideoResume:++self.videoResumeGeneration];
-  } else if (!self.pipActive && [[NeoVLCFrameTap snapshot:self.movieView][@"resourceInterrupted"] boolValue]) {
+  } else if (returningFromBackground && !self.pipActive && [[NeoVLCFrameTap snapshot:self.movieView][@"resourceInterrupted"] boolValue]) {
     [self rebuildVideoAtCurrentPosition];
     if (!self.videoResuming) { [self applyPlaybackIntentForced:YES]; }
   } else { [self applyPlaybackIntentForced:YES]; }
