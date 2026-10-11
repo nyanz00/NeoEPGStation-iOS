@@ -69,6 +69,15 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private let drawer = NeoSidebar(), drawerDim = UIButton(type: .custom)
   private var drawerOpen = false, drawerDragging = false, drawerStart: CGFloat = 0
   private var diagnostic = "", commentDiagnostic = ""
+#if targetEnvironment(simulator)
+  private var smokeSafeArea: UIEdgeInsets?
+#endif
+  override var safeAreaInsets: UIEdgeInsets {
+#if targetEnvironment(simulator)
+    if let smokeSafeArea { return smokeSafeArea }
+#endif
+    return super.safeAreaInsets
+  }
 
   @objc(initWithTitle:)
   init(title: String) {
@@ -688,11 +697,14 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       if action == .menu {
         drawerDragging = true; drawerStart = -drawer.bounds.width
         drawer.isHidden = false; drawerDim.isHidden = false; drawer.frame.origin.x = drawerStart
-      }
+      } else { onAction?("back-begin") }
     }
     if action == .menu && (state == .changed || state == .began) {
       drawer.frame.origin.x = min(0, max(-drawer.bounds.width, drawerStart + translation))
       drawerDim.alpha = 1 + drawer.frame.minX / max(1, drawer.bounds.width)
+    }
+    if action == .back && (state == .changed || state == .began) {
+      onAction?("back-progress:\(min(1, max(0, translation/max(1, bounds.width))))")
     }
     if [.ended, .cancelled, .failed].contains(state) {
       let threshold = action == .menu ? drawer.bounds.width * 0.5 : bounds.width * 0.28
@@ -700,7 +712,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       if navigationScrollEnabled { navigationScroll?.isScrollEnabled = true }
       navigationScroll = nil; navigationAction = nil; drawerDragging = false
       if action == .menu { setDrawer(finish) }
-      else if finish { perform("back") }
+      else { onAction?(finish ? "back-finish" : "back-cancel") }
       onAction?("interaction")
     }
   }
@@ -731,12 +743,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
         orientationDistance = max(1, bounds.height*0.35-videoView.frame.minY)
         orientationScale = 1
       } else {
-        // Reaching the top with the finger and filling the viewport are the
-        // same progress. Keep the movie's centre and information panel fixed.
-        orientationDistance = max(1, (startY ?? videoView.center.y)-safeAreaInsets.top)
-        let halfHeight = max(1, videoView.bounds.height/2)
-        orientationScale = max(1, max(videoView.center.y-safeAreaInsets.top, bounds.maxY-videoView.center.y)/halfHeight)
-        orientationScale = max(orientationScale, bounds.width/max(1, videoView.bounds.width))
+        // Only fill the space above the movie, including the status area.
+        // The lower edge stays at the information panel throughout the drag.
+        orientationDistance = max(1, videoView.frame.minY-bounds.minY)
+        orientationScale = max(1, (videoView.frame.maxY-bounds.minY)/max(1, videoView.bounds.height))
       }
       onAction?("orientation-begin"); showControls(false); updateDiagnostics()
     }
@@ -773,7 +783,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     }
     let scale = 1+min(1, orientationProgress)*(orientationScale-1)
     let transform = orientationWasWide ? CGAffineTransform(translationX: 0, y: orientationTranslation)
-      : CGAffineTransform(scaleX: scale, y: scale)
+      : CGAffineTransform(a: scale, b: 0, c: 0, d: scale, tx: 0, ty: -(scale-1)*videoView.bounds.height/2)
     [videoView, pipCover, videoDim].forEach { $0.transform = transform }
   }
   private func restoreOrientationOrder() {
@@ -981,11 +991,13 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let lower = navigationTarget(start: CGPoint(x: 200, y: 844 * 0.4), velocity: forward) == .back
     let vertical = navigationTarget(start: .zero, velocity: CGPoint(x: 100, y: 300)) == nil
     navigationAction = .back; updateNavigation(state: .began, translation: 0, velocity: 0)
+    updateNavigation(state: .changed, translation: 156, velocity: 100)
+    let following = actions.contains("back-begin") && actions.contains("back-progress:0.4") && !actions.contains("back-finish")
     updateNavigation(state: .cancelled, translation: 300, velocity: 800)
-    let cancelled = !actions.contains("back")
+    let cancelled = actions.contains("back-cancel") && !actions.contains("back-finish")
     navigationAction = .back; updateNavigation(state: .began, translation: 0, velocity: 0)
     updateNavigation(state: .ended, translation: 200, velocity: 600)
-    let completed = actions.contains("back")
+    let completed = actions.contains("back-finish")
     navigationAction = .menu; updateNavigation(state: .began, translation: 0, velocity: 0)
     updateNavigation(state: .changed, translation: 160, velocity: 600)
     let dragging = drawer.frame.minX > -drawer.bounds.width && drawerDim.alpha > 0
@@ -996,11 +1008,13 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     frame = savedFrame; onAction = handler; setNeedsLayout(); layoutIfNeeded()
     drawer.layer.removeAllAnimations(); drawerDim.layer.removeAllAnimations(); drawer.isHidden = true; drawerDim.isHidden = true
     return ["portraitSwipe40Menu60Back": top && lower, "landscapeSwipeOnlyMenu": wide,
-      "swipeBackCompletesAndCancels": completed && cancelled, "swipeDrawerOpens": dragging && opened,
+      "swipeBackCompletesAndCancels": completed && cancelled, "playerBackReportsFingerProgress": following,
+      "swipeDrawerOpens": dragging && opened,
       "verticalSwipeLeavesScrolling": vertical, "rootNavigationGesture": navigationPan.view === self]
   }
   private func runOrientationChecks() -> [String: Bool] {
     let savedFrame = frame, handler = onAction, savedHUD = controlsVisible
+    let savedSafeArea = smokeSafeArea; smokeSafeArea = UIEdgeInsets(top: 60, left: 0, bottom: 34, right: 0)
     var actions: [String] = []; onAction = { actions.append($0) }
     frame = CGRect(x: 0, y: 0, width: 390, height: 844); setNeedsLayout(); layoutIfNeeded()
     let portraitDirection = orientationDirection(CGPoint(x: 0, y: -600)) && !orientationDirection(CGPoint(x: 0, y: 600))
@@ -1010,14 +1024,15 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     updateOrientation(state: .began, translation: 0)
     let hidden = !controlsVisible
     let upDistance = orientationDistance
-    let videoCentre = videoView.center
+    let videoBottom = videoView.frame.maxY, videoTop = videoView.frame.minY
     let fixedViews = [header, controls, centerControls, loadingButton, displayedStatus, panel]
     let fixedFrames = fixedViews.map(\.frame)
     updateOrientation(state: .changed, translation: -upDistance*0.5)
-    let expands = videoView.transform.a > 1 && videoView.transform.ty == 0 && videoView.center == videoCentre
+    let expands = videoView.transform.a > 1 && abs(videoView.frame.maxY-videoBottom) < 0.5 &&
+      abs(videoView.frame.minY-videoTop/2) < 0.5
     let fixed = zip(fixedViews, fixedFrames).allSatisfy { $0.0.frame == $0.1 && $0.0.transform == .identity }
     setNeedsLayout(); layoutIfNeeded()
-    let survivesLayout = videoView.transform.a > 1 && videoView.center == videoCentre &&
+    let survivesLayout = videoView.transform.a > 1 && abs(videoView.frame.maxY-videoBottom) < 0.5 &&
       zip(fixedViews, fixedFrames).allSatisfy { $0.0.frame == $0.1 && $0.0.transform == .identity }
     updateOrientation(state: .cancelled, translation: -upDistance*0.5)
     let cancelled = videoView.transform == .identity && !interactionOpen && !actions.contains("orientation:landscape")
@@ -1025,12 +1040,13 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     updateOrientation(state: .changed, translation: -orientationDistance*0.99)
     let below = !actions.contains("orientation:landscape")
     updateOrientation(state: .changed, translation: -orientationDistance)
-    let fullViewport = videoView.frame.minY <= safeAreaInsets.top+1 && videoView.frame.maxY >= bounds.maxY-1 &&
+    let upperGapFilled = abs(videoView.frame.minY-bounds.minY) < 1 && abs(videoView.frame.maxY-videoBottom) < 0.5 &&
       videoView.frame.minX <= 1 && videoView.frame.maxX >= bounds.maxX-1
     let landscape = actions.filter { $0 == "orientation:landscape" }.count == 1 && orientationPending
     updateOrientation(state: .ended, translation: -orientationDistance)
     let once = actions.filter { $0 == "orientation:landscape" }.count == 1
     finishOrientationTransition()
+    smokeSafeArea = UIEdgeInsets(top: 0, left: 60, bottom: 21, right: 60)
     frame = CGRect(x: 0, y: 0, width: 844, height: 390); setNeedsLayout(); layoutIfNeeded()
     let landscapeDirection = orientationDirection(CGPoint(x: 0, y: 600)) && !orientationDirection(CGPoint(x: 0, y: -600))
     let wideFrame = videoView.frame
@@ -1047,17 +1063,17 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let unlimited = abs(videoView.transform.ty-downDistance*3) < 1 && videoView.transform.a == 1
     updateOrientation(state: .ended, translation: downDistance*3)
     finishOrientationTransition()
-    frame = savedFrame; onAction = handler; showControls(savedHUD); setNeedsLayout(); layoutIfNeeded()
+    smokeSafeArea = savedSafeArea; frame = savedFrame; onAction = handler; showControls(savedHUD); setNeedsLayout(); layoutIfNeeded()
     orientationViews.forEach { $0.layer.removeAllAnimations() }
     return ["movieSwipeDirection": portraitDirection && landscapeDirection,
       "movieSwipeFollowsFinger": expands && translates && survivesLayout,
       "movieSwipeKeepsInformationPanelFixed": expands && survivesLayout,
-      "movieSwipeKeepsPortraitVideoCentre": expands && survivesLayout,
+      "movieSwipeKeepsPortraitVideoBottom": expands && survivesLayout,
       "movieSwipeKeepsHUDFixed": fixed && survivesLayout,
       "movieSwipeCancellationRestoresFrame": cancelled,
       "movieSwipeLocksLandscapeAndPortrait": landscape && portrait,
       "movieSwipeTriggersBeforeFingerRelease": below && landscape && notEarly && portrait && once,
-      "movieSwipeTriggerMatchesViewport": fullViewport && triggerPosition,
+      "movieSwipeTriggerMatchesUpperGap": upperGapFilled && triggerPosition,
       "movieSwipeDownHasNoTranslationCap": unlimited,
       "movieSwipeHidesControls": hidden,
       "movieSwipeExcludesSliderAndPanel": excluded, "movieSwipeRecognizerOnCommonAncestor": orientationPan.view === self]

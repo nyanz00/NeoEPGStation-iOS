@@ -23,6 +23,8 @@ struct NeoDestination {
 @objc(NeoSwipeBackAnimator)
 final class NeoSwipeBackAnimator: NSObject, UIViewControllerAnimatedTransitioning {
   private var animator: UIViewPropertyAnimator?
+  var curve: UIView.AnimationCurve = .linear
+  var onCompletion: ((Bool) -> Void)?
   func transitionDuration(using transitionContext: UIViewControllerContextTransitioning?) -> TimeInterval {
     UIAccessibility.isReduceMotionEnabled ? 0.01 : 0.3
   }
@@ -36,7 +38,7 @@ final class NeoSwipeBackAnimator: NSObject, UIViewControllerAnimatedTransitionin
     let container = context.containerView, width = container.bounds.width
     to.frame = context.finalFrame(for: target); container.insertSubview(to, belowSubview: from)
     to.transform = CGAffineTransform(translationX: -width * 0.25, y: 0)
-    let animator = UIViewPropertyAnimator(duration: transitionDuration(using: context), curve: .linear) {
+    let animator = UIViewPropertyAnimator(duration: transitionDuration(using: context), curve: curve) {
       from.transform = CGAffineTransform(translationX: width, y: 0); to.transform = .identity
     }
     animator.addCompletion { position in
@@ -45,15 +47,35 @@ final class NeoSwipeBackAnimator: NSObject, UIViewControllerAnimatedTransitionin
     }
     self.animator = animator; return animator
   }
-  func animationEnded(_ transitionCompleted: Bool) { animator = nil }
+  func animationEnded(_ transitionCompleted: Bool) { animator = nil; onCompletion?(transitionCompleted) }
 }
 
 // Retained by the player: both its back button and its completed right swipe
 // dismiss through the same horizontal animator used by detail navigation.
 @objc(NeoPlayerTransition)
 final class NeoPlayerTransition: NSObject, UIViewControllerTransitioningDelegate {
+  private var interaction: UIPercentDrivenInteractiveTransition?
+  @objc var onCompletion: ((Bool) -> Void)?
+  @objc var interactive: Bool { interaction != nil }
+  @objc func beginInteractiveDismissal(_ controller: UIViewController) -> Bool {
+    guard interaction == nil, controller.presentingViewController != nil, controller.transitionCoordinator == nil else { return false }
+    let driver = UIPercentDrivenInteractiveTransition(); driver.completionCurve = .easeOut
+    interaction = driver; controller.dismiss(animated: true); return true
+  }
+  @objc func updateInteractiveDismissal(_ progress: CGFloat) { interaction?.update(min(1, max(0, progress))) }
+  @objc func endInteractiveDismissal(_ finish: Bool) {
+    if finish { interaction?.finish() } else { interaction?.cancel() }
+  }
   func animationController(forDismissed dismissed: UIViewController) -> UIViewControllerAnimatedTransitioning? {
-    NeoSwipeBackAnimator()
+    let animator = NeoSwipeBackAnimator()
+    animator.curve = interactive ? .linear : .easeOut
+    animator.onCompletion = { [weak self] completed in
+      guard let self else { return }; self.interaction = nil; self.onCompletion?(completed)
+    }
+    return animator
+  }
+  func interactionControllerForDismissal(using animator: UIViewControllerAnimatedTransitioning) -> UIViewControllerInteractiveTransitioning? {
+    interaction
   }
 }
 

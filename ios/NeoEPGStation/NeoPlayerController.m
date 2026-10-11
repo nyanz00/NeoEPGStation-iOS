@@ -165,6 +165,16 @@
 @property (nonatomic) NSNumber *videoResumeDeferredTime;
 @property (nonatomic, copy) dispatch_block_t videoResumeDeferredCompletion;
 @property (nonatomic) NeoPlayerTransition *playerTransition;
+@property (nonatomic) UIView *rotationContainer;
+@property (nonatomic) UIViewPropertyAnimator *rotationAnimator;
+@property (nonatomic) BOOL rotatingPlayer;
+@property (nonatomic) NSInteger rotationGeneration;
+@property (nonatomic) NSTimeInterval playerRotationDuration;
+@property (nonatomic) NSTimeInterval systemRotationDuration;
+@property (nonatomic) BOOL dismissingPlayer;
+@property (nonatomic, weak) UIViewController *dismissalPresenter;
+@property (nonatomic, weak) UIWindowScene *dismissalScene;
+@property (nonatomic) NeoPlayerController *closingRetain;
 #if TARGET_OS_SIMULATOR
 @property (nonatomic) CGRect smokeSavedFrame;
 @property (nonatomic) BOOL smokeStopVideoResume;
@@ -192,7 +202,13 @@
   self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
   self.chrome = [[NeoPlayerChrome alloc] initWithTitle:self.mediaTitle];
   self.chrome.frame = self.view.bounds; self.chrome.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-  [self.view addSubview:self.chrome];
+  self.rotationContainer = [[UIView alloc] initWithFrame:self.view.bounds];
+  [self.view addSubview:self.rotationContainer]; [self.rotationContainer addSubview:self.chrome];
+  __weak typeof(self) transitionSelf = self;
+  self.playerTransition.onCompletion = ^(BOOL completed) {
+    transitionSelf.dismissingPlayer = NO;
+    if (completed) { [transitionSelf completePlayerDismissal]; }
+  };
   if (self.recordingContext) { [self.chrome configure:self.recordingContext]; }
   self.movieView = self.chrome.videoView;
   self.statusLabel = self.chrome.statusLabel; self.statusLabel.text = @"PLAY · 準備中";
@@ -325,8 +341,10 @@
 }
 
 - (void)applyPlayerLayout:(CGSize)size {
+  if (self.rotatingPlayer) { return; }
   BOOL changed = self.landscape != (size.width > size.height);
   self.landscape = size.width > size.height;
+  self.rotationContainer.frame = CGRectMake(0, 0, size.width, size.height);
   self.chrome.frame = CGRectMake(0, 0, size.width, size.height);
   [self.chrome setNeedsLayout]; [self.chrome layoutIfNeeded];
   [self alignVideoOutput];
@@ -335,13 +353,55 @@
 - (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; [self applyPlayerLayout:self.view.bounds.size]; }
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
   [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+  CGFloat angle = atan2(coordinator.targetTransform.b, coordinator.targetTransform.a);
+  if (fabs(angle) > 0.01 && !self.closing && !self.dismissingPlayer) {
+    [self animatePlayerRotationToSize:size coordinator:coordinator]; return;
+  }
   [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context) {
     [self.chrome finishOrientationTransition];
     [self applyPlayerLayout:size];
   } completion:nil];
 }
+- (void)animatePlayerRotationToSize:(CGSize)size coordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+  [self.rotationAnimator stopAnimation:YES];
+  self.rotatingPlayer = YES; NSInteger generation = ++self.rotationGeneration;
+  self.systemRotationDuration = coordinator.transitionDuration;
+  self.playerRotationDuration = UIAccessibilityIsReduceMotionEnabled() ? 0.01 : MIN(0.28, coordinator.transitionDuration*0.8);
+  self.landscape = size.width > size.height; [self setNeedsStatusBarAppearanceUpdate];
+  self.chrome.autoresizingMask = UIViewAutoresizingNone;
+  CGAffineTransform rotation = coordinator.targetTransform;
+  // Cancel UIKit's window rotation on an owned child, never on the controller's
+  // root view. Its live video/UI then rotate with a separate, shorter animator.
+  [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+    self.rotationContainer.bounds = (CGRect){CGPointZero, size};
+    self.rotationContainer.center = CGPointMake(size.width/2, size.height/2);
+    self.rotationContainer.transform = CGAffineTransformInvert(rotation);
+    self.chrome.center = CGPointMake(size.width/2, size.height/2);
+    // Start outside the coordinator's inherited animation transaction.
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (!self.rotatingPlayer || self.rotationGeneration != generation) { return; }
+      self.rotationAnimator = [[UIViewPropertyAnimator alloc] initWithDuration:self.playerRotationDuration
+        curve:UIViewAnimationCurveEaseInOut animations:^{
+          [self.chrome finishOrientationTransition];
+          self.chrome.bounds = (CGRect){CGPointZero, size}; self.chrome.transform = rotation;
+          [self.chrome setNeedsLayout]; [self.chrome layoutIfNeeded]; [self alignVideoOutput];
+        }];
+      [self.rotationAnimator startAnimation];
+    });
+  } completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+    if (self.rotationGeneration != generation) { return; }
+    [self.rotationAnimator stopAnimation:YES]; self.rotationAnimator = nil;
+    [UIView performWithoutAnimation:^{
+      self.rotationContainer.transform = CGAffineTransformIdentity; self.chrome.transform = CGAffineTransformIdentity;
+      self.chrome.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+      self.rotatingPlayer = NO; [self.chrome finishOrientationTransition]; [self applyPlayerLayout:self.view.bounds.size];
+    }];
+  }];
+  [NeoPlaybackDiagnostics record:@"ui.orientationAnimation" fields:@{@"durationMs": @(self.playerRotationDuration*1000),
+    @"systemMs": @(self.systemRotationDuration*1000), @"angle": @(atan2(rotation.b, rotation.a))}];
+}
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations { return self.orientationMask; }
-- (BOOL)shouldAutorotate { return YES; }
+- (BOOL)shouldAutorotate { return !self.dismissingPlayer; }
 - (BOOL)prefersStatusBarHidden { return self.landscape; }
 - (UIStatusBarStyle)preferredStatusBarStyle { return UIStatusBarStyleLightContent; }
 - (BOOL)prefersHomeIndicatorAutoHidden { return self.landscape && !self.chrome.controlsVisible; }
@@ -375,6 +435,15 @@
 }
 - (void)performPlayerAction:(NSString *)action {
   if (self.closing) { return; }
+  if ([action hasPrefix:@"back-"]) {
+    if ([action isEqualToString:@"back-begin"]) { [self beginPlayerDismissal:YES]; }
+    else if ([action hasPrefix:@"back-progress:"]) { [self.playerTransition updateInteractiveDismissal:[action substringFromIndex:14].doubleValue]; }
+    else if ([action isEqualToString:@"back-finish"] || [action isEqualToString:@"back-cancel"]) {
+      [self.playerTransition endInteractiveDismissal:[action isEqualToString:@"back-finish"]];
+    }
+    return;
+  }
+  if (self.dismissingPlayer) { return; }
   if ([action isEqualToString:@"toggle-controls"]) { [self toggleControls]; return; }
   if ([action isEqualToString:@"orientation-begin"] || [action hasPrefix:@"orientation:"]) {
     [self hideControls];
@@ -1633,6 +1702,30 @@
   [self.commentPiP start]; return YES;
 }
 - (void)runExitSmokeFromHost:(UIViewController *)host completion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  [self runInteractiveBackCancellationSmoke:host completion:^(NSDictionary *drag) {
+    [self runCommittedExitSmokeFromHost:host drag:drag completion:completion];
+  }];
+}
+- (void)runInteractiveBackCancellationSmoke:(UIViewController *)host completion:(void (^)(NSDictionary *))completion {
+  VLCMedia *media = self.player.media; NSURL *endpoint = self.playbackURL;
+  [self performPlayerAction:@"back-begin"];
+  [self performPlayerAction:@"back-progress:0.4"];
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    CGFloat position = self.view.layer.presentationLayer.transform.m41;
+    BOOL following = self.playerTransition.interactive && self.transitionCoordinator.isInteractive &&
+      fabs(self.transitionCoordinator.percentComplete-0.4) < 0.02 && position > 1 && position < self.view.bounds.size.width-1;
+    BOOL early = self.dismissingPlayer && !self.closing && self.player.media == media;
+    [self performPlayerAction:@"back-cancel"];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      BOOL retained = !self.dismissingPlayer && !self.closing && !self.playerTransition.interactive &&
+        host.presentedViewController == self && self.player.media == media && [endpoint isEqual:self.playbackURL] &&
+        CGAffineTransformIsIdentity(self.view.transform);
+      completion(@{@"playerBackTracksFinger": @(following), @"cancelledPlayerBackKeepsInput": @(retained),
+        @"playerDismissalStartsBeforeNativeStop": @(early), @"dragX": @(position)});
+    });
+  });
+}
+- (void)runCommittedExitSmokeFromHost:(UIViewController *)host drag:(NSDictionary *)drag completion:(void (^)(NSDictionary<NSString *, id> *))completion {
   BOOL horizontalDismissal = self.transitioningDelegate == self.playerTransition &&
     [[self.playerTransition animationControllerForDismissedController:self] isKindOfClass:NeoSwipeBackAnimator.class];
   [self setOrientation:@"landscape"];
@@ -1640,15 +1733,24 @@
     if (!locked) { completion(@{@"success": @NO, @"landscapeBeforeExit": @NO}); return; }
     self.onNavigate = ^(NSString *route) {
       [self waitForHostPortrait:host attempt:0 completion:^(BOOL portrait) {
-        completion(@{@"success": portrait && horizontalDismissal && [route isEqualToString:@"recorded"] ? @YES : @NO,
+        BOOL faster = self.playerRotationDuration > 0 && self.playerRotationDuration < self.systemRotationDuration;
+        BOOL cleanRotation = !self.rotatingPlayer && CGAffineTransformIsIdentity(self.rotationContainer.transform) && CGAffineTransformIsIdentity(self.chrome.transform);
+        NSMutableDictionary *result = [@{@"success": portrait && horizontalDismissal && faster && cleanRotation &&
+            [drag[@"playerBackTracksFinger"] boolValue] && [drag[@"cancelledPlayerBackKeepsInput"] boolValue] &&
+            [drag[@"playerDismissalStartsBeforeNativeStop"] boolValue] && [route isEqualToString:@"recorded"] ? @YES : @NO,
           @"playerUsesHorizontalBackAnimator": @(horizontalDismissal), @"landscapeBeforeExit": @YES,
+          @"playerRotationUsesShorterDuration": @(faster), @"playerRotationRestoresTransforms": @(cleanRotation),
+          @"playerRotationDurationMs": @(self.playerRotationDuration*1000), @"systemRotationDurationMs": @(self.systemRotationDuration*1000),
           @"sidebarRouteDelivered": [route isEqualToString:@"recorded"] ? @YES : @NO, @"hostPortraitAfterExit": portrait ? @YES : @NO,
           @"hostPortraitOnly": host.supportedInterfaceOrientations == UIInterfaceOrientationMaskPortrait ? @YES : @NO,
           @"hostClass": NSStringFromClass(host.class), @"hostOrientationMask": @(host.supportedInterfaceOrientations),
-          @"sceneOrientation": @(host.view.window.windowScene.interfaceOrientation), @"hostFrame": NSStringFromCGRect(host.view.bounds)});
+          @"sceneOrientation": @(host.view.window.windowScene.interfaceOrientation), @"hostFrame": NSStringFromCGRect(host.view.bounds)} mutableCopy];
+        [result addEntriesFromDictionary:drag]; completion(result);
       }];
     };
-    [self performPlayerAction:@"navigate:recorded"];
+    self.pendingRoute = @"recorded";
+    [self performPlayerAction:@"back-begin"]; [self performPlayerAction:@"back-progress:0.65"];
+    [self performPlayerAction:@"back-finish"];
   }];
 }
 - (void)waitForHostPortrait:(UIViewController *)host attempt:(NSInteger)attempt completion:(void (^)(BOOL))completion {
@@ -1794,7 +1896,25 @@
 - (BOOL)isMediaPlaying { return self.player.isPlaying; }
 
 - (void)closePlayer {
+  [self beginPlayerDismissal:NO];
+}
+- (void)beginPlayerDismissal:(BOOL)interactive {
+  if (self.closing || self.dismissingPlayer || self.rotatingPlayer || self.transitionCoordinator) { return; }
+  self.dismissalPresenter = self.view.window.rootViewController ?: self.presentingViewController;
+  self.dismissalScene = self.view.window.windowScene;
+  self.dismissingPlayer = YES;
+  if (interactive) {
+    if (![self.playerTransition beginInteractiveDismissal:self]) { self.dismissingPlayer = NO; }
+  } else { [self dismissViewControllerAnimated:YES completion:nil]; }
+}
+- (void)completePlayerDismissal {
   if (self.closing) { return; }
+  // A cancelled drag never tears down playback. On success the UI has already
+  // returned; retain native resources until VLC's asynchronous stop completes.
+  self.closingRetain = self;
+  [self.dismissalPresenter setNeedsUpdateOfSupportedInterfaceOrientations];
+  [self.dismissalScene requestGeometryUpdateWithPreferences:[[UIWindowSceneGeometryPreferencesIOS alloc]
+    initWithInterfaceOrientations:UIInterfaceOrientationMaskPortrait] errorHandler:nil];
   [NeoPlaybackDiagnostics record:@"player.close" fields:@{}];
   [self sampleHistory]; [self.history finish]; self.closing = YES;
   [self cancelVideoResume];
@@ -1834,17 +1954,10 @@
   void (^navigate)(NSString *) = self.onNavigate; self.onNavigate = nil;
   void (^recording)(NSInteger) = self.onRecording; self.onRecording = nil;
   NSString *route = self.pendingRoute; NSInteger recordingID = self.pendingRecording;
-  UIViewController *presenter = self.view.window.rootViewController ?: self.presentingViewController;
-  UIWindowScene *scene = self.view.window.windowScene;
-  [self dismissViewControllerAnimated:YES completion:^{
-    // Reset the scene as well as the mask: a manually locked landscape scene
-    // can otherwise stay horizontal after the player has been dismissed.
-    [presenter setNeedsUpdateOfSupportedInterfaceOrientations];
-    [scene requestGeometryUpdateWithPreferences:[[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:UIInterfaceOrientationMaskPortrait] errorHandler:nil];
-    if (callback) { callback(); }
-    if (route && navigate) { navigate(route); }
-    else if (recordingID > 0 && recording) { recording(recordingID); }
-  }];
+  if (callback) { callback(); }
+  if (route && navigate) { navigate(route); }
+  else if (recordingID > 0 && recording) { recording(recordingID); }
+  self.playerTransition.onCompletion = nil; self.closingRetain = nil;
 }
 - (void)dealloc { [self.nowPlaying stop]; [self.timer invalidate]; [self.controlsHideTimer invalidate]; [NSNotificationCenter.defaultCenter removeObserver:self]; }
 @end
