@@ -698,12 +698,22 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
   private func runNavigationButtonChecks(_ recorded: NeoRecordedPage) async -> Bool {
     func waitForPage(_ list: NeoRecordedPage, _ page: Int) async -> Bool {
-      for _ in 0..<30 {
-        if list.smokeCurrentPage == page { return true }
+      for _ in 0..<60 {
+        if list.smokeLoadSettled && list.smokeCurrentPage == page { return true }
         try? await Task.sleep(nanoseconds: 100_000_000)
       }
+      backSmokeDetails["pageWaitFailure"] = ["expected": page, "actual": list.smokeCurrentPage,
+        "requested": list.smokeRequestedPage, "settled": list.smokeLoadSettled,
+        "root": list === recorded, "stack": active?.viewControllers.count ?? 0]
       return false
     }
+    func settledNavigation() async {
+      for _ in 0..<60 {
+        if active?.transitionCoordinator == nil { return }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+      }
+    }
+    await settledNavigation()
     recorded.smokePageSeven()
     guard await waitForPage(recorded, 7) else { return false }
     let oldInset = recorded.collection.contentInset
@@ -728,7 +738,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     // A detail opened from a search must return to that same filtered list.
     let search = NeoRecordedPage(shell: self, keyword: "サンプル")
     active?.pushViewController(search, animated: false); view.layoutIfNeeded()
-    try? await Task.sleep(nanoseconds: 500_000_000)
+    await settledNavigation()
+    guard await waitForPage(search, 1) else { return false }
     search.smokePageSeven()
     guard await waitForPage(search, 7) else { return false }
     openDetail(NeoRecordedPage.fixtures.records[0])
@@ -745,7 +756,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     guard await waitForPage(recorded, 7) else { return false }
     let directSearch = NeoRecordedPage(shell: self, keyword: "サンプル")
     active?.pushViewController(directSearch, animated: false); view.layoutIfNeeded()
-    try? await Task.sleep(nanoseconds: 500_000_000)
+    await settledNavigation()
+    guard await waitForPage(directSearch, 1) else { return false }
     selectDestination("recorded")
     try? await Task.sleep(nanoseconds: 500_000_000)
     let directReturn = active?.topViewController === recorded && recorded.smokeCurrentPage == 7
