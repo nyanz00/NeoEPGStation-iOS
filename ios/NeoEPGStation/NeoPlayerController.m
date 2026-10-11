@@ -559,6 +559,8 @@
   } else if (self.videoResumeStage == 2 && self.videoResumeSeekFinished &&
       [stats[@"outputID"] integerValue] > 0 && [stats[@"outputID"] integerValue] != self.videoResumeOldOutput &&
       [stats[@"samples"] integerValue] > 0 && ![stats[@"resourceInterrupted"] boolValue] &&
+      [stats[@"scheduledInMs"] doubleValue] >= -500 && [stats[@"scheduledInMs"] doubleValue] <= 100 &&
+      llabs([self mediaTime]-self.videoResumeTime) < 500 &&
       [stats[@"layerStatus"] integerValue] != AVQueuedSampleBufferRenderingStatusFailed) {
     NSNumber *deferred = self.videoResumeDeferredTime;
     dispatch_block_t completion = self.videoResumeDeferredCompletion; self.videoResumeDeferredCompletion = nil;
