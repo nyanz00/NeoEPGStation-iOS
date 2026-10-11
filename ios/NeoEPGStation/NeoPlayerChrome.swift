@@ -30,6 +30,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private let orientationPan = UIPanGestureRecognizer()
   private var orientationProgress: CGFloat = 0
   private var orientationDragging = false, orientationPending = false, orientationWasWide = false
+  private var orientationDistance: CGFloat = 1, orientationScale: CGFloat = 1, orientationTranslation: CGFloat = 0
+  private var orientationPreviewRaised = false
   private var orientationCompletion: DispatchWorkItem?
   private var navigationStart = CGPoint.zero, navigationAction: NeoSwipeAction?
   private weak var navigationScroll: UIScrollView?
@@ -342,6 +344,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     }
   }
   @objc var controlsVisible: Bool { hudVisible }
+  @objc var loadingVisible: Bool { !loadingButton.isHidden }
   @objc func updatePiP(_ active: Bool) {
     // Cover the drawable rather than hiding it: VLC must keep supplying frames
     // for the PiP compositor, including while the app remains in foreground.
@@ -411,8 +414,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let progress = bufferProgress.map { String(format: "バッファリング %.0f%%", $0*100) }
     displayedStatus.text = [loadingMessage, progress].compactMap { $0 }.joined(separator: "\n")
     if !busy { displayedStatus.text = important ? status : nil }
-    displayedStatus.isHidden = pipShowing || (!busy && !important)
-    loadingButton.isHidden = pipShowing || !busy
+    displayedStatus.isHidden = pipShowing || orientationDragging || orientationPending || (!busy && !important)
+    loadingButton.isHidden = pipShowing || orientationDragging || orientationPending || !busy
     if busy { loadingSpinner.startAnimating() } else { loadingSpinner.stopAnimating() }
     playButton.setImage(busy ? nil : playerIcon(playButton.accessibilityLabel == "一時停止" ? "Pause" : "PlayArrow", side: 60), for: .normal)
     loadingButton.accessibilityLabel = "\(displayedStatus.text ?? "読み込み中")、\(playButton.accessibilityLabel ?? "再生・一時停止")"
@@ -716,41 +719,66 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     !interactionOpen && !pipShowing && abs(velocity.y) > abs(velocity.x)*1.2 && (isWide ? velocity.y > 0 : velocity.y < 0)
   }
   @objc private func dragOrientation(_ gesture: UIPanGestureRecognizer) {
-    updateOrientation(state: gesture.state, translation: gesture.translation(in: self).y, velocity: gesture.velocity(in: self).y)
+    updateOrientation(state: gesture.state, translation: gesture.translation(in: self).y,
+      startY: gesture.location(in: self).y-gesture.translation(in: self).y)
   }
-  private func updateOrientation(state: UIGestureRecognizer.State, translation: CGFloat, velocity: CGFloat) {
+  private func updateOrientation(state: UIGestureRecognizer.State, translation: CGFloat, startY: CGFloat? = nil) {
     if state == .began {
       orientationCompletion?.cancel(); orientationWasWide = isWide; orientationDragging = true
-      orientationProgress = 0; onAction?("interaction")
+      orientationPending = false; orientationProgress = 0; orientationTranslation = 0
+      if orientationWasWide {
+        // Match the pictured lower position; translation itself has no cap.
+        orientationDistance = max(1, bounds.height*0.35-videoView.frame.minY)
+        orientationScale = 1
+      } else {
+        // Reaching the top with the finger and filling the viewport are the
+        // same progress. Keep the movie's centre and information panel fixed.
+        orientationDistance = max(1, (startY ?? videoView.center.y)-safeAreaInsets.top)
+        let halfHeight = max(1, videoView.bounds.height/2)
+        orientationScale = max(1, max(videoView.center.y-safeAreaInsets.top, bounds.maxY-videoView.center.y)/halfHeight)
+        orientationScale = max(orientationScale, bounds.width/max(1, videoView.bounds.width))
+      }
+      onAction?("orientation-begin"); showControls(false); updateDiagnostics()
     }
     guard orientationDragging else { return }
-    let distance = min(180, max(100, videoView.bounds.height*0.6))
     let directed = orientationWasWide ? translation : -translation
-    orientationProgress = min(1, max(0, directed/distance))
+    orientationTranslation = max(0, directed)
+    orientationProgress = max(0, directed/orientationDistance)
     applyOrientationPreview()
+    if (state == .changed || state == .ended) && orientationProgress >= 1 && !orientationPending {
+      commitOrientationPreview()
+    }
     if [.ended, .cancelled, .failed].contains(state) {
-      let directedVelocity = orientationWasWide ? velocity : -velocity
-      let finish = state == .ended && directed > 16 && (orientationProgress >= 0.35 || directedVelocity > 550)
       orientationDragging = false
-      if finish {
-        orientationPending = true
-        onAction?(orientationWasWide ? "orientation:portrait" : "orientation:landscape")
-        // Geometry requests can be denied (e.g. an embedding container). Never
-        // leave a transformed drawable or a permanently locked gesture behind.
-        let fallback = DispatchWorkItem { [weak self] in self?.cancelOrientationPreview() }
-        orientationCompletion = fallback
-        DispatchQueue.main.asyncAfter(deadline: .now()+0.8, execute: fallback)
-      } else { cancelOrientationPreview() }
+      if !orientationPending { cancelOrientationPreview() }
     }
   }
+  private func commitOrientationPreview() {
+    orientationPending = true
+    let fallback = DispatchWorkItem { [weak self] in self?.cancelOrientationPreview() }
+    orientationCompletion = fallback
+    // This is only cleanup for a denied rotation, not a delay before rotation.
+    DispatchQueue.main.asyncAfter(deadline: .now()+0.8, execute: fallback)
+    onAction?(orientationWasWide ? "orientation:portrait" : "orientation:landscape")
+  }
   private func applyOrientationPreview() {
-    guard orientationProgress > 0, orientationWasWide == isWide else { return }
-    let p = orientationProgress
-    // Scale the movie and its comments about their existing centre. The swipe
-    // must not translate the movie, HUD or information panel vertically.
-    let scale: CGFloat = orientationWasWide ? 1-p*0.22 : 1+p*0.14
-    let transform = CGAffineTransform(scaleX: scale, y: scale)
+    guard orientationWasWide == isWide else { return }
+    if orientationProgress <= 0 {
+      [videoView, pipCover, videoDim].forEach { $0.transform = .identity }
+      restoreOrientationOrder(); return
+    }
+    if !orientationPreviewRaised {
+      // The fixed information panel must not mask the expanding movie.
+      [videoView, pipCover, videoDim].forEach(bringSubviewToFront); orientationPreviewRaised = true
+    }
+    let scale = 1+min(1, orientationProgress)*(orientationScale-1)
+    let transform = orientationWasWide ? CGAffineTransform(translationX: 0, y: orientationTranslation)
+      : CGAffineTransform(scaleX: scale, y: scale)
     [videoView, pipCover, videoDim].forEach { $0.transform = transform }
+  }
+  private func restoreOrientationOrder() {
+    guard orientationPreviewRaised else { return }; orientationPreviewRaised = false
+    for (index, view) in [videoView, pipCover, videoDim].enumerated() { insertSubview(view, at: index) }
   }
   // Called inside the system rotation transaction, so the preview morphs into
   // the new fitted frame instead of snapping back before the screen rotates.
@@ -758,14 +786,20 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     orientationCompletion?.cancel(); orientationCompletion = nil
     orientationDragging = false; orientationPending = false; orientationProgress = 0
     orientationViews.forEach { $0.transform = .identity }
+    restoreOrientationOrder()
+    updateDiagnostics()
   }
   @objc func cancelOrientationPreview() {
     orientationCompletion?.cancel(); orientationCompletion = nil
     orientationDragging = false; orientationPending = false; orientationProgress = 0
+    updateDiagnostics()
     UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.22, delay: 0,
       options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]) {
       self.orientationViews.forEach { $0.transform = .identity }
-    } completion: { [weak self] _ in self?.onAction?("interaction") }
+    } completion: { [weak self] _ in
+      guard let self, !self.orientationDragging && !self.orientationPending else { return }
+      self.restoreOrientationOrder()
+    }
   }
   func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { comments.count }
   func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -966,45 +1000,66 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       "verticalSwipeLeavesScrolling": vertical, "rootNavigationGesture": navigationPan.view === self]
   }
   private func runOrientationChecks() -> [String: Bool] {
-    let savedFrame = frame, handler = onAction
+    let savedFrame = frame, handler = onAction, savedHUD = controlsVisible
     var actions: [String] = []; onAction = { actions.append($0) }
     frame = CGRect(x: 0, y: 0, width: 390, height: 844); setNeedsLayout(); layoutIfNeeded()
     let portraitDirection = orientationDirection(CGPoint(x: 0, y: -600)) && !orientationDirection(CGPoint(x: 0, y: 600))
     let excluded = !acceptsVideoTap(timeline.convert(CGPoint(x: 10, y: 10), to: self), target: timeline) &&
       !acceptsVideoTap(panel.convert(CGPoint(x: 10, y: 10), to: self), target: panel)
-    updateOrientation(state: .began, translation: 0, velocity: -600)
+    showControls(true)
+    updateOrientation(state: .began, translation: 0)
+    let hidden = !controlsVisible
+    let upDistance = orientationDistance
     let videoCentre = videoView.center
     let fixedViews = [header, controls, centerControls, loadingButton, displayedStatus, panel]
     let fixedFrames = fixedViews.map(\.frame)
-    updateOrientation(state: .changed, translation: -80, velocity: -600)
+    updateOrientation(state: .changed, translation: -upDistance*0.5)
     let expands = videoView.transform.a > 1 && videoView.transform.ty == 0 && videoView.center == videoCentre
     let fixed = zip(fixedViews, fixedFrames).allSatisfy { $0.0.frame == $0.1 && $0.0.transform == .identity }
     setNeedsLayout(); layoutIfNeeded()
     let survivesLayout = videoView.transform.a > 1 && videoView.center == videoCentre &&
       zip(fixedViews, fixedFrames).allSatisfy { $0.0.frame == $0.1 && $0.0.transform == .identity }
-    updateOrientation(state: .cancelled, translation: -100, velocity: -600)
+    updateOrientation(state: .cancelled, translation: -upDistance*0.5)
     let cancelled = videoView.transform == .identity && !interactionOpen && !actions.contains("orientation:landscape")
-    updateOrientation(state: .began, translation: 0, velocity: -600)
-    updateOrientation(state: .ended, translation: -120, velocity: -600)
-    let landscape = actions.contains("orientation:landscape") && orientationPending
+    updateOrientation(state: .began, translation: 0)
+    updateOrientation(state: .changed, translation: -orientationDistance*0.99)
+    let below = !actions.contains("orientation:landscape")
+    updateOrientation(state: .changed, translation: -orientationDistance)
+    let fullViewport = videoView.frame.minY <= safeAreaInsets.top+1 && videoView.frame.maxY >= bounds.maxY-1 &&
+      videoView.frame.minX <= 1 && videoView.frame.maxX >= bounds.maxX-1
+    let landscape = actions.filter { $0 == "orientation:landscape" }.count == 1 && orientationPending
+    updateOrientation(state: .ended, translation: -orientationDistance)
+    let once = actions.filter { $0 == "orientation:landscape" }.count == 1
     finishOrientationTransition()
     frame = CGRect(x: 0, y: 0, width: 844, height: 390); setNeedsLayout(); layoutIfNeeded()
     let landscapeDirection = orientationDirection(CGPoint(x: 0, y: 600)) && !orientationDirection(CGPoint(x: 0, y: -600))
-    updateOrientation(state: .began, translation: 0, velocity: 600)
-    updateOrientation(state: .changed, translation: 80, velocity: 600)
-    let shrinks = videoView.transform.a < 1 && videoView.transform.ty == 0
-    updateOrientation(state: .ended, translation: 120, velocity: 600)
-    let portrait = actions.contains("orientation:portrait")
+    let wideFrame = videoView.frame
+    updateOrientation(state: .began, translation: 0)
+    let downDistance = orientationDistance
+    updateOrientation(state: .changed, translation: downDistance*0.5)
+    let translates = videoView.transform.a == 1 && videoView.frame.size == wideFrame.size &&
+      abs(videoView.frame.minY-wideFrame.minY-downDistance*0.5) < 1
+    let notEarly = !actions.contains("orientation:portrait")
+    updateOrientation(state: .changed, translation: downDistance)
+    let portrait = actions.filter { $0 == "orientation:portrait" }.count == 1 && orientationPending
+    let triggerPosition = abs(videoView.frame.minY-bounds.height*0.35) < 1
+    updateOrientation(state: .changed, translation: downDistance*3)
+    let unlimited = abs(videoView.transform.ty-downDistance*3) < 1 && videoView.transform.a == 1
+    updateOrientation(state: .ended, translation: downDistance*3)
     finishOrientationTransition()
-    frame = savedFrame; onAction = handler; setNeedsLayout(); layoutIfNeeded()
+    frame = savedFrame; onAction = handler; showControls(savedHUD); setNeedsLayout(); layoutIfNeeded()
     orientationViews.forEach { $0.layer.removeAllAnimations() }
     return ["movieSwipeDirection": portraitDirection && landscapeDirection,
-      "movieSwipeFollowsFinger": expands && shrinks && survivesLayout,
+      "movieSwipeFollowsFinger": expands && translates && survivesLayout,
       "movieSwipeKeepsInformationPanelFixed": expands && survivesLayout,
-      "movieSwipeKeepsVideoVerticalPosition": expands && survivesLayout && shrinks,
+      "movieSwipeKeepsPortraitVideoCentre": expands && survivesLayout,
       "movieSwipeKeepsHUDFixed": fixed && survivesLayout,
       "movieSwipeCancellationRestoresFrame": cancelled,
       "movieSwipeLocksLandscapeAndPortrait": landscape && portrait,
+      "movieSwipeTriggersBeforeFingerRelease": below && landscape && notEarly && portrait && once,
+      "movieSwipeTriggerMatchesViewport": fullViewport && triggerPosition,
+      "movieSwipeDownHasNoTranslationCap": unlimited,
+      "movieSwipeHidesControls": hidden,
       "movieSwipeExcludesSliderAndPanel": excluded, "movieSwipeRecognizerOnCommonAncestor": orientationPan.view === self]
   }
   private func panelTabRowsAligned() -> Bool {

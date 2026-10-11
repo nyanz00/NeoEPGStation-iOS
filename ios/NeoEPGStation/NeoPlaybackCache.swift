@@ -59,6 +59,19 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   }
   private var deliverySequence = 0
   private var deliveries: [ObjectIdentifier: Delivery] = [:]
+  private func recordConnectionEnd(_ connection: NWConnection, state: Int, error: NWError? = nil) {
+    var domain = 0, code = 0
+    if let error {
+      switch error {
+      case .posix(let value): domain = 1; code = Int(value.rawValue)
+      case .dns(let value): domain = 2; code = Int(value)
+      case .tls(let value): domain = 3; code = Int(value)
+      @unknown default: domain = 4
+      }
+    }
+    NeoPlaybackDiagnostics.record("range.connectionEnd", fields: ["delivery": deliveries[ObjectIdentifier(connection)]?.id ?? 0,
+      "state": state, "errorDomain": domain, "errorCode": code, "closing": closed, "suspended": suspended])
+  }
   private func finishDelivery(_ connection: NWConnection, reason: Int) {
     guard let entry = deliveries.removeValue(forKey: ObjectIdentifier(connection)) else { return }
     NeoPlaybackDiagnostics.record("range.deliveryEnd", fields: ["delivery": entry.id, "originSeek": entry.seek,
@@ -269,6 +282,8 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
       let terminal: Bool
       switch state { case .cancelled, .failed: terminal = true; default: terminal = false }
       if terminal, let connection {
+        if case .failed(let error) = state { self?.recordConnectionEnd(connection, state: 2, error: error) }
+        else { self?.recordConnectionEnd(connection, state: 1) }
         self?.finishDelivery(connection, reason: 1)
         let id = ObjectIdentifier(connection); self?.connections.removeValue(forKey: id)
         self?.requests.removeValue(forKey: id)?.cancel()
@@ -317,7 +332,10 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     }
   }
   private func send(_ connection: NWConnection, _ header: String, then: @escaping () -> Void) {
-    connection.send(content: Data(header.utf8), completion: .contentProcessed { error in if error == nil { then() } else { connection.cancel() } })
+    connection.send(content: Data(header.utf8), completion: .contentProcessed { [weak self] error in
+      if let error { self?.recordConnectionEnd(connection, state: 3, error: error); connection.cancel() }
+      else { then() }
+    })
   }
   private func pump(_ connection: NWConnection, offset: Int64, end: Int64) {
     guard !closed, !suspended, connections[ObjectIdentifier(connection)] != nil, offset <= end, case .ready = connection.state else {
@@ -342,7 +360,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
             self.deliveries[key] = entry
           }
           self.pump(connection, offset: offset + Int64(amount), end: end)
-        } else { self.finishDelivery(connection, reason: 3); connection.cancel() }
+        } else { self.recordConnectionEnd(connection, state: 4, error: error); self.finishDelivery(connection, reason: 3); connection.cancel() }
       })
     }
     if var block = blocks[aligned], let data = try? Data(contentsOf: file(aligned)), data.count == block.count {

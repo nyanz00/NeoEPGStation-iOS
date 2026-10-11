@@ -20,6 +20,7 @@ struct NeoDestination {
 
 // A public UIKit interactive transition, rather than forwarding touches into
 // UINavigationController's private edge-gesture implementation.
+@objc(NeoSwipeBackAnimator)
 final class NeoSwipeBackAnimator: NSObject, UIViewControllerAnimatedTransitioning {
   private var animator: UIViewPropertyAnimator?
   func transitionDuration(using transitionContext: UIViewControllerContextTransitioning?) -> TimeInterval {
@@ -45,6 +46,15 @@ final class NeoSwipeBackAnimator: NSObject, UIViewControllerAnimatedTransitionin
     self.animator = animator; return animator
   }
   func animationEnded(_ transitionCompleted: Bool) { animator = nil }
+}
+
+// Retained by the player: both its back button and its completed right swipe
+// dismiss through the same horizontal animator used by detail navigation.
+@objc(NeoPlayerTransition)
+final class NeoPlayerTransition: NSObject, UIViewControllerTransitioningDelegate {
+  func animationController(forDismissed dismissed: UIViewController) -> UIViewControllerAnimatedTransitioning? {
+    NeoSwipeBackAnimator()
+  }
 }
 
 class NeoPage: UIViewController {

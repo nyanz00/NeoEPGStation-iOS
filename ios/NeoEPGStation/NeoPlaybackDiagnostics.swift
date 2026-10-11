@@ -9,9 +9,12 @@ final class NeoPlaybackDiagnostics: NSObject {
   private static var started = ProcessInfo.processInfo.systemUptime
   private static var currentSeek = 0
   private static var awaitingVideo = false
+  private static var nativeErrors: [Int: Int] = [:]
+  private static var nativeErrorPending = false, nativeErrorGeneration = 0
   @objc static var seekID: Int { lock.lock(); defer { lock.unlock() }; return currentSeek }
   @objc static func begin() {
-    lock.lock(); events.removeAll(); started = ProcessInfo.processInfo.systemUptime; currentSeek = 0; awaitingVideo = false; lock.unlock()
+    lock.lock(); events.removeAll(); started = ProcessInfo.processInfo.systemUptime; currentSeek = 0; awaitingVideo = false
+    nativeErrors.removeAll(); nativeErrorPending = false; nativeErrorGeneration += 1; lock.unlock()
     record("session.start", fields: ["rewindSeconds": NeoPlaybackCache.savedSeconds,
       "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"])
   }
@@ -32,6 +35,21 @@ final class NeoPlaybackDiagnostics: NSObject {
     row["event"] = event; row["elapsed"] = ProcessInfo.processInfo.systemUptime - started; row["seek"] = currentSeek
     events.append(row)
     if events.count > 4096 { events.removeFirst(256) }
+  }
+  // Fixed categories only: 0 other, 1 seek, 2 EOF, 3 read, 4 connection,
+  // 5 decoder, 6 demux. Counts preserve storms without flooding the UI/log.
+  @objc(nativeError:level:) static func nativeError(_ kind: Int, level: Int) {
+    lock.lock()
+    let key = kind*10+level
+    nativeErrors[key, default: 0] += 1
+    guard !nativeErrorPending else { lock.unlock(); return }
+    nativeErrorPending = true; let token = nativeErrorGeneration; lock.unlock()
+    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now()+0.1) {
+      lock.lock()
+      guard token == nativeErrorGeneration else { lock.unlock(); return }
+      let counts = nativeErrors; nativeErrors.removeAll(); nativeErrorPending = false; lock.unlock()
+      for (key, count) in counts { record("vlc.inputWarning", fields: ["kind": key/10, "level": key%10, "notifications": count]) }
+    }
   }
   @objc static func exportURL() -> URL? {
     lock.lock(); let snapshot = events; lock.unlock()
