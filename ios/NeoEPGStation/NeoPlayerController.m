@@ -1183,16 +1183,27 @@
     BOOL sameInput = self.player.media == media && [endpoint isEqual:self.playbackURL] && self.reloadGeneration == reload;
     BOOL pausedPosition = !self.wantsPlayback && llabs([self mediaTime]-time) < 500;
     NSInteger changes = [stats[@"changes"] integerValue];
+    NSInteger samples = [stats[@"samples"] integerValue];
     NSInteger decoded = self.player.media.statistics.decodedVideo;
     [self setPlaybackIntent:YES];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
       NSDictionary *current = [NeoVLCFrameTap snapshot:self.movieView];
+      // libVLC publishes cumulative statistics from its input loop, not at
+      // every displayed frame. Read-ahead can leave that snapshot unchanged
+      // while queued decoded pictures are correctly being displayed.
+      // Require changing, due pictures, not repeated paused-frame delivery.
       BOOL advancing = self.player.isPlaying && [self mediaTime] > time+1000 &&
-        self.player.media.statistics.decodedVideo > decoded && [current[@"changes"] integerValue] > changes;
+        [current[@"samples"] integerValue] >= samples+24 && [current[@"changes"] integerValue] >= changes+3 &&
+        [current[@"contentAge"] doubleValue] >= 0 && [current[@"contentAge"] doubleValue] < 0.5 &&
+        fabs([current[@"scheduledInMs"] doubleValue]) < 100;
       completion(@{@"success": @((BOOL)(preparing && sameInput && pausedPosition && advancing)),
         @"interruptedVideoRebuiltWithoutInputReload": @((BOOL)(preparing && sameInput)),
         @"interruptedVideoKeepsPausedPosition": @(pausedPosition),
-        @"interruptedVideoResumesDecodedPictures": @(advancing)});
+        @"interruptedVideoResumesDecodedPictures": @(advancing),
+        @"resumedPictureChanges": @([current[@"changes"] integerValue]-changes),
+        @"resumedSamples": @([current[@"samples"] integerValue]-samples),
+        @"resumedMediaAdvanceMs": @([self mediaTime]-time),
+        @"resumedDecodedSnapshotDelta": @(self.player.media.statistics.decodedVideo-decoded)});
     }); return;
   }
   if (attempt >= 100) {
