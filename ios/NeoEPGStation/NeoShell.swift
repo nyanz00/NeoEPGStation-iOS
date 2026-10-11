@@ -723,9 +723,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     recorded.collection.setContentOffset(CGPoint(x: 0, y: 40), animated: false)
     let offset = recorded.collection.contentOffset
     openDetail(NeoRecordedPage.fixtures.records[0])
-    try? await Task.sleep(nanoseconds: 500_000_000)
+    await settledNavigation()
     selectDestination("recorded")
-    try? await Task.sleep(nanoseconds: 500_000_000)
+    await settledNavigation()
     let returned = active?.topViewController === recorded && recorded.smokeCurrentPage == 7 && recorded.collection.contentOffset == offset
     selectDestination("recorded")
     guard await waitForPage(recorded, 1) else { return false }
@@ -744,12 +744,12 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     search.smokePageSeven()
     guard await waitForPage(search, 7) else { return false }
     openDetail(NeoRecordedPage.fixtures.records[0])
-    try? await Task.sleep(nanoseconds: 500_000_000)
+    await settledNavigation()
     selectDestination("recorded")
-    try? await Task.sleep(nanoseconds: 500_000_000)
+    await settledNavigation()
     let searchReturned = active?.topViewController === search && search.smokeCurrentPage == 7
     selectDestination("recorded")
-    try? await Task.sleep(nanoseconds: 500_000_000)
+    await settledNavigation()
     let searchReturnsOriginal = active?.topViewController === recorded && recorded.smokeCurrentPage == 7 && recorded.collection.contentOffset == searchOffset
     selectDestination("recorded")
     let searchReset = await waitForPage(recorded, 1)
@@ -760,7 +760,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     await settledNavigation()
     guard await waitForPage(directSearch, 1) else { return false }
     selectDestination("recorded")
-    try? await Task.sleep(nanoseconds: 500_000_000)
+    await settledNavigation()
     let directReturn = active?.topViewController === recorded && recorded.smokeCurrentPage == 7
     selectDestination("recorded")
     let directReset = await waitForPage(recorded, 1)
