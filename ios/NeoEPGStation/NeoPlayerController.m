@@ -982,6 +982,7 @@
     self.transportRecoveryAttempted = YES;
     [self reloadPlaybackAtTime:MAX(self.backgroundTime, self.lastObservedTime) completion:nil];
   } else if (self.videoResuming) {
+    self.repairingVideo = YES;
     if (!returningFromBackground) { return; }
     if (self.videoResumeStage == 2) {
       [self completeSeek:self.seekGeneration failed:YES];
@@ -1188,8 +1189,8 @@
       NSDictionary *current = [NeoVLCFrameTap snapshot:self.movieView];
       BOOL advancing = self.player.isPlaying && [self mediaTime] > time+1000 &&
         self.player.media.statistics.decodedVideo > decoded && [current[@"changes"] integerValue] > changes;
-      completion(@{@"success": @(preparing && sameInput && pausedPosition && advancing),
-        @"interruptedVideoRebuiltWithoutInputReload": @(preparing && sameInput),
+      completion(@{@"success": @((BOOL)(preparing && sameInput && pausedPosition && advancing)),
+        @"interruptedVideoRebuiltWithoutInputReload": @((BOOL)(preparing && sameInput)),
         @"interruptedVideoKeepsPausedPosition": @(pausedPosition),
         @"interruptedVideoResumesDecodedPictures": @(advancing)});
     }); return;

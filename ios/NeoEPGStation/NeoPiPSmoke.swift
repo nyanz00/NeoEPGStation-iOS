@@ -112,9 +112,19 @@ enum NeoPiPSmoke {
         writer.add(input)
         guard writer.startWriting() else { throw CommentParseError.invalid("合成動画の準備") }
         writer.startSession(atSourceTime: .zero)
-        let pixel = try colorPixel(kCVPixelFormatType_32BGRA)
         let deadline = Date().addingTimeInterval(20)
         for frame in 0..<480 {
+          // Each submitted buffer is immutable after append. A changing
+          // background lets recovery checks distinguish real decoded pictures
+          // from repeated delivery of a paused image.
+          let pixel = try colorPixel(kCVPixelFormatType_32BGRA)
+          CVPixelBufferLockBaseAddress(pixel, [])
+          let bytes = CVPixelBufferGetBaseAddress(pixel)!.assumingMemoryBound(to: UInt8.self)
+          let stride = CVPixelBufferGetBytesPerRow(pixel)
+          for y in 0..<360 { for x in 0..<640 {
+            bytes[y * stride + x * 4] = UInt8(30 + frame % 180)
+          } }
+          CVPixelBufferUnlockBaseAddress(pixel, [])
           while !input.isReadyForMoreMediaData && Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
           guard Date() < deadline, adaptor.append(pixel, withPresentationTime: CMTime(value: Int64(frame), timescale: 24)) else {
             throw CommentParseError.invalid("合成動画の書き込み")
