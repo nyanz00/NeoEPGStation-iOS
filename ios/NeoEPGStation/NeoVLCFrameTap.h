@@ -17,6 +17,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSDictionary<NSString *, NSNumber *> *)snapshot:(UIView *)view;
 + (void)bindView:(UIView *)view sink:(nullable id<NeoVideoFrameSink>)sink;
 #if TARGET_OS_SIMULATOR
++ (void)simulateResourceInterruption:(UIView *)view;
 + (nullable UIView *)videoViewInView:(UIView *)view;
 + (NSDictionary<NSString *, NSNumber *> *)monitoringSmoke;
 #endif

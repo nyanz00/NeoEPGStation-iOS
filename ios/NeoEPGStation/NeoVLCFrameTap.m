@@ -15,6 +15,7 @@
 @property (atomic) BOOL hasFingerprint;
 @property (atomic) NSUInteger outputID;
 @property (atomic) double arrivalHost;
+@property (atomic) BOOL resourceInterrupted;
 @end
 @implementation NeoTappedVideoLayer
 - (instancetype)init {
@@ -40,7 +41,14 @@
   [self prepareResume];
 }
 - (void)prepareResume {
-  @synchronized(self) { [super flush]; self.monitorUntil = CACurrentMediaTime()+60; self.hasFingerprint = NO; }
+  @synchronized(self) {
+    // flush clears AVFoundation's error, but cannot rebuild VLC's decoder.
+    // Preserve evidence of revoked resources across notification ordering.
+    if (super.requiresFlushToResumeDecoding || super.error.code == AVErrorOperationInterrupted) {
+      self.resourceInterrupted = YES;
+    }
+    [super flush]; self.monitorUntil = CACurrentMediaTime()+60; self.hasFingerprint = NO;
+  }
 }
 - (void)flushQueue { @synchronized(self) { [super flush]; } }
 - (void)monitorContent { @synchronized(self) { self.monitorUntil = CACurrentMediaTime()+60; } }
@@ -49,6 +57,7 @@
     double now = CACurrentMediaTime();
     return @{ @"outputID": @(self.outputID), @"samples": @(self.samples), @"changes": @(self.changes),
       @"monitoring": @(now <= self.monitorUntil), @"arrivalAge": @(self.arrivalHost > 0 ? now-self.arrivalHost : -1),
+      @"resourceInterrupted": @(self.resourceInterrupted),
       @"layerErrorCode": @(super.error.code),
       @"contentAge": @(self.changedHost > 0 ? now-self.changedHost : -1),
       @"scheduledInMs": @((self.scheduledHost-now)*1000), @"layerStatus": @(super.status),
@@ -80,6 +89,10 @@
 }
 - (AVQueuedSampleBufferRenderingStatus)status {
   AVQueuedSampleBufferRenderingStatus status = super.status;
+  if (status == AVQueuedSampleBufferRenderingStatusFailed &&
+      (super.requiresFlushToResumeDecoding || super.error.code == AVErrorOperationInterrupted)) {
+    self.resourceInterrupted = YES;
+  }
   // The inactive inline layer can lose renderer resources in the background.
   // VLC must still deliver decoded frames to the separate active PiP source.
   if (status == AVQueuedSampleBufferRenderingStatusFailed && (self.appBackground || self.frameSink.capturingForPiP)) {
@@ -112,6 +125,12 @@ static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideo
 + (void)flushVideoQueue:(UIView *)view { [[self layerIn:view] flushQueue]; }
 + (void)monitorContent:(UIView *)view { [[self layerIn:view] monitorContent]; }
 + (NSDictionary *)snapshot:(UIView *)view { return [[self layerIn:view] snapshot] ?: @{}; }
+#if TARGET_OS_SIMULATOR
++ (void)simulateResourceInterruption:(UIView *)view {
+  // Exercise the real decoder/output replacement while the media is paused.
+  [self layerIn:view].resourceInterrupted = YES;
+}
+#endif
 + (BOOL)install {
   static BOOL installed;
   static dispatch_once_t once;
@@ -138,6 +157,8 @@ static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideo
 + (NSDictionary<NSString *, NSNumber *> *)monitoringSmoke {
   NeoTappedVideoLayer *old = [NeoTappedVideoLayer new], *layer = [NeoTappedVideoLayer new];
   BOOL fresh = [[layer snapshot][@"monitoring"] boolValue] && old.outputID != layer.outputID;
+  old.resourceInterrupted = YES; [old prepareResume];
+  BOOL interrupted = [[old snapshot][@"resourceInterrupted"] boolValue] && ![[layer snapshot][@"resourceInterrupted"] boolValue];
   CVPixelBufferRef pixel = NULL; CMVideoFormatDescriptionRef format = NULL; CMSampleBufferRef sample = NULL;
   if (CVPixelBufferCreate(kCFAllocatorDefault, 16, 16, kCVPixelFormatType_32BGRA, NULL, &pixel) != kCVReturnSuccess) {
     return @{@"freshOutputMonitored": @(fresh), @"freshOutputContentChangesMeasured": @NO};
@@ -157,7 +178,7 @@ static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideo
   NSDictionary *stats = [layer snapshot];
   BOOL measured = [stats[@"changes"] integerValue] == 3 && [stats[@"contentAge"] doubleValue] >= 0;
   if (sample) { CFRelease(sample); } if (format) { CFRelease(format); } CVPixelBufferRelease(pixel);
-  return @{@"freshOutputMonitored": @(fresh), @"freshOutputContentChangesMeasured": @(measured)};
+  return @{@"freshOutputMonitored": @(fresh), @"freshOutputContentChangesMeasured": @(measured), @"interruptedResourceSurvivesDisplayFlush": @(interrupted)};
 }
 + (UIView *)videoViewInView:(UIView *)view {
   if ([view.layer isKindOfClass:NeoTappedVideoLayer.class]) { return view; }

@@ -137,8 +137,19 @@
 @property (nonatomic) BOOL videoWatchPending;
 @property (nonatomic) NeoVideoRecovery *videoRecovery;
 @property (nonatomic) NSInteger lastVideoOutputID;
-@property (nonatomic) NSInteger videoRepairGeneration;
 @property (nonatomic) BOOL repairingVideo;
+@property (nonatomic) BOOL videoResuming;
+@property (nonatomic) BOOL videoResumePriming;
+@property (nonatomic) BOOL videoResumeSeekFinished;
+@property (nonatomic) NSInteger videoResumeStage;
+@property (nonatomic) NSInteger videoResumeGeneration;
+@property (nonatomic) NSInteger videoResumeOldOutput;
+@property (nonatomic) NSTimeInterval videoResumeDeadline;
+@property (nonatomic) int64_t videoResumeTime;
+@property (nonatomic) VLCMedia *videoResumeMedia;
+@property (nonatomic, copy) NSString *videoResumeTrack;
+@property (nonatomic) NSNumber *videoResumeDeferredTime;
+@property (nonatomic, copy) dispatch_block_t videoResumeDeferredCompletion;
 #if TARGET_OS_SIMULATOR
 @property (nonatomic) CGRect smokeSavedFrame;
 #endif
@@ -419,6 +430,8 @@
 }
 - (void)reloadPlaybackAtTime:(int64_t)time completion:(dispatch_block_t)completion {
   if (self.closing || self.reloading) { if (completion) { completion(); } return; }
+  [NeoPlaybackDiagnostics record:@"input.reloadRequested" fields:@{@"targetMs": @(time), @"videoResume": @(self.videoResuming), @"videoRepairStage": @(self.videoRecovery.stage)}];
+  [self cancelVideoResume];
   NSInteger generation = ++self.reloadGeneration;
   [self sampleHistory]; [self.history flush];
   self.reloadTime = MAX(0, time); self.reloadPlaying = self.wantsPlayback;
@@ -458,7 +471,7 @@
 }
 - (void)checkVideoRecovery {
   NSTimeInterval now = CACurrentMediaTime();
-  if (self.closing || self.inputInBackground || self.pipActive || self.reloading || self.seeking ||
+  if (self.closing || self.inputInBackground || self.pipActive || self.reloading || self.videoResuming || self.seeking ||
       self.buffering || !self.wantsPlayback || !self.player.isPlaying) {
     [self.videoRecovery hold:now]; return;
   }
@@ -493,20 +506,79 @@
     // A bounded fallback only after the output repair failed verification.
     [self reloadPlaybackAtTime:[self mediaTime] completion:nil]; return;
   }
+  [self rebuildVideoAtCurrentPosition];
+}
+// Replace only the video decoder/output after iOS revoked its resources.
+// Deselect/select are asynchronous: wait for the old output to be removed,
+// rather than selecting again after an arbitrary 200 ms delay. The paused
+// position seek feeds a keyframe into the fresh decoder without opening HTTP
+// or playing the beginning of the file. Audio, demux and cache stay intact.
+- (void)rebuildVideoAtCurrentPosition {
+  if (self.videoResuming || self.closing || self.reloading || self.inputInBackground || self.pipActive) { return; }
   VLCMediaPlayerTrack *selected = nil;
   for (VLCMediaPlayerTrack *track in self.player.videoTracks) { if (track.isSelected) { selected = track; break; } }
-  if (!selected) { return; }
-  NSInteger generation = ++self.videoRepairGeneration; VLCMedia *mediaAtRepair = self.player.media;
-  selected.selected = NO;
+  if (!selected || !self.player.isSeekable) { return; }
+  self.videoResuming = YES; self.repairingVideo = YES;
+  self.videoResumeMedia = self.player.media; self.videoResumeTrack = selected.trackId;
+  self.videoResumeTime = [self mediaTime]; self.videoResumeStage = 0; self.videoResumeSeekFinished = NO;
+  self.videoResumeOldOutput = [[NeoVLCFrameTap snapshot:self.movieView][@"outputID"] integerValue];
+  NSInteger generation = ++self.videoResumeGeneration;
+  self.videoResumeDeadline = CACurrentMediaTime()+4;
+  [NeoPlaybackDiagnostics record:@"video.resumeRebuild" fields:@{@"mediaMs": @(self.videoResumeTime), @"outputID": @(self.videoResumeOldOutput), @"wantsPlayback": @(self.wantsPlayback)}];
+  [self.player pause]; selected.selected = NO;
+  [self updateLoadingState];
+  [self pollVideoResume:generation];
+}
+- (void)pollVideoResume:(NSInteger)generation {
+  if (!self.videoResuming || self.videoResumeGeneration != generation || self.closing ||
+      self.inputInBackground || self.player.media != self.videoResumeMedia || self.reloading) { return; }
+  NSDictionary *stats = [NeoVLCFrameTap snapshot:self.movieView];
+  VLCMediaPlayerTrack *target = nil; BOOL anySelected = NO;
+  for (VLCMediaPlayerTrack *track in self.player.videoTracks) {
+    anySelected |= track.isSelected;
+    if ([track.trackId isEqual:self.videoResumeTrack]) { target = track; }
+  }
+  if (CACurrentMediaTime() >= self.videoResumeDeadline) {
+    int64_t time = self.videoResumeDeferredTime ? self.videoResumeDeferredTime.longLongValue : self.videoResumeTime;
+    dispatch_block_t completion = self.videoResumeDeferredCompletion; self.videoResumeDeferredCompletion = nil;
+    [NeoPlaybackDiagnostics record:@"video.resumeTimeout" fields:@{@"stage": @(self.videoResumeStage), @"mediaMs": @(time)}];
+    [self reloadPlaybackAtTime:time completion:completion]; return;
+  }
+  if (self.videoResumeStage == 0 && !anySelected && [stats[@"outputID"] integerValue] == 0 && target) {
+    self.videoResumeStage = 1; target.selected = YES;
+    [NeoPlaybackDiagnostics record:@"video.resumeOutputRetired" fields:@{@"outputID": @(self.videoResumeOldOutput)}];
+  } else if (self.videoResumeStage == 1 && target.isSelected && self.player.state == VLCMediaPlayerStatePaused) {
+    self.videoResumeStage = 2; self.videoResumeDeadline = CACurrentMediaTime()+10;
+    self.videoResumePriming = YES;
+    __weak typeof(self) weakSelf = self;
+    [self seekBy:self.videoResumeTime-[self mediaTime] completion:^{
+      if (!weakSelf.videoResuming || weakSelf.videoResumeGeneration != generation) { return; }
+      weakSelf.videoResumeSeekFinished = !weakSelf.lastSeekFailed;
+    }];
+    self.videoResumePriming = NO;
+  } else if (self.videoResumeStage == 2 && self.videoResumeSeekFinished &&
+      [stats[@"outputID"] integerValue] > 0 && [stats[@"outputID"] integerValue] != self.videoResumeOldOutput &&
+      [stats[@"samples"] integerValue] > 0 && ![stats[@"resourceInterrupted"] boolValue] &&
+      [stats[@"layerStatus"] integerValue] != AVQueuedSampleBufferRenderingStatusFailed) {
+    NSNumber *deferred = self.videoResumeDeferredTime;
+    dispatch_block_t completion = self.videoResumeDeferredCompletion; self.videoResumeDeferredCompletion = nil;
+    NSMutableDictionary *fields = [stats mutableCopy];
+    fields[@"mediaMs"] = @([self mediaTime]); fields[@"decodedVideo"] = @(self.player.media.statistics.decodedVideo);
+    fields[@"sameInput"] = @(self.player.media == self.videoResumeMedia);
+    [NeoPlaybackDiagnostics record:@"video.resumePrepared" fields:fields];
+    [self cancelVideoResume]; self.repairingVideo = NO; self.videoWatchPending = YES;
+    [self alignVideoOutput]; [self applyPlaybackIntentForced:YES]; [self updateLoadingState];
+    if (deferred) { [self seekBy:deferred.longLongValue-[self mediaTime] completion:completion ?: ^{}]; }
+    return;
+  }
   __weak typeof(self) weakSelf = self;
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-    if (!weakSelf || weakSelf.closing || weakSelf.player.media != mediaAtRepair) { return; }
-    selected.selected = YES;
-    if (weakSelf.videoRepairGeneration != generation) { return; }
-    [weakSelf applyPlaybackIntentForced:YES];
-    // Keep the recovery indicator until changing, due pictures are observed.
-    [NeoPlaybackDiagnostics record:@"video.trackRestored" fields:@{@"mediaMs": @([weakSelf mediaTime]), @"confirmed": @NO}];
-  });
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [weakSelf pollVideoResume:generation]; });
+}
+- (void)cancelVideoResume {
+  self.videoResumeGeneration++; self.videoResuming = NO; self.videoResumePriming = NO;
+  self.videoResumeMedia = nil; self.videoResumeTrack = nil; self.videoResumeDeferredTime = nil;
+  dispatch_block_t completion = self.videoResumeDeferredCompletion; self.videoResumeDeferredCompletion = nil;
+  if (completion) { completion(); }
 }
 - (void)startWhenCommentsReady {
   if (self.closing || self.transportSuspended || self.reloading) { return; }
@@ -605,7 +677,7 @@
   [self applyPlaybackIntentForced:NO];
 }
 - (void)applyPlaybackIntentForced:(BOOL)force {
-  if (self.closing || self.reloading || self.playbackEnded || self.playbackFailed) { return; }
+  if (self.closing || self.reloading || self.videoResuming || self.playbackEnded || self.playbackFailed) { return; }
   // Buffering/seek callbacks can arrive after EOF. Only reconcile an active
   // input; starting a stopped input belongs to an explicit play/reload action.
   if (self.player.state != VLCMediaPlayerStatePlaying && self.player.state != VLCMediaPlayerStatePaused) { return; }
@@ -876,6 +948,11 @@
   [self.history flush];
   [NeoPlaybackDiagnostics record:@"lifecycle.background" fields:@{@"wantsPlayback": @(self.wantsPlayback), @"pip": @(self.pipActive), @"mediaMs": @([self mediaTime])}];
   if (self.closing) { return; }
+  if (self.videoResuming) {
+    // Do not leave a deselected track behind if another background transition
+    // interrupts preparation. The next foreground will retry its saved track.
+    self.videoResumeGeneration++;
+  }
   [self.videoRecovery reset]; self.videoWatchPending = NO; self.repairingVideo = NO;
   self.inputInBackground = YES;
   self.backgroundTime = self.reloading ? self.reloadTime : MAX(0, [self mediaTime]);
@@ -894,13 +971,24 @@
   [self alignVideoOutput];
   [NeoVLCFrameTap prepareForeground:self.movieView];
   [self.videoRecovery reset]; self.videoWatchPending = YES;
-  self.repairingVideo = NO; self.videoRepairGeneration += 1;
+  self.repairingVideo = NO;
   [NeoPlaybackDiagnostics record:@"video.foregroundFlush" fields:[NeoVLCFrameTap snapshot:self.movieView]];
   VLCMediaPlayerState state = self.player.state;
   if (!self.reloading && !self.playbackEnded && self.backgroundPositionValid &&
       (self.transportSuspended || state == VLCMediaPlayerStateError || state == VLCMediaPlayerStateStopped)) {
     self.transportRecoveryAttempted = YES;
     [self reloadPlaybackAtTime:MAX(self.backgroundTime, self.lastObservedTime) completion:nil];
+  } else if (self.videoResuming) {
+    if (self.videoResumeStage == 2) {
+      [self completeSeek:self.seekGeneration failed:YES];
+      self.videoResumeStage = 1; self.videoResumeSeekFinished = NO;
+    }
+    self.repairingVideo = YES;
+    self.videoResumeDeadline = CACurrentMediaTime()+4;
+    [self pollVideoResume:++self.videoResumeGeneration];
+  } else if (!self.pipActive && [[NeoVLCFrameTap snapshot:self.movieView][@"resourceInterrupted"] boolValue]) {
+    [self rebuildVideoAtCurrentPosition];
+    if (!self.videoResuming) { [self applyPlaybackIntentForced:YES]; }
   } else { [self applyPlaybackIntentForced:YES]; }
 }
 
@@ -1049,18 +1137,65 @@
         BOOL registered = [metadata[@"titleRegistered"] boolValue] && [metadata[@"targets"] integerValue] == 6 &&
           [metadata[@"seekEnabled"] boolValue] && [metadata[@"rate"] doubleValue] > 0;
         BOOL invalidRemoteSeek = !self.nowPlaying.seekAction(NAN);
-        [self runLifecycleRecoverySmoke:^(NSDictionary *result) {
+        [self runLifecycleRecoverySmoke:^(NSDictionary *lifecycle) {
+        [self runInterruptedVideoSmoke:^(NSDictionary *videoResult) {
+          NSMutableDictionary *result = [lifecycle mutableCopy]; [result addEntriesFromDictionary:videoResult];
+          result[@"success"] = @([lifecycle[@"success"] boolValue] && [videoResult[@"success"] boolValue]);
           NSMutableDictionary *checks = [result mutableCopy];
           checks[@"bufferingBurstCoalesced"] = @(coalesced); checks[@"bufferingResetDropsOldUpdate"] = @(reset);
           checks[@"latestPlayFollowsQueuedPause"] = @(intentOrdered); checks[@"nowPlayingRegistered"] = @(registered);
           checks[@"invalidRemoteSeekRejected"] = @(invalidRemoteSeek);
           NSDictionary *monitor = [NeoVLCFrameTap monitoringSmoke]; [checks addEntriesFromDictionary:monitor];
-          BOOL monitored = [monitor[@"freshOutputMonitored"] boolValue] && [monitor[@"freshOutputContentChangesMeasured"] boolValue];
+          BOOL monitored = [monitor[@"freshOutputMonitored"] boolValue] && [monitor[@"freshOutputContentChangesMeasured"] boolValue] && [monitor[@"interruptedResourceSurvivesDisplayFlush"] boolValue];
           checks[@"success"] = @((BOOL)([result[@"success"] boolValue] && coalesced && reset && intentOrdered && registered && invalidRemoteSeek && monitored)); completion(checks);
+        }];
         }];
         }];
       });
     });
+  });
+}
+- (void)runInterruptedVideoSmoke:(void (^)(NSDictionary *))completion {
+  [self setPlaybackIntent:NO];
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    VLCMedia *media = self.player.media; NSURL *endpoint = self.playbackURL;
+    NSInteger reload = self.reloadGeneration;
+    NSInteger output = [[NeoVLCFrameTap snapshot:self.movieView][@"outputID"] integerValue];
+    int64_t time = [self mediaTime];
+    [self backgrounded]; [NeoVLCFrameTap simulateResourceInterruption:self.movieView]; [self foregrounded];
+    BOOL preparing = self.videoResuming;
+    // Commands during preparation change intent, not the paused native input.
+    [self setPlaybackIntent:YES]; [self setPlaybackIntent:NO];
+    [self pollInterruptedVideoSmoke:0 media:media endpoint:endpoint reload:reload output:output time:time preparing:preparing completion:completion];
+  });
+}
+- (void)pollInterruptedVideoSmoke:(NSInteger)attempt media:(VLCMedia *)media endpoint:(NSURL *)endpoint
+                          reload:(NSInteger)reload output:(NSInteger)output time:(int64_t)time preparing:(BOOL)preparing
+                      completion:(void (^)(NSDictionary *))completion {
+  NSDictionary *stats = [NeoVLCFrameTap snapshot:self.movieView];
+  if (!self.videoResuming && !self.seeking && !self.reloading && self.player.state == VLCMediaPlayerStatePaused &&
+      [stats[@"outputID"] integerValue] > 0 && [stats[@"outputID"] integerValue] != output) {
+    BOOL sameInput = self.player.media == media && [endpoint isEqual:self.playbackURL] && self.reloadGeneration == reload;
+    BOOL pausedPosition = !self.wantsPlayback && llabs([self mediaTime]-time) < 500;
+    NSInteger changes = [stats[@"changes"] integerValue];
+    NSInteger decoded = self.player.media.statistics.decodedVideo;
+    [self setPlaybackIntent:YES];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      NSDictionary *current = [NeoVLCFrameTap snapshot:self.movieView];
+      BOOL advancing = self.player.isPlaying && [self mediaTime] > time+1000 &&
+        self.player.media.statistics.decodedVideo > decoded && [current[@"changes"] integerValue] > changes;
+      completion(@{@"success": @(preparing && sameInput && pausedPosition && advancing),
+        @"interruptedVideoRebuiltWithoutInputReload": @(preparing && sameInput),
+        @"interruptedVideoKeepsPausedPosition": @(pausedPosition),
+        @"interruptedVideoResumesDecodedPictures": @(advancing)});
+    }); return;
+  }
+  if (attempt >= 100) {
+    completion(@{@"success": @NO, @"error": @"interrupted output did not prepare", @"videoResumeStage": @(self.videoResumeStage),
+      @"videoResuming": @(self.videoResuming), @"seeking": @(self.seeking), @"state": @(self.player.state), @"output": stats}); return;
+  }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [self pollInterruptedVideoSmoke:attempt+1 media:media endpoint:endpoint reload:reload output:output time:time preparing:preparing completion:completion];
   });
 }
 - (void)runLifecycleRecoverySmoke:(void (^)(NSDictionary<NSString *, id> *))completion {
@@ -1372,6 +1507,11 @@
 - (void)play { [self setPlaybackIntent:YES]; }
 - (void)pause { [self setPlaybackIntent:NO]; }
 - (void)seekBy:(int64_t)offset completion:(dispatch_block_t)completion {
+  if (self.videoResuming && !self.videoResumePriming) {
+    dispatch_block_t superseded = self.videoResumeDeferredCompletion;
+    self.videoResumeDeferredTime = @(MAX(0, [self mediaTime]+offset)); self.videoResumeDeferredCompletion = completion;
+    if (superseded) { superseded(); } return;
+  }
   if (self.closing || !self.player.isSeekable) { completion(); return; }
   [self sampleHistory]; [self.history flush];
   [self completeSeek:self.seekGeneration failed:NO];
@@ -1495,6 +1635,7 @@
   if (self.closing) { return; }
   [NeoPlaybackDiagnostics record:@"player.close" fields:@{}];
   [self sampleHistory]; [self.history finish]; self.closing = YES;
+  [self cancelVideoResume];
   [self.nowPlaying stop];
   [self.bufferingUpdates reset]; self.bufferingUpdates.onUpdate = nil;
   [self completeSeek:self.seekGeneration failed:NO];
