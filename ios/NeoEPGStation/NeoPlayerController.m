@@ -922,7 +922,7 @@
     }
     if (self.reloading && state == VLCMediaPlayerStateStopped && !self.restoringReload && !self.awaitingEndpoint) { [self restartMedia]; return; }
     if (state == VLCMediaPlayerStateError && (self.transportSuspended || self.awaitingEndpoint || self.player.state != state)) { return; }
-    if (state == VLCMediaPlayerStateError && self.backgroundPositionValid && !self.reloading && !self.transportRecoveryAttempted) {
+    if (state == VLCMediaPlayerStateError && !self.playbackFailed && self.backgroundPositionValid && !self.reloading && !self.transportRecoveryAttempted) {
       self.transportSuspended = YES;
       if (!self.inputInBackground || self.wantsPlayback) {
         self.transportRecoveryAttempted = YES;
@@ -945,7 +945,7 @@
       [self.history sample:self.lastObservedLength / 1000.0 duration:self.lastObservedLength / 1000.0 running:NO seeking:NO rate:self.playbackRate];
       [self.history flush]; [self showControls];
     }
-    if (state == VLCMediaPlayerStateStopped && !self.playbackEnded && !self.reloading && self.lastObservedTime > 0) {
+    if (state == VLCMediaPlayerStateStopped && !self.playbackFailed && !self.playbackEnded && !self.reloading && self.lastObservedTime > 0) {
       if (self.backgroundPositionValid && !self.transportRecoveryAttempted) {
         self.transportSuspended = YES;
         if (!self.inputInBackground || self.wantsPlayback) {
@@ -1253,8 +1253,15 @@
             self.playbackFailed && !self.chrome.loadingVisible && self.chrome.controlsVisible && self.reloadGeneration == reload;
           checks[@"failedVideoRecoveryStopsSpinnerAndReloadLoop"] = @(bounded);
           BOOL monitored = [monitor[@"freshOutputMonitored"] boolValue] && [monitor[@"freshOutputContentChangesMeasured"] boolValue] && [monitor[@"interruptedResourceSurvivesDisplayFlush"] boolValue];
+          // Delayed terminal notifications after failure must not route back
+          // through the older background-connection recovery path.
+          [self.player stop];
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+          BOOL noLateReload = !self.reloading && self.reloadGeneration == reload && self.playbackFailed;
+          checks[@"failedVideoRecoveryIgnoresLateStop"] = @(noLateReload);
           checks[@"success"] = @((BOOL)([result[@"success"] boolValue] && coalesced && reset && intentOrdered && registered && invalidRemoteSeek && monitored &&
-            [pausedFallback[@"success"] boolValue] && [playingFallback[@"success"] boolValue] && bounded)); completion(checks);
+            [pausedFallback[@"success"] boolValue] && [playingFallback[@"success"] boolValue] && bounded && noLateReload)); completion(checks);
+          });
         }];
         }];
         }];
