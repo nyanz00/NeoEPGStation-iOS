@@ -1691,7 +1691,7 @@
   UIInterfaceOrientationMask mask = orientation == UIInterfaceOrientationPortrait ? UIInterfaceOrientationMaskPortrait : UIInterfaceOrientationMaskLandscapeRight;
   BOOL wide = orientation != UIInterfaceOrientationPortrait;
   BOOL settled = self.orientationMask == mask && self.view.window.windowScene.interfaceOrientation == orientation &&
-    (self.view.bounds.size.width > self.view.bounds.size.height) == wide && !self.transitionCoordinator;
+    (self.view.bounds.size.width > self.view.bounds.size.height) == wide && !self.rotatingPlayer && !self.transitionCoordinator;
   if (settled || attempt >= 30) { [self.view layoutIfNeeded]; completion(settled); return; }
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
     [self waitForSmokeOrientation:orientation attempt:attempt + 1 completion:completion];
@@ -1709,13 +1709,24 @@
       @"dismissing": @(self.dismissingPlayer), @"rotating": @(self.rotatingPlayer), @"interactive": @(self.playerTransition.interactive),
       @"hasCoordinator": @(self.transitionCoordinator != nil), @"nativeState": @(self.player.state)}); }
   });
-  [self runInteractiveBackCancellationSmoke:host completion:^(NSDictionary *drag) {
-    [self runCommittedExitSmokeFromHost:host drag:drag completion:finish];
+  // Reload checks end by unlocking orientation, which may rotate the simulator
+  // again. Exercise the portrait-only back gesture after that rotation settles.
+  [self setOrientation:@"portrait"];
+  [self waitForSmokeOrientation:UIInterfaceOrientationPortrait attempt:0 completion:^(BOOL portrait) {
+    if (!portrait) { finish(@{@"success": @NO, @"error": @"portrait back fixture did not settle"}); return; }
+    [self runInteractiveBackCancellationSmoke:host completion:^(NSDictionary *drag) {
+      [self runCommittedExitSmokeFromHost:host drag:drag completion:finish];
+    }];
   }];
 }
 - (void)runInteractiveBackCancellationSmoke:(UIViewController *)host completion:(void (^)(NSDictionary *))completion {
   VLCMedia *media = self.player.media; NSURL *endpoint = self.playbackURL;
   [self performPlayerAction:@"back-begin"];
+  if (!self.dismissingPlayer || !self.playerTransition.interactive) {
+    completion(@{@"playerBackTracksFinger": @NO, @"cancelledPlayerBackKeepsInput": @NO,
+      @"playerDismissalStartsBeforeNativeStop": @NO, @"error": @"portrait back did not begin",
+      @"rotatingAtBegin": @(self.rotatingPlayer), @"coordinatorAtBegin": @(self.transitionCoordinator != nil)}); return;
+  }
   [self performPlayerAction:@"back-progress:0.4"];
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
     CGFloat position = self.view.layer.presentationLayer.transform.m41;
@@ -1756,7 +1767,12 @@
       }];
     };
     self.pendingRoute = @"recorded";
-    [self performPlayerAction:@"back-begin"]; [self performPlayerAction:@"back-progress:0.65"];
+    [self performPlayerAction:@"back-begin"];
+    if (!self.dismissingPlayer || !self.playerTransition.interactive) {
+      completion(@{@"success": @NO, @"error": @"committed back did not begin",
+        @"rotatingAtBegin": @(self.rotatingPlayer), @"coordinatorAtBegin": @(self.transitionCoordinator != nil)}); return;
+    }
+    [self performPlayerAction:@"back-progress:0.65"];
     [self performPlayerAction:@"back-finish"];
   }];
 }
