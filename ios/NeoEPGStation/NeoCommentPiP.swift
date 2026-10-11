@@ -335,6 +335,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     let presented = videoPresentationHostTime
     let time = clock.time(media: media, running: running, now: now, rate: rateProvider?() ?? 1,
       videoHost: presented, decodedHost: presented > 0 ? videoDecodeHostTime : nil)
+    composition.enabled = composition.enabled && (clock.ready || !(wantsPlaybackProvider?() ?? running))
     guard next != nil || current != nil else { return }
     do {
       if let next = next, let pixel = CMSampleBufferGetImageBuffer(next.sample) {
@@ -355,12 +356,12 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
       if resumeGate != nil, let timeline = state.timeline {
         let scale = max(Double(outputSize.width)/timeline.width, Double(outputSize.height)/timeline.height)
         renderer.prepareAhead(timeline, time: seekTarget, pixelScale: scale * max(1, state.size), opacity: state.usesSourceOpacity ? nil : state.opacity)
-        renderer.prepareLayout(timeline, size: state.size, pixelScale: scale)
       }
       let layer = displayLayer
       if layer.status == .failed { layer.flush() }
       guard layer.isReadyForMoreMediaData else { return }
-      guard let output = try Self.compose(image: image, size: outputSize, pool: pool, renderer: renderer, state: composition, time: time) else { return }
+      guard let output = try Self.compose(image: image, size: outputSize, pool: pool, renderer: renderer,
+        state: composition, time: time, schedulingTime: clock.schedulingTime) else { return }
       let sample = try Self.makeSample(output, hostTime: now)
       layer.enqueue(sample)
       frameLock.lock(); composed += 1; frameLock.unlock()
@@ -391,7 +392,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   }
 
   static func compose(image: CGImage, size: CGSize, pool: CVPixelBufferPool, renderer: NeoDanmakuRenderer,
-                      state: CommentCompositionState, time: Double) throws -> CVPixelBuffer? {
+                      state: CommentCompositionState, time: Double, schedulingTime: Double? = nil) throws -> CVPixelBuffer? {
     var output: CVPixelBuffer?
     let allocation = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(nil, pool,
       [kCVPixelBufferPoolAllocationThresholdKey: 6] as CFDictionary, &output)
@@ -408,9 +409,10 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
       let scale = max(Double(size.width) / timeline.width, Double(size.height) / timeline.height)
       // Rasterize at the displayed text size; enlarging comments must not just
       // magnify a small bitmap. Placement/lane geometry remains unchanged.
-      renderer.prepareAhead(timeline, time: time, pixelScale: scale * max(1, state.size), opacity: state.usesSourceOpacity ? nil : state.opacity)
+      renderer.prepareAhead(timeline, time: schedulingTime ?? time, pixelScale: scale * max(1, state.size), opacity: state.usesSourceOpacity ? nil : state.opacity)
       _ = renderer.drawCPU(timeline: timeline, time: time, viewport: size,
-        sizeMultiplier: state.size, opacity: state.opacity, pixelScale: scale, rasterScale: scale * max(1, state.size), usesSourceOpacity: state.usesSourceOpacity, context: context)
+        sizeMultiplier: state.size, opacity: state.opacity, pixelScale: scale, rasterScale: scale * max(1, state.size),
+        usesSourceOpacity: state.usesSourceOpacity, schedulingTime: schedulingTime, context: context)
       if let failure = renderer.error { throw CommentParseError.invalid(failure) }
     }
     return output

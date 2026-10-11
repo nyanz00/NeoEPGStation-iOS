@@ -339,40 +339,14 @@ enum NeoASSComments {
   }
 }
 
-// Bridge coarse native time samples with a bounded monotonic playback clock.
-// Seeks reset explicitly; pauses/buffering freeze immediately. Correct small
-// sample phase errors gradually instead of jumping backwards each update.
-struct CommentPlaybackClock {
-  private var sample = -1.0, sampleHost = 0.0, anchor = 0.0, host = 0.0, last = 0.0
-  private var wasRunning = false
-  mutating func reset() { self = CommentPlaybackClock() }
-  mutating func time(media: Double, running: Bool, now: Double, rate: Double = 1) -> Double {
-    guard media.isFinite, media >= 0, now.isFinite else { reset(); return 0 }
-    let speed = rate.isFinite ? min(4, max(0.25, rate)) : 1
-    if sample < 0 || !running || !wasRunning || media < sample - 0.5 {
-      sample = media; sampleHost = now; anchor = media; host = now; last = media; wasRunning = running
-      return media
-    }
-    var predicted = anchor + max(0, now-host)*speed
-    if media != sample {
-      let difference = media-predicted
-      if abs(difference) > 1.5*speed { predicted = media; last = media }
-      else { predicted += min(0.02, max(-0.02, difference)) }
-      sample = media; sampleHost = now; anchor = predicted; host = now
-    }
-    // A genuinely stalled native clock cannot advance indefinitely.
-    let bounded = min(predicted, anchor + max(0, sampleHost+1.5-host)*speed)
-    last = max(last, bounded); wasRunning = true
-    return last
-  }
-}
-
 // Native time may continue advancing while decoded video is stalled. Freeze
 // the rendered time (including coarse-clock interpolation) until due video
 // frames resume. A seek explicitly resets this clock to its new destination.
 struct CommentPresentationClock {
-  private var clock = CommentPlaybackClock()
-  private var last: Double?, advancing = false
+  private var last: Double?, previousMedia: Double?, previousHost: Double?
+  private var advancing = false, started = false
+  private(set) var ready = false
+  private(set) var schedulingTime = 0.0
   mutating func reset() { self = CommentPresentationClock() }
   mutating func time(media: Double, running: Bool, now: Double, rate: Double = 1, videoHost: Double? = nil, decodedHost: Double? = nil) -> Double {
     func isFresh(_ host: Double) -> Bool { host.isFinite && host > 0 && now-host <= 0.25 && host <= now }
@@ -380,16 +354,58 @@ struct CommentPresentationClock {
     // Neither future scheduled frames alone nor an advancing VLC clock suffice.
     let videoFresh = videoHost.map(isFresh) ?? true
     let fresh = videoFresh || (decodedHost.map(isFresh) ?? false)
+    guard media.isFinite, media >= 0, now.isFinite else { return last ?? 0 }
     let active = running && fresh
     if !active {
       advancing = false
-      if last == nil { last = media.isFinite ? max(0, media) : 0 }
+      previousHost = now
+      if last == nil { last = media; schedulingTime = media }
+      previousMedia = media
       return last ?? 0
     }
-    if !advancing { clock.reset() }
-    last = clock.time(media: media, running: true, now: now, rate: rate)
+    // A fresh queued frame alone is not a stable initial media anchor. Wait
+    // until the real media clock progresses; nothing is emitted before ready.
+    if !started {
+      let progressed = previousMedia.map { media > $0 + 0.001 && media-$0 <= 1.5 } ?? false
+      previousMedia = media; previousHost = now; last = media; schedulingTime = media
+      guard progressed else { return media }
+      started = true; ready = true; advancing = true; return media
+    }
+    let speed = rate.isFinite ? min(4, max(0.25, rate)) : 1
+    if advancing, let host = previousHost { last = (last ?? media) + max(0, now-host)*speed }
+    previousHost = now; previousMedia = media
+    // Raw media corrections affect only which events are emitted next. They
+    // never rewind, stall or accelerate an event already travelling on screen.
+    schedulingTime = media
     advancing = true
     return last ?? 0
+  }
+}
+
+// Active events use an independent presentation lifetime. Repeated or backwards
+// native timestamps cannot re-emit them; explicit seeks reset this structure.
+struct CommentMotionScheduler {
+  private var active: [Int: NativeComment] = [:]
+  private var emitted: Set<Int> = []
+  private var cursor = CommentFrameCursor()
+  private var ordered: [NativeComment] = [], expiresAt = Double.infinity
+  mutating func reset() { self = CommentMotionScheduler() }
+  mutating func replaceTimeline() { cursor.reset() }
+  mutating func visible(_ timeline: CommentTimeline, media: Double, motion: Double) -> [NativeComment] {
+    var changed = false
+    if motion >= expiresAt { active = active.filter { $0.value.end > motion }; changed = true }
+    for source in cursor.visible(timeline, at: media) where !emitted.contains(source.id) {
+      emitted.insert(source.id)
+      var event = source
+      let age = max(0, media-source.start)
+      event.start = motion-age; event.end = event.start+(source.end-source.start)
+      if event.end > motion { active[event.id] = event; changed = true }
+    }
+    if changed {
+      ordered = active.values.sorted { $0.layer == $1.layer ? $0.id < $1.id : $0.layer < $1.layer }
+      expiresAt = ordered.map(\.end).min() ?? .infinity
+    }
+    return ordered
   }
 }
 

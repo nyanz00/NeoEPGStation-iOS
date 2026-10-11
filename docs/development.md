@@ -2,6 +2,8 @@
 
 ## ビルド
 
+コメントの初期時計、表示中の移動維持、動画の縦スワイプ、検索からの段階的な復帰は `comment-motion-swipe-navigation.md` を参照する。
+
 Swift / UIKitの型検査・テスト・ビルドは `.github/workflows/ios.yml` のmacOSランナーで行う。
 Xcodeは26.6、CocoaPodsは1.16.2に固定している。Node / Metro / React Nativeは使用しない。
 VLCKitは `ios/VLCKit.podspec` の公式ダウンロードURLとSHA-256で固定する。

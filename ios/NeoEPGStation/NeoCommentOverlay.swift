@@ -8,7 +8,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   @objc var runningProvider: (() -> Bool)?
   @objc var wantsPlaybackProvider: (() -> Bool)?
   @objc var videoHostProvider: (() -> Double)?
-  @objc var coveredByPiP = false { didSet { clock.reset(); refreshRendering() } }
+  @objc var coveredByPiP = false { didSet { clock.reset(); renderer?.seekWindow(); refreshRendering() } }
   @objc var onChange: (() -> Void)?
   @objc var videoSize: CGSize = .zero
   @objc private(set) var status = "コメントを確認中…"
@@ -116,11 +116,11 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
         returned = true
       }
       overlay.renderedTime = 1
+      _ = overlay.clock.time(media: 0.98, running: true, now: 99.98, videoHost: 99.98)
       _ = overlay.clock.time(media: 1, running: true, now: 100, videoHost: 100)
       let preservedClock = overlay.renderedTime
       overlay.endSeek()
       checks["ordinaryPlayDoesNotStartSeekWarmup"] = !overlay.seeking && overlay.resumeGate == nil && overlay.renderedTime == preservedClock
-      overlay.renderer?.prepareLayout(overlay.timeline!, size: overlay.sizeMultiplier, pixelScale: overlay.renderScale)
       overlay.renderer?.waitForPreparedImages()
       let oldTimeline = overlay.timeline!, oldRaw = overlay.rawTimeline
       var added = oldTimeline.comments[0]; added.id = 100; added.start = 10; added.end = 15.25
@@ -380,7 +380,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   deinit { loader?.close(); NotificationCenter.default.removeObserver(self) }
 
   @objc private func didBackground() { background = true; refreshRendering() }
-  @objc private func willForeground() { background = false; clock.reset(); refreshRendering() }
+  @objc private func willForeground() { background = false; clock.reset(); renderer?.seekWindow(); refreshRendering() }
   override func didMoveToWindow() { super.didMoveToWindow(); refreshRendering() }
   private func refreshRendering() {
     let show = enabled && ready && !closed && !seeking
@@ -408,19 +408,25 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
       if canDraw { seekTarget = nil }
       clock.reset()
     }
+    let wasAnchored = clock.ready
     let time = clock.time(media: media, running: running, now: now, rate: rateProvider?() ?? 1, videoHost: videoHostProvider?())
+    if !wasAnchored && clock.ready {
+      NeoPlaybackDiagnostics.record("comments.initialAnchor", fields: ["media": media, "motion": time])
+    }
     renderedTime = time
     let viewport = view.drawableSize
     let ratio = videoSize.width > 0 && videoSize.height > 0 ? videoSize.width / videoSize.height : CGFloat(timeline.width / timeline.height)
     let fittedWidth = min(viewport.width, viewport.height * ratio), fittedHeight = fittedWidth / ratio
     let pixelScale = max(Double(fittedWidth) / timeline.width, Double(fittedHeight) / timeline.height)
-    renderer.prepareAhead(timeline, time: canDraw ? time : seekTarget ?? time, pixelScale: pixelScale, opacity: usesSourceOpacity ? nil : opacity)
+    canDraw = canDraw && (clock.ready || !(wantsPlaybackProvider?() ?? running))
+    renderer.prepareAhead(timeline, time: canDraw ? clock.schedulingTime : seekTarget ?? media, pixelScale: pixelScale, opacity: usesSourceOpacity ? nil : opacity)
     guard inFlight.wait(timeout: .now()) == .success else { return }
     guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
       let command = renderer.queue.makeCommandBuffer(), let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { inFlight.signal(); return }
     drawn = canDraw ? renderer.encode(timeline: timeline, time: time, viewport: viewport,
       videoRect: CGRect(x: (viewport.width - fittedWidth) / 2, y: (viewport.height - fittedHeight) / 2, width: fittedWidth, height: fittedHeight),
-      sizeMultiplier: sizeMultiplier, opacity: opacity, pixelScale: pixelScale, usesSourceOpacity: usesSourceOpacity, encoder: encoder) : 0
+      sizeMultiplier: sizeMultiplier, opacity: opacity, pixelScale: pixelScale, usesSourceOpacity: usesSourceOpacity,
+      schedulingTime: clock.schedulingTime, encoder: encoder) : 0
     let completion = inFlight
     command.addCompletedHandler { _ in completion.signal() }
     encoder.endEncoding(); command.present(drawable); command.commit()

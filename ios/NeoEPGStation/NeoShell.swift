@@ -305,7 +305,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     guard api != nil, popInteraction == nil, active?.transitionCoordinator == nil else { return }
     if let nav = controllers[id] {
       if id == route, let list = nav.topViewController as? NeoRecordedPage {
-        list.returnToFirstPage()
+        if nav.viewControllers.count > 1 { nav.popViewController(animated: true) }
+        else { list.returnToFirstPage() }
       } else if let list = nav.viewControllers.last(where: { $0 is NeoRecordedPage }) {
         nav.popToViewController(list, animated: id == route)
       } else {
@@ -722,6 +723,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     guard await waitForPage(recorded, 7) else { return false }
     showRoute("settings"); selectDestination("recorded")
     let acrossTabs = active?.topViewController === recorded && recorded.smokeCurrentPage == 7
+    recorded.collection.setContentOffset(CGPoint(x: 0, y: 40), animated: false)
+    let searchOffset = recorded.collection.contentOffset
     // A detail opened from a search must return to that same filtered list.
     let search = NeoRecordedPage(shell: self, keyword: "サンプル")
     active?.pushViewController(search, animated: false); view.layoutIfNeeded()
@@ -734,14 +737,29 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     try? await Task.sleep(nanoseconds: 500_000_000)
     let searchReturned = active?.topViewController === search && search.smokeCurrentPage == 7
     selectDestination("recorded")
-    let searchReset = await waitForPage(search, 1)
+    try? await Task.sleep(nanoseconds: 500_000_000)
+    let searchReturnsOriginal = active?.topViewController === recorded && recorded.smokeCurrentPage == 7 && recorded.collection.contentOffset == searchOffset
+    selectDestination("recorded")
+    let searchReset = await waitForPage(recorded, 1)
+    recorded.smokePageSeven()
+    guard await waitForPage(recorded, 7) else { return false }
+    let directSearch = NeoRecordedPage(shell: self, keyword: "サンプル")
+    active?.pushViewController(directSearch, animated: false); view.layoutIfNeeded()
+    try? await Task.sleep(nanoseconds: 500_000_000)
+    selectDestination("recorded")
+    try? await Task.sleep(nanoseconds: 500_000_000)
+    let directReturn = active?.topViewController === recorded && recorded.smokeCurrentPage == 7
+    selectDestination("recorded")
+    let directReset = await waitForPage(recorded, 1)
     backSmokeDetails["navigationReturnsListPageAndOffset"] = returned
     backSmokeDetails["navigationSecondTapResetsPage"] = reset
     backSmokeDetails["navigationAcrossTabsPreservesPage"] = acrossTabs
-    backSmokeDetails["navigationPreservesSearchList"] = searchReturned && searchReset
+    backSmokeDetails["navigationPreservesSearchList"] = searchReturned && searchReturnsOriginal && searchReset
+    backSmokeDetails["searchReturnsOriginalPage"] = searchReturnsOriginal
+    backSmokeDetails["searchWithoutDetailReturnsOriginalThenFirstPage"] = directReturn && directReset
     active?.popToRootViewController(animated: false); recorded.returnToFirstPage()
     _ = await waitForPage(recorded, 1)
-    return returned && reset && acrossTabs && searchReturned && searchReset
+    return returned && reset && acrossTabs && searchReturned && searchReturnsOriginal && searchReset && directReturn && directReset
   }
 #endif
 }

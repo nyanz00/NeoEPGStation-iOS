@@ -57,9 +57,11 @@ enum NeoPiPSmoke {
       let pool = try NeoCommentPiP.makePool(size: size)
       let input = try colorPixel(kCVPixelFormatType_32BGRA), image = try NeoCommentPiP.videoImage(input)
       renderer.prepare(timeline.comments); renderer.waitForPreparedImages()
+      var previousTime = -Double.infinity
       func frame(_ time: Double, _ opacity: Float = 1, _ scale: Double = 1, _ enabled: Bool = true) throws -> CVPixelBuffer {
+        if time < previousTime { renderer.seekWindow() }; previousTime = time
         renderer.prepare(timeline.comments, pixelScale: max(1, scale), absoluteOpacity: opacity)
-        renderer.prepareLayout(timeline, size: scale); renderer.waitForPreparedImages()
+        renderer.waitForPreparedImages()
         guard let output = try NeoCommentPiP.compose(image: image, size: size, pool: pool, renderer: renderer,
           state: CommentCompositionState(timeline: timeline, version: 0, enabled: enabled, size: scale, opacity: opacity), time: time)
           else { throw CommentParseError.invalid("合成テストのプール容量") }

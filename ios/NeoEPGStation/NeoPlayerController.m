@@ -301,6 +301,7 @@
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
   [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
   [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+    [self.chrome finishOrientationTransition];
     [self applyPlayerLayout:size];
   } completion:nil];
 }
@@ -395,11 +396,11 @@
     : [mode isEqualToString:@"landscape"] ? UIInterfaceOrientationMaskLandscapeRight : UIInterfaceOrientationMaskAllButUpsideDown;
   [self setNeedsUpdateOfSupportedInterfaceOrientations];
   UIWindowScene *scene = self.view.window.windowScene;
-  if (!scene) { return; }
+  if (!scene) { [self.chrome cancelOrientationPreview]; return; }
   UIWindowSceneGeometryPreferencesIOS *preferences = [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:self.orientationMask];
   __weak typeof(self) weakSelf = self;
   [scene requestGeometryUpdateWithPreferences:preferences errorHandler:^(NSError *error) {
-    dispatch_async(dispatch_get_main_queue(), ^{ weakSelf.statusLabel.text = @"画面回転エラー · この表示環境では向きを変更できません。"; [weakSelf.chrome updateDiagnostics]; });
+    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf.chrome cancelOrientationPreview]; weakSelf.statusLabel.text = @"画面回転エラー · この表示環境では向きを変更できません。"; [weakSelf.chrome updateDiagnostics]; });
   }];
 }
 - (void)reloadPlayback {

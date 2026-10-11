@@ -123,6 +123,7 @@ jobs:
           if-no-files-found: error
 
   ipad-ui:
+    name: Reused simulator UI checks
     if: ${{ inputs.reuse_run != '' }}
     runs-on: macos-26
     timeout-minutes: 25

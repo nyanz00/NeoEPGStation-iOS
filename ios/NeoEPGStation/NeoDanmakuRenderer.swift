@@ -15,7 +15,6 @@ final class NeoDanmakuRenderer {
   let device: MTLDevice
   let queue: MTLCommandQueue
   private let pipeline: MTLRenderPipelineState
-  private let layoutQueue = DispatchQueue(label: "neo.comments.layout", qos: .userInitiated)
   private let textQueue = DispatchQueue(label: "neo.comments.text", qos: .userInitiated)
   private let lock = NSLock()
   private var cache: [CommentTextureKey: CommentTexture] = [:]
@@ -25,12 +24,9 @@ final class NeoDanmakuRenderer {
   private var failure: String?
   private let budget = 48 * 1024 * 1024
   private let cpuOnly: Bool
-  private var laneSize: Double?, requestedLaneSize: Double?
-  private var lanes: [Int: Double] = [:]
-  private var requestedTimeline: UUID?
-  private var pinnedLanes: [Int: Double] = [:]
-  private var laneScale: Double?, requestedLaneScale: Double?, layoutVersion = 0
-  private var cursor = CommentFrameCursor()
+  private var motionScheduler = CommentMotionScheduler()
+  private var displayLanes: [Int: Double] = [:], displayIDs: [Int] = []
+  private var displaySize = -1.0, displayScale = -1.0
   private var preparedIDs: [Int] = [], preparedScale = -1.0, preparedOpacity: Float?
   private var preparationGeneration = -1
   private var preparedTime = -Double.infinity
@@ -60,20 +56,18 @@ final class NeoDanmakuRenderer {
   func reset() {
     lock.lock(); defer { lock.unlock() }
     generation += 1; cache.removeAll(); pending.removeAll(); wanted.removeAll(); cost = 0; failure = nil
-    requestedTimeline = nil; pinnedLanes.removeAll(); laneSize = nil; requestedLaneSize = nil; laneScale = nil; requestedLaneScale = nil; layoutVersion += 1; lanes.removeAll()
-    cursor.reset(); preparedIDs.removeAll(); preparationGeneration = -1
+    preparedIDs.removeAll(); preparationGeneration = -1
+    motionScheduler.reset(); displayLanes.removeAll(); displayIDs.removeAll(); displaySize = -1
     renderRevision += 1; frameImages.removeAll(); snapshotRevision = -1
   }
 
   var error: String? { lock.lock(); defer { lock.unlock() }; return failure }
   var cachedBytes: Int { lock.lock(); defer { lock.unlock() }; return cost }
-  // A paused PiP must also repaint when a new lane plan finishes, even when
-  // its glyph textures were already cached and no image work was necessary.
-  var hasPendingImages: Bool { lock.lock(); defer { lock.unlock() }; return !pending.isEmpty || requestedLaneSize != laneSize || requestedLaneScale != laneScale }
+  // A paused PiP repaints when asynchronously prepared glyphs become available.
+  var hasPendingImages: Bool { lock.lock(); defer { lock.unlock() }; return !pending.isEmpty }
   func overflow(timeline: CommentTimeline, time: Double) -> Int {
     lock.lock(); defer { lock.unlock() }
-    guard laneSize != nil else { return 0 }
-    return timeline.visible(at: time).filter { $0.usesDanmakuTiming && lanes[$0.id] == nil }.count
+    return frameImages.filter { $0.0.usesDanmakuTiming && displayLanes[$0.0.id] == nil }.count
   }
 
   // Only newly visible or imminent comments are rasterized, away from the main
@@ -134,15 +128,13 @@ final class NeoDanmakuRenderer {
     preparedTime = time
     prepare(timeline.visible(at: time, lookAhead: 1.5), pixelScale: pixelScale, absoluteOpacity: opacity)
   }
-  func seekWindow() { cursor.reset(); preparedTime = -.infinity; preparationGeneration = -1 }
+  func seekWindow() {
+    motionScheduler.reset(); displayLanes.removeAll(); displayIDs.removeAll()
+    renderRevision += 1; preparedTime = -.infinity; preparationGeneration = -1
+  }
   func replaceTimeline(_ previous: CommentTimeline?, at time: Double) {
-    lock.lock()
-    pinnedLanes = Dictionary(uniqueKeysWithValues: (previous?.visible(at: time) ?? []).compactMap { c in
-      lanes[c.id].map { (c.id, $0) }
-    })
-    requestedTimeline = nil; renderRevision += 1
-    lock.unlock()
-    seekWindow()
+    // Active identities, lifetimes and lane positions survive preview-to-full.
+    motionScheduler.replaceTimeline(); preparedTime = -.infinity; preparationGeneration = -1
   }
   func fittingEnd(_ timeline: CommentTimeline, duration: Double, size: Double, pixelScale: Double) -> CommentTimeline {
     timeline.fittingEnd(duration: duration) { c in
@@ -182,39 +174,8 @@ final class NeoDanmakuRenderer {
       scale: scale, width: Int(bounds.width), height: Int(bounds.height))
   }
 
-  func prepareLayout(_ timeline: CommentTimeline, size: Double, pixelScale: Double = 1) {
-    let scale = min(2, max(0.25, ceil(pixelScale*4)/4))
-    lock.lock()
-    guard requestedTimeline != timeline.identity || requestedLaneSize != size || requestedLaneScale != scale else { lock.unlock(); return }
-    let pins = laneSize == size && laneScale == scale ? pinnedLanes : [:]
-    requestedTimeline = timeline.identity
-    requestedLaneSize = size; requestedLaneScale = scale; layoutVersion += 1
-    let version = generation, layout = layoutVersion; lock.unlock()
-    layoutQueue.async { [weak self] in
-      guard let self else { return }
-      func cancelled() -> Bool {
-        self.lock.lock(); defer { self.lock.unlock() }
-        return self.generation != version || self.layoutVersion != layout
-      }
-      guard !cancelled() else { return }
-      var metrics: [CommentTextureKey: CommentExtent] = [:]
-      let began = CACurrentMediaTime()
-      let plan = CommentLanePlan.build(timeline, size: size, cancelled: cancelled, fixedPositions: pins) { comment in
-        let key = CommentTextureKey(text: comment.text, style: comment.style, pixelScale: scale)
-        if let value = metrics[key] { return value }
-        let raster = self.geometry(key)
-        let value = CommentExtent(width: Double(raster.size.width), height: Double(raster.size.height))
-        metrics[key] = value; return value
-      }
-      NeoPlaybackDiagnostics.record("comments.layout", fields: ["durationMs": (CACurrentMediaTime()-began)*1000, "count": timeline.comments.count])
-      self.lock.lock(); defer { self.lock.unlock() }
-      if self.generation == version && self.layoutVersion == layout { self.lanes = plan; self.laneSize = size; self.laneScale = scale; self.renderRevision += 1 }
-    }
-  }
-
   func warmWindow(_ timeline: CommentTimeline, time: Double, size: Double, pixelScale: Double,
                   opacity: Float?, completion: @escaping () -> Void) {
-    prepareLayout(timeline, size: size, pixelScale: pixelScale)
     prepare(timeline.visible(at: time, lookAhead: 1.5), pixelScale: pixelScale, absoluteOpacity: opacity)
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
       self?.waitForPreparedImages()
@@ -230,19 +191,46 @@ final class NeoDanmakuRenderer {
     snapshotRevision = renderRevision; snapshotIDs = ids; snapshotScale = pixelScale; snapshotOpacity = opacity; snapshotSize = size
     frameImages = comments.compactMap { comment in
       guard let image = cache[key(comment, pixelScale: pixelScale, absoluteOpacity: opacity)] else { return nil }
-      return (comment, image, laneSize == size && laneScale == min(2, max(0.25, ceil((lanePixelScale ?? pixelScale)*4)/4)) ? lanes[comment.id] : nil)
+      return (comment, image, displayLanes[comment.id])
     }
     return frameImages
+  }
+
+  private func movingComments(_ timeline: CommentTimeline, media: Double, motion: Double,
+                              size: Double, scale: Double, opacity: Float?) -> [NativeComment] {
+    let visible = motionScheduler.visible(timeline, media: media, motion: motion)
+    lock.lock()
+    let available = visible.compactMap { c -> (NativeComment, CGSize)? in
+      cache[key(c, pixelScale: scale, absoluteOpacity: opacity)].map { (c, $0.size) }
+    }
+    lock.unlock()
+    let ids = available.map { $0.0.id }
+    if ids != displayIDs || size != displaySize || scale != displayScale {
+      let pins = size == displaySize && scale == displayScale ? displayLanes : [:]
+      let metrics = Dictionary(uniqueKeysWithValues: available.map { ($0.0.id, $0.1) })
+      let live = CommentTimeline(width: timeline.width, height: timeline.height, comments: available.map { $0.0 })
+      // Only arrivals/departures change this small plan. Fixed active trajectories
+      // include their real remaining lifetime after a scheduling-clock correction.
+      let plan = CommentLanePlan.build(live, size: size, fixedPositions: pins) { c in
+        let metric = metrics[c.id]!
+        return CommentExtent(width: Double(metric.width), height: Double(metric.height))
+      }
+      lock.lock()
+      displayIDs = ids; displaySize = size; displayScale = scale; displayLanes = plan; renderRevision += 1
+      lock.unlock()
+    }
+    return visible
   }
 
   // All comments are retained. Cache misses are requested, never converted into
   // a permanent density limit. The initial 1-second lookahead hides normal misses.
   func encode(timeline: CommentTimeline, time: Double, viewport: CGSize, videoRect: CGRect,
-              sizeMultiplier: Double, opacity: Float, pixelScale: Double = 1, usesSourceOpacity: Bool = false, encoder: MTLRenderCommandEncoder) -> Int {
-    let visible = cursor.visible(timeline, at: time)
+              sizeMultiplier: Double, opacity: Float, pixelScale: Double = 1, usesSourceOpacity: Bool = false,
+              schedulingTime: Double? = nil, encoder: MTLRenderCommandEncoder) -> Int {
+    let visible = movingComments(timeline, media: schedulingTime ?? time, motion: time,
+      size: sizeMultiplier, scale: pixelScale, opacity: usesSourceOpacity ? nil : opacity)
     guard viewport.width > 0, viewport.height > 0, videoRect.width > 0, videoRect.height > 0 else { return 0 }
     encoder.setRenderPipelineState(pipeline)
-    prepareLayout(timeline, size: sizeMultiplier, pixelScale: pixelScale)
     var alpha: Float = 1
     encoder.setFragmentBytes(&alpha, length: MemoryLayout<Float>.size, index: 0)
     // Clip to the fitted video, not to the entire window's letterbox bars.
@@ -297,14 +285,16 @@ final class NeoDanmakuRenderer {
   // PiP may continue after the app loses foreground GPU access. Reuse the same
   // cached CoreText images and placement, without submitting Metal commands.
   func drawCPU(timeline: CommentTimeline, time: Double, viewport: CGSize, sizeMultiplier: Double,
-               opacity: Float, pixelScale: Double, rasterScale: Double? = nil, usesSourceOpacity: Bool = false, context: CGContext) -> Int {
+               opacity: Float, pixelScale: Double, rasterScale: Double? = nil, usesSourceOpacity: Bool = false,
+               schedulingTime: Double? = nil, context: CGContext) -> Int {
     context.saveGState(); defer { context.restoreGState() }
-    prepareLayout(timeline, size: sizeMultiplier, pixelScale: pixelScale)
     context.interpolationQuality = .medium
     let videoRect = CGRect(origin: .zero, size: viewport)
     context.clip(to: videoRect)
     var drawn = 0
-    let images = snapshot(cursor.visible(timeline, at: time), pixelScale: rasterScale ?? pixelScale, opacity: usesSourceOpacity ? nil : opacity, size: sizeMultiplier, lanePixelScale: pixelScale)
+    let visible = movingComments(timeline, media: schedulingTime ?? time, motion: time,
+      size: sizeMultiplier, scale: rasterScale ?? pixelScale, opacity: usesSourceOpacity ? nil : opacity)
+    let images = snapshot(visible, pixelScale: rasterScale ?? pixelScale, opacity: usesSourceOpacity ? nil : opacity, size: sizeMultiplier, lanePixelScale: pixelScale)
     for (comment, image, top) in images {
       guard let bitmap = image.image else { continue }
       guard var rect = placement(comment, imageSize: image.size, timeline: timeline, time: time,
@@ -316,7 +306,7 @@ final class NeoDanmakuRenderer {
     return drawn
   }
 
-  func waitForPreparedImages() { layoutQueue.sync {}; textQueue.sync {} }
+  func waitForPreparedImages() { textQueue.sync {} }
 
   private func rasterize(_ key: CommentTextureKey) throws -> CommentTexture {
     let style = key.style, raster = geometry(key)
@@ -385,9 +375,13 @@ final class NeoDanmakuRenderer {
       let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 640, height: 360, mipmapped: false)
       descriptor.usage = [.renderTarget, .shaderRead]; descriptor.storageMode = .shared
       guard let target = device.makeTexture(descriptor: descriptor) else { throw CommentParseError.invalid("テスト出力") }
+      var previousTime = -Double.infinity
       func frame(time: Double, opacity: Float, size: Double = 1) throws -> ([UInt8], Int) {
+        // These fixture jumps simulate explicit user seeks, unlike native
+        // clock corrections (which keep the active motion scheduler).
+        if time < previousTime { renderer.seekWindow() }; previousTime = time
         renderer.prepare(comments, absoluteOpacity: opacity)
-        renderer.prepareLayout(timeline, size: size); renderer.waitForPreparedImages()
+        renderer.waitForPreparedImages()
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = target; pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
         pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
@@ -405,7 +399,7 @@ final class NeoDanmakuRenderer {
       let larger = try frame(time: 3, opacity: 1, size: 1.5)
       guard first.1 > 0, first.1 <= 80, first.0.contains(where: { $0 > 0 }), first.0 == paused.0,
         first.0 != moved.0, first.0 != larger.0, !hidden.0.contains(where: { $0 > 0 }), !ended.0.contains(where: { $0 > 0 }) else { throw CommentParseError.invalid("描画検証") }
-      renderer.prepareLayout(timeline, size: 1); renderer.waitForPreparedImages()
+      _ = try frame(time: 3, opacity: 1, size: 1)
       let packed = renderer.snapshot(comments, pixelScale: 1, opacity: 1, size: 1).compactMap { comment, image, top in
         renderer.placement(comment, imageSize: image.size, timeline: timeline, time: 3,
           videoRect: CGRect(x: 0, y: 0, width: 640, height: 360), sizeMultiplier: 1, laneTop: top)
@@ -423,7 +417,7 @@ final class NeoDanmakuRenderer {
       renderer.reset()
       func alphaFrame(_ override: Float?) throws -> [UInt8] {
         renderer.prepare([test], absoluteOpacity: override)
-        renderer.prepareLayout(alphaTimeline, size: 1); renderer.waitForPreparedImages()
+        renderer.waitForPreparedImages()
         let pass = MTLRenderPassDescriptor(); pass.colorAttachments[0].texture = target
         pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
         pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)

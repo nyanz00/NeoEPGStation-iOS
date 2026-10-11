@@ -157,25 +157,6 @@ let longTimeline = CommentTimeline(width: 1920, height: 1080, comments: many)
 check(longTimeline.visible(at: 10000).count == 9, "Long fixed comment remains visible")
 check(longTimeline.visible(at: 4).count == 6, "Seek into an earlier overlapping window")
 
-var clock = CommentPlaybackClock()
-check(clock.time(media: 10, running: true, now: 100) == 10, "Initial media anchor")
-check(abs(clock.time(media: 10, running: true, now: 100.02) - 10.02) < 0.0001, "Between-sample smoothing")
-check(clock.time(media: 10, running: true, now: 102) == 11.5, "A stalled clock stops after the bounded grace period")
-check(clock.time(media: 10, running: false, now: 102) == 10, "Pause freezes time")
-check(clock.time(media: 3, running: true, now: 103) == 3, "Backward seek resets anchor")
-check(clock.time(media: 90, running: true, now: 104) == 90, "Forward seek resets anchor")
-clock.reset()
-var previousClock = clock.time(media: 0, running: true, now: 0)
-for frame in 1...240 {
-  let now = Double(frame)/60
-  let value = clock.time(media: floor(now), running: true, now: now)
-  check(value >= previousClock && value-previousClock < 0.04, "Coarse native samples do not freeze or jump each second")
-  previousClock = value
-}
-clock.reset()
-_ = clock.time(media: 3, running: true, now: 0, rate: 2)
-check(abs(clock.time(media: 3, running: true, now: 0.25, rate: 2)-3.5) < 0.001, "Playback-rate interpolation")
-check(clock.time(media: .nan, running: true, now: 1) == 0, "Invalid clock input is rejected")
 var cursor = CommentFrameCursor()
 var gate = CommentSeekResumeGate()
 check(!gate.allows(media: 5, running: false, wantsPlayback: true), "Seek waits through buffering")
@@ -210,8 +191,10 @@ for step in 1...100 {
 }
 check(presentationClock.time(media: 40, running: false, now: 112, videoHost: 112) == beforeStall,
   "Buffering notification freezes comments despite fresh queued frames and advancing media time")
-check(presentationClock.time(media: 22, running: true, now: 112.1, videoHost: 112.1) == 22,
-  "Fresh video reanchors comments on recovery")
+check(presentationClock.time(media: 22, running: true, now: 112.1, videoHost: 112.1) == beforeStall && presentationClock.schedulingTime == 22,
+  "Fresh video updates new emissions without jumping the active motion clock")
+check(abs(presentationClock.time(media: 22.1, running: true, now: 112.2, videoHost: 112.2)-beforeStall-0.1) < 0.00001,
+  "Active comments resume at constant speed after real buffering")
 presentationClock.reset()
 check(presentationClock.time(media: 3, running: false, now: 113, videoHost: 0) == 3,
   "Explicitly paused seek shows destination after reset")
@@ -221,12 +204,62 @@ print("Video-stall-aware comment clock: all checks passed")
 
 var obscuredClock = CommentPresentationClock()
 _ = obscuredClock.time(media: 10, running: true, now: 100, videoHost: 100)
-check(obscuredClock.time(media: 13, running: true, now: 103, videoHost: 100, decodedHost: 103) == 13,
+_ = obscuredClock.time(media: 10.1, running: true, now: 100.1, videoHost: 100.1)
+check(abs(obscuredClock.time(media: 13, running: true, now: 103, videoHost: 100, decodedHost: 103)-13) < 0.00001,
   "Fresh decoded video keeps comments running when PiP or inline surface is obscured")
-check(obscuredClock.time(media: 14, running: false, now: 104, videoHost: 100, decodedHost: 104) == 13,
+check(abs(obscuredClock.time(media: 14, running: false, now: 104, videoHost: 100, decodedHost: 104)-13) < 0.00001,
   "Real buffering still freezes comments even with fresh decoded frames")
-check(obscuredClock.time(media: 20, running: true, now: 110, videoHost: 100, decodedHost: 104) == 13,
+check(abs(obscuredClock.time(media: 20, running: true, now: 110, videoHost: 100, decodedHost: 104)-13) < 0.00001,
   "Both decode and presentation stalled must freeze comments")
+
+var emissionClock = CommentPresentationClock()
+_ = emissionClock.time(media: 0, running: false, now: 100, videoHost: 100)
+_ = emissionClock.time(media: 0, running: true, now: 100.01, videoHost: 100.01)
+check(!emissionClock.ready, "Fresh startup frames do not emit stationary comments before native time advances")
+_ = emissionClock.time(media: 0.1, running: true, now: 100.1, videoHost: 100.1)
+check(emissionClock.ready && emissionClock.schedulingTime == 0.1, "Initial emissions anchor to advancing native media time")
+var priorMotion = 0.1
+for frame in 1...180 {
+  let now = 100.1+Double(frame)/60
+  let raw = frame < 60 ? now-100 : now-100-0.1
+  let motion = emissionClock.time(media: raw, running: true, now: now, videoHost: now)
+  check(abs(motion-priorMotion-1/60.0) < 0.000001, "A backwards 100ms native correction never freezes or speeds active comments")
+  check(abs(emissionClock.schedulingTime-raw) < 0.000001, "New emissions follow the corrected media time")
+  priorMotion = motion
+}
+check(abs(emissionClock.time(media: 3.2, running: true, now: 103.35, rate: 2, videoHost: 103.35)-priorMotion-0.5) < 0.000001,
+  "Explicit playback speed still applies to active trajectories")
+emissionClock.reset()
+check(!emissionClock.ready && emissionClock.time(media: 50, running: false, now: 104) == 50,
+  "A true seek resets to the requested position, including paused seeks")
+
+var movingStyle = CommentStyle(); movingStyle.alignment = 7
+let moving = NativeComment(id: 300, layer: 0, start: 0, end: 5.25, text: "active", style: movingStyle,
+  motion: CommentMotion(from: CommentPoint(x: 1920, y: 0), to: CommentPoint(x: -1400, y: 0), start: 0, end: 5.25), usesDanmakuTiming: true)
+var arriving = moving; arriving.id = 301; arriving.start = 1; arriving.end = 6.25
+let movementTimeline = CommentTimeline(width: 1920, height: 1080, comments: [moving, arriving])
+var scheduler = CommentMotionScheduler()
+let originalMoving = scheduler.visible(movementTimeline, media: 0.2, motion: 0.2)[0]
+let corrected = scheduler.visible(movementTimeline, media: 0.9, motion: 1.1)
+check(corrected.count == 1 && corrected[0].start == originalMoving.start && corrected[0].end == originalMoving.end,
+  "Backward correction leaves the current event's presentation lifetime unchanged")
+let newEmissions = scheduler.visible(movementTimeline, media: 1.01, motion: 1.21)
+check(newEmissions.count == 2 && newEmissions[0].start == originalMoving.start && abs(newEmissions[1].start-1.2) < 0.00001,
+  "Only a newly emitted event receives the corrected scheduling offset")
+scheduler.replaceTimeline()
+check(scheduler.visible(movementTimeline, media: 1.1, motion: 1.3).map(\.start) == newEmissions.map(\.start),
+  "Preview handoff preserves actual active trajectories")
+check(scheduler.visible(movementTimeline, media: 4, motion: 7).isEmpty,
+  "Expired events are not emitted again while native media time lags")
+scheduler.reset()
+check(scheduler.visible(movementTimeline, media: 2, motion: 2).count == 2,
+  "An explicit backwards seek permits destination events to be emitted again")
+let actualPlan = CommentLanePlan.build(CommentTimeline(width: 1920, height: 1080, comments: newEmissions), size: 1, fixedPositions: [300: 0]) {
+  _ in CommentExtent(width: 1400, height: 60)
+}
+check(actualPlan[300] == 0 && actualPlan[301] != nil && actualPlan[301]! >= 61,
+  "Collision avoidance reserves the actual remaining presentation lifetime of active comments")
+print("Initial emission gate and correction-independent active motion: all checks passed")
 
 // Preview-to-full identities, duplicate events and terminal text entry.
 let previewRange = NeoCommentLoader.previewRange(at: 100)
