@@ -61,7 +61,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   private var drawDiagnosticHost = 0.0, shortGaps = 0, busyFrames = 0, gpuBackpressure = 0
   private var maxDrawMs = 0.0, maxGapMs = 0.0
   private struct DrawState: Equatable {
-    let timeline: UUID, motion: Double, scheduling: Double, viewport: CGSize
+    let timeline: UUID, motion: Double, scheduling: Double, viewport: CGSize, fittedVideo: CGSize
     let size: Double, opacity: Float, sourceOpacity: Bool, canDraw: Bool, revision: Int
   }
   private var lastDrawState: DrawState?
@@ -443,6 +443,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     canDraw = canDraw && (clock.ready || !(wantsPlaybackProvider?() ?? running))
     renderer.prepareAhead(timeline, time: canDraw ? clock.schedulingTime : seekTarget ?? media, pixelScale: pixelScale, opacity: usesSourceOpacity ? nil : opacity)
     let state = DrawState(timeline: timeline.identity, motion: time, scheduling: clock.schedulingTime, viewport: viewport,
+      fittedVideo: CGSize(width: fittedWidth, height: fittedHeight),
       size: sizeMultiplier, opacity: opacity, sourceOpacity: usesSourceOpacity, canDraw: canDraw, revision: renderer.visualRevision)
     // Preparation and explicit pause often yield identical frames. Keep the
     // last presented texture instead of blocking the main thread for another
