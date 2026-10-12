@@ -14,6 +14,7 @@ enum CommentLanePlan {
       let measured = measure(c)
       active.append(Active(comment: c, extent: CommentExtent(width: measured.width*c.style.scaleX*size,
         height: measured.height*c.style.scaleY*size), top: fixedPositions[c.id]!))
+      positions[c.id] = fixedPositions[c.id]!
     }
     func left(_ c: NativeComment, _ e: CommentExtent, _ time: Double) -> Double {
       if let x = c.scrollingX(viewportWidth: timeline.width, textWidth: e.width, elapsed: time-c.start) { return x }
@@ -23,6 +24,9 @@ enum CommentLanePlan {
     }
     for (index, comment) in timeline.comments.enumerated() where comment.usesDanmakuTiming {
       if index % 128 == 0 && cancelled() { return [:] }
+      // Existing trajectories are already reserved. Do not measure, generate
+      // candidates and sort them again each time a single new comment arrives.
+      if fixedPositions[comment.id] != nil { continue }
       active.removeAll { $0.comment.end <= comment.start }
       let measured = measure(comment)
       let extent = CommentExtent(width: measured.width * comment.style.scaleX * size,

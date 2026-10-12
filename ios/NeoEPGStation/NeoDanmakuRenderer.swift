@@ -27,6 +27,8 @@ final class NeoDanmakuRenderer {
   private var motionScheduler = CommentMotionScheduler()
   private var displayLanes: [Int: Double] = [:], displayIDs: [Int] = []
   private var displaySize = -1.0, displayScale = -1.0
+  private var laneRevision = -1, laneVisibleIDs: [Int] = []
+  private var warmIdentity: UUID?, warmLanes: [Int: Double] = [:], warmSize = -1.0, warmScale = -1.0
   private var preparedIDs: [Int] = [], preparedScale = -1.0, preparedOpacity: Float?
   private var preparationGeneration = -1
   private var preparedTime = -Double.infinity
@@ -58,6 +60,7 @@ final class NeoDanmakuRenderer {
     generation += 1; cache.removeAll(); pending.removeAll(); wanted.removeAll(); cost = 0; failure = nil
     preparedIDs.removeAll(); preparationGeneration = -1
     motionScheduler.reset(); displayLanes.removeAll(); displayIDs.removeAll(); displaySize = -1
+    warmIdentity = nil; warmLanes.removeAll()
     renderRevision += 1; frameImages.removeAll(); snapshotRevision = -1
   }
 
@@ -130,6 +133,7 @@ final class NeoDanmakuRenderer {
   }
   func seekWindow() {
     motionScheduler.reset(); displayLanes.removeAll(); displayIDs.removeAll()
+    warmIdentity = nil; warmLanes.removeAll(); displaySize = -1
     renderRevision += 1; preparedTime = -.infinity; preparationGeneration = -1
   }
   func replaceTimeline(_ previous: CommentTimeline?, at time: Double) {
@@ -176,9 +180,27 @@ final class NeoDanmakuRenderer {
 
   func warmWindow(_ timeline: CommentTimeline, time: Double, size: Double, pixelScale: Double,
                   opacity: Float?, completion: @escaping () -> Void) {
-    prepare(timeline.visible(at: time, lookAhead: 1.5), pixelScale: pixelScale, absoluteOpacity: opacity)
+    let comments = timeline.visible(at: time, lookAhead: 1.5)
+    prepare(comments, pixelScale: pixelScale, absoluteOpacity: opacity)
+    lock.lock(); let version = generation; lock.unlock()
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-      self?.waitForPreparedImages()
+      if let self {
+        self.waitForPreparedImages()
+        self.lock.lock()
+        let metrics = Dictionary(uniqueKeysWithValues: comments.compactMap { c in
+          self.cache[self.key(c, pixelScale: pixelScale, absoluteOpacity: opacity)].map { (c.id, $0.size) }
+        })
+        self.lock.unlock()
+        let window = CommentTimeline(width: timeline.width, height: timeline.height, comments: comments.filter { metrics[$0.id] != nil })
+        let plan = CommentLanePlan.build(window, size: size) { c in
+          let metric = metrics[c.id]!; return CommentExtent(width: Double(metric.width), height: Double(metric.height))
+        }
+        self.lock.lock()
+        if self.generation == version {
+          self.warmIdentity = timeline.identity; self.warmLanes = plan; self.warmSize = size; self.warmScale = pixelScale
+        }
+        self.lock.unlock()
+      }
       DispatchQueue.main.async(execute: completion)
     }
   }
@@ -199,14 +221,36 @@ final class NeoDanmakuRenderer {
   private func movingComments(_ timeline: CommentTimeline, media: Double, motion: Double,
                               size: Double, scale: Double, opacity: Float?) -> [NativeComment] {
     let visible = motionScheduler.visible(timeline, media: media, motion: motion)
+    let visibleIDs = visible.map(\.id)
     lock.lock()
+    if laneRevision == renderRevision && laneVisibleIDs == visibleIDs && size == displaySize && scale == displayScale {
+      lock.unlock(); return visible
+    }
     let available = visible.compactMap { c -> (NativeComment, CGSize)? in
       cache[key(c, pixelScale: scale, absoluteOpacity: opacity)].map { (c, $0.size) }
     }
+    let imagesRevision = renderRevision
     lock.unlock()
     let ids = available.map { $0.0.id }
+    var laneChange = 0
     if ids != displayIDs || size != displaySize || scale != displayScale {
-      let pins = size == displaySize && scale == displayScale ? displayLanes : [:]
+      lock.lock()
+      let initialPins = warmIdentity == timeline.identity && size == warmSize && scale == warmScale
+        ? warmLanes.filter { ids.contains($0.key) } : [:]
+      lock.unlock()
+      let pins = size == displaySize && scale == displayScale ? displayLanes : initialPins
+      // Departures alone cannot introduce a collision. Retain the existing
+      // lanes without reconstructing or sorting a plan on the render thread.
+      if size == displaySize && scale == displayScale && Set(ids).isSubset(of: Set(displayIDs)) {
+        lock.lock()
+        let remaining = Set(ids)
+        displayLanes = displayLanes.filter { remaining.contains($0.key) }
+        displayIDs = ids; renderRevision += 1
+        laneRevision = imagesRevision+1; laneVisibleIDs = visibleIDs
+        lock.unlock()
+        return visible
+      }
+      let began = CACurrentMediaTime()
       let metrics = Dictionary(uniqueKeysWithValues: available.map { ($0.0.id, $0.1) })
       let live = CommentTimeline(width: timeline.width, height: timeline.height, comments: available.map { $0.0 })
       // Only arrivals/departures change this small plan. Fixed active trajectories
@@ -217,8 +261,12 @@ final class NeoDanmakuRenderer {
       }
       lock.lock()
       displayIDs = ids; displaySize = size; displayScale = scale; displayLanes = plan; renderRevision += 1
+      laneChange = 1
       lock.unlock()
+      let duration = (CACurrentMediaTime()-began)*1000
+      if duration > 8 { NeoPlaybackDiagnostics.record("comments.laneWork", fields: ["durationMs": duration, "count": ids.count, "pinned": pins.count]) }
     }
+    lock.lock(); laneRevision = imagesRevision+laneChange; laneVisibleIDs = visibleIDs; lock.unlock()
     return visible
   }
 

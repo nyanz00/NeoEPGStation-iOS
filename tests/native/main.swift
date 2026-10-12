@@ -329,3 +329,33 @@ check(recovery.evaluate(outputStats(samples: 108, changes: 1, age: 50), mediaMs:
 check(recovery.evaluate(outputStats(samples: 132, changes: 3, age: 0), mediaMs: 7000, now: 351) == 1,
   "A held repair still verifies actual picture recovery")
 print("Video-output identity, confirmed recovery and bounded escalation: all checks passed")
+
+func ebml(_ id: [UInt8], _ body: Data) -> Data {
+  Data(id + [0x10, UInt8((body.count >> 16)&255), UInt8((body.count >> 8)&255), UInt8(body.count&255)]) + body
+}
+func ebmlNumber(_ number: UInt64) -> Data {
+  Data((0..<8).reversed().map { UInt8((number >> ($0*8))&255) })
+}
+let mkvInfo = ebml([0x2a,0xd7,0xb1], ebmlNumber(1_000_000))
+let mkvTracks = ebml([0xae], ebml([0xd7], ebmlNumber(1)) + ebml([0x83], ebmlNumber(1)))
+func cue(_ time: UInt64, _ position: UInt64) -> Data {
+  ebml([0xbb], ebml([0xb3], ebmlNumber(time)) + ebml([0xb7], ebml([0xf7], ebmlNumber(1)) + ebml([0xf1], ebmlNumber(position))))
+}
+let mkvCues = cue(0, 50) + cue(80_000, 800) + cue(90_000, 900)
+let mkv = NeoMatroskaSeekIndex(cues: mkvCues, info: mkvInfo, tracks: mkvTracks, segment: 100, length: 1200)
+check(mkv?.nearest(85)?.offset == 900 && mkv?.nearest(85)?.time == 80, "MKV seek uses the preceding video Cue and Segment-relative offset")
+check(NeoMatroskaSeekIndex(cues: cue(1, 2000), info: mkvInfo, tracks: mkvTracks, segment: 100, length: 1200) == nil,
+  "Out-of-file MKV Cues never enable trusted demuxing")
+check(NeoMatroskaSeekIndex(cues: cue(1, 900)+cue(2, 50), info: mkvInfo, tracks: mkvTracks, segment: 100, length: 1200) == nil,
+  "Backwards MKV Cue offsets are rejected")
+check(NeoMatroskaSeekIndex(cues: mkvCues.dropLast(), info: mkvInfo, tracks: mkvTracks, segment: 100, length: 1200) == nil,
+  "Truncated EBML metadata is rejected")
+let audioOnly = ebml([0xae], ebml([0xd7], ebmlNumber(1)) + ebml([0x83], ebmlNumber(2)))
+check(NeoMatroskaSeekIndex(cues: mkvCues, info: mkvInfo, tracks: audioOnly, segment: 100, length: 1200) == nil,
+  "Audio-only Cues cannot masquerade as a video index")
+check(NeoMatroskaSeekIndex.header(Data([0x18,0x53,0x80,0x67,0xff]))?.size == nil,
+  "Unknown-size Segment headers are handled without integer overflow")
+var measured = 0
+_ = CommentLanePlan.build(expanded, size: 1, fixedPositions: [0: 80, 1: 160]) { _ in measured += 1; return CommentExtent(width: 100, height: 40) }
+check(measured == expanded.comments.count, "Pinned comments are measured once, without re-running candidate packing")
+print("MKV Cue validation and incremental comment packing: all checks passed")

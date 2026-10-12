@@ -99,6 +99,7 @@ if '--ui-only' in sys.argv:
 fixture_container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], 'io.github.nyanz00.NeoEPGStation', 'data'))
 (fixture_container / 'Documents').mkdir(exist_ok=True)
 shutil.copyfile('tests/fixtures/player-tap.ts', fixture_container / 'Documents/player-tap.ts')
+shutil.copyfile('tests/fixtures/player-seek.mkv', fixture_container / 'Documents/player-seek.mkv')
 sys.path.insert(0, str(Path('tests/fixtures').resolve()))
 from http_range_server import start_server
 range_server = start_server(fixture_container / 'Documents')
@@ -168,7 +169,7 @@ for name in ['pip-composition-smoke', 'player-landscape-smoke', 'player-initial-
     if source.exists():
         Path(f'dist/{name}.png').write_bytes(source.read_bytes())
 results = {}
-for name in ['player-recovery-smoke', 'comment-preparation-smoke', 'pip-composition-smoke', 'pip-player-smoke', 'player-ui-smoke', 'player-playback-smoke', 'player-controls-smoke', 'player-settings-smoke', 'player-exit-smoke', 'player-tap-smoke', 'rewind-cache-smoke', 'player-seek-state-smoke', 'player-ended-smoke']:
+for name in ['player-mkv-seek-smoke', 'player-recovery-smoke', 'comment-preparation-smoke', 'pip-composition-smoke', 'pip-player-smoke', 'player-ui-smoke', 'player-playback-smoke', 'player-controls-smoke', 'player-settings-smoke', 'player-exit-smoke', 'player-tap-smoke', 'rewind-cache-smoke', 'player-seek-state-smoke', 'player-ended-smoke']:
     result = json.loads((container / f'Documents/{name}.json').read_text())
     Path(f'dist/{name}.json').write_text(json.dumps(result, indent=2) + '\n')
     results[name] = result

@@ -241,9 +241,26 @@ enum NeoPiPSmoke {
           if let diagnostics = NeoPlaybackDiagnostics.exportURL(), let data = try? Data(contentsOf: diagnostics) {
             try? data.write(to: directory.appendingPathComponent("player-diagnostics-smoke.json"))
           }
-          player.onClose = { completion(taps["success"] as? Bool == true && recovery["success"] as? Bool == true) }
+          player.onClose = {
+            mkvSeekTest(root: root) { mkv in
+              completion(taps["success"] as? Bool == true && recovery["success"] as? Bool == true && mkv)
+            }
+          }
           player.closeTapSmoke()
         }
+      }
+    }
+  }
+  static func mkvSeekTest(root: UIViewController, completion: @escaping (Bool) -> Void) {
+    guard let base = ProcessInfo.processInfo.environment["NEO_EPG_RANGE_SMOKE"], let url = URL(string: base+"/api/videos/3") else {
+      save("player-mkv-seek-smoke", ["success": false, "error": "missing MKV Range server"]); completion(false); return
+    }
+    let player = NeoPlayerController(url: url, title: "Synthetic MKV indexed seek", username: "", password: "", networkCaching: 100)
+    player.recordingContext = ["disableHistory": true]; player.modalPresentationStyle = .fullScreen
+    root.present(player, animated: false) {
+      player.runMKVSeekSmoke { result in
+        save("player-mkv-seek-smoke", result)
+        player.onClose = { completion(result["success"] as? Bool == true) }; player.closeTapSmoke()
       }
     }
   }

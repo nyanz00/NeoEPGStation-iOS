@@ -58,6 +58,8 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   private var seekTarget: Double?
   private var drawn = 0, lastFrame = 0.0, frameCount = 0, fps = 0.0, metricsHost = 0.0
   private let inFlight = DispatchSemaphore(value: 3)
+  private var drawDiagnosticHost = 0.0, shortGaps = 0, busyFrames = 0, gpuBackpressure = 0
+  private var maxDrawMs = 0.0, maxGapMs = 0.0
   var compositionState: CommentCompositionState {
     CommentCompositionState(timeline: timeline, version: version, enabled: enabled && ready && !closed,
       size: sizeMultiplier, opacity: opacity, usesSourceOpacity: usesSourceOpacity)
@@ -383,7 +385,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   @objc private func willForeground() { background = false; clock.reset(); renderer?.seekWindow(); refreshRendering() }
   override func didMoveToWindow() { super.didMoveToWindow(); refreshRendering() }
   private func refreshRendering() {
-    let show = enabled && ready && !closed && !seeking
+    let show = enabled && ready && !warming && !closed && !seeking
     metal?.isHidden = !show
     metal?.isPaused = !show || background || coveredByPiP || window == nil
   }
@@ -395,6 +397,21 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
       ready = false; status = error; refreshRendering(); onChange?(); return
     }
     let now = CACurrentMediaTime()
+    defer {
+      let work = (CACurrentMediaTime()-now)*1000
+      maxDrawMs = max(maxDrawMs, work)
+      if work > 8 { busyFrames += 1 }
+      if now-drawDiagnosticHost >= 1 {
+        if shortGaps > 0 || busyFrames > 0 || gpuBackpressure > 0 {
+          NeoPlaybackDiagnostics.record("comments.frameWork", fields: ["maxWorkMs": maxDrawMs, "maxGapMs": maxGapMs,
+            "shortGaps": shortGaps, "busyFrames": busyFrames, "gpuBackpressure": gpuBackpressure, "media": renderedTime])
+        }
+        drawDiagnosticHost = now; maxDrawMs = 0; maxGapMs = 0; shortGaps = 0; busyFrames = 0; gpuBackpressure = 0
+      }
+    }
+    if lastFrame > 0, now-lastFrame > 1.8/Double(max(1, view.preferredFramesPerSecond)), runningProvider?() == true {
+      shortGaps += 1; maxGapMs = max(maxGapMs, (now-lastFrame)*1000)
+    }
     if lastFrame > 0, now-lastFrame > 0.08, runningProvider?() == true {
       NeoPlaybackDiagnostics.record("comments.drawGap", fields: ["durationMs": (now-lastFrame)*1000, "media": renderedTime])
     }
@@ -420,7 +437,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     let pixelScale = max(Double(fittedWidth) / timeline.width, Double(fittedHeight) / timeline.height)
     canDraw = canDraw && (clock.ready || !(wantsPlaybackProvider?() ?? running))
     renderer.prepareAhead(timeline, time: canDraw ? clock.schedulingTime : seekTarget ?? media, pixelScale: pixelScale, opacity: usesSourceOpacity ? nil : opacity)
-    guard inFlight.wait(timeout: .now()) == .success else { return }
+    guard inFlight.wait(timeout: .now()) == .success else { gpuBackpressure += 1; return }
     guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
       let command = renderer.queue.makeCommandBuffer(), let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { inFlight.signal(); return }
     drawn = canDraw ? renderer.encode(timeline: timeline, time: time, viewport: viewport,

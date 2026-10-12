@@ -26,6 +26,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   @objc var channelArtwork: UIImage? { logo.image }
   private let leftHeader = UIView(), rightHeader = UIView(), videoDim = UIView()
   private let videoTap = UITapGestureRecognizer()
+  private let videoDoubleTap = UITapGestureRecognizer()
   private let navigationPan = UIPanGestureRecognizer()
   private let orientationPan = UIPanGestureRecognizer()
   private var orientationProgress: CGFloat = 0
@@ -76,8 +77,12 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
 #if targetEnvironment(simulator)
     if let smokeSafeArea { return smokeSafeArea }
 #endif
+    if let rotationInsets { return rotationInsets }
     return super.safeAreaInsets
   }
+  private var rotationInsets: UIEdgeInsets?
+  @objc func holdRotationInsets(_ insets: UIEdgeInsets) { rotationInsets = insets }
+  @objc func releaseRotationInsets() { rotationInsets = nil }
 
   @objc(initWithTitle:)
   init(title: String) {
@@ -186,11 +191,16 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     // empty HUD regions and VLC/Metal subviews receive the same background tap.
     videoTap.addTarget(self, action: #selector(tapVideo)); videoTap.delegate = self
     videoTap.cancelsTouchesInView = true; addGestureRecognizer(videoTap)
+    videoDoubleTap.numberOfTapsRequired = 2
+    videoDoubleTap.addTarget(self, action: #selector(doubleTapVideo)); videoDoubleTap.delegate = self
+    videoDoubleTap.cancelsTouchesInView = true; addGestureRecognizer(videoDoubleTap)
+    videoTap.require(toFail: videoDoubleTap)
     navigationPan.addTarget(self, action: #selector(dragNavigation)); navigationPan.delegate = self
     addGestureRecognizer(navigationPan); videoTap.require(toFail: navigationPan)
     orientationPan.addTarget(self, action: #selector(dragOrientation)); orientationPan.delegate = self
     orientationPan.maximumNumberOfTouches = 1
     addGestureRecognizer(orientationPan); videoTap.require(toFail: orientationPan)
+    videoDoubleTap.require(toFail: navigationPan); videoDoubleTap.require(toFail: orientationPan)
     header.backgroundColor = .clear; controls.backgroundColor = .clear
     renderPanel()
     statusLabel.backgroundColor = .clear; statusLabel.numberOfLines = 2; statusLabel.isHidden = true
@@ -369,6 +379,12 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     return tracking(self)
   }
   @objc private func tapVideo() { onAction?("toggle-controls") }
+  @objc private func doubleTapVideo(_ gesture: UITapGestureRecognizer) {
+    jumpAt(gesture.location(in: self))
+  }
+  private func jumpAt(_ point: CGPoint) {
+    onAction?(point.x < videoView.frame.midX ? "jump:-10" : "jump:10")
+  }
   private func acceptsVideoTap(_ point: CGPoint, target: UIView?) -> Bool {
     guard videoView.frame.contains(point), !interactionOpen, let target else { return false }
     var ancestor: UIView? = target
@@ -379,7 +395,9 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     return ancestor === self
   }
   func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-    if gesture === videoTap { return acceptsVideoTap(touch.location(in: self), target: touch.view) }
+    if gesture === videoTap || gesture === videoDoubleTap {
+      return !pipShowing && acceptsVideoTap(touch.location(in: self), target: touch.view)
+    }
     if gesture === orientationPan { return !pipShowing && acceptsVideoTap(touch.location(in: self), target: touch.view) }
     guard gesture === navigationPan else { return true }
     navigationStart = touch.location(in: self); navigationScroll = nil
@@ -755,7 +773,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     orientationTranslation = max(0, directed)
     orientationProgress = max(0, directed/orientationDistance)
     applyOrientationPreview()
-    if (state == .changed || state == .ended) && orientationProgress >= 1 && !orientationPending {
+    if state == .ended && orientationProgress >= 1 && !orientationPending {
       commitOrientationPreview()
     }
     if [.ended, .cancelled, .failed].contains(state) {
@@ -980,6 +998,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       "panelTapExcluded": panelExcluded, "tabsImmediateWithoutGeometryAnimation": immediate,
       "panelTabsAlignedInitially": initiallyAligned, "panelTabsStayAlignedAfterSelection": tabsAligned]
     let all = checks.merging(gestures) { _, new in new }.merging(runOrientationChecks()) { _, new in new }
+      .merging(runDoubleTapChecks()) { _, new in new }
     return all.merging(["success": all.values.allSatisfy { $0 }]) { _, new in new }
   }
   private func runNavigationChecks() -> [String: Bool] {
@@ -1042,8 +1061,11 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     updateOrientation(state: .changed, translation: -orientationDistance)
     let upperGapFilled = abs(videoView.frame.minY-bounds.minY) < 1 && abs(videoView.frame.maxY-videoBottom) < 0.5 &&
       videoView.frame.minX <= 1 && videoView.frame.maxX >= bounds.maxX-1
-    let landscape = actions.filter { $0 == "orientation:landscape" }.count == 1 && orientationPending
+    let heldPortrait = !actions.contains("orientation:landscape") && orientationDragging && !orientationPending
+    updateOrientation(state: .changed, translation: -orientationDistance*2)
+    let upCapped = abs(videoView.frame.minY-bounds.minY) < 1 && abs(videoView.frame.maxY-videoBottom) < 0.5
     updateOrientation(state: .ended, translation: -orientationDistance)
+    let landscape = actions.filter { $0 == "orientation:landscape" }.count == 1 && orientationPending
     let once = actions.filter { $0 == "orientation:landscape" }.count == 1
     finishOrientationTransition()
     smokeSafeArea = UIEdgeInsets(top: 0, left: 60, bottom: 21, right: 60)
@@ -1057,11 +1079,12 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       abs(videoView.frame.minY-wideFrame.minY-downDistance*0.5) < 1
     let notEarly = !actions.contains("orientation:portrait")
     updateOrientation(state: .changed, translation: downDistance)
-    let portrait = actions.filter { $0 == "orientation:portrait" }.count == 1 && orientationPending
+    let heldLandscape = !actions.contains("orientation:portrait") && orientationDragging && !orientationPending
     let triggerPosition = abs(videoView.frame.minY-bounds.height*0.35) < 1
     updateOrientation(state: .changed, translation: downDistance*3)
     let unlimited = abs(videoView.transform.ty-downDistance*3) < 1 && videoView.transform.a == 1
     updateOrientation(state: .ended, translation: downDistance*3)
+    let portrait = actions.filter { $0 == "orientation:portrait" }.count == 1 && orientationPending
     finishOrientationTransition()
     smokeSafeArea = savedSafeArea; frame = savedFrame; onAction = handler; showControls(savedHUD); setNeedsLayout(); layoutIfNeeded()
     orientationViews.forEach { $0.layer.removeAllAnimations() }
@@ -1072,11 +1095,26 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       "movieSwipeKeepsHUDFixed": fixed && survivesLayout,
       "movieSwipeCancellationRestoresFrame": cancelled,
       "movieSwipeLocksLandscapeAndPortrait": landscape && portrait,
-      "movieSwipeTriggersBeforeFingerRelease": below && landscape && notEarly && portrait && once,
+      "movieSwipeTriggersOnFingerRelease": below && heldPortrait && heldLandscape && landscape && notEarly && portrait && once,
+      "movieSwipeUpStopsAtScreenTop": upCapped,
       "movieSwipeTriggerMatchesUpperGap": upperGapFilled && triggerPosition,
       "movieSwipeDownHasNoTranslationCap": unlimited,
       "movieSwipeHidesControls": hidden,
       "movieSwipeExcludesSliderAndPanel": excluded, "movieSwipeRecognizerOnCommonAncestor": orientationPan.view === self]
+  }
+  private func runDoubleTapChecks() -> [String: Bool] {
+    let saved = onAction, savedHUD = controlsVisible
+    var actions: [String] = []; onAction = { actions.append($0) }
+    for shown in [true, false] {
+      showControls(shown)
+      jumpAt(CGPoint(x: videoView.frame.minX+videoView.frame.width*0.2, y: videoView.frame.midY))
+      jumpAt(CGPoint(x: videoView.frame.minX+videoView.frame.width*0.8, y: videoView.frame.midY))
+    }
+    let correct = actions == ["jump:-10", "jump:10", "jump:-10", "jump:10"]
+    tapVideo(); let single = actions.last == "toggle-controls"
+    onAction = saved; showControls(savedHUD)
+    return ["doubleTapLeftRightSeekTenSeconds": correct, "doubleTapDoesNotToggleControls": !actions.dropLast().contains("toggle-controls"),
+      "singleTapStillTogglesControls": single, "doubleTapRecognizerNeedsTwoTouches": videoDoubleTap.numberOfTapsRequired == 2 && videoDoubleTap.view === self]
   }
   private func panelTabRowsAligned() -> Bool {
     tabButtons.forEach { $0.layoutIfNeeded() }

@@ -1,5 +1,84 @@
 import Foundation
 
+// Read only EBML metadata, never infer seek positions from bitrate or scan
+// encoded frames. Offsets in Cues/SeekHead are relative to Segment's body.
+struct NeoMatroskaSeekIndex {
+  struct Element { let id: UInt64; let body: Int; let size: Int? }
+  struct Cue { let time: Double; let offset: Int64 }
+  let cues: [Cue]
+  func nearest(_ time: Double) -> Cue? { cues.last { $0.time <= time } ?? cues.first }
+  static func header(_ data: Data, at offset: Int = 0) -> Element? {
+    let bytes = [UInt8](data)
+    func vint(_ at: Int, id: Bool) -> (UInt64, Int, Bool)? {
+      guard at >= 0, at < bytes.count, bytes[at] != 0 else { return nil }
+      var width = 1, mask: UInt8 = 0x80
+      while bytes[at]&mask == 0 && width < 8 { width += 1; mask >>= 1 }
+      guard width <= (id ? 4 : 8), at+width <= bytes.count else { return nil }
+      var value = UInt64(id ? bytes[at] : bytes[at]&(~mask))
+      if width > 1 { for byte in bytes[(at+1)..<(at+width)] { value = (value<<8)|UInt64(byte) } }
+      return (value, at+width, !id && value == (UInt64(1) << (7*width))-1)
+    }
+    guard let id = vint(offset, id: true), let size = vint(id.1, id: false), size.0 <= UInt64(Int.max) else { return nil }
+    return Element(id: id.0, body: size.1, size: size.2 ? nil : Int(size.0))
+  }
+  static func children(_ data: Data) -> [(UInt64, Data)]? {
+    var offset = 0, result: [(UInt64, Data)] = []
+    while offset < data.count {
+      guard let element = header(data, at: offset), let size = element.size,
+        size <= data.count-element.body else { return nil }
+      result.append((element.id, data.subdata(in: element.body..<(element.body+size))))
+      offset = element.body+size
+    }
+    return result
+  }
+  static func unsigned(_ data: Data) -> UInt64? {
+    guard !data.isEmpty, data.count <= 8 else { return nil }
+    return data.reduce(UInt64(0)) { ($0<<8)|UInt64($1) }
+  }
+  static func seeks(_ data: Data, segment: Int64, length: Int64) -> [UInt64: Int64] {
+    var positions: [UInt64: Int64] = [:]
+    for (id, body) in children(data) ?? [] where id == 0x4dbb {
+      let fields = children(body) ?? []
+      guard let target = fields.first(where: { $0.0 == 0x53ab }).flatMap({ unsigned($0.1) }),
+        let relative = fields.first(where: { $0.0 == 0x53ac }).flatMap({ unsigned($0.1) }),
+        relative < UInt64(max(0, length-segment)) else { continue }
+      positions[target] = segment+Int64(relative)
+    }
+    return positions
+  }
+  init?(cues data: Data, info: Data, tracks: Data, segment: Int64, length: Int64) {
+    guard let infoFields = Self.children(info), let trackFields = Self.children(tracks),
+      let points = Self.children(data), segment >= 0, segment < length else { return nil }
+    let scale = infoFields.first(where: { $0.0 == 0x2ad7b1 }).flatMap { Self.unsigned($0.1) } ?? 1_000_000
+    guard scale > 0, scale <= 1_000_000_000 else { return nil }
+    var videoTracks: Set<UInt64> = []
+    for (id, body) in trackFields where id == 0xae {
+      let fields = Self.children(body) ?? []
+      if fields.first(where: { $0.0 == 0x83 }).flatMap({ Self.unsigned($0.1) }) == 1,
+        let number = fields.first(where: { $0.0 == 0xd7 }).flatMap({ Self.unsigned($0.1) }) { videoTracks.insert(number) }
+    }
+    guard !videoTracks.isEmpty else { return nil }
+    var result: [Cue] = []
+    for (id, body) in points where id == 0xbb {
+      guard let fields = Self.children(body),
+        let ticks = fields.first(where: { $0.0 == 0xb3 }).flatMap({ Self.unsigned($0.1) }) else { return nil }
+      let time = Double(ticks)*Double(scale)/1_000_000_000
+      guard time.isFinite, time >= 0, time <= 24*60*60 else { return nil }
+      for (id, track) in fields where id == 0xb7 {
+        guard let values = Self.children(track) else { return nil }
+        guard let number = values.first(where: { $0.0 == 0xf7 }).flatMap({ Self.unsigned($0.1) }), videoTracks.contains(number) else { continue }
+        guard let relative = values.first(where: { $0.0 == 0xf1 }).flatMap({ Self.unsigned($0.1) }),
+          relative < UInt64(length-segment) else { return nil }
+        result.append(Cue(time: time, offset: segment+Int64(relative)))
+      }
+    }
+    guard !result.isEmpty, result.count <= 100_000 else { return nil }
+    result.sort { $0.time == $1.time ? $0.offset < $1.offset : $0.time < $1.time }
+    guard zip(result, result.dropFirst()).allSatisfy({ $0.0.offset <= $0.1.offset }) else { return nil }
+    cues = result
+  }
+}
+
 // Source-byte/media-time mapping. TS uses PCR rather than average bitrate;
 // MP4 uses each track's chunk offsets, sample sizes and decode-time table.
 // Container indexes/headers are retained separately from watched media bytes.

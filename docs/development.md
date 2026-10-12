@@ -2,6 +2,8 @@
 
 ## ビルド
 
+MKV索引を使う途中再開、期限後の入力再利用、指を離してからの縦横切り替え、ダブルタップとコメント初期描画は `player-indexed-seek-gestures.md` を参照する。
+
 映像復旧の成功確認・原因診断・動画だけのスワイプ・上流接続の再試行は `player-output-reconnect.md` を参照する。
 コメントの初期時計、表示中の移動維持、動画の縦スワイプ、検索からの段階的な復帰は `comment-motion-swipe-navigation.md` を参照する。
 

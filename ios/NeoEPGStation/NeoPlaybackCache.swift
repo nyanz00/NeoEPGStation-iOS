@@ -43,6 +43,9 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   private var length: Int64 = 0, closed = false
   private var validator: String?, validatorHeader: String?
   private var byteClock = NeoMediaByteClock()
+  private var matroskaIndex: NeoMatroskaSeekIndex?
+  @objc var hasMatroskaSeekIndex: Bool { queue.sync { matroskaIndex != nil } }
+  @objc func matroskaSeekOffset(_ time: Double) -> Int64 { queue.sync { matroskaIndex?.nearest(time)?.offset ?? -1 } }
   private var startup: ((URL?, String?) -> Void)?
   @objc private(set) var status = ""
   private var warnings: [String: String] = [:]
@@ -58,6 +61,13 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     var firstSent = false
   }
   private var deliverySequence = 0
+  private var seekRangeStarts: [Int64] = [], seekNetworkBaseline: Int64 = 0
+  @objc var seekMetrics: [String: NSNumber] { queue.sync {
+    let expected = matroskaIndex?.nearest(mediaTime)?.offset ?? -1
+    let target = expected > 0 ? seekRangeStarts.first { abs($0-expected) <= 65536 } ?? -1 : -1
+    return ["largestRangeStart": NSNumber(value: seekRangeStarts.max() ?? -1), "indexedRangeStart": NSNumber(value: target),
+     "networkBytes": NSNumber(value: networkBytes-seekNetworkBaseline), "fileBytes": NSNumber(value: length)]
+  } }
   private var deliveries: [ObjectIdentifier: Delivery] = [:]
   private func recordConnectionEnd(_ connection: NWConnection, state: Int, error: NWError? = nil) {
     var domain = 0, code = 0
@@ -119,8 +129,10 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
       fetch(offset: 0, count: 1) { [self] result in
         switch result {
         case .failure: finishStart(nil, "巻き戻し用キャッシュを開始できません。サーバーのRange応答と認証を確認してください。")
-        case .success:
-          self.loadIndex(offset: 0, attempt: 0) { [self] in self.listen() }
+        case .success(let data):
+          if data.first == 0x1a {
+            self.loadMatroskaIndex { [self] in self.listen() }
+          } else { self.loadIndex(offset: 0, attempt: 0) { [self] in self.listen() } }
         }
       }
     }
@@ -175,6 +187,85 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
       } else { completion() }
     }
   }
+  private func readEBML(_ offset: Int64, _ completion: @escaping (NeoMatroskaSeekIndex.Element?, Int64) -> Void) {
+    guard offset >= 0, offset < length else { completion(nil, offset); return }
+    fetch(offset: offset, count: Int(min(16, length-offset))) { result in
+      guard case .success(let data) = result, let element = NeoMatroskaSeekIndex.header(data) else { completion(nil, offset); return }
+      completion(element, offset+Int64(element.body))
+    }
+  }
+  private func loadMatroskaIndex(completion: @escaping () -> Void) {
+    readEBML(0) { [self] header, body in
+      guard let header, header.id == 0x1a45dfa3, let size = header.size, size <= 4096 else { completion(); return }
+      fetch(offset: body, count: size) { [self] result in
+        guard case .success(let data) = result,
+          let fields = NeoMatroskaSeekIndex.children(data),
+          fields.contains(where: { $0.0 == 0x4282 && String(data: $0.1, encoding: .utf8) == "matroska" }) else { completion(); return }
+        readEBML(body+Int64(size)) { [self] segment, start in
+          guard segment?.id == 0x18538067 else { completion(); return }
+          scanMatroskaMetadata(start, segment: start, count: 0, positions: [:], completion: completion)
+        }
+      }
+    }
+  }
+  private func scanMatroskaMetadata(_ offset: Int64, segment: Int64, count: Int,
+                                    positions: [UInt64: Int64], completion: @escaping () -> Void) {
+    guard count < 64 else { finishMatroskaIndex(segment: segment, positions: positions, completion: completion); return }
+    readEBML(offset) { [self] element, body in
+      guard let element, let size = element.size, Int64(size) <= length-body else {
+        finishMatroskaIndex(segment: segment, positions: positions, completion: completion); return
+      }
+      var found = positions
+      if [UInt64(0x1549a966), 0x1654ae6b, 0x1c53bb6b].contains(element.id) { found[element.id] = offset }
+      if element.id == 0x1f43b675 {
+        // Stop at the first media cluster. SeekHead locates tail Cues without
+        // downloading or decoding the preceding recording.
+        finishMatroskaIndex(segment: segment, positions: found, completion: completion); return
+      }
+      if element.id == 0x114d9b74 && size <= 1024*1024 {
+        fetch(offset: body, count: size) { [self] result in
+          if case .success(let data) = result {
+            found.merge(NeoMatroskaSeekIndex.seeks(data, segment: segment, length: length)) { _, new in new }
+          }
+          scanMatroskaMetadata(body+Int64(size), segment: segment, count: count+1, positions: found, completion: completion)
+        }
+      } else { scanMatroskaMetadata(body+Int64(size), segment: segment, count: count+1, positions: found, completion: completion) }
+    }
+  }
+  private func finishMatroskaIndex(segment: Int64, positions: [UInt64: Int64], completion: @escaping () -> Void) {
+    let ids: [UInt64] = [0x1549a966, 0x1654ae6b, 0x1c53bb6b]
+    var metadata: [UInt64: Data] = [:]
+    func load(_ index: Int) {
+      if index == ids.count {
+        guard let info = metadata[ids[0]], let tracks = metadata[ids[1]], let cues = metadata[ids[2]],
+          let parsed = NeoMatroskaSeekIndex(cues: cues, info: info, tracks: tracks, segment: segment, length: length) else { completion(); return }
+        // Check actual Cluster IDs as well as metadata bounds before opting
+        // into VLC's cue-trusting path. No raw content or URLs enter the log.
+        readEBML(parsed.cues.first!.offset) { [self] first, _ in
+          guard first?.id == 0x1f43b675 else { completion(); return }
+          readEBML(parsed.cues.last!.offset) { [self] last, _ in
+            if last?.id == 0x1f43b675 {
+              matroskaIndex = parsed
+              NeoPlaybackDiagnostics.record("mkv.indexReady", fields: ["cues": parsed.cues.count, "firstOffset": parsed.cues.first!.offset,
+                "lastOffset": parsed.cues.last!.offset, "lastTime": parsed.cues.last!.time])
+            }
+            completion()
+          }
+        }
+        return
+      }
+      let id = ids[index]
+      guard let offset = positions[id] else { completion(); return }
+      readEBML(offset) { [self] element, body in
+        guard element?.id == id, let size = element?.size, size > 0, size <= 8*1024*1024, Int64(size) <= length-body else { completion(); return }
+        fetch(offset: body, count: size) { result in
+          guard case .success(let data) = result else { completion(); return }
+          metadata[id] = data; load(index+1)
+        }
+      }
+    }
+    load(0)
+  }
   private func finishStart(_ url: URL?, _ error: String?) {
     guard let callback = startup else { return }; startup = nil
     DispatchQueue.main.async { [weak self] in
@@ -201,6 +292,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   }
   @objc func beginSeek(_ time: Double) {
     queue.async { [self] in
+      seekRangeStarts.removeAll(); seekNetworkBaseline = networkBytes
       mediaTime = max(0, time); highWater = mediaTime; lastUse = ProcessInfo.processInfo.systemUptime
       NeoPlaybackDiagnostics.record("cache.seek", fields: ["target": time, "retainedBytes": bytes, "blocks": blocks.count, "seconds": seconds])
     }
@@ -318,6 +410,8 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
       send(connection, "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */\(length)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", then: { connection.cancel() }); return
     }
     deliverySequence += 1
+    seekRangeStarts.append(start)
+    if seekRangeStarts.count > 64 { seekRangeStarts.removeFirst() }
     let entry = Delivery(id: deliverySequence, seek: NeoPlaybackDiagnostics.seekID,
       began: ProcessInfo.processInfo.systemUptime, start: start, end: end)
     deliveries[ObjectIdentifier(connection)] = entry

@@ -43,6 +43,11 @@
     [NeoPlaybackDiagnostics nativeError:kind level:level];
   }
   NSString *event = nil; long long first = 0, second = 0;
+  unsigned long long position = 0;
+  if ([message hasPrefix:@"seek: preroll{ req: "] &&
+      sscanf(message.UTF8String, "seek: preroll{ req: %lld, start-pts: %lld, start-fpos: %llu}", &first, &second, &position) == 3) {
+    [NeoPlaybackDiagnostics record:@"mkv.nativeSeek" fields:@{@"targetTicks": @(first), @"startTicks": @(second), @"offset": @(position)}];
+  }
   if ([message hasPrefix:@"Stream buffering done ("] &&
       sscanf(message.UTF8String, "Stream buffering done (%lld ms in %lld ms)", &first, &second) == 2) {
     event = @"vlc.bufferReady";
@@ -138,6 +143,7 @@
 @property (nonatomic) BOOL backgroundPositionValid;
 @property (nonatomic) BOOL inputInBackground;
 @property (nonatomic) int64_t inputStartTime;
+@property (nonatomic) BOOL reloadTimedOut;
 @property (atomic) BOOL invalidClockReported;
 @property (nonatomic) NSTimeInterval inputClockGuardUntil;
 @property (nonatomic, copy) dispatch_block_t reloadCompletion;
@@ -170,6 +176,7 @@
 @property (nonatomic) BOOL rotatingPlayer;
 @property (nonatomic) NSInteger rotationGeneration;
 @property (nonatomic) NSTimeInterval playerRotationDuration;
+@property (nonatomic) CGFloat rotationHandoffDelta;
 @property (nonatomic) NSTimeInterval systemRotationDuration;
 @property (nonatomic) BOOL dismissingPlayer;
 @property (nonatomic, weak) UIViewController *dismissalPresenter;
@@ -266,7 +273,10 @@
   self.comments.timeProvider = ^double { return (double)[weakSelf mediaTime] / 1000.0; };
   self.comments.wantsPlaybackProvider = ^BOOL { return weakSelf.wantsPlayback && !weakSelf.playbackEnded && !weakSelf.closing; };
   self.comments.runningProvider = ^BOOL {
-    return weakSelf.player.isPlaying && weakSelf.wantsPlayback && !weakSelf.seeking && !weakSelf.scrubbing && !weakSelf.buffering && !weakSelf.closing && !weakSelf.reloading;
+    // Brief buffering/state notifications must not interrupt already moving
+    // comments while due video frames keep arriving. The presentation clock
+    // freezes on actual video inactivity; explicit pause remains immediate.
+    return weakSelf.inputBufferReady && weakSelf.wantsPlayback && !weakSelf.seeking && !weakSelf.scrubbing && !weakSelf.closing && !weakSelf.reloading;
   };
   self.comments.onChange = ^{ [weakSelf updateCommentState]; [weakSelf updateLoadingState]; };
   [self.chrome bindCommentSettings:self.comments];
@@ -346,6 +356,7 @@
   self.landscape = size.width > size.height;
   self.rotationContainer.frame = CGRectMake(0, 0, size.width, size.height);
   self.chrome.frame = CGRectMake(0, 0, size.width, size.height);
+  [self.chrome holdRotationInsets:self.view.safeAreaInsets];
   [self.chrome setNeedsLayout]; [self.chrome layoutIfNeeded];
   [self alignVideoOutput];
   if (changed) { [self setNeedsStatusBarAppearanceUpdate]; }
@@ -373,16 +384,24 @@
   // Cancel UIKit's window rotation on an owned child, never on the controller's
   // root view. Its live video/UI then rotate with a separate, shorter animator.
   [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context) {
-    self.rotationContainer.bounds = (CGRect){CGPointZero, size};
-    self.rotationContainer.center = CGPointMake(size.width/2, size.height/2);
+    // UIKit has installed the destination safe area here. Keep it stable while
+    // the owned content rotates, instead of relaying intermediate root insets.
+    [self.chrome holdRotationInsets:self.view.safeAreaInsets];
+    // The root already uses destination coordinates. Rebase centers together;
+    // animating this rebase on a different timeline makes the movie drift.
+    [UIView performWithoutAnimation:^{
+      self.rotationContainer.bounds = (CGRect){CGPointZero, size};
+      self.rotationContainer.center = CGPointMake(size.width/2, size.height/2);
+      self.chrome.center = CGPointMake(size.width/2, size.height/2);
+    }];
     self.rotationContainer.transform = CGAffineTransformInvert(rotation);
-    self.chrome.center = CGPointMake(size.width/2, size.height/2);
     // Start outside the coordinator's inherited animation transaction.
     dispatch_async(dispatch_get_main_queue(), ^{
       if (!self.rotatingPlayer || self.rotationGeneration != generation) { return; }
       self.rotationAnimator = [[UIViewPropertyAnimator alloc] initWithDuration:self.playerRotationDuration
         curve:UIViewAnimationCurveEaseInOut animations:^{
           [self.chrome finishOrientationTransition];
+          // Bounds, video fitting and angle share the shorter timeline.
           self.chrome.bounds = (CGRect){CGPointZero, size}; self.chrome.transform = rotation;
           [self.chrome setNeedsLayout]; [self.chrome layoutIfNeeded]; [self alignVideoOutput];
         }];
@@ -392,9 +411,17 @@
     if (self.rotationGeneration != generation) { return; }
     [self.rotationAnimator stopAnimation:YES]; self.rotationAnimator = nil;
     [UIView performWithoutAnimation:^{
+      CGRect before = [self.movieView convertRect:self.movieView.bounds toView:self.view];
+      // Rebase equal composed transforms without doing a second content layout.
       self.rotationContainer.transform = CGAffineTransformIdentity; self.chrome.transform = CGAffineTransformIdentity;
+      self.rotationContainer.frame = (CGRect){CGPointZero, size}; self.chrome.frame = (CGRect){CGPointZero, size};
       self.chrome.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-      self.rotatingPlayer = NO; [self.chrome finishOrientationTransition]; [self applyPlayerLayout:self.view.bounds.size];
+      self.rotatingPlayer = NO; [self.chrome holdRotationInsets:self.view.safeAreaInsets];
+      [self.chrome setNeedsLayout]; [self.chrome layoutIfNeeded]; [self alignVideoOutput];
+      CGRect after = [self.movieView convertRect:self.movieView.bounds toView:self.view];
+      self.rotationHandoffDelta = MAX(MAX(fabs(before.origin.x-after.origin.x), fabs(before.origin.y-after.origin.y)),
+        MAX(fabs(before.size.width-after.size.width), fabs(before.size.height-after.size.height)));
+      [NeoPlaybackDiagnostics record:@"ui.rotationHandoff" fields:@{@"delta": @(self.rotationHandoffDelta), @"wide": @(self.landscape)}];
     }];
   }];
   [NeoPlaybackDiagnostics record:@"ui.orientationAnimation" fields:@{@"durationMs": @(self.playerRotationDuration*1000),
@@ -747,6 +774,7 @@
   // must not open it again while start-paused is still preparing it.
   if (self.reloading && self.restoringReload) { return; }
   self.restoringReload = self.reloading;
+  self.reloadTimedOut = NO;
   self.playbackEnded = NO; self.playbackFailed = NO; self.buffering = NO;
   self.inputBufferReady = NO; self.lastIntentCommandAt = 0;
   [self.chrome updateBuffering:NO progress:1];
@@ -759,6 +787,14 @@
   [self.rewindCache beginSeek:self.inputStartTime / 1000.0];
   if (self.reloading) { [self.comments beginSeek:self.inputStartTime / 1000.0]; }
   VLCMedia *media = [VLCMedia mediaWithURL:self.playbackURL ?: self.sourceURL];
+  // Ordinary HTTP reports CAN_FASTSEEK=false. The default MKV demuxer may
+  // consequently reject unverified Cues and fall back to the first cluster.
+  // Opt in only after parsing video Cues and checking their file positions.
+  if (self.rewindCache.hasMatroskaSeekIndex && self.playbackURL) {
+    [media addOption:@":demux=mkv_trusted"];
+    [NeoPlaybackDiagnostics record:@"mkv.indexSeek" fields:@{@"targetMs": @(self.inputStartTime),
+      @"expectedOffset": @([self.rewindCache matroskaSeekOffset:self.inputStartTime/1000.0])}];
+  }
   [media addOption:[NSString stringWithFormat:@":network-caching=%ld", (long)self.networkCaching]];
   if (self.inputStartTime > 0) {
     [media addOption:[NSString stringWithFormat:@":start-time=%.3f", self.inputStartTime / 1000.0]];
@@ -771,6 +807,7 @@
 }
 - (void)finishReload:(BOOL)failed {
   self.reloading = NO; self.restoringReload = NO;
+  self.reloadTimedOut = NO;
   self.inputClockGuardUntil = CACurrentMediaTime()+3;
   [self.reloadTimer invalidate]; self.reloadTimer = nil;
   self.lastSeekFailed = failed;
@@ -798,7 +835,7 @@
 }
 - (void)restoreReloadIfReady {
   VLCMediaPlayerState state = self.player.state;
-  if (!self.reloading || self.awaitingEndpoint || !self.inputBufferReady || self.buffering ||
+  if ((!self.reloading && !self.reloadTimedOut) || self.awaitingEndpoint || !self.inputBufferReady || self.buffering ||
       state != VLCMediaPlayerStatePaused) { return; }
   // start-time is handled by the demuxer during initialisation. There is no
   // second, post-buffering seek from the beginning of the recording.
@@ -806,6 +843,9 @@
   // for that initial pause before applying the user's latest playback intent.
   [NeoPlaybackDiagnostics record:@"input.restoreReady" fields:@{@"targetMs": @(self.reloadTime),
     @"mediaMs": @([self mediaTime]), @"bufferReady": @(self.inputBufferReady), @"wantsPlayback": @(self.wantsPlayback)}];
+  // A deadline does not invalidate a healthy input still finishing decoder
+  // preparation. Its late initial pause is reusable, including explicit play.
+  self.playbackFailed = NO;
   [self finishReload:NO];
 }
 - (void)togglePlayback { [self showControls]; [self setPlaybackIntent:!self.wantsPlayback]; }
@@ -814,6 +854,17 @@
   self.wantsPlayback = playing;
   [NeoPlaybackDiagnostics record:@"playback.intent" fields:@{@"playing": @(playing), @"reloading": @(self.reloading)}];
   [self.commentPiP updateAutomaticPlayback];
+  if (self.reloadTimedOut && self.player.state != VLCMediaPlayerStateStopped && self.player.state != VLCMediaPlayerStateError) {
+    [self restoreReloadIfReady];
+    if (self.reloadTimedOut) {
+      if (playing) {
+        self.reloading = YES; self.reloadTimedOut = NO; self.playbackFailed = NO;
+        self.restoringReload = YES; [self.comments beginSeek:self.reloadTime/1000.0]; [self armReloadDeadline];
+        [self updateLoadingState];
+      }
+      [self updateControls]; return;
+    }
+  }
   if (!self.reloading && !self.awaitingComments && !self.awaitingEndpoint && playing &&
       (self.transportSuspended || self.playbackEnded || self.playbackFailed || self.player.state == VLCMediaPlayerStateStopped)) {
     if (self.playbackEnded) {
@@ -1280,6 +1331,43 @@
 }
 - (void)runVideoTapSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
   [self waitForTapSmokePlayback:0 completion:completion];
+}
+- (void)runMKVSeekSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  [self waitForTapSmokePlayback:0 completion:^(NSDictionary *tap) {
+    if (!self.rewindCache.hasMatroskaSeekIndex) { completion(@{@"success": @NO, @"error": @"MKV video Cues unavailable"}); return; }
+    int64_t expected = [self.rewindCache matroskaSeekOffset:90];
+    NSTimeInterval began = CACurrentMediaTime();
+    [self reloadPlaybackAtTime:90000 completion:^{
+      NSDictionary *metrics = self.rewindCache.seekMetrics;
+      BOOL jumped = [metrics[@"indexedRangeStart"] longLongValue] > 0 && expected > 1024*1024;
+      BOOL bounded = [metrics[@"networkBytes"] longLongValue] < [metrics[@"fileBytes"] longLongValue]/2;
+      BOOL ready = !self.playbackFailed && !self.reloading && llabs([self mediaTime]-90000) < 2000;
+      VLCMedia *retained = self.player.media;
+      [self pollLatestRecoveryIntent:0 completion:^(BOOL advances) {
+        [self runLateReloadSmoke:^(BOOL late) {
+          completion(@{@"success": @(jumped && bounded && ready && advances && late), @"indexedTargetRange": @(jumped),
+            @"boundedReloadNetwork": @(bounded), @"targetPositionPreserved": @(ready), @"videoAndTimeAdvance": @(advances),
+            @"latePreparationReusesInput": @(late && retained == self.player.media), @"expectedOffset": @(expected),
+            @"indexedRangeStart": metrics[@"indexedRangeStart"], @"networkBytes": metrics[@"networkBytes"],
+            @"fileBytes": metrics[@"fileBytes"], @"reloadMs": @((CACurrentMediaTime()-began)*1000)});
+        }];
+      }];
+    }];
+  }];
+}
+- (void)runLateReloadSmoke:(void (^)(BOOL))completion {
+  VLCMedia *input = self.player.media; NSInteger generation = self.reloadGeneration;
+  self.reloading = YES; self.restoringReload = YES; self.buffering = YES; self.inputBufferReady = NO;
+  self.reloadTime = [self mediaTime]; [self armReloadDeadline]; [self.reloadTimer fire];
+  BOOL retained = self.reloadTimedOut && !self.reloading && input == self.player.media;
+  // Reproduce preparation finishing after the deadline on the same input.
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    self.buffering = NO; self.inputBufferReady = YES; [self restoreReloadIfReady];
+    [self setPlaybackIntent:YES];
+    [self pollLatestRecoveryIntent:0 completion:^(BOOL playing) {
+      completion(retained && playing && !self.playbackFailed && !self.reloadTimedOut && input == self.player.media && generation == self.reloadGeneration);
+    }];
+  });
 }
 - (void)runRecoverySmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
   NeoBufferingUpdates *updates = [NeoBufferingUpdates new];
@@ -1753,11 +1841,13 @@
       [self waitForHostPortrait:host attempt:0 completion:^(BOOL portrait) {
         BOOL faster = self.playerRotationDuration > 0 && self.playerRotationDuration < self.systemRotationDuration;
         BOOL cleanRotation = !self.rotatingPlayer && CGAffineTransformIsIdentity(self.rotationContainer.transform) && CGAffineTransformIsIdentity(self.chrome.transform);
+        cleanRotation = cleanRotation && self.rotationHandoffDelta < 1;
         NSMutableDictionary *result = [@{@"success": portrait && horizontalDismissal && faster && cleanRotation &&
             [drag[@"playerBackTracksFinger"] boolValue] && [drag[@"cancelledPlayerBackKeepsInput"] boolValue] &&
             [drag[@"playerDismissalStartsBeforeNativeStop"] boolValue] && [route isEqualToString:@"recorded"] ? @YES : @NO,
           @"playerUsesHorizontalBackAnimator": @(horizontalDismissal), @"landscapeBeforeExit": @YES,
           @"playerRotationUsesShorterDuration": @(faster), @"playerRotationRestoresTransforms": @(cleanRotation),
+          @"playerRotationHandoffDelta": @(self.rotationHandoffDelta),
           @"playerRotationDurationMs": @(self.playerRotationDuration*1000), @"systemRotationDurationMs": @(self.systemRotationDuration*1000),
           @"sidebarRouteDelivered": [route isEqualToString:@"recorded"] ? @YES : @NO, @"hostPortraitAfterExit": portrait ? @YES : @NO,
           @"hostPortraitOnly": host.supportedInterfaceOrientations == UIInterfaceOrientationMaskPortrait ? @YES : @NO,
@@ -1888,7 +1978,10 @@
   NSInteger generation = self.reloadGeneration;
   self.reloadTimer = [NSTimer timerWithTimeInterval:25 repeats:NO block:^(NSTimer *timer) {
     if (!weakSelf || weakSelf.closing || !weakSelf.reloading || weakSelf.reloadGeneration != generation) { return; }
+    BOOL pendingHealthyInput = weakSelf.player.state != VLCMediaPlayerStateStopped && weakSelf.player.state != VLCMediaPlayerStateError;
     [weakSelf completeSeek:weakSelf.seekGeneration failed:YES]; [weakSelf finishReload:YES];
+    weakSelf.reloadTimedOut = pendingHealthyInput;
+    [NeoPlaybackDiagnostics record:@"input.reloadDeadline" fields:@{@"retained": @(pendingHealthyInput), @"state": @(weakSelf.player.state)}];
     weakSelf.statusLabel.text = @"再読み込みできませんでした。接続を確認して再試行してください。";
     [weakSelf.chrome updateDiagnostics]; [weakSelf showControls];
   }];

@@ -12,6 +12,7 @@ NS_ASSUME_NONNULL_BEGIN
                   username:(NSString *)username password:(NSString *)password
             networkCaching:(NSInteger)networkCaching;
 #if TARGET_OS_SIMULATOR
+- (void)runMKVSeekSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runMKVSeekSmoke(completion:));
 - (void)runVideoTapSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runVideoTapSmoke(completion:));
 - (void)closeTapSmoke;
 - (void)runRecoverySmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runRecoverySmoke(completion:));
