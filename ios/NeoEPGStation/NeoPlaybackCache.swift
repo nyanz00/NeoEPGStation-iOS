@@ -63,6 +63,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   }
   private var deliverySequence = 0
   private var seekRangeStarts: [Int64] = [], seekNetworkBaseline: Int64 = 0
+  private var seekTargetOffset: Int64 = -1
   @objc var seekMetrics: [String: NSNumber] { queue.sync {
     let expected = matroskaIndex?.nearest(mediaTime)?.offset ?? -1
     let target = expected > 0 ? seekRangeStarts.first { abs($0-expected) <= 65536 } ?? -1 : -1
@@ -295,6 +296,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   @objc func beginSeek(_ time: Double) {
     queue.async { [self] in
       seekRangeStarts.removeAll(); seekNetworkBaseline = networkBytes
+      seekTargetOffset = matroskaIndex?.nearest(time)?.offset ?? -1
       mediaTime = max(0, time); highWater = mediaTime; lastUse = ProcessInfo.processInfo.systemUptime
       NeoPlaybackDiagnostics.record("cache.seek", fields: ["target": time, "retainedBytes": bytes, "blocks": blocks.count, "seconds": seconds])
     }
@@ -479,6 +481,27 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
         "offset": aligned, "bytes": data.count, "requestedOffset": offset, "blockEndTime": block.endTime ?? -1,
         "payloadBytes": min(data.count-Int(offset-aligned), Int(end-offset+1))])
       block.used = lastUse; blocks[aligned] = block; hitBytes += Int64(data.count); deliver(data); return
+    }
+    // A replacement MKV input first reads container headers before jumping to
+    // its Cue. Do not prefetch whole megabyte blocks on that obsolete prefix
+    // connection. Once near the destination, normal disk caching resumes.
+    if seekTargetOffset > blockSize && offset < seekTargetOffset-blockSize {
+      let prefixCount = Int(min(64*1024, end-offset+1))
+      fetch(offset: offset, count: prefixCount, connection: connection) { [weak self] result in
+        guard let self, !self.closed, case .ready = connection.state else { return }
+        switch result {
+        case .success(let data):
+          self.report(nil, kind: "fetch")
+          let key = ObjectIdentifier(connection)
+          if var entry = self.deliveries[key] { entry.networkBytes += Int64(data.count); self.deliveries[key] = entry }
+          deliver(data, base: offset)
+        case .failure:
+          self.report("動画データを取得できません。再接続しています…", kind: "fetch")
+          self.finishDelivery(connection, reason: 4); connection.cancel()
+          DispatchQueue.main.async { [weak self] in self?.onTransportFailure?() }
+        }
+      }
+      return
     }
     NeoPlaybackDiagnostics.record("cache.miss", fields: ["delivery": deliveries[ObjectIdentifier(connection)]?.id ?? 0,
       "offset": aligned, "bytes": count, "requestedOffset": offset])
