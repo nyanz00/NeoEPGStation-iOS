@@ -1114,7 +1114,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     tapVideo(); let single = actions.last == "toggle-controls"
     onAction = saved; showControls(savedHUD)
     return ["doubleTapLeftRightSeekTenSeconds": correct, "doubleTapDoesNotToggleControls": !actions.dropLast().contains("toggle-controls"),
-      "singleTapStillTogglesControls": single, "doubleTapRecognizerNeedsTwoTouches": videoDoubleTap.numberOfTapsRequired == 2 && videoDoubleTap.view === self]
+      "singleTapStillTogglesControls": single, "doubleTapRecognizerNeedsTwoTaps": videoDoubleTap.numberOfTapsRequired == 2 && videoDoubleTap.view === self]
   }
   private func panelTabRowsAligned() -> Bool {
     tabButtons.forEach { $0.layoutIfNeeded() }

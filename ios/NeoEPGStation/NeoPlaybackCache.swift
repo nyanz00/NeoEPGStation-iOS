@@ -44,6 +44,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   private var validator: String?, validatorHeader: String?
   private var byteClock = NeoMediaByteClock()
   private var matroskaIndex: NeoMatroskaSeekIndex?
+  private var metadataFragments: [Int64: Data] = [:]
   @objc var hasMatroskaSeekIndex: Bool { queue.sync { matroskaIndex != nil } }
   @objc func matroskaSeekOffset(_ time: Double) -> Int64 { queue.sync { matroskaIndex?.nearest(time)?.offset ?? -1 } }
   private var startup: ((URL?, String?) -> Void)?
@@ -57,7 +58,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   private var requestSequence = 0
   private struct Delivery {
     let id: Int, seek: Int, began: Double, start: Int64, end: Int64
-    var diskBytes: Int64 = 0, sentBytes: Int64 = 0, networkBytes: Int64 = 0
+    var diskBytes: Int64 = 0, sentBytes: Int64 = 0, networkBytes: Int64 = 0, indexBytes: Int64 = 0
     var firstSent = false
   }
   private var deliverySequence = 0
@@ -86,7 +87,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     guard let entry = deliveries.removeValue(forKey: ObjectIdentifier(connection)) else { return }
     NeoPlaybackDiagnostics.record("range.deliveryEnd", fields: ["delivery": entry.id, "originSeek": entry.seek,
       "start": entry.start, "end": entry.end, "diskReadBytes": entry.diskBytes,
-      "processedBytes": entry.sentBytes, "networkBytes": entry.networkBytes, "reason": reason,
+      "processedBytes": entry.sentBytes, "networkBytes": entry.networkBytes, "indexReadBytes": entry.indexBytes, "reason": reason,
       "durationMs": (ProcessInfo.processInfo.systemUptime-entry.began)*1000])
   }
 
@@ -189,8 +190,9 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   }
   private func readEBML(_ offset: Int64, _ completion: @escaping (NeoMatroskaSeekIndex.Element?, Int64) -> Void) {
     guard offset >= 0, offset < length else { completion(nil, offset); return }
-    fetch(offset: offset, count: Int(min(16, length-offset))) { result in
+    fetch(offset: offset, count: Int(min(16, length-offset))) { [self] result in
       guard case .success(let data) = result, let element = NeoMatroskaSeekIndex.header(data) else { completion(nil, offset); return }
+      metadataFragments[offset] = data
       completion(element, offset+Int64(element.body))
     }
   }
@@ -260,7 +262,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
         guard element?.id == id, let size = element?.size, size > 0, size <= 8*1024*1024, Int64(size) <= length-body else { completion(); return }
         fetch(offset: body, count: size) { result in
           guard case .success(let data) = result else { completion(); return }
-          metadata[id] = data; load(index+1)
+          metadata[id] = data; self.metadataFragments[body] = data; load(index+1)
         }
       }
     }
@@ -297,9 +299,13 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
       NeoPlaybackDiagnostics.record("cache.seek", fields: ["target": time, "retainedBytes": bytes, "blocks": blocks.count, "seconds": seconds])
     }
   }
+#if targetEnvironment(simulator)
+  @objc func clearMediaCacheForSmoke() { queue.async { [self] in clearBlocks() } }
+#endif
   @objc func close() {
     queue.async { [self] in
       guard !closed else { return }; closed = true
+      metadataFragments.removeAll(); matroskaIndex = nil
       finishStart(nil, "再生を終了しました。")
       stopTransport()
       session.invalidateAndCancel(); clearBlocks()
@@ -437,8 +443,8 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     }
     lastUse = ProcessInfo.processInfo.systemUptime
     let aligned = offset / blockSize * blockSize, count = Int(min(blockSize, length - aligned))
-    func deliver(_ data: Data) {
-      let begin = Int(offset - aligned), amount = min(data.count - begin, Int(end - offset + 1))
+    func deliver(_ data: Data, base: Int64? = nil) {
+      let begin = Int(offset - (base ?? aligned)), amount = min(data.count - begin, Int(end - offset + 1))
       guard amount > 0 else { connection.cancel(); return }
       connection.send(content: data.subdata(in: begin..<begin+amount), completion: .contentProcessed { [weak self] error in
         guard let self else { connection.cancel(); return }
@@ -456,6 +462,13 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
           self.pump(connection, offset: offset + Int64(amount), end: end)
         } else { self.recordConnectionEnd(connection, state: 4, error: error); self.finishDelivery(connection, reason: 3); connection.cancel() }
       })
+    }
+    if let fragment = metadataFragments.first(where: { offset >= $0.key && offset-$0.key < Int64($0.value.count) }) {
+      let amount = min(fragment.value.count-Int(offset-fragment.key), Int(end-offset+1))
+      let key = ObjectIdentifier(connection)
+      if var entry = deliveries[key] { entry.indexBytes += Int64(amount); deliveries[key] = entry }
+      NeoPlaybackDiagnostics.record("cache.indexHit", fields: ["offset": offset, "bytes": amount])
+      deliver(fragment.value, base: fragment.key); return
     }
     if var block = blocks[aligned], let data = try? Data(contentsOf: file(aligned)), data.count == block.count {
       report(nil, kind: "fetch")

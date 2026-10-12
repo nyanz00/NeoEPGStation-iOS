@@ -29,6 +29,7 @@ final class NeoDanmakuRenderer {
   private var displaySize = -1.0, displayScale = -1.0
   private var laneRevision = -1, laneVisibleIDs: [Int] = []
   private var warmIdentity: UUID?, warmLanes: [Int: Double] = [:], warmSize = -1.0, warmScale = -1.0
+  private var warmGeneration = 0
   private var preparedIDs: [Int] = [], preparedScale = -1.0, preparedOpacity: Float?
   private var preparationGeneration = -1
   private var preparedTime = -Double.infinity
@@ -61,6 +62,7 @@ final class NeoDanmakuRenderer {
     preparedIDs.removeAll(); preparationGeneration = -1
     motionScheduler.reset(); displayLanes.removeAll(); displayIDs.removeAll(); displaySize = -1
     warmIdentity = nil; warmLanes.removeAll()
+    warmGeneration += 1
     renderRevision += 1; frameImages.removeAll(); snapshotRevision = -1
   }
 
@@ -133,8 +135,11 @@ final class NeoDanmakuRenderer {
   }
   func seekWindow() {
     motionScheduler.reset(); displayLanes.removeAll(); displayIDs.removeAll()
+    lock.lock()
     warmIdentity = nil; warmLanes.removeAll(); displaySize = -1
+    warmGeneration += 1
     renderRevision += 1; preparedTime = -.infinity; preparationGeneration = -1
+    lock.unlock()
   }
   func replaceTimeline(_ previous: CommentTimeline?, at time: Double) {
     // Active identities, lifetimes and lane positions survive preview-to-full.
@@ -182,7 +187,7 @@ final class NeoDanmakuRenderer {
                   opacity: Float?, completion: @escaping () -> Void) {
     let comments = timeline.visible(at: time, lookAhead: 1.5)
     prepare(comments, pixelScale: pixelScale, absoluteOpacity: opacity)
-    lock.lock(); let version = generation; lock.unlock()
+    lock.lock(); let version = generation, warmVersion = warmGeneration; lock.unlock()
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
       if let self {
         self.waitForPreparedImages()
@@ -196,7 +201,7 @@ final class NeoDanmakuRenderer {
           let metric = metrics[c.id]!; return CommentExtent(width: Double(metric.width), height: Double(metric.height))
         }
         self.lock.lock()
-        if self.generation == version {
+        if self.generation == version && self.warmGeneration == warmVersion {
           self.warmIdentity = timeline.identity; self.warmLanes = plan; self.warmSize = size; self.warmScale = pixelScale
         }
         self.lock.unlock()

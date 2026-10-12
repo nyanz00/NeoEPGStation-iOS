@@ -66,10 +66,10 @@ struct NeoMatroskaSeekIndex {
       guard time.isFinite, time >= 0, time <= 24*60*60 else { return nil }
       for (id, track) in fields where id == 0xb7 {
         guard let values = Self.children(track) else { return nil }
-        guard let number = values.first(where: { $0.0 == 0xf7 }).flatMap({ Self.unsigned($0.1) }), videoTracks.contains(number) else { continue }
-        guard let relative = values.first(where: { $0.0 == 0xf1 }).flatMap({ Self.unsigned($0.1) }),
+        guard let number = values.first(where: { $0.0 == 0xf7 }).flatMap({ Self.unsigned($0.1) }),
+          let relative = values.first(where: { $0.0 == 0xf1 }).flatMap({ Self.unsigned($0.1) }),
           relative < UInt64(length-segment) else { return nil }
-        result.append(Cue(time: time, offset: segment+Int64(relative)))
+        if videoTracks.contains(number) { result.append(Cue(time: time, offset: segment+Int64(relative))) }
       }
     }
     guard !result.isEmpty, result.count <= 100_000 else { return nil }

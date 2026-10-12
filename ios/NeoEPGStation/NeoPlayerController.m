@@ -248,12 +248,12 @@
   self.nowPlaying.pauseAction = ^{ [remoteSelf setPlaybackIntent:NO]; };
   self.nowPlaying.toggleAction = ^{ [remoteSelf setPlaybackIntent:!remoteSelf.wantsPlayback]; };
   self.nowPlaying.seekAction = ^BOOL(double seconds) {
-    if (!remoteSelf || remoteSelf.closing || remoteSelf.reloading || !remoteSelf.player.isSeekable || !isfinite(seconds)) { return NO; }
+    if (!remoteSelf || remoteSelf.closing || remoteSelf.reloading || remoteSelf.reloadTimedOut || !remoteSelf.player.isSeekable || !isfinite(seconds)) { return NO; }
     double bounded = fmin(fmax(0, seconds), [remoteSelf mediaLength] / 1000.0);
     [remoteSelf seekBy:(int64_t)(bounded*1000)-[remoteSelf mediaTime] completion:^{}]; return YES;
   };
   self.nowPlaying.skipAction = ^BOOL(double seconds) {
-    if (!remoteSelf || remoteSelf.closing || remoteSelf.reloading || !remoteSelf.player.isSeekable || !isfinite(seconds)) { return NO; }
+    if (!remoteSelf || remoteSelf.closing || remoteSelf.reloading || remoteSelf.reloadTimedOut || !remoteSelf.player.isSeekable || !isfinite(seconds)) { return NO; }
     double bounded = fmin(fmax(-[remoteSelf mediaLength] / 1000.0, seconds), [remoteSelf mediaLength] / 1000.0);
     [remoteSelf seekBy:(int64_t)(bounded*1000) completion:^{}]; return YES;
   };
@@ -276,7 +276,10 @@
     // Brief buffering/state notifications must not interrupt already moving
     // comments while due video frames keep arriving. The presentation clock
     // freezes on actual video inactivity; explicit pause remains immediate.
-    return weakSelf.inputBufferReady && weakSelf.wantsPlayback && !weakSelf.seeking && !weakSelf.scrubbing && !weakSelf.closing && !weakSelf.reloading;
+    double due = weakSelf.commentPiP.videoPresentationHostTime;
+    BOOL videoStillAdvancing = due > 0 && CACurrentMediaTime()-due < 0.1;
+    return weakSelf.inputBufferReady && weakSelf.player.isPlaying && weakSelf.wantsPlayback &&
+      (!weakSelf.buffering || videoStillAdvancing) && !weakSelf.seeking && !weakSelf.scrubbing && !weakSelf.closing && !weakSelf.reloading;
   };
   self.comments.onChange = ^{ [weakSelf updateCommentState]; [weakSelf updateLoadingState]; };
   [self.chrome bindCommentSettings:self.comments];
@@ -478,7 +481,7 @@
     return;
   }
   [self showControls];
-  if (self.reloading && ([action hasPrefix:@"jump:"] || [action hasPrefix:@"seekto:"] || [action hasPrefix:@"scrub-"])) { return; }
+  if ((self.reloading || self.reloadTimedOut) && ([action hasPrefix:@"jump:"] || [action hasPrefix:@"seekto:"] || [action hasPrefix:@"scrub-"])) { return; }
   if ([action isEqualToString:@"back"]) { [self closePlayer]; }
   else if ([action isEqualToString:@"play"]) { [self togglePlayback]; }
   else if ([action isEqualToString:@"pip"]) { [self startPiP]; }
@@ -551,6 +554,7 @@
 }
 - (void)reloadPlaybackAtTime:(int64_t)time completion:(dispatch_block_t)completion {
   if (self.closing || self.reloading) { if (completion) { completion(); } return; }
+  self.reloadTimedOut = NO;
   [NeoPlaybackDiagnostics record:@"input.reloadRequested" fields:@{@"targetMs": @(time), @"videoResume": @(self.videoResuming), @"videoRepairStage": @(self.videoRecovery.stage)}];
   [self cancelVideoResume];
   NSInteger generation = ++self.reloadGeneration;
@@ -835,6 +839,7 @@
 }
 - (void)restoreReloadIfReady {
   VLCMediaPlayerState state = self.player.state;
+  if (self.reloading && !self.restoringReload) { return; }
   if ((!self.reloading && !self.reloadTimedOut) || self.awaitingEndpoint || !self.inputBufferReady || self.buffering ||
       state != VLCMediaPlayerStatePaused) { return; }
   // start-time is handled by the demuxer during initialisation. There is no
@@ -969,7 +974,7 @@
   [self applyPlaybackIntent];
   [self updateNowPlaying];
   [self sampleHistory];
-  self.timeline.enabled = self.player.isSeekable && !self.reloading; self.playButton.enabled = YES;
+  self.timeline.enabled = self.player.isSeekable && !self.reloading && !self.reloadTimedOut; self.playButton.enabled = YES;
   int64_t current = MAX(0, [self mediaTime] / 1000);
   int64_t length = [self mediaLength] / 1000;
   if (!self.scrubbing && length > 0) { self.timeline.value = self.playbackEnded ? 1 : MIN(1, MAX(0, (double)[self mediaTime] / [self mediaLength])); }
@@ -1336,6 +1341,7 @@
   [self waitForTapSmokePlayback:0 completion:^(NSDictionary *tap) {
     if (!self.rewindCache.hasMatroskaSeekIndex) { completion(@{@"success": @NO, @"error": @"MKV video Cues unavailable"}); return; }
     int64_t expected = [self.rewindCache matroskaSeekOffset:90];
+    [self.rewindCache clearMediaCacheForSmoke];
     NSTimeInterval began = CACurrentMediaTime();
     [self reloadPlaybackAtTime:90000 completion:^{
       NSDictionary *metrics = self.rewindCache.seekMetrics;
@@ -1343,11 +1349,17 @@
       BOOL bounded = [metrics[@"networkBytes"] longLongValue] < [metrics[@"fileBytes"] longLongValue]/2;
       BOOL ready = !self.playbackFailed && !self.reloading && llabs([self mediaTime]-90000) < 2000;
       VLCMedia *retained = self.player.media;
+      [NeoVLCFrameTap monitorContent:self.movieView];
+      NSInteger pictureChanges = [[NeoVLCFrameTap snapshot:self.movieView][@"changes"] integerValue];
       [self pollLatestRecoveryIntent:0 completion:^(BOOL advances) {
+        NSDictionary *video = [NeoVLCFrameTap snapshot:self.movieView];
+        BOOL pictures = [video[@"changes"] integerValue] >= pictureChanges+3 && [video[@"contentAge"] doubleValue] < 0.5 &&
+          fabs([video[@"scheduledInMs"] doubleValue]) < 100;
         [self runLateReloadSmoke:^(BOOL late) {
-          completion(@{@"success": @(jumped && bounded && ready && advances && late), @"indexedTargetRange": @(jumped),
-            @"boundedReloadNetwork": @(bounded), @"targetPositionPreserved": @(ready), @"videoAndTimeAdvance": @(advances),
-            @"latePreparationReusesInput": @(late && retained == self.player.media), @"expectedOffset": @(expected),
+          completion(@{@"success": @((BOOL)(jumped && bounded && ready && advances && pictures && late)), @"indexedTargetRange": @(jumped),
+            @"boundedReloadNetwork": @(bounded), @"targetPositionPreserved": @(ready), @"videoAndTimeAdvance": @((BOOL)(advances && pictures)),
+            @"pictureChanges": @([video[@"changes"] integerValue]-pictureChanges),
+            @"latePreparationReusesInput": @((BOOL)(late && retained == self.player.media)), @"expectedOffset": @(expected),
             @"indexedRangeStart": metrics[@"indexedRangeStart"], @"networkBytes": metrics[@"networkBytes"],
             @"fileBytes": metrics[@"fileBytes"], @"reloadMs": @((CACurrentMediaTime()-began)*1000)});
         }];
@@ -1659,7 +1671,10 @@
         checks[@"visibleBeforeTwoPointFiveSeconds"] = self.chrome.controlsVisible ? @YES : @NO;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
           checks[@"pausedIdleHides"] = self.chrome.controlsVisible ? @NO : @YES;
-          checks[@"fadeOutCompletes"] = self.chrome.controls.layer.presentationLayer.opacity < 0.01 ? @YES : @NO;
+          // The auto-hide timer may execute late on a loaded simulator. Check
+          // its 2.5s visibility separately, then wait for the actual fade end.
+          [self waitForHiddenControlsFade:0 completion:^(BOOL faded) {
+          checks[@"fadeOutCompletes"] = @(faded);
           [self beginScrubbing];
           dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             checks[@"scrubbingStaysVisible"] = @(self.chrome.controlsVisible);
@@ -1675,9 +1690,18 @@
             }];
             [NSRunLoop.mainRunLoop addTimer:verifyHide forMode:NSRunLoopCommonModes];
           });
+          }];
         });
       });
     });
+  });
+}
+- (void)waitForHiddenControlsFade:(NSInteger)attempt completion:(void (^)(BOOL))completion {
+  CALayer *layer = self.chrome.controls.layer.presentationLayer ?: self.chrome.controls.layer;
+  BOOL faded = !self.chrome.controlsVisible && layer.opacity < 0.01;
+  if (faded || attempt >= 40) { completion(faded); return; }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.025*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [self waitForHiddenControlsFade:attempt+1 completion:completion];
   });
 }
 - (NSDictionary<NSString *, id> *)runLayoutSmokeChecks {
