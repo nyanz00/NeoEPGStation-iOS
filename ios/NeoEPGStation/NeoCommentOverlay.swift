@@ -60,6 +60,11 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   private let inFlight = DispatchSemaphore(value: 3)
   private var drawDiagnosticHost = 0.0, shortGaps = 0, busyFrames = 0, gpuBackpressure = 0
   private var maxDrawMs = 0.0, maxGapMs = 0.0
+  private struct DrawState: Equatable {
+    let timeline: UUID, motion: Double, scheduling: Double, viewport: CGSize
+    let size: Double, opacity: Float, sourceOpacity: Bool, canDraw: Bool, revision: Int
+  }
+  private var lastDrawState: DrawState?
   var compositionState: CommentCompositionState {
     CommentCompositionState(timeline: timeline, version: version, enabled: enabled && ready && !closed,
       size: sizeMultiplier, opacity: opacity, usesSourceOpacity: usesSourceOpacity)
@@ -437,6 +442,13 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     let pixelScale = max(Double(fittedWidth) / timeline.width, Double(fittedHeight) / timeline.height)
     canDraw = canDraw && (clock.ready || !(wantsPlaybackProvider?() ?? running))
     renderer.prepareAhead(timeline, time: canDraw ? clock.schedulingTime : seekTarget ?? media, pixelScale: pixelScale, opacity: usesSourceOpacity ? nil : opacity)
+    let state = DrawState(timeline: timeline.identity, motion: time, scheduling: clock.schedulingTime, viewport: viewport,
+      size: sizeMultiplier, opacity: opacity, sourceOpacity: usesSourceOpacity, canDraw: canDraw, revision: renderer.visualRevision)
+    // Preparation and explicit pause often yield identical frames. Keep the
+    // last presented texture instead of blocking the main thread for another
+    // drawable. Moving comments (also under system overlays) change motion on
+    // every tick; glyph arrival, seek, size, track and opacity invalidate this.
+    if lastDrawState == state { return }
     guard inFlight.wait(timeout: .now()) == .success else { gpuBackpressure += 1; return }
     guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
       let command = renderer.queue.makeCommandBuffer(), let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { inFlight.signal(); return }
@@ -447,6 +459,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     let completion = inFlight
     command.addCompletedHandler { _ in completion.signal() }
     encoder.endEncoding(); command.present(drawable); command.commit()
+    lastDrawState = state
     frameCount += 1
     if now - metricsHost >= 1 { fps = Double(frameCount) / (now - metricsHost); frameCount = 0; metricsHost = now }
   }

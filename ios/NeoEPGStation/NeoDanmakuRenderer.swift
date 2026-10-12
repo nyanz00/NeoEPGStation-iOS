@@ -68,6 +68,7 @@ final class NeoDanmakuRenderer {
 
   var error: String? { lock.lock(); defer { lock.unlock() }; return failure }
   var cachedBytes: Int { lock.lock(); defer { lock.unlock() }; return cost }
+  var visualRevision: Int { lock.lock(); defer { lock.unlock() }; return renderRevision }
   // A paused PiP repaints when asynchronously prepared glyphs become available.
   var hasPendingImages: Bool { lock.lock(); defer { lock.unlock() }; return !pending.isEmpty }
   func overflow(timeline: CommentTimeline, time: Double) -> Int {
