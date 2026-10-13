@@ -61,7 +61,7 @@ final class NeoRecordedSearch: UIViewController {
     choice("ルール", value: draft.manualOnly ? "手動録画のみ" : draft.ruleID.map { ruleName.isEmpty ? "ルール \($0)" : ruleName } ?? "すべて", enabled: !draft.manualOnly && options != nil) { [weak self] in self?.selectRule() }
     choice("チャンネル", value: draft.channelID.flatMap { channels[$0] } ?? "すべて", enabled: options != nil) { [weak self] in
       guard let self, let options else { return }
-      choose(title: "チャンネル", entries: [("すべて", "")] + options.channels.map { ("\(channels[$0.channelId] ?? String($0.channelId)) (\($0.cnt))", String($0.channelId)) }, selected: draft.channelID.map(String.init) ?? "") { [weak self] in self?.draft.channelID = Int($0); self?.render() }
+      choose(title: "チャンネル", entries: [("すべて", "")] + options.channels.map { ("\(self.channels[$0.channelId] ?? String($0.channelId)) (\($0.cnt))", String($0.channelId)) }, selected: draft.channelID.map(String.init) ?? "") { [weak self] in self?.draft.channelID = Int($0); self?.render() }
     }
     let genres = ["ニュース・報道", "スポーツ", "情報・ワイドショー", "ドラマ", "音楽", "バラエティ", "映画", "アニメ・特撮", "ドキュメンタリー・教養", "劇場・公演", "趣味・教育", "福祉", "予備", "予備", "拡張", "その他"]
     choice("ジャンル", value: draft.genre.map { genres.indices.contains($0) ? genres[$0] : String($0) } ?? "すべて", enabled: options != nil) { [weak self] in
@@ -156,7 +156,7 @@ final class NeoRecordedSearch: UIViewController {
   @objc private func keyboard(_ note: Notification) {
     guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
     scroll.contentInset.bottom = max(0, scroll.frame.maxY - view.convert(frame, from: nil).minY)
-    scroll.scrollIndicatorInsets.bottom = scroll.contentInset.bottom
+    scroll.verticalScrollIndicatorInsets.bottom = scroll.contentInset.bottom
   }
   deinit { task?.cancel(); NotificationCenter.default.removeObserver(self) }
 }
