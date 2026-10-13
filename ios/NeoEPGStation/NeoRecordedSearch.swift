@@ -45,7 +45,7 @@ final class NeoRecordedSearch: UIViewController {
       guard let self else { return }
       do {
         let result = try await api.recordedOptions(userID: userID)
-        if let id = draft.ruleID { ruleName = try await api.rule(id).searchOption.keyword ?? "" }
+        if let id = draft.ruleID { let rule = try? await api.rule(id); ruleName = rule?.searchOption.keyword ?? "" }
         guard !Task.isCancelled else { return }; options = result; render()
       } catch {
         guard !Task.isCancelled else { return }
@@ -138,8 +138,8 @@ final class NeoRecordedSearch: UIViewController {
         do {
           try await Task.sleep(nanoseconds: 250_000_000)
           var rules = try await api.ruleKeywords(keyword: text, userID: userID)
-          if let id = draft.ruleID, !rules.contains(where: { $0.id == id }) {
-            let rule = try await api.rule(id); rules.insert(NeoRuleKeyword(id: id, keyword: rule.searchOption.keyword ?? ""), at: 0)
+          if let id = draft.ruleID, !rules.contains(where: { $0.id == id }), let rule = try? await api.rule(id) {
+            rules.insert(NeoRuleKeyword(id: id, keyword: rule.searchOption.keyword ?? ""), at: 0)
           }
           guard !Task.isCancelled else { return }
           page?.entries = [("すべて", "")] + rules.map { ($0.keyword.isEmpty ? "ルール \($0.id)" : $0.keyword, String($0.id)) }

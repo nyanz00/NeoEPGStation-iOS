@@ -926,6 +926,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       && categoryButtons[0].frame.maxX == categoryButtons[1].frame.minX && categoryButtons[1].frame.maxX == categoryButtons[2].frame.minX
     categoryButtons[0].sendActions(for: .touchUpInside)
     let returns = tab == "settings" && settingsCategory == "general" && panelOpen
+    let retention = stack.arrangedSubviews.first { $0.accessibilityIdentifier == "player-retention-dropdown" } as? UIButton
+    let retentionActions = retention?.menu?.children.compactMap { $0 as? UIAction } ?? []
+    let retentionDropdown = retention?.showsMenuAsPrimaryAction == true && retentionActions.map(\.title) == ["オフ", "30秒", "1分", "2分", "3分", "4分", "5分"]
+      && retentionActions.filter { $0.state == .on }.count == 1
     let oldWait = NeoCommentOverlay.waitBeforePlayback
     let waitToggle = stack.arrangedSubviews.compactMap { $0 as? UIStackView }.flatMap(\.arrangedSubviews)
       .first { $0.accessibilityIdentifier == "player-wait-for-comments" } as? UISwitch
@@ -952,7 +956,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let shared = drawer.brand.frame.minX == drawer.contentSafeArea.left + 16 && drawer.logo.frame.minX - drawer.brand.frame.maxX == 7
       && config?.imageProperties.reservedLayoutSize == CGSize(width: 24, height: 27)
     onAction = handler; subtitleTracks = oldTracks; subtitleKey = ""; settingsCategory = oldCategory
-    return runDiagnosticsChecks().merging(["waitForCommentsSettingPersisted": waitSaved, "settingsStayInPanel": returns, "fixedSettingsCategoryTabs": categories, "settingsBottomTab": settingsTab,
+    return runDiagnosticsChecks().merging(["retentionDropdown": retentionDropdown, "waitForCommentsSettingPersisted": waitSaved, "settingsStayInPanel": returns, "fixedSettingsCategoryTabs": categories, "settingsBottomTab": settingsTab,
       "videoReloadOnlyAtGeneralBottom": reloadAtBottom && reloadRouted && commentsNoReload && subtitlesNoReload,
       "commentPreferencesRestoredInNewPlayer": persisted, "commentPreferencesRetainedAcrossPanels": panelRetained,
       "commentSettingsApplyToComposition": applied, "slidersRetainedDuringUpdates": stable,
