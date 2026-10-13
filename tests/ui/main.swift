@@ -150,6 +150,66 @@ Task.detached {
     do { _ = try await api.recordings(page: 1); fatalError("Accepted non-JSON") } catch is NeoError {}
     FixtureProtocol.handler = { _ in (200, Data(#"{"id":99,"name":"Sample","startAt":0,"endAt":1,"isRecording":false}"#.utf8)) }
     do { _ = try await api.recording(1); fatalError("Accepted mismatched recording ID") } catch is NeoError {}
+
+    let originalViewer = api.viewer
+    defer { api.viewer = originalViewer }
+    api.viewer = "7"
+    api.profileHeaders = ["X-Viewer-Profile-Id": "71", "X-Viewer-Session": String(repeating: "s", count: 32)]
+    FixtureProtocol.handler = { request in
+      expect(request.url?.path == "/epg/api/viewer-profiles", "Profile metadata route")
+      expect(request.value(forHTTPHeaderField: "X-Viewer-Session") == nil, "Metadata does not use stale session")
+      return (200, Data(#"{"profiles":[{"id":71,"name":"Sample","tvUserId":7,"lockRequired":true}]}"#.utf8))
+    }
+    expect(try await api.viewerProfiles().profiles.first?.lockRequired == true, "Protected profile maps to TV user")
+    FixtureProtocol.handler = { request in
+      expect(request.httpMethod == "POST", "Unlock is a POST")
+      expect(request.url?.path.hasSuffix("/71/unlock") == true, "Correct profile unlocked")
+      expect(request.value(forHTTPHeaderField: "X-Viewer-Session") == nil, "Unlock independent of previous session")
+      return (200, Data(#"{"sessionToken":"ssssssssssssssssssssssssssssssss"}"#.utf8))
+    }
+    expect(try await api.unlockProfile(71, password: "fixture").sessionToken.count == 32, "Unlock returns session")
+    FixtureProtocol.handler = { request in
+      expect(request.value(forHTTPHeaderField: "X-Viewer-Profile-Id") == "71", "Validation profile header")
+      expect(request.value(forHTTPHeaderField: "X-Viewer-Session")?.count == 32, "Validation session header")
+      return (200, Data(#"{"valid":false}"#.utf8))
+    }
+    expect(try await api.validateProfile(71, token: String(repeating: "s", count: 32)) == false, "Revoked session reported invalid")
+    FixtureProtocol.handler = { request in
+      expect(request.url?.path.hasSuffix("/1/playback") == true, "Resume position route")
+      expect(request.timeoutInterval == 3, "Resume fetch is bounded")
+      expect(request.value(forHTTPHeaderField: "X-EPGStation-User-Id") == "8", "Explicit captured history owner")
+      expect(request.value(forHTTPHeaderField: "X-Viewer-Session") == nil, "History needs no profile session")
+      return (200, Data(#"{"position":60,"duration":120,"watchedSeconds":22}"#.utf8))
+    }
+    expect(try await api.playback(1, user: "8").resumePosition == 60, "Resume uses saved seconds")
+    for (position, duration, expected) in [(4.99,120.0,nil),(5.0,120.0,5.0),(109.99,120.0,109.99),(110.0,120.0,nil),(60.0,0.0,60.0)] as [(Double,Double,Double?)] {
+      expect(NeoPlayback(position: position, duration: duration, watchedSeconds: 0, updatedAt: nil).resumePosition == expected, "Web resume boundary")
+    }
+    FixtureProtocol.handler = { request in
+      expect(request.value(forHTTPHeaderField: "X-EPGStation-User-Id") == "7", "History owner header")
+      expect(request.url?.query == "isHalfWidth=true", "History half-width option")
+      return (200, Data(#"{"items":[]}"#.utf8))
+    }
+    expect(try await api.history(user: "7").items.isEmpty, "Empty history is valid")
+    FixtureProtocol.handler = { request in
+      expect(request.httpMethod == "PUT", "History settings PUT")
+      return (200, Data(#"{"enabled":false,"limit":30}"#.utf8))
+    }
+    let historySettings = try await api.updateHistorySettings(user: "7", enabled: false, limit: 30)
+    expect(!historySettings.enabled && historySettings.limit == 30, "Shared history settings response")
+    FixtureProtocol.handler = { request in
+      expect(request.httpMethod == "DELETE", "History deletion method")
+      expect(request.value(forHTTPHeaderField: "X-EPGStation-User-Id") == "8", "Delete never follows changed active user")
+      return (204, Data())
+    }
+    try await api.removeHistory(1, user: "8")
+    FixtureProtocol.handler = { request in
+      let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
+      expect(query.contains(URLQueryItem(name: "userId", value: "8")), "Locate route can display owner's recording page")
+      return (200, Data(#"{"total":300,"records":[]}"#.utf8))
+    }
+    _ = try await api.recordings(page: 7, userID: 8)
+
     print("Native API request, response and authentication-error tests passed")
   } catch { fatalError("Native API fixture failed: \(error)") }
 }

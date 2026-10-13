@@ -204,6 +204,8 @@
 
 - (void)viewDidLoad {
   [super viewDidLoad]; self.view.backgroundColor = UIColor.blackColor;
+  self.initialPosition = isfinite(self.initialPosition) ? MAX(0, self.initialPosition) : 0;
+  self.lastObservedTime = (int64_t)llround(self.initialPosition * 1000);
   [NeoPlaybackDiagnostics begin];
   [NeoPlaybackDiagnostics record:@"player.start" fields:@{@"networkCachingMs": @(self.networkCaching)}];
   self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
@@ -270,7 +272,7 @@
   self.comments = [[NeoCommentOverlay alloc] initWithFrame:self.movieView.bounds];
   self.comments.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   self.comments.rateProvider = ^double { return weakSelf.playbackRate; };
-  self.comments.timeProvider = ^double { return (double)[weakSelf mediaTime] / 1000.0; };
+  self.comments.timeProvider = ^double { return weakSelf.initialPosition > 0 ? weakSelf.initialPosition : (double)[weakSelf mediaTime] / 1000.0; };
   self.comments.wantsPlaybackProvider = ^BOOL { return weakSelf.wantsPlayback && !weakSelf.playbackEnded && !weakSelf.closing; };
   self.comments.runningProvider = ^BOOL {
     // Brief buffering/state notifications must not interrupt already moving
@@ -784,7 +786,8 @@
   [self.chrome updateBuffering:NO progress:1];
   [NeoPlaybackDiagnostics record:@"input.restart" fields:@{@"restoring": @(self.reloading), @"targetMs": @(self.reloadTime)}];
   self.subtitleSignature = nil;
-  self.inputStartTime = self.reloading ? self.reloadTime : 0;
+  self.inputStartTime = self.reloading ? self.reloadTime : (int64_t)llround(self.initialPosition * 1000);
+  self.initialPosition = 0;
   self.invalidClockReported = NO;
   self.inputClockGuardUntil = CACurrentMediaTime()+3;
   self.lastObservedTime = self.inputStartTime;
@@ -874,7 +877,7 @@
       (self.transportSuspended || self.playbackEnded || self.playbackFailed || self.player.state == VLCMediaPlayerStateStopped)) {
     if (self.playbackEnded) {
       self.backgroundPositionValid = NO; self.lastObservedTime = 0;
-      [self.rewindCache beginSeek:0];
+      [self.rewindCache beginSeek:self.initialPosition];
       if (!self.awaitingComments && !self.reloading) { [self restartMedia]; }
     } else { [self reloadPlaybackAtTime:MAX(self.lastObservedTime, self.backgroundPositionValid ? self.backgroundTime : 0) completion:nil]; }
   } else { [self applyPlaybackIntentForced:YES]; }
@@ -1366,6 +1369,28 @@
       }];
     }];
   }];
+}
+- (void)runInitialResumeSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  [self pollInitialResumeSmoke:0 completion:completion];
+}
+- (void)pollInitialResumeSmoke:(NSInteger)attempt completion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  if (self.player.isPlaying && [NeoVLCFrameTap videoViewInView:self.movieView]) {
+    NSDictionary *metrics = self.rewindCache.seekMetrics;
+    BOOL startsAtTarget = self.inputStartTime == 90000 && [self mediaTime] >= 90000 && [self mediaTime] < 100000 && self.reloadGeneration == 0;
+    BOOL indexed = [metrics[@"indexedRangeStart"] longLongValue] > 1024*1024 && self.rewindCache.hasMatroskaSeekIndex;
+    double commentsAt = self.comments.timeProvider();
+    [NeoVLCFrameTap monitorContent:self.movieView];
+    [self pollLatestRecoveryIntent:0 completion:^(BOOL advances) {
+      NSDictionary *video = [NeoVLCFrameTap snapshot:self.movieView];
+      BOOL pictures = [video[@"changes"] integerValue] >= 3 && [video[@"contentAge"] doubleValue] < 0.5;
+      completion(@{@"success": @(startsAtTarget && indexed && advances && pictures && commentsAt >= 90 && commentsAt < 100),
+        @"startsWithoutReloadOrSeek": @(startsAtTarget), @"initialIndexedTargetRange": @(indexed),
+        @"commentsUseResumePosition": @(commentsAt >= 90 && commentsAt < 100), @"picturesAdvance": @(pictures),
+        @"seekMetrics": metrics});
+    }]; return;
+  }
+  if (attempt >= 100) { completion(@{@"success": @NO, @"state": @(self.player.state), @"time": @([self mediaTime])}); return; }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self pollInitialResumeSmoke:attempt+1 completion:completion]; });
 }
 - (void)runLateReloadSmoke:(void (^)(BOOL))completion {
   VLCMedia *input = self.player.media; NSInteger generation = self.reloadGeneration;

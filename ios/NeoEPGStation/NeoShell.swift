@@ -203,6 +203,8 @@ final class NeoSidebar: UIView, UITableViewDataSource, UITableViewDelegate {
 final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigationControllerDelegate {
   let storage = NeoNative()
   private(set) var api: NeoAPI?
+  private(set) var account: NeoAccountCoordinator?
+  private var preparingPlay = false
   private(set) var channels: [Int: String] = [:]
   private(set) var serverConfig: NeoServerConfig?
   private(set) var route = "recorded"
@@ -216,6 +218,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private var bottomButtons: [UIButton] = []
   private var menuOpen = false, tabletExpanded = true
 #if targetEnvironment(simulator)
+  func smokeUseAPI(_ value: NeoAPI?) { api = value; account = value.map { NeoAccountCoordinator(api: $0, shell: self) } }
   private var startupDrawerWasStill = false
 #endif
   private var contentPan: UIPanGestureRecognizer!, closingPan: UIPanGestureRecognizer!, backdropPan: UIPanGestureRecognizer!
@@ -311,6 +314,10 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     controllers.removeAll(); active = nil
     showRoute("recorded")
     let api = self.api!
+    account = NeoAccountCoordinator(api: api, shell: self)
+    DispatchQueue.main.async { [weak self, weak api] in
+      guard let self, self.api === api else { return }; self.account?.restore()
+    }
     Task { [weak self] in await self?.refreshServerConfig() }
     Task { [weak self] in
       if let channels = try? await api.channels(), self?.api === api {
@@ -327,9 +334,10 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       for case let detail as NeoDetailPage in nav.viewControllers where detail.isViewLoaded { detail.refreshCapabilities() }
     }
   }
+  func revalidateAccount() { if player == nil { account?.restore() } }
   func showConnection(message: String? = nil) {
     dismissPopup()
-    api = nil; menuOpen = false; route = "connection"
+    api = nil; account = nil; menuOpen = false; route = "connection"
     let page = NeoConnectionPage(shell: self)
     page.initialMessage = message
     let nav = UINavigationController(rootViewController: page); nav.setNavigationBarHidden(true, animated: false)
@@ -345,6 +353,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       let page: NeoPage
       if id == "recorded" { page = NeoRecordedPage(shell: self) }
       else if id == "settings" { page = NeoSettingsPage(shell: self) }
+      else if id == "history" { page = NeoHistoryPage(shell: self) }
       else { page = NeoPlaceholderPage(id: id, shell: self) }
       nav = UINavigationController(rootViewController: page); nav.setNavigationBarHidden(true, animated: false)
       nav.delegate = self
@@ -387,16 +396,51 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     dismissPopup()
     active?.pushViewController(NeoDetailPage(item: recording, shell: self), animated: true)
   }
-  func play(_ file: NeoVideoFile, recording: NeoRecording) {
-    guard player == nil, let api else { return }
+  func locateRecording(_ id: Int, position: NeoListPosition) {
+    showRoute("recorded")
+    guard let nav = controllers["recorded"], let list = nav.viewControllers.first as? NeoRecordedPage else { return }
+    nav.popToRootViewController(animated: false)
+    list.locate(id, page: position.page, userID: position.userId)
+  }
+  func play(_ file: NeoVideoFile, recording: NeoRecording, fromBeginning: Bool = false, onPrepared: (() -> Void)? = nil) {
+    guard player == nil, !preparingPlay, let api else { onPrepared?(); return }
+    guard api.accountReady else {
+      (active?.topViewController as? NeoPage)?.alert("アクティブユーザーの確認が必要です。設定のアカウントで確認してください。")
+      onPrepared?(); return
+    }
+    preparingPlay = true
+    let user = api.viewer, revision = api.identityRevision, origin = active?.topViewController
+    Task { [weak self, weak origin] in
+      guard let self else { return }
+      defer { preparingPlay = false; onPrepared?() }
+      var start = 0.0
+      if !fromBeginning, api.resumePlayback, Int(user).map({ $0 > 0 }) == true {
+        do { start = try await api.playback(recording.id, user: user).resumePosition ?? 0 }
+        catch {
+          guard self.api === api, api.identityRevision == revision, active?.topViewController === origin else { return }
+          let alert = UIAlertController(title: "再生位置を取得できません", message: error.localizedDescription, preferredStyle: .alert)
+          alert.addAction(UIAlertAction(title: "再試行", style: .default) { [weak self] _ in self?.play(file, recording: recording) })
+          alert.addAction(UIAlertAction(title: "最初から再生", style: .default) { [weak self] _ in self?.play(file, recording: recording, fromBeginning: true) })
+          alert.addAction(UIAlertAction(title: "キャンセル", style: .cancel)); origin?.present(alert, animated: true); return
+        }
+      }
+      guard self.api === api, api.accountReady, api.identityRevision == revision, active?.topViewController === origin, player == nil else { return }
+      presentPlayer(file, recording: recording, api: api, user: user, start: start)
+    }
+  }
+  private func presentPlayer(_ file: NeoVideoFile, recording: NeoRecording, api: NeoAPI, user: String, start: Double) {
     let controller = NeoPlayerController(url: api.url("/videos/\(file.id)"), title: recording.name, username: "", password: "", networkCaching: 5000)
-    controller.recordingContext = ["baseURL": api.base.absoluteString, "id": recording.id, "user": api.viewer,
+    controller.initialPosition = start
+    controller.recordingContext = ["baseURL": api.base.absoluteString, "id": recording.id, "user": user,
       "disableHistory": api.disablePlaybackHistory,
       "channelId": recording.channelId ?? 0, "channelName": recording.channelName ?? recording.channelId.flatMap { channels[$0] } ?? "",
       "name": recording.name, "startAt": recording.startAt, "endAt": recording.endAt, "isRecording": recording.isRecording,
       "description": recording.description ?? "", "extended": recording.extended ?? "", "ruleId": recording.ruleId ?? 0]
     controller.modalPresentationStyle = .fullScreen; player = controller
-    controller.onClose = { [weak self] in self?.player = nil }
+    controller.onClose = { [weak self] in
+      self?.player = nil
+      NotificationCenter.default.post(name: .neoHistoryChanged, object: api)
+    }
     controller.onNavigate = { [weak self] route in self?.selectDestination(route) }
     controller.onRecording = { [weak self, weak api] id in
       Task { [weak self] in
@@ -629,6 +673,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     }
     if smokeStage == "menu" { setMenu(true, animated: false) }
     if smokeStage == "settings" { showRoute("settings") }
+    if smokeStage == "history" { showRoute("history") }
+    if ["settings-viewing", "settings-account"].contains(smokeStage) {
+      showRoute("settings")
+      active?.pushViewController(NeoSettingsCategoryPage(category: smokeStage == "settings-viewing" ? .viewing : .account, shell: self), animated: false)
+    }
     if ["detail", "detail-actions", "play-popup", "drop-dialog"].contains(smokeStage) { openDetail(NeoRecordedPage.fixtures.records[0]) }
     if smokeStage == "pagination" { recorded.smokePageSeven() }
     view.layoutIfNeeded()
@@ -639,6 +688,10 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       var popupCorrect = true
       if let settings = self.active?.topViewController as? NeoSettingsPage {
         popupCorrect = settings.smokeHistoryPreferences()
+      }
+      if self.smokeStage == "history" { popupCorrect = (self.active?.topViewController as? NeoHistoryPage)?.smokeReady == true }
+      if self.smokeStage.hasPrefix("settings-") {
+        popupCorrect = self.active?.viewControllers.count == 2 && self.active?.topViewController is NeoSettingsCategoryPage
       }
       var dropText = ""
       if self.smokeStage == "record-actions" {

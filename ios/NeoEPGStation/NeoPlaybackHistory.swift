@@ -71,6 +71,7 @@ final class NeoPlaybackHistory: NSObject, URLSessionTaskDelegate {
       sending = false
       if error == nil, let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
         acknowledged = total; status = ""; pending = pending || clock.total > total
+        NotificationCenter.default.post(name: Notification.Name("NeoHistoryChanged"), object: nil)
       } else { status = "視聴履歴を送信できません。接続・認証設定を確認してください。"; pending = true }
       onChange?()
       if pending {

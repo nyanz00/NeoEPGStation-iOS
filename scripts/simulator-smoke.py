@@ -31,7 +31,7 @@ def capture_ui(udid, stage, prefix, terminate_existing=True):
         or result.get('theme') != 'neon-teal-dark'
         or result.get('uiEngine') != 'Swift / UIKit'
         or result.get('retainedList') is not True
-        or result.get('route') != ('settings' if stage == 'settings' else 'recorded')):
+        or result.get('route') != ('settings' if stage.startswith('settings') else 'history' if stage == 'history' else 'recorded')):
         raise RuntimeError(f'UI smoke failed: {result}')
     if prefix == 'ui-ipad' and result.get('sidebarWidth') != 240:
         raise RuntimeError(f"Unexpected iPad sidebar width: {result.get('sidebarWidth')}")
@@ -62,7 +62,7 @@ def capture_ipad(app, device):
 
 Path('dist').mkdir(exist_ok=True)
 ui_stages = ['recorded', 'pagination', 'detail', 'record-actions', 'detail-actions', 'play-popup',
-             'list-actions', 'drop-dialog', 'menu', 'settings', 'gestures']
+             'list-actions', 'drop-dialog', 'menu', 'settings', 'settings-viewing', 'settings-account', 'history', 'gestures']
 device_file = Path('dist/simulator-device.json')
 if '--prepare' in sys.argv or not device_file.exists():
     available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '--json'))['devices']
@@ -169,7 +169,7 @@ for name in ['pip-composition-smoke', 'player-landscape-smoke', 'player-initial-
     if source.exists():
         Path(f'dist/{name}.png').write_bytes(source.read_bytes())
 results = {}
-for name in ['player-mkv-seek-smoke', 'player-recovery-smoke', 'comment-preparation-smoke', 'pip-composition-smoke', 'pip-player-smoke', 'player-ui-smoke', 'player-playback-smoke', 'player-controls-smoke', 'player-settings-smoke', 'player-exit-smoke', 'player-tap-smoke', 'rewind-cache-smoke', 'player-seek-state-smoke', 'player-ended-smoke']:
+for name in ['account-smoke', 'player-initial-resume-smoke', 'player-mkv-seek-smoke', 'player-recovery-smoke', 'comment-preparation-smoke', 'pip-composition-smoke', 'pip-player-smoke', 'player-ui-smoke', 'player-playback-smoke', 'player-controls-smoke', 'player-settings-smoke', 'player-exit-smoke', 'player-tap-smoke', 'rewind-cache-smoke', 'player-seek-state-smoke', 'player-ended-smoke']:
     result = json.loads((container / f'Documents/{name}.json').read_text())
     Path(f'dist/{name}.json').write_text(json.dumps(result, indent=2) + '\n')
     results[name] = result

@@ -13,6 +13,7 @@ final class NeoDetailPage: NeoPage {
   private lazy var encodeButton = NeoStyle.recordingButton("ENCODE", icon: "ControlPoint", success: true) { [weak self] in self?.alert("ENCODE の操作は準備中です。") }
   private lazy var thumbButton = NeoStyle.recordingButton("THUMB", icon: "ImageOutlined", success: true) { [weak self] in self?.alert("thumbnail の操作は準備中です。") }
   private let buttonRow = NeoRecordingButtonRow()
+  private lazy var beginningButton = NeoStyle.button("最初から再生") { [weak self] in self?.selectFile(fromBeginning: true) }
   private lazy var moreButton: UIButton = NeoStyle.iconButton("MoreVert", label: "詳細メニューを開く") { [weak self] in
     guard let self else { return }; self.showRecordingMenu(self.item, anchor: self.moreButton, detail: true)
   }
@@ -50,7 +51,7 @@ final class NeoDetailPage: NeoPage {
     let isWide = body.bounds.width >= 900
     if wide != isWide { wide = isWide; render() }
   }
-  override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); if isViewLoaded { refreshCapabilities() } }
+  override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); if isViewLoaded { render() } }
   func refreshCapabilities() {
     guard isViewLoaded else { return }
     var buttons = [playButton, streamingButton]
@@ -90,14 +91,23 @@ final class NeoDetailPage: NeoPage {
       info.addArrangedSubview(buttonRow)
     } else { info.addArrangedSubview(NeoStyle.label("再生できるファイルがありません。", muted: true)) }
     stack.setCustomSpacing(24, after: top)
+    if !(item.videoFiles ?? []).isEmpty, shell?.api?.resumePlayback == true,
+      Int(shell?.api?.viewer ?? "master").map({ $0 > 0 }) == true {
+      beginningButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
+      stack.addArrangedSubview(beginningButton)
+    }
     for text in [item.description, item.extended].compactMap({ $0 }) {
       let label = NeoStyle.label(text); label.numberOfLines = 0; stack.addArrangedSubview(label)
     }
   }
-  private func selectFile() {
+  private func selectFile(fromBeginning: Bool = false) {
     shell?.showPopup(anchor: playButton, entries: (item.videoFiles ?? []).map { file in
       NeoMenuEntry(title: file.name) { [weak self] in
-        guard let self else { return }; self.shell?.play(file, recording: self.item)
+        guard let self else { return }
+        self.playButton.isEnabled = false; self.loading.startAnimating()
+        self.shell?.play(file, recording: self.item, fromBeginning: fromBeginning) { [weak self] in
+          self?.playButton.isEnabled = true; self?.loading.stopAnimating()
+        }
       }
     }, appearance: .files)
   }

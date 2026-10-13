@@ -3,6 +3,9 @@ import UIKit
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
   var window: UIWindow?
+  func applicationDidBecomeActive(_ application: UIApplication) {
+    (window?.rootViewController as? NeoShell)?.revalidateAccount()
+  }
   func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
     var controller = (window ?? self.window)?.rootViewController
     while let current = controller {
@@ -24,7 +27,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         NeoPiPSmoke.compositionTest()
       }
       DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-        if let root = self?.window?.rootViewController { NeoPiPSmoke.playerTest(root: root) }
+        if let root = self?.window?.rootViewController as? NeoShell {
+          Task { await NeoAccountSmoke.run(root); NeoPiPSmoke.playerTest(root: root) }
+        }
       }
     }
 #endif

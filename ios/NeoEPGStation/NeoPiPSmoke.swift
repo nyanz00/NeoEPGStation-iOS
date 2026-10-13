@@ -260,7 +260,16 @@ enum NeoPiPSmoke {
     root.present(player, animated: false) {
       player.runMKVSeekSmoke { result in
         save("player-mkv-seek-smoke", result)
-        player.onClose = { completion(result["success"] as? Bool == true) }; player.closeTapSmoke()
+        player.onClose = {
+          let resume = NeoPlayerController(url: url, title: "Synthetic initial resume", username: "", password: "", networkCaching: 100)
+          resume.initialPosition = 90; resume.recordingContext = ["disableHistory": true]; resume.modalPresentationStyle = .fullScreen
+          root.present(resume, animated: false) {
+            resume.runInitialResumeSmoke { initial in
+              save("player-initial-resume-smoke", initial)
+              resume.onClose = { completion(result["success"] as? Bool == true && initial["success"] as? Bool == true) }; resume.closeTapSmoke()
+            }
+          }
+        }; player.closeTapSmoke()
       }
     }
   }

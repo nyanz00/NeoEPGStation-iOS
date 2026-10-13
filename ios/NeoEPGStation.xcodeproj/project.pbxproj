@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+    BDEF00000000000000000023 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000023; };
+    BDEF00000000000000000022 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000022; };
+    BDEF00000000000000000021 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000021; };
+    BDEF00000000000000000020 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000020; };
     BDEF00000000000000000019 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000019; };
     BDEF00000000000000000016 /* NeoNowPlaying.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000016; };
     BDEF00000000000000000015 /* NeoPlaybackDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000015; };
@@ -41,6 +45,10 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+    ADEF00000000000000000023 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoAccountSmoke.swift; path = NeoEPGStation/NeoAccountSmoke.swift; sourceTree = "<group>"; };
+    ADEF00000000000000000022 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoHistoryPage.swift; path = NeoEPGStation/NeoHistoryPage.swift; sourceTree = "<group>"; };
+    ADEF00000000000000000021 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoSettingsCategories.swift; path = NeoEPGStation/NeoSettingsCategories.swift; sourceTree = "<group>"; };
+    ADEF00000000000000000020 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoAccount.swift; path = NeoEPGStation/NeoAccount.swift; sourceTree = "<group>"; };
     ADEF00000000000000000019 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoVideoRecovery.swift; path = NeoEPGStation/NeoVideoRecovery.swift; sourceTree = "<group>"; };
     ADEF00000000000000000016 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoNowPlaying.swift; path = NeoEPGStation/NeoNowPlaying.swift; sourceTree = "<group>"; };
     ADEF00000000000000000015 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoPlaybackDiagnostics.swift; path = NeoEPGStation/NeoPlaybackDiagnostics.swift; sourceTree = "<group>"; };
@@ -111,6 +119,10 @@
 				D2E6EDAE12E0A01E77E05D82 /* NeoPlayerController.h */,
 				8A85F63ACA51CC2F817F957F /* NeoPlayerController.m */,
 				E8DB963ADF006F5C91474E80 /* NeoNative.swift */,
+        ADEF00000000000000000020,
+        ADEF00000000000000000021,
+        ADEF00000000000000000022,
+        ADEF00000000000000000023,
         ADEF00000000000000000007,
         ADEF00000000000000000008,
         ADEF00000000000000000010,
@@ -330,6 +342,10 @@
 				761780ED2CA45674006654EE /* AppDelegate.swift in Sources */,
 				C5EC3F766E24819570B97E68 /* NeoPlayerController.m in Sources */,
 				7C7CD6B520048B87A9436634 /* NeoNative.swift in Sources */,
+        BDEF00000000000000000020,
+        BDEF00000000000000000021,
+        BDEF00000000000000000022,
+        BDEF00000000000000000023,
         BDEF00000000000000000007,
         BDEF00000000000000000009,
         BDEF00000000000000000006,

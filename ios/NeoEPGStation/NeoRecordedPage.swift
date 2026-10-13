@@ -94,6 +94,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   private var cache: [NeoRecordingQuery: (result: NeoRecords, stored: Date)] = [:]
   private var cacheOrder: [NeoRecordingQuery] = []
   private var lateThumbnails: Set<URL> = []
+  private var locatedUserID: Int?, focusedRecordingID: Int?
   private(set) var lastFadeDuration: TimeInterval = 0
   private let spinner = UIActivityIndicatorView(style: .medium)
   private let message = NeoStyle.label(size: 14, muted: true)
@@ -132,6 +133,10 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     message.frame = body.bounds.insetBy(dx: 24, dy: 48); spinner.center = CGPoint(x: body.bounds.midX, y: 70)
   }
   func reloadLabels() { collection.reloadData() }
+  func locate(_ id: Int, page: Int, userID: Int?) {
+    locatedUserID = userID; focusedRecordingID = id; keyword = ""; reverse = false
+    cache.removeAll(); cacheOrder.removeAll(); reload(targetPage: max(1, page))
+  }
   func returnToFirstPage() {
     if page != 1 || requestedPage != 1 { reload(targetPage: 1) }
     else { collection.setContentOffset(CGPoint(x: 0, y: -collection.adjustedContentInset.top), animated: false) }
@@ -141,7 +146,8 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     task?.cancel(); spinner.startAnimating(); message.text = nil
     let requestedPage = targetPage ?? page, query = keyword, oldest = reverse
     self.requestedPage = requestedPage
-    let key = NeoRecordingQuery(page: requestedPage, keyword: query, reverse: oldest)
+    let userID = locatedUserID
+    let key = NeoRecordingQuery(page: requestedPage, keyword: query, reverse: oldest, userID: userID)
     let entry = cache[key]
     let cached = entry.flatMap { Date().timeIntervalSince($0.stored) < 30 ? $0.result : nil }
     collection.layer.removeAllAnimations(); collection.alpha = 0
@@ -154,9 +160,9 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         else {
 #if targetEnvironment(simulator)
         if self.shell?.smokeStage.isEmpty == false { result = Self.fixtures }
-        else { guard let api else { return }; result = try await api.recordings(page: requestedPage, keyword: query, reverse: oldest) }
+        else { guard let api else { return }; result = try await api.recordings(page: requestedPage, keyword: query, reverse: oldest, userID: userID) }
 #else
-        guard let api else { return }; result = try await api.recordings(page: requestedPage, keyword: query, reverse: oldest)
+        guard let api else { return }; result = try await api.recordings(page: requestedPage, keyword: query, reverse: oldest, userID: userID)
 #endif
           self.cache[key] = (result, Date()); self.cacheOrder.removeAll { $0 == key }; self.cacheOrder.append(key)
           if self.cacheOrder.count > 12 { self.cache.removeValue(forKey: self.cacheOrder.removeFirst()) }
@@ -171,6 +177,11 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         self.message.text = result.records.isEmpty ? "録画がありません" : nil
         self.collection.reloadData(); self.collection.setContentOffset(.zero, animated: false)
         self.collection.layoutIfNeeded()
+        if let id = self.focusedRecordingID, let index = result.records.firstIndex(where: { $0.id == id }) {
+          self.collection.scrollToItem(at: IndexPath(item: index, section: 0), at: .centeredVertically, animated: false)
+          self.collection.selectItem(at: IndexPath(item: index, section: 0), animated: false, scrollPosition: [])
+          self.focusedRecordingID = nil
+        }
         self.lastFadeDuration = UIAccessibility.isReduceMotionEnabled ? 0 : cached == nil ? 0.5 : 0.32
         // CSS `ease` in RecordedPage.tsx, applied once to the entire list/footer.
         let fade = CABasicAnimation(keyPath: "opacity"); fade.fromValue = 0; fade.toValue = 1

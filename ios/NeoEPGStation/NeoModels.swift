@@ -116,6 +116,7 @@ enum NeoNavigationGesture {
 }
 struct NeoRecordingQuery: Hashable {
   let page: Int; let keyword: String; let reverse: Bool
+  var userID: Int? = nil
 }
 enum NeoPagination {
   // VueCompatiblePagination.tsx: five consecutive mobile buttons.
@@ -166,23 +167,65 @@ enum NeoProgramText {
 }
 struct NeoViewer: Decodable { let id: Int; let name: String }
 struct NeoViewers: Decodable { let users: [NeoViewer] }
+struct NeoViewerProfile: Decodable {
+  let id: Int; let name: String; let tvUserId: Int?; let lockRequired: Bool
+}
+struct NeoViewerProfiles: Decodable { let profiles: [NeoViewerProfile] }
+struct NeoViewerSession: Decodable { let sessionToken: String; let recoveryCode: String? }
+struct NeoSessionValidity: Decodable { let valid: Bool }
+struct NeoPlayback: Decodable {
+  let position: Double; let duration: Double; let watchedSeconds: Double; let updatedAt: Double?
+  var resumePosition: Double? {
+    guard position.isFinite, duration.isFinite, position >= 5, duration <= 0 || position < duration - 10 else { return nil }
+    return position
+  }
+}
+struct NeoHistoryItem: Decodable { let recorded: NeoRecording; let playback: NeoPlayback }
+struct NeoHistory: Decodable { let items: [NeoHistoryItem] }
+struct NeoHistorySettings: Decodable { let enabled: Bool; let limit: Int }
+struct NeoListPosition: Decodable { let page: Int; let userId: Int? }
+extension Notification.Name {
+  static let neoAccountChanged = Notification.Name("NeoAccountChanged")
+  static let neoHistoryChanged = Notification.Name("NeoHistoryChanged")
+}
+private final class NeoAPIRedirectPolicy: NSObject, URLSessionTaskDelegate {
+  func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
+}
 final class NeoAPI {
   let base: URL; let session: URLSession
+  var profileHeaders: [String: String] = [:]
+  var accountReady = false
+  var identityRevision = 0
+  var onLocked: ((Int) -> Void)?
   var viewer: String {
     get { UserDefaults.standard.string(forKey: "viewer." + base.absoluteString) ?? "master" }
-    set { UserDefaults.standard.set(newValue, forKey: "viewer." + base.absoluteString) }
+    set {
+      UserDefaults.standard.set(newValue, forKey: "viewer." + base.absoluteString)
+      identityRevision += 1
+      NotificationCenter.default.post(name: .neoAccountChanged, object: self)
+    }
+  }
+  var resumePlayback: Bool {
+    get { UserDefaults.standard.object(forKey: "resume." + base.absoluteString) as? Bool ?? true }
+    set { UserDefaults.standard.set(newValue, forKey: "resume." + base.absoluteString) }
   }
   var disablePlaybackHistory: Bool {
     get { UserDefaults.standard.bool(forKey: "history.disabled." + base.absoluteString) }
     set { UserDefaults.standard.set(newValue, forKey: "history.disabled." + base.absoluteString) }
   }
-  init(base: URL, session: URLSession = .shared) { self.base = base; self.session = session }
+  init(base: URL, session: URLSession? = nil) {
+    self.base = base
+    self.session = session ?? URLSession(configuration: .ephemeral, delegate: NeoAPIRedirectPolicy(), delegateQueue: nil)
+    accountReady = viewer == "master" || viewer == "0"
+  }
   func url(_ path: String) -> URL { URL(string: base.absoluteString + "/api" + path)! }
-  func recordings(page: Int, keyword: String = "", reverse: Bool = false) async throws -> NeoRecords {
+  func recordings(page: Int, keyword: String = "", reverse: Bool = false, userID: Int? = nil) async throws -> NeoRecords {
     var parts = URLComponents(url: url("/recorded"), resolvingAgainstBaseURL: false)!
     parts.queryItems = [URLQueryItem(name: "isHalfWidth", value: "true"), URLQueryItem(name: "isReverse", value: reverse ? "true" : "false"),
       URLQueryItem(name: "limit", value: "30"), URLQueryItem(name: "offset", value: String(max(0, page - 1) * 30))]
     if !keyword.isEmpty { parts.queryItems!.append(URLQueryItem(name: "keyword", value: keyword)) }
+    if let userID { parts.queryItems!.append(URLQueryItem(name: "userId", value: String(userID))) }
     let result: NeoRecords = try await request(parts.url!)
     guard result.total >= 0, result.records.allSatisfy({ $0.id > 0 }) else { throw NeoError("録画一覧の応答形式が一致しません。") }
     return result
@@ -193,7 +236,37 @@ final class NeoAPI {
     return value
   }
   func channels() async throws -> [NeoChannel] { try await request(url("/channels")) }
-  func viewers() async throws -> NeoViewers { try await request(url("/users")) }
+  func viewers() async throws -> NeoViewers { try await request(url("/users"), headers: [:]) }
+  func viewerProfiles() async throws -> NeoViewerProfiles { try await request(url("/viewer-profiles"), headers: [:]) }
+  func unlockProfile(_ id: Int, password: String) async throws -> NeoViewerSession {
+    try await request(url("/viewer-profiles/\(id)/unlock"), method: "POST",
+      body: ["password": password.precomposedStringWithCanonicalMapping], headers: [:])
+  }
+  func validateProfile(_ id: Int, token: String) async throws -> Bool {
+    let value: NeoSessionValidity = try await request(url("/viewer-profiles/\(id)/session"),
+      headers: ["X-Viewer-Profile-Id": String(id), "X-Viewer-Session": token])
+    return value.valid
+  }
+  func playback(_ id: Int, user: String) async throws -> NeoPlayback {
+    try await request(url("/recorded/\(id)/playback"), user: user, timeout: 3, headers: [:])
+  }
+  func history(user: String) async throws -> NeoHistory {
+    try await request(url("/recorded/playbackHistory?isHalfWidth=true"), user: user, timeout: 10, headers: [:])
+  }
+  func historySettings(user: String) async throws -> NeoHistorySettings {
+    try await request(url("/recorded/playbackHistory/settings"), user: user, headers: [:])
+  }
+  func updateHistorySettings(user: String, enabled: Bool? = nil, limit: Int? = nil) async throws -> NeoHistorySettings {
+    var body: [String: Any] = [:]
+    if let enabled { body["enabled"] = enabled }
+    if let limit { body["limit"] = limit }
+    return try await request(url("/recorded/playbackHistory/settings"), method: "PUT", body: body, user: user, headers: [:])
+  }
+  func removeHistory(_ id: Int, user: String) async throws {
+    _ = try await response(url("/recorded/\(id)/playback"), method: "DELETE", user: user, headers: [:])
+    NotificationCenter.default.post(name: .neoHistoryChanged, object: self)
+  }
+  func listPosition(_ id: Int) async throws -> NeoListPosition { try await request(url("/recorded/\(id)/listPosition?limit=30")) }
   func rule(_ id: Int) async throws -> NeoRule { try await request(url("/rules/\(id)")) }
   func relatedRecordings(ruleId: Int?, keyword: String) async throws -> NeoRecords {
     var parts = URLComponents(url: url("/recorded"), resolvingAgainstBaseURL: false)!
@@ -215,16 +288,33 @@ final class NeoAPI {
     }
     return text
   }
-  private func request<T: Decodable>(_ url: URL) async throws -> T {
-    var request = URLRequest(url: url); request.timeoutInterval = 20
+  private func request<T: Decodable>(_ url: URL, method: String = "GET", body: [String: Any]? = nil,
+    user: String? = nil, timeout: Double = 20, headers: [String: String]? = nil) async throws -> T {
+    let data = try await response(url, method: method, body: body, user: user, timeout: timeout, headers: headers)
+    do { return try JSONDecoder().decode(T.self, from: data) }
+    catch { throw NeoError("APIの応答形式が一致しません。NeoEPGStationのURLを確認してください。") }
+  }
+  private func response(_ url: URL, method: String = "GET", body: [String: Any]? = nil,
+    user: String? = nil, timeout: Double = 20, headers: [String: String]? = nil) async throws -> Data {
+    var request = URLRequest(url: url); request.timeoutInterval = timeout; request.httpMethod = method
     request.setValue("application/json", forHTTPHeaderField: "Accept")
-    request.setValue(viewer, forHTTPHeaderField: "X-EPGStation-User-Id")
+    request.setValue(user ?? viewer, forHTTPHeaderField: "X-EPGStation-User-Id")
+    for (key, value) in headers ?? profileHeaders { request.setValue(value, forHTTPHeaderField: key) }
+    if let body {
+      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      request.httpBody = try JSONSerialization.data(withJSONObject: body)
+    }
     let (data, response) = try await session.data(for: request)
     guard let http = response as? HTTPURLResponse else { throw NeoError("サーバーの応答を確認できませんでした。") }
     guard (200..<300).contains(http.statusCode) else {
-      throw NeoError([401,403].contains(http.statusCode) ? "アクセスできません。認証設定を確認してください。" : "サーバーがエラーを返しました（HTTP \(http.statusCode)）。")
+      let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+      let message = (json?["errors"] as? String) ?? (json?["message"] as? String)
+      if message == "視聴者プロフィールのロックを解除してください",
+        let profile = request.value(forHTTPHeaderField: "X-Viewer-Profile-Id").flatMap(Int.init) {
+        DispatchQueue.main.async { [weak self] in self?.onLocked?(profile) }
+      }
+      throw NeoError(message ?? ([401,403].contains(http.statusCode) ? "アクセスできません。認証設定を確認してください。" : "サーバーがエラーを返しました（HTTP \(http.statusCode)）。"))
     }
-    do { return try JSONDecoder().decode(T.self, from: data) }
-    catch { throw NeoError("APIの応答形式が一致しません。NeoEPGStationのURLを確認してください。") }
+    return data
   }
 }
