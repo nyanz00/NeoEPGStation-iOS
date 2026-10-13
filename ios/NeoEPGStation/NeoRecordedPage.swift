@@ -9,7 +9,7 @@ final class NeoRecordedCard: UICollectionViewCell {
     // MUI dark warning.main orange[400], action.hover white at 0.08.
     contentView.layer.borderWidth = focused ? 2 : 0
     contentView.layer.borderColor = UIColor(red: 255/255, green: 167/255, blue: 38/255, alpha: 1).cgColor
-    contentView.backgroundColor = focused ? UIColor(red: (25/255)*0.92+0.08, green: (30/255)*0.92+0.08, blue: (35/255)*0.92+0.08, alpha: 1) : NeoStyle.paper
+    contentView.backgroundColor = focused ? UIColor.white.withAlphaComponent(0.08) : NeoStyle.paper
     if focused { accessibilityTraits.insert(.selected) } else { accessibilityTraits.remove(.selected) }
   }
   var onMore: ((UIView) -> Void)?
