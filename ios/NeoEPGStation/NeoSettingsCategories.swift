@@ -10,7 +10,7 @@ enum NeoSettingsCategory: String, CaseIterable {
     case .app: return "接続先と下部ナビゲーションを設定します。"
     case .general: return "アプリ全体の外観を確認します。"
     case .viewing: return "リジューム再生と視聴履歴の送信を設定します。"
-    case .display: return "録画の操作ボタンと視聴履歴の保存件数を設定します。"
+    case .display: return "録画一覧の表示件数とハイライト、操作ボタン、視聴履歴の保存件数を設定します。"
     case .account: return "アクティブユーザーの切り替えと外部連携の認証を管理します。"
     }
   }
@@ -109,6 +109,15 @@ final class NeoSettingsCategoryPage: NeoPage {
       row("視聴履歴を送信しない", explanation: "このアプリからの送信だけを止めます。既存の履歴とリジューム位置は残ります。", control: historyToggle)
     case .display:
       toggle("THUMBボタンを表示しない", on: shell.storage.hideRecordedThumbnailButton) { [weak shell] in shell?.storage.hideRecordedThumbnailButton = $0 }
+      toggle("録画済みへ戻った番組を強調表示", explanation: "録画詳細や視聴履歴から一覧へ移動した際、対象の録画を約1秒間ハイライトします。", on: api.highlightRecorded) { api.highlightRecorded = $0 }
+      let length = UITextField(); length.text = String(api.recordedLength); length.keyboardType = .numberPad; length.textColor = .white
+      length.borderStyle = .roundedRect; length.backgroundColor = NeoStyle.paper
+      length.widthAnchor.constraint(equalToConstant: 100).isActive = true; length.accessibilityIdentifier = "recorded-page-length"
+      row("録画済み表示件数", explanation: "1ページの表示件数。初期値24件、1〜1000件。このアプリに保存します。", control: length)
+      button("表示件数を保存") { [weak self, weak length] in
+        guard let self, let value = Int(length?.text ?? ""), (1...1000).contains(value) else { self?.alert("表示件数は1〜1000で入力してください。"); return }
+        self.view.endEditing(true); api.recordedLength = value; self.alert("設定を保存しました。")
+      }
       guard api.accountReady, Int(api.viewer).map({ $0 > 0 }) == true else { info("視聴履歴の保存件数を変更するには通常ユーザーを選択してください。"); return }
       let user = api.viewer, revision = api.identityRevision
       let status = NeoStyle.label("視聴履歴設定を取得中…", muted: true); status.numberOfLines = 0; stack.addArrangedSubview(status)

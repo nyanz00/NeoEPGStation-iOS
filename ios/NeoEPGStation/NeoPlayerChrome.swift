@@ -565,12 +565,16 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       stack.addArrangedSubview(cache); append("次のリロードから適用します。", size: 12, muted: true)
       append("巻き戻し用キャッシュ", bold: true)
       let retained = NeoPlaybackCache.savedSeconds
-      for value in NeoPlaybackCache.presets {
-        let text = value == 0 ? "オフ" : value == 30 ? "30秒" : "\(value/60)分"
-        let choice = NeoStyle.button(text) { [weak self] in self?.onAction?("retention:\(value)"); self?.renderPanel() }
-        choice.tintColor = value == retained ? NeoStyle.accent : NeoStyle.muted
-        stack.addArrangedSubview(choice)
-      }
+      func retentionLabel(_ value: Int) -> String { value == 0 ? "オフ" : value == 30 ? "30秒" : "\(value/60)分" }
+      let retention = UIButton(type: .system); retention.setTitle(retentionLabel(retained) + " ▾", for: .normal)
+      retention.tintColor = NeoStyle.accent; retention.contentHorizontalAlignment = .left
+      retention.accessibilityIdentifier = "player-retention-dropdown"; retention.accessibilityLabel = "巻き戻し用キャッシュ"
+      retention.heightAnchor.constraint(equalToConstant: 44).isActive = true; retention.showsMenuAsPrimaryAction = true
+      retention.menu = UIMenu(children: NeoPlaybackCache.presets.map { value in
+        UIAction(title: retentionLabel(value), state: value == retained ? .on : .off) { [weak self] _ in
+          self?.onAction?("retention:\(value)"); self?.renderPanel()
+        }
+      }); stack.addArrangedSubview(retention)
       let row = UIStackView(); row.addArrangedSubview(NeoStyle.label("操作ボタンを自動で隠す")); let toggle = UISwitch(); toggle.isOn = autoHide; toggle.onTintColor = NeoStyle.accent
       toggle.addAction(UIAction { [weak self, weak toggle] _ in self?.autoHide = toggle?.isOn == true; self?.onAction?("interaction") }, for: .valueChanged); row.addArrangedSubview(toggle); stack.addArrangedSubview(row)
       let waitRow = UIStackView(arrangedSubviews: [NeoStyle.label("コメントの準備を待って再生"), UISwitch()]); waitRow.distribution = .equalSpacing

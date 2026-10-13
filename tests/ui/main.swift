@@ -102,13 +102,14 @@ Task.detached {
     FixtureProtocol.handler = { request in
       expect(request.url?.path == "/epg/api/recorded", "API preserves reverse-proxy prefix")
       let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
-      expect(query.contains(URLQueryItem(name: "offset", value: "180")), "Page seven offset")
+      expect(query.contains(URLQueryItem(name: "offset", value: "144")), "Page seven uses Web default 24")
       expect(query.contains(URLQueryItem(name: "isReverse", value: "false")), "Newest recordings first")
       expect(query.contains(URLQueryItem(name: "keyword", value: "アニメ & 日曜")), "Keyword encoding")
       expect(request.value(forHTTPHeaderField: "Authorization") == nil, "No legacy Basic auth")
       expect(request.value(forHTTPHeaderField: "X-EPGStation-User-Id") == "master", "Viewer header")
       return (200, Data(#"{"total":300,"records":[]}"#.utf8))
     }
+    api.recordedLength = 24
     let result = try await api.recordings(page: 7, keyword: "アニメ & 日曜")
     expect(result.total == 300, "List response decoded")
     FixtureProtocol.handler = { request in
@@ -209,6 +210,53 @@ Task.detached {
       return (200, Data(#"{"total":300,"records":[]}"#.utf8))
     }
     _ = try await api.recordings(page: 7, userID: 8)
+
+    var filters = NeoRecordedFilters()
+    filters.keyword = "特番 & アニメ"; filters.ruleID = 4; filters.channelID = 9; filters.genre = 7
+    filters.encodeModes = ["__ts__", "AV1 / MKV"]; filters.encodeModeMatch = "only"
+    filters.hasOriginalFile = true; filters.hasDrop = true; filters.hasError = true; filters.hasScrambling = true
+    filters.startDate = "2026-10-01"; filters.endDate = "2026-10-14"
+    api.recordedLength = 48
+    expect(NeoAPI(base: api.base).recordedLength == 48, "Page size persists per server")
+    FixtureProtocol.handler = { request in
+      let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
+      for (key, value) in [("offset","288"),("limit","48"),("ruleId","4"),("channelId","9"),("genre","7"),("userId","8"),("encodeModeMatch","only"),("hasDrop","true"),("hasError","true"),("hasScrambling","true"),("hasOriginalFile","true")] {
+        expect(query.contains(URLQueryItem(name: key, value: value)), "Full recording search: \(key)")
+      }
+      expect(query.filter { $0.name == "encodeModes[]" }.count == 2, "Multiple file types use server's array query")
+      expect(request.value(forHTTPHeaderField: "X-EPGStation-User-Id") != "8", "List filter does not change active identity")
+      return (200, Data(#"{"records":[],"total":300}"#.utf8))
+    }
+    _ = try await api.recordings(page: 7, userID: 8, filters: filters)
+    FixtureProtocol.handler = { request in
+      expect(request.url?.query == "limit=48", "History locate shares list size")
+      return (200, Data(#"{"page":7,"userId":8}"#.utf8))
+    }
+    _ = try await api.listPosition(1)
+    api.recordedLength = 24
+    FixtureProtocol.handler = { request in
+      expect(request.url?.path == "/epg/api/recorded/options" && request.url?.query == "userId=8", "User-specific search candidates")
+      return (200, Data(#"{"channels":[{"channelId":9,"cnt":4}],"genres":[{"genre":7,"cnt":4}],"encode":[{"name":"AV1","suffix":".mkv"}]}"#.utf8))
+    }
+    expect(try await api.recordedOptions(userID: 8).encode.first?.name == "AV1", "File type choices decode")
+    FixtureProtocol.handler = { request in
+      expect(request.url?.path == "/epg/api/rules/keyword", "Rule keyword endpoint matches Web")
+      return (200, Data(#"{"items":[{"id":4,"keyword":"アニメ"}]}"#.utf8))
+    }
+    expect(try await api.ruleKeywords(keyword: "アニメ", userID: 8).first?.id == 4, "Rule autocomplete response matches Web")
+    let fullRange = try filters.dateRange()
+    expect(fullRange.0 == 1790780400000 && fullRange.1 == 1791990000000 - 1, "JST inclusive recording date range")
+    filters.specificDate = true; filters.year = "2024"; filters.month = "2"; filters.day = "29"
+    let leap = try filters.dateRange()
+    expect(leap.1! - leap.0! == 86_400_000 - 1, "Leap day has exact one-day range")
+    filters.day = "30"
+    do { _ = try filters.queryItems(); fatalError("Accepted impossible date") } catch is NeoError {}
+    filters.day = ""; filters.month = ""
+    let yearRange = try filters.dateRange()
+    expect(yearRange.1! - yearRange.0! == 366 * 86_400_000 - 1, "Year-only search includes whole leap year")
+    filters.manualOnly = true
+    expect(try filters.queryItems().contains(URLQueryItem(name: "ruleId", value: "0")), "Manual-only overrides selected rule")
+    expect(NeoRecordingQuery(page: 1, keyword: "", reverse: false, filters: filters) != NeoRecordingQuery(page: 1, keyword: "", reverse: false), "Search filters participate in list cache key")
 
     print("Native API request, response and authentication-error tests passed")
   } catch { fatalError("Native API fixture failed: \(error)") }

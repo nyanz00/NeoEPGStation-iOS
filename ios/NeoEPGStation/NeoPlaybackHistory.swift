@@ -27,6 +27,18 @@ final class NeoPlaybackHistory: NSObject, URLSessionTaskDelegate {
   private var session: URLSession!
   @objc private(set) var status = ""
   @objc var onChange: (() -> Void)?
+  @objc var onDiagnostic: (([String: Any]) -> Void)?
+  static func observedMilliseconds(_ date: Date) -> Int64 { Int64((date.timeIntervalSince1970 * 1000).rounded(.down)) }
+  static func errorMessage(_ error: Error?) -> String {
+    let error = error as NSError?
+    let connectionCodes = [NSURLErrorTimedOut, NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost,
+      NSURLErrorNetworkConnectionLost, NSURLErrorDNSLookupFailed, NSURLErrorNotConnectedToInternet,
+      NSURLErrorSecureConnectionFailed, NSURLErrorDataNotAllowed, NSURLErrorInternationalRoamingOff]
+    if let error, error.domain == NSURLErrorDomain, connectionCodes.contains(error.code) {
+      return "視聴履歴を送信できません。サーバーに接続できませんでした。"
+    }
+    return "視聴履歴の送信中にエラーが発生しました。"
+  }
 
   @objc(initWithBase:recordingID:user:username:password:)
   init(base: URL, recordingID: Int, user: String, username: String, password: String) {
@@ -65,14 +77,23 @@ final class NeoPlaybackHistory: NSObject, URLSessionTaskDelegate {
     if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
     request.httpBody = try? JSONSerialization.data(withJSONObject: ["position": min(clock.position, clock.duration),
       "duration": clock.duration, "sessionId": sessionID, "sessionWatchedSeconds": total,
-      "observedAt": Date().timeIntervalSince1970 * 1000])
+      "observedAt": Self.observedMilliseconds(Date())])
     // The request keeps this sender alive through the final close-time flush.
-    session.dataTask(with: request) { [self] _, response, error in
+    session.dataTask(with: request) { [self] data, response, error in
       sending = false
       if error == nil, let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
         acknowledged = total; status = ""; pending = pending || clock.total > total
         NotificationCenter.default.post(name: Notification.Name("NeoHistoryChanged"), object: nil)
-      } else { status = "視聴履歴を送信できません。接続・認証設定を確認してください。"; pending = true }
+      } else {
+        status = Self.errorMessage(error); pending = true
+        // Keep diagnostics numeric/fixed-field only: responses may contain private data.
+        let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+        let errors = json?["errors"] as? [[String: Any]] ?? []
+        let validation = errors.contains { (($0["path"] as? String) ?? "").contains("observedAt") }
+        onDiagnostic?(["httpStatus": (response as? HTTPURLResponse)?.statusCode ?? 0,
+          "urlError": (error as NSError?)?.domain == NSURLErrorDomain ? (error as NSError?)?.code ?? 0 : 0,
+          "observedAtValidation": validation])
+      }
       onChange?()
       if pending {
         DispatchQueue.main.asyncAfter(deadline: .now() + (status.isEmpty ? 1 : 5)) { [self] in

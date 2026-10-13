@@ -394,6 +394,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
   func openDetail(_ recording: NeoRecording) {
     dismissPopup()
+    (active?.topViewController as? NeoRecordedPage)?.rememberDetail(recording.id)
     active?.pushViewController(NeoDetailPage(item: recording, shell: self), animated: true)
   }
   func locateRecording(_ id: Int, position: NeoListPosition) {
@@ -658,14 +659,15 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
           guard let self else { return }
           Task { [self] in
             let navigationButtons = await self.runNavigationButtonChecks(recorded)
+            let listFeatures = await recorded.smokeListFeatures()
             let gap = self.sidebar.logo.frame.minX - self.sidebar.brand.frame.maxX
-            NeoNative.writeSmoke("ui-gestures-smoke", ["success": correct && navigationButtons && self.startupDrawerWasStill && drawerClosed && popupCycles && gap == 7 && thumbnails && freshFade == 0.5 && cachedFade == 0.32,
+            NeoNative.writeSmoke("ui-gestures-smoke", ["success": correct && navigationButtons && listFeatures && self.startupDrawerWasStill && drawerClosed && popupCycles && gap == 7 && thumbnails && freshFade == 0.5 && cachedFade == 0.32,
               "stage": "gestures", "route": self.route, "recordCount": recorded.records.count,
               "theme": "neon-teal-dark", "uiEngine": "Swift / UIKit", "retainedList": retained,
               "shortcuts": self.shortcuts, "brandGap": gap, "interactiveBack": correct, "thumbnailLoading": thumbnails,
               "freshFade": freshFade, "cachedFade": cachedFade, "backDetails": self.backSmokeDetails,
               "drawerClosedByLeftSwipe": drawerClosed, "popupCycles": popupCycles,
-              "startupDrawerDoesNotAnimate": self.startupDrawerWasStill, "navigationButtonReturnsThenResets": navigationButtons])
+              "startupDrawerDoesNotAnimate": self.startupDrawerWasStill, "navigationButtonReturnsThenResets": navigationButtons, "recordedFiltersAndHighlight": listFeatures])
           }
         }
       }
@@ -674,18 +676,22 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     if smokeStage == "menu" { setMenu(true, animated: false) }
     if smokeStage == "settings" { showRoute("settings") }
     if smokeStage == "history" { showRoute("history") }
-    if ["settings-viewing", "settings-account"].contains(smokeStage) {
+    if ["settings-viewing", "settings-account", "settings-display"].contains(smokeStage) {
       showRoute("settings")
-      active?.pushViewController(NeoSettingsCategoryPage(category: smokeStage == "settings-viewing" ? .viewing : .account, shell: self), animated: false)
+      active?.pushViewController(NeoSettingsCategoryPage(category: smokeStage == "settings-viewing" ? .viewing : smokeStage == "settings-display" ? .display : .account, shell: self), animated: false)
     }
     if ["detail", "detail-actions", "play-popup", "drop-dialog"].contains(smokeStage) { openDetail(NeoRecordedPage.fixtures.records[0]) }
     if smokeStage == "pagination" { recorded.smokePageSeven() }
+    if smokeStage == "recorded-search" { recorded.smokeOpenSearch() }
     view.layoutIfNeeded()
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
       guard let self else { return }
       let cardHeight = recorded.cardHeight
       let pages = recorded.renderedPages
       var popupCorrect = true
+      if self.smokeStage == "recorded-search" {
+        popupCorrect = ((recorded.presentedViewController as? UINavigationController)?.topViewController as? NeoRecordedSearch)?.smokeValid == true
+      }
       if let settings = self.active?.topViewController as? NeoSettingsPage {
         popupCorrect = settings.smokeHistoryPreferences()
       }

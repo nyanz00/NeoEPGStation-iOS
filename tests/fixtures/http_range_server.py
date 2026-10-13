@@ -56,6 +56,8 @@ def start_server(directory):
             assert self.headers['X-EPGStation-User-Id'] == '7'
             assert body['duration'] > 0 and 0 <= body['position'] <= body['duration']
             assert body['sessionWatchedSeconds'] >= 0 and len(body['sessionId']) == 36
+            # OpenAPI UnixtimeMS is integer, not a fractional millisecond timestamp.
+            assert type(body['observedAt']) is int and body['observedAt'] > 0
             self.server.progress.append(body)
             reply = json.dumps({'position': body['position'], 'duration': body['duration'],
                                 'watchedSeconds': body['sessionWatchedSeconds'], 'updatedAt': 1}).encode()

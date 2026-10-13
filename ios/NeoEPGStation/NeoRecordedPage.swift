@@ -5,6 +5,13 @@ final class NeoRecordedCard: UICollectionViewCell {
   let channel = NeoStyle.label(size: 12, muted: true), time = NeoStyle.label(size: 12, muted: true)
   let descriptionLabel = NeoStyle.label(size: 12)
   var mobile = true
+  func setFocused(_ focused: Bool) {
+    // MUI dark warning.main orange[400], action.hover white at 0.08.
+    contentView.layer.borderWidth = focused ? 2 : 0
+    contentView.layer.borderColor = UIColor(red: 255/255, green: 167/255, blue: 38/255, alpha: 1).cgColor
+    contentView.backgroundColor = focused ? UIColor(red: (25/255)*0.92+0.08, green: (30/255)*0.92+0.08, blue: (35/255)*0.92+0.08, alpha: 1) : NeoStyle.paper
+    if focused { accessibilityTraits.insert(.selected) } else { accessibilityTraits.remove(.selected) }
+  }
   var onMore: ((UIView) -> Void)?
   private lazy var more: UIButton = NeoStyle.iconButton("MoreVert", label: "録画メニュー") { [weak self] in
     guard let self else { return }; self.onMore?(self.more)
@@ -30,7 +37,7 @@ final class NeoRecordedCard: UICollectionViewCell {
     time.frame = CGRect(x: x, y: y + 50, width: bodyWidth, height: 20)
     descriptionLabel.frame = CGRect(x: x, y: y + 70, width: bodyWidth, height: 20)
   }
-  override func prepareForReuse() { super.prepareForReuse(); thumbnail.load(nil); onMore = nil }
+  override func prepareForReuse() { super.prepareForReuse(); thumbnail.load(nil); onMore = nil; setFocused(false) }
   func configure(_ item: NeoRecording, channelName: String, api: NeoAPI?, mobile: Bool, fadeThumbnail: Bool) {
     self.mobile = mobile; title.text = item.name; channel.text = channelName
     time.text = NeoProgramText.interval(start: item.startAt, end: item.endAt)
@@ -88,13 +95,20 @@ final class NeoPaginationFooter: UICollectionReusableView {
 final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
   let collection: UICollectionView
   private(set) var records: [NeoRecording] = []
-  private var total = 0, page = 1, keyword = "", reverse = false
+  private var total = 0, page = 1, reverse = false
+  private var filters = NeoRecordedFilters()
+  private var keyword: String { filters.keyword }
+  private var pageLength = 24
   private var requestedPage = 1
   private var task: Task<Void, Never>?
   private var cache: [NeoRecordingQuery: (result: NeoRecords, stored: Date)] = [:]
   private var cacheOrder: [NeoRecordingQuery] = []
   private var lateThumbnails: Set<URL> = []
   private var locatedUserID: Int?, focusedRecordingID: Int?
+  private var userFilterExplicit = false, users: [NeoViewer] = []
+  private let userButton = UIButton(type: .system)
+  private var usersTask: Task<Void, Never>?, observers: [NSObjectProtocol] = []
+  private var returnRecordingID: Int?, returnOffset: CGPoint?, highlightID: Int?, highlightGeneration = 0
   private(set) var lastFadeDuration: TimeInterval = 0
   private let spinner = UIActivityIndicatorView(style: .medium)
   private let message = NeoStyle.label(size: 14, muted: true)
@@ -110,7 +124,9 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   }
   init(shell: NeoShell, keyword: String = "", reverse: Bool = false) {
     let layout = UICollectionViewFlowLayout(); collection = UICollectionView(frame: .zero, collectionViewLayout: layout)
-    self.keyword = keyword; self.reverse = reverse
+    self.filters.keyword = keyword; self.reverse = reverse
+    self.locatedUserID = shell.api.flatMap { Int($0.viewer) }.flatMap { $0 > 0 ? $0 : nil }
+    pageLength = shell.api?.recordedLength ?? 24
     super.init(title: "録画済み", shell: shell)
   }
   required init?(coder: NSCoder) { fatalError() }
@@ -122,19 +138,89 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     refresh.tintColor = NeoStyle.accent; refresh.addTarget(self, action: #selector(refreshList), for: .valueChanged)
     collection.refreshControl = refresh; body.addSubview(collection); body.addSubview(message); body.addSubview(spinner)
     message.numberOfLines = 0; message.textAlignment = .center
+    body.addSubview(userButton); userButton.tintColor = NeoStyle.accent; userButton.contentHorizontalAlignment = .left
+    userButton.accessibilityIdentifier = "recorded-user-filter"; userButton.showsMenuAsPrimaryAction = true
+    loadUsers()
+    observers.append(NotificationCenter.default.addObserver(forName: .neoAccountChanged, object: nil, queue: .main) { [weak self] note in
+      guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
+      if !self.userFilterExplicit {
+        self.locatedUserID = Int(api.viewer).flatMap { $0 > 0 ? $0 : nil }; self.clearCache(); self.reload(targetPage: 1)
+      }
+      self.loadUsers()
+    })
+    observers.append(NotificationCenter.default.addObserver(forName: .neoRecordingPreferencesChanged, object: nil, queue: .main) { [weak self] note in
+      guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
+      if !api.highlightRecorded { self.clearHighlight() }
+      if self.pageLength != api.recordedLength { self.pageLength = api.recordedLength; self.clearCache(); self.reload(targetPage: 1) }
+    })
     actions = [NeoStyle.iconButton("SearchOutlined", label: "録画検索") { [weak self] in self?.search() },
       NeoStyle.iconButton("MoreVert", label: "録画一覧メニュー") { [weak self] in self?.showOptions() }]
     reload()
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
-    let changed = collection.bounds.size != body.bounds.size; collection.frame = body.bounds
+    userButton.frame = CGRect(x: 12, y: 0, width: max(0, body.bounds.width - 24), height: 48)
+    let frame = CGRect(x: 0, y: 48, width: body.bounds.width, height: max(0, body.bounds.height - 48))
+    let changed = collection.bounds.size != frame.size; collection.frame = frame
     if changed { collection.collectionViewLayout.invalidateLayout() }
     message.frame = body.bounds.insetBy(dx: 24, dy: 48); spinner.center = CGPoint(x: body.bounds.midX, y: 70)
   }
   func reloadLabels() { collection.reloadData() }
+  override func viewDidAppear(_ animated: Bool) {
+    super.viewDidAppear(animated)
+    guard let id = returnRecordingID else { return }
+    returnRecordingID = nil
+    collection.layoutIfNeeded()
+    if let offset = returnOffset { collection.setContentOffset(offset, animated: false) }; returnOffset = nil
+    if let index = records.firstIndex(where: { $0.id == id }) {
+      let path = IndexPath(item: index, section: 0)
+      if !collection.indexPathsForVisibleItems.contains(path) { collection.scrollToItem(at: path, at: .centeredVertically, animated: false) }
+      showHighlight(id)
+    }
+  }
+  func rememberDetail(_ id: Int) { returnRecordingID = id; returnOffset = collection.contentOffset; clearHighlight() }
+  private func showHighlight(_ id: Int) {
+    clearHighlight(); guard shell?.api?.highlightRecorded == true else { return }
+    highlightID = id; updateHighlights(); let generation = highlightGeneration
+    DispatchQueue.main.asyncAfter(deadline: .now()+1) { [weak self] in
+      guard let self, generation == self.highlightGeneration else { return }; self.clearHighlight()
+    }
+  }
+  private func clearHighlight() { highlightGeneration += 1; highlightID = nil; updateHighlights() }
+  private func updateHighlights() {
+    for cell in collection.visibleCells {
+      guard let cell = cell as? NeoRecordedCard, let index = collection.indexPath(for: cell), records.indices.contains(index.item) else { continue }
+      cell.setFocused(records[index.item].id == highlightID)
+    }
+  }
+  private func clearCache() { cache.removeAll(); cacheOrder.removeAll() }
+  private func loadUsers() {
+    usersTask?.cancel(); updateUserMenu()
+    guard let api = shell?.api else { return }
+    usersTask = Task { [weak self] in
+      guard let self else { return }
+      do {
+        let result = try await api.viewers(); guard !Task.isCancelled, self.shell?.api === api else { return }
+        self.users = result.users; self.updateUserMenu()
+      } catch { if !Task.isCancelled {
+        self.userButton.menu = UIMenu(children: [UIAction(title: "ユーザーを取得できません。再試行") { [weak self] _ in self?.loadUsers() }])
+      } }
+    }
+  }
+  private func updateUserMenu() {
+    let name = locatedUserID.map { id in users.first { $0.id == id }?.name ?? shell?.account?.currentName ?? String(id) } ?? "master（すべて）"
+    userButton.setTitle("ユーザー：\(name) ▾", for: .normal)
+    userButton.menu = UIMenu(children: [UIAction(title: "master（すべて）", state: locatedUserID == nil ? .on : .off) { [weak self] _ in self?.selectUser(nil) }] + users.filter { $0.id > 0 }.map { user in
+      UIAction(title: user.name, state: user.id == locatedUserID ? .on : .off) { [weak self] _ in self?.selectUser(user.id) }
+    })
+  }
+  private func selectUser(_ id: Int?) {
+    userFilterExplicit = true; guard id != locatedUserID else { return }
+    locatedUserID = id; updateUserMenu(); clearCache(); reload(targetPage: 1)
+  }
   func locate(_ id: Int, page: Int, userID: Int?) {
-    locatedUserID = userID; focusedRecordingID = id; keyword = ""; reverse = false
+    userFilterExplicit = true; locatedUserID = userID.flatMap { $0 > 0 ? $0 : nil }; focusedRecordingID = id; filters = NeoRecordedFilters(); reverse = false
+    returnRecordingID = nil; returnOffset = nil; updateUserMenu()
     cache.removeAll(); cacheOrder.removeAll(); reload(targetPage: max(1, page))
   }
   func returnToFirstPage() {
@@ -144,10 +230,12 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   @objc private func refreshList() { cache.removeAll(); cacheOrder.removeAll(); reload() }
   private func reload(targetPage: Int? = nil) {
     task?.cancel(); spinner.startAnimating(); message.text = nil
+    clearHighlight()
     let requestedPage = targetPage ?? page, query = keyword, oldest = reverse
     self.requestedPage = requestedPage
     let userID = locatedUserID
-    let key = NeoRecordingQuery(page: requestedPage, keyword: query, reverse: oldest, userID: userID)
+    let search = filters, limit = pageLength
+    let key = NeoRecordingQuery(page: requestedPage, keyword: query, reverse: oldest, userID: userID, filters: search, limit: limit)
     let entry = cache[key]
     let cached = entry.flatMap { Date().timeIntervalSince($0.stored) < 30 ? $0.result : nil }
     collection.layer.removeAllAnimations(); collection.alpha = 0
@@ -160,14 +248,16 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         else {
 #if targetEnvironment(simulator)
         if self.shell?.smokeStage.isEmpty == false { result = Self.fixtures }
-        else { guard let api else { return }; result = try await api.recordings(page: requestedPage, keyword: query, reverse: oldest, userID: userID) }
+        else { guard let api else { return }; result = try await api.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search) }
 #else
-        guard let api else { return }; result = try await api.recordings(page: requestedPage, keyword: query, reverse: oldest, userID: userID)
+        guard let api else { return }; result = try await api.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search)
 #endif
           self.cache[key] = (result, Date()); self.cacheOrder.removeAll { $0 == key }; self.cacheOrder.append(key)
           if self.cacheOrder.count > 12 { self.cache.removeValue(forKey: self.cacheOrder.removeFirst()) }
         }
         try Task.checkCancellation()
+        let lastPage = max(1, Int(ceil(Double(result.total) / Double(limit))))
+        if requestedPage > lastPage { self.reload(targetPage: lastPage); return }
         let urls = result.records.compactMap { $0.thumbnails?.first.flatMap { api?.url("/thumbnails/\($0)") } }
         let late = try await NeoThumbnail.prepare(urls)
         try Task.checkCancellation()
@@ -179,7 +269,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         self.collection.layoutIfNeeded()
         if let id = self.focusedRecordingID, let index = result.records.firstIndex(where: { $0.id == id }) {
           self.collection.scrollToItem(at: IndexPath(item: index, section: 0), at: .centeredVertically, animated: false)
-          self.collection.selectItem(at: IndexPath(item: index, section: 0), animated: false, scrollPosition: [])
+          self.showHighlight(id)
           self.focusedRecordingID = nil
         }
         self.lastFadeDuration = UIAccessibility.isReduceMotionEnabled ? 0 : cached == nil ? 0.5 : 0.32
@@ -200,7 +290,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     }
   }
   private func selectPage(_ value: Int) {
-    guard value != page, (1...max(1, Int(ceil(Double(total) / 30)))).contains(value) else { return }
+    guard value != page, (1...max(1, Int(ceil(Double(total) / Double(pageLength))))).contains(value) else { return }
     reload(targetPage: value)
   }
 #if targetEnvironment(simulator)
@@ -217,16 +307,28 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   }
 #endif
   private func search() {
-    let dialog = UIAlertController(title: "録画検索", message: "番組名・説明から検索", preferredStyle: .alert)
-    dialog.addTextField { [keyword] field in field.placeholder = "キーワード"; field.text = keyword; field.clearButtonMode = .whileEditing }
-    dialog.addAction(UIAlertAction(title: "キャンセル", style: .cancel))
-    dialog.addAction(UIAlertAction(title: "検索", style: .default) { [weak self, weak dialog] _ in
-      guard let self, let shell = self.shell else { return }
-      let query = dialog?.textFields?.first?.text ?? ""
-      guard query != self.keyword else { return }
-      if query.isEmpty { self.navigationController?.popToRootViewController(animated: true) }
-      else { self.navigationController?.pushViewController(NeoRecordedPage(shell: shell, keyword: query, reverse: self.reverse), animated: true) }
-    }); present(dialog, animated: true)
+    guard let shell, let api = shell.api else { return }
+    let dialog = NeoRecordedSearch(api: api, channels: shell.channels, userID: locatedUserID, filters: filters)
+#if targetEnvironment(simulator)
+    dialog.smokeFixtures = !shell.smokeStage.isEmpty
+#endif
+    dialog.onApply = { [weak self] value in self?.applySearch(value) }
+    let nav = UINavigationController(rootViewController: dialog); nav.overrideUserInterfaceStyle = .dark
+    nav.modalPresentationStyle = .pageSheet; nav.sheetPresentationController?.detents = [.large()]
+    present(nav, animated: true)
+  }
+  private func applySearch(_ value: NeoRecordedFilters) {
+    guard let shell, value != filters else { return }
+    let root = navigationController?.viewControllers.first as? NeoRecordedPage
+    if value.isEmpty, let root {
+      navigationController?.popToRootViewController(animated: true)
+      if !root.filters.isEmpty { root.filters = value; root.reload(targetPage: 1) }; return
+    }
+    if self === root {
+      let result = NeoRecordedPage(shell: shell, reverse: reverse)
+      result.filters = value; result.locatedUserID = locatedUserID; result.userFilterExplicit = true
+      navigationController?.pushViewController(result, animated: true)
+    } else { filters = value; clearCache(); reload(targetPage: 1) }
   }
   private func showOptions() {
     guard let anchor = actions.last else { return }
@@ -242,6 +344,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     let thumbnailURL = item.thumbnails?.first.flatMap { shell?.api?.url("/thumbnails/\($0)") }
     cell.configure(item, channelName: item.channelName ?? item.channelId.flatMap { shell?.channels[$0] } ?? "", api: shell?.api,
       mobile: mobile, fadeThumbnail: thumbnailURL.map { lateThumbnails.contains($0) } ?? false)
+    cell.setFocused(item.id == highlightID)
 #if targetEnvironment(simulator)
     if shell?.smokeStage.isEmpty == false { cell.thumbnail.showFixture(item.id) }
 #endif
@@ -257,15 +360,47 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, minimumLineSpacingForSectionAt section: Int) -> CGFloat { mobile ? 4 : 8 }
   func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, minimumInteritemSpacingForSectionAt section: Int) -> CGFloat { mobile ? 4 : 8 }
   func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, referenceSizeForFooterInSection section: Int) -> CGSize {
-    CGSize(width: collectionView.bounds.width, height: total > 30 ? 72 : 0)
+    CGSize(width: collectionView.bounds.width, height: total > pageLength ? 72 : 0)
   }
   func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
     let footer = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "pages", for: indexPath) as! NeoPaginationFooter
-    footer.configure(page: page, count: max(1, Int(ceil(Double(total) / 30))), mobile: collection.bounds.width <= 500) { [weak self] value in self?.selectPage(value) }
+    footer.configure(page: page, count: max(1, Int(ceil(Double(total) / Double(pageLength)))), mobile: collection.bounds.width <= 500) { [weak self] value in self?.selectPage(value) }
     return footer
   }
-  deinit { task?.cancel() }
+  deinit { task?.cancel(); usersTask?.cancel(); observers.forEach(NotificationCenter.default.removeObserver) }
 #if targetEnvironment(simulator)
+  func smokeOpenSearch() { search() }
+  func smokeListFeatures() async -> Bool {
+    guard let shell, let api = shell.api else { return false }
+    let oldLength = api.recordedLength, oldHighlight = api.highlightRecorded, oldViewer = api.viewer
+    defer { api.recordedLength = oldLength; api.highlightRecorded = oldHighlight; selectUser(nil) }
+    func settled() async {
+      for _ in 0..<100 { if smokeLoadSettled { return }; try? await Task.sleep(nanoseconds: 20_000_000) }
+    }
+    api.recordedLength = 25; await settled()
+    guard pageLength == 25, page == 1 else { return false }
+    api.highlightRecorded = true
+    locate(1, page: 7, userID: 7); await settled(); collection.layoutIfNeeded()
+    let located = page == 7 && highlightID == 1 && locatedUserID == 7
+      && (collection.cellForItem(at: IndexPath(item: 0, section: 0)) as? NeoRecordedCard)?.contentView.layer.borderWidth == 2
+    api.highlightRecorded = false
+    let disabled = highlightID == nil
+    api.highlightRecorded = true
+    rememberDetail(1); viewDidAppear(false)
+    let returned = highlightID == 1
+    try? await Task.sleep(nanoseconds: 1_100_000_000)
+    let expired = highlightID == nil
+    let card = NeoRecordedCard(frame: .zero); card.setFocused(true); card.prepareForReuse()
+    let reused = card.contentView.layer.borderWidth == 0
+    selectUser(nil); await settled()
+    let all = locatedUserID == nil && page == 1 && api.viewer == oldViewer
+    var search = NeoRecordedFilters(); search.genre = 7; search.encodeModes = ["__ts__", "AV1 / MKV"]
+    applySearch(search); await Task.yield()
+    let child = navigationController?.topViewController as? NeoRecordedPage
+    let preserved = child !== self && child?.filters == search && child?.locatedUserID == nil
+    navigationController?.popToViewController(self, animated: false)
+    return located && disabled && returned && expired && reused && all && preserved
+  }
   func smokeOpenListMenu() { showOptions() }
   func smokeOpenFirstMenu() {
     collection.layoutIfNeeded()

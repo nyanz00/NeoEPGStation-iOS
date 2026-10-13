@@ -62,7 +62,7 @@ def capture_ipad(app, device):
 
 Path('dist').mkdir(exist_ok=True)
 ui_stages = ['recorded', 'pagination', 'detail', 'record-actions', 'detail-actions', 'play-popup',
-             'list-actions', 'drop-dialog', 'menu', 'settings', 'settings-viewing', 'settings-account', 'history', 'gestures']
+             'list-actions', 'drop-dialog', 'menu', 'settings', 'settings-viewing', 'settings-account', 'settings-display', 'recorded-search', 'history', 'gestures']
 device_file = Path('dist/simulator-device.json')
 if '--prepare' in sys.argv or not device_file.exists():
     available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '--json'))['devices']

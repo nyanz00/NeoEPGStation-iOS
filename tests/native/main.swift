@@ -359,3 +359,7 @@ var measured = 0
 _ = CommentLanePlan.build(expanded, size: 1, fixedPositions: [0: 80, 1: 160]) { _ in measured += 1; return CommentExtent(width: 100, height: 40) }
 check(measured == expanded.comments.count, "Pinned comments are measured once, without re-running candidate packing")
 print("MKV Cue validation and incremental comment packing: all checks passed")
+check(NeoPlaybackHistory.observedMilliseconds(Date(timeIntervalSince1970: 1700000000.1234)) == 1700000000123,
+  "Playback observedAt is an integer millisecond value accepted by OpenAPI")
+check(NeoPlaybackHistory.errorMessage(URLError(.timedOut)).contains("接続できませんでした"), "Timeout gets connection message")
+check(NeoPlaybackHistory.errorMessage(nil) == "視聴履歴の送信中にエラーが発生しました。", "HTTP rejection gets generic message")

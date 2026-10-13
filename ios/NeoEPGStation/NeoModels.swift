@@ -117,7 +117,72 @@ enum NeoNavigationGesture {
 struct NeoRecordingQuery: Hashable {
   let page: Int; let keyword: String; let reverse: Bool
   var userID: Int? = nil
+  var filters = NeoRecordedFilters()
+  var limit = 24
 }
+// RecordedPage.tsx's request options, including JST dates and inclusive upper bounds.
+struct NeoRecordedFilters: Hashable {
+  var keyword = "", ruleID: Int?, channelID: Int?, genre: Int?
+  var encodeModes: [String] = [], encodeModeMatch = "include"
+  var manualOnly = false, hasOriginalFile = false, hasDrop = false, hasError = false, hasScrambling = false
+  var specificDate = false, startDate = "", endDate = "", year = "", month = "", day = ""
+  var isEmpty: Bool { self == Self() }
+  func queryItems() throws -> [URLQueryItem] {
+    var items: [URLQueryItem] = []
+    func add(_ name: String, _ value: String) { items.append(URLQueryItem(name: name, value: value)) }
+    if !keyword.isEmpty { add("keyword", keyword) }
+    if manualOnly { add("ruleId", "0") } else if let ruleID { add("ruleId", String(ruleID)) }
+    if let channelID { add("channelId", String(channelID)) }
+    if let genre { add("genre", String(genre)) }
+    for mode in Set(encodeModes).sorted() { add("encodeModes[]", mode) }
+    if !encodeModes.isEmpty { add("encodeModeMatch", encodeModeMatch) }
+    for (key, enabled) in [("hasOriginalFile", hasOriginalFile), ("hasDrop", hasDrop), ("hasError", hasError), ("hasScrambling", hasScrambling)] where enabled { add(key, "true") }
+    let range = try dateRange()
+    if let start = range.0 { add("recordedStartAt", String(start)) }
+    if let end = range.1 { add("recordedEndAt", String(end)) }
+    return items
+  }
+  func dateRange() throws -> (Int64?, Int64?) {
+    var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+    func date(_ y: Int, _ m: Int, _ d: Int) throws -> Date {
+      guard (1...9999).contains(y), (1...12).contains(m), (1...31).contains(d),
+        let value = calendar.date(from: DateComponents(year: y, month: m, day: d)),
+        calendar.component(.year, from: value) == y, calendar.component(.month, from: value) == m,
+        calendar.component(.day, from: value) == d else { throw NeoError("録画日の指定が不正です") }
+      return value
+    }
+    func parse(_ text: String) throws -> Date? {
+      if text.isEmpty { return nil }
+      guard text.range(of: #"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"#, options: .regularExpression) != nil else { throw NeoError("録画日の指定が不正です") }
+      let parts = text.split(separator: "-").compactMap { Int($0) }
+      return try date(parts[0], parts[1], parts[2])
+    }
+    func milliseconds(_ value: Date?) -> Int64? { value.map { Int64(($0.timeIntervalSince1970 * 1000).rounded()) } }
+    if specificDate {
+      if year.isEmpty {
+        guard month.isEmpty && day.isEmpty else { throw NeoError("録画日の指定が不正です") }; return (nil, nil)
+      }
+      guard year.count == 4, let y = Int(year), month.isEmpty || Int(month) != nil,
+        day.isEmpty || (!month.isEmpty && Int(day) != nil) else { throw NeoError("録画日の指定が不正です") }
+      let start = try date(y, Int(month) ?? 1, Int(day) ?? 1)
+      let unit: Calendar.Component = !day.isEmpty ? .day : !month.isEmpty ? .month : .year
+      let end = calendar.date(byAdding: unit, value: 1, to: start)!
+      return (milliseconds(start), milliseconds(end)! - 1)
+    }
+    let start = try parse(startDate), endDay = try parse(endDate)
+    let end = endDay.flatMap { calendar.date(byAdding: .day, value: 1, to: $0) }
+    if let start, let end, start >= end { throw NeoError("録画日の指定が不正です") }
+    return (milliseconds(start), milliseconds(end).map { $0 - 1 })
+  }
+}
+struct NeoRecordedOptions: Decodable {
+  struct Channel: Decodable { let channelId: Int; let cnt: Int }
+  struct Genre: Decodable { let genre: Int; let cnt: Int }
+  struct Encode: Decodable { let name: String; let suffix: String? }
+  let channels: [Channel]; let genres: [Genre]; let encode: [Encode]
+}
+struct NeoRuleKeyword: Decodable { let id: Int; let keyword: String }
+struct NeoRuleKeywords: Decodable { let items: [NeoRuleKeyword] }
 enum NeoPagination {
   // VueCompatiblePagination.tsx: five consecutive mobile buttons.
   static func mobile(page: Int, count: Int) -> [Int] {
@@ -187,6 +252,7 @@ struct NeoListPosition: Decodable { let page: Int; let userId: Int? }
 extension Notification.Name {
   static let neoAccountChanged = Notification.Name("NeoAccountChanged")
   static let neoHistoryChanged = Notification.Name("NeoHistoryChanged")
+  static let neoRecordingPreferencesChanged = Notification.Name("NeoRecordingPreferencesChanged")
 }
 private final class NeoAPIRedirectPolicy: NSObject, URLSessionTaskDelegate {
   func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -233,18 +299,29 @@ final class NeoAPI {
     get { UserDefaults.standard.bool(forKey: "history.disabled." + base.absoluteString) }
     set { UserDefaults.standard.set(newValue, forKey: "history.disabled." + base.absoluteString) }
   }
+  var recordedLength: Int {
+    get { min(1000, max(1, UserDefaults.standard.object(forKey: "recorded.length." + base.absoluteString) as? Int ?? 24)) }
+    set { UserDefaults.standard.set(min(1000, max(1, newValue)), forKey: "recorded.length." + base.absoluteString)
+      NotificationCenter.default.post(name: .neoRecordingPreferencesChanged, object: self) }
+  }
+  var highlightRecorded: Bool {
+    get { UserDefaults.standard.object(forKey: "recorded.highlight." + base.absoluteString) as? Bool ?? true }
+    set { UserDefaults.standard.set(newValue, forKey: "recorded.highlight." + base.absoluteString)
+      NotificationCenter.default.post(name: .neoRecordingPreferencesChanged, object: self) }
+  }
   init(base: URL, session: URLSession? = nil) {
     self.base = base
     self.session = session ?? URLSession(configuration: .ephemeral, delegate: NeoAPIRedirectPolicy(), delegateQueue: nil)
     accountReady = viewer == "master" || viewer == "0"
   }
   func url(_ path: String) -> URL { URL(string: base.absoluteString + "/api" + path)! }
-  func recordings(page: Int, keyword: String = "", reverse: Bool = false, userID: Int? = nil) async throws -> NeoRecords {
+  func recordings(page: Int, keyword: String = "", reverse: Bool = false, userID: Int? = nil, filters: NeoRecordedFilters? = nil) async throws -> NeoRecords {
     var parts = URLComponents(url: url("/recorded"), resolvingAgainstBaseURL: false)!
     parts.queryItems = [URLQueryItem(name: "isHalfWidth", value: "true"), URLQueryItem(name: "isReverse", value: reverse ? "true" : "false"),
-      URLQueryItem(name: "limit", value: "30"), URLQueryItem(name: "offset", value: String(max(0, page - 1) * 30))]
-    if !keyword.isEmpty { parts.queryItems!.append(URLQueryItem(name: "keyword", value: keyword)) }
-    if let userID { parts.queryItems!.append(URLQueryItem(name: "userId", value: String(userID))) }
+      URLQueryItem(name: "limit", value: String(recordedLength)), URLQueryItem(name: "offset", value: String(max(0, page - 1) * recordedLength))]
+    var search = filters ?? NeoRecordedFilters(); if filters == nil { search.keyword = keyword }
+    parts.queryItems! += try search.queryItems()
+    if let userID, userID > 0 { parts.queryItems!.append(URLQueryItem(name: "userId", value: String(userID))) }
     let result: NeoRecords = try await request(parts.url!)
     guard result.total >= 0, result.records.allSatisfy({ $0.id > 0 }) else { throw NeoError("録画一覧の応答形式が一致しません。") }
     return result
@@ -285,7 +362,17 @@ final class NeoAPI {
     _ = try await response(url("/recorded/\(id)/playback"), method: "DELETE", user: user, headers: [:])
     NotificationCenter.default.post(name: .neoHistoryChanged, object: self)
   }
-  func listPosition(_ id: Int) async throws -> NeoListPosition { try await request(url("/recorded/\(id)/listPosition?limit=30")) }
+  func listPosition(_ id: Int) async throws -> NeoListPosition { try await request(url("/recorded/\(id)/listPosition?limit=\(recordedLength)")) }
+  func recordedOptions(userID: Int?) async throws -> NeoRecordedOptions {
+    try await request(url("/recorded/options" + (userID.map { "?userId=\($0)" } ?? "")))
+  }
+  func ruleKeywords(keyword: String, userID: Int?) async throws -> [NeoRuleKeyword] {
+    var parts = URLComponents(url: url("/rules/keyword"), resolvingAgainstBaseURL: false)!
+    parts.queryItems = [URLQueryItem(name: "limit", value: "1000")]
+    if !keyword.isEmpty { parts.queryItems!.append(URLQueryItem(name: "keyword", value: keyword)) }
+    if let userID { parts.queryItems!.append(URLQueryItem(name: "userId", value: String(userID))) }
+    let result: NeoRuleKeywords = try await request(parts.url!); return result.items
+  }
   func rule(_ id: Int) async throws -> NeoRule { try await request(url("/rules/\(id)")) }
   func relatedRecordings(ruleId: Int?, keyword: String) async throws -> NeoRecords {
     var parts = URLComponents(url: url("/recorded"), resolvingAgainstBaseURL: false)!

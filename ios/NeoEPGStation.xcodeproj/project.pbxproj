@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+    BDEF00000000000000000024 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000024; };
     BDEF00000000000000000023 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000023; };
     BDEF00000000000000000022 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000022; };
     BDEF00000000000000000021 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000021; };
@@ -45,6 +46,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+    ADEF00000000000000000024 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoRecordedSearch.swift; path = NeoEPGStation/NeoRecordedSearch.swift; sourceTree = "<group>"; };
     ADEF00000000000000000023 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoAccountSmoke.swift; path = NeoEPGStation/NeoAccountSmoke.swift; sourceTree = "<group>"; };
     ADEF00000000000000000022 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoHistoryPage.swift; path = NeoEPGStation/NeoHistoryPage.swift; sourceTree = "<group>"; };
     ADEF00000000000000000021 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoSettingsCategories.swift; path = NeoEPGStation/NeoSettingsCategories.swift; sourceTree = "<group>"; };
@@ -123,6 +125,7 @@
         ADEF00000000000000000021,
         ADEF00000000000000000022,
         ADEF00000000000000000023,
+        ADEF00000000000000000024,
         ADEF00000000000000000007,
         ADEF00000000000000000008,
         ADEF00000000000000000010,
@@ -346,6 +349,7 @@
         BDEF00000000000000000021,
         BDEF00000000000000000022,
         BDEF00000000000000000023,
+        BDEF00000000000000000024,
         BDEF00000000000000000007,
         BDEF00000000000000000009,
         BDEF00000000000000000006,

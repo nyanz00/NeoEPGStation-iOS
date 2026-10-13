@@ -325,6 +325,7 @@
     self.history = [[NeoPlaybackHistory alloc] initWithBase:base recordingID:recordingID.integerValue
       user:self.recordingContext[@"user"] ?: @"master" username:self.username password:self.password];
     self.history.onChange = ^{ [weakSelf updateControls]; };
+    self.history.onDiagnostic = ^(NSDictionary *fields) { [NeoPlaybackDiagnostics record:@"history.sendFailure" fields:fields]; };
   }
   [self showControls];
   if (self.sourceURL.isFileURL || [self.recordingContext[@"isRecording"] boolValue]) { [self startWhenCommentsReady]; }
