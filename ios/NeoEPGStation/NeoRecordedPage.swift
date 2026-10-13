@@ -144,7 +144,8 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     observers.append(NotificationCenter.default.addObserver(forName: .neoAccountChanged, object: nil, queue: .main) { [weak self] note in
       guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
       if !self.userFilterExplicit {
-        self.locatedUserID = Int(api.viewer).flatMap { $0 > 0 ? $0 : nil }; self.clearCache(); self.reload(targetPage: 1)
+        let id = Int(api.viewer).flatMap { $0 > 0 ? $0 : nil }
+        if id != self.locatedUserID { self.locatedUserID = id; self.clearCache(); self.reload(targetPage: 1) }
       }
       self.loadUsers()
     })
@@ -379,6 +380,9 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     }
     api.recordedLength = 25; await settled()
     guard pageLength == 25, page == 1 else { return false }
+    selectPage(7); await settled(); let originalPage = page
+    NotificationCenter.default.post(name: .neoAccountChanged, object: api)
+    let sameIdentityKeptPage = page == originalPage && requestedPage == originalPage
     api.highlightRecorded = true
     locate(1, page: 7, userID: 7); await settled(); collection.layoutIfNeeded()
     let located = page == 7 && highlightID == 1 && locatedUserID == 7
@@ -399,7 +403,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     let child = navigationController?.topViewController as? NeoRecordedPage
     let preserved = child !== self && child?.filters == search && child?.locatedUserID == nil
     navigationController?.popToViewController(self, animated: false)
-    return located && disabled && returned && expired && reused && all && preserved
+    return sameIdentityKeptPage && located && disabled && returned && expired && reused && all && preserved
   }
   func smokeOpenListMenu() { showOptions() }
   func smokeOpenFirstMenu() {
