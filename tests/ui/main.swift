@@ -153,8 +153,8 @@ Task.detached {
 
     let originalViewer = api.viewer
     defer { api.viewer = originalViewer }
-    api.viewer = "7"
-    api.profileHeaders = ["X-Viewer-Profile-Id": "71", "X-Viewer-Session": String(repeating: "s", count: 32)]
+    api.activate(user: "7", headers: ["X-Viewer-Profile-Id": "71", "X-Viewer-Session": String(repeating: "s", count: 32)])
+    expect(api.accountReady && api.viewer == "7", "Identity activation is complete before notifying consumers")
     FixtureProtocol.handler = { request in
       expect(request.url?.path == "/epg/api/viewer-profiles", "Profile metadata route")
       expect(request.value(forHTTPHeaderField: "X-Viewer-Session") == nil, "Metadata does not use stale session")

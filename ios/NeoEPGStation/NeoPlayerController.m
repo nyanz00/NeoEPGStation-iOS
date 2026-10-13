@@ -1383,9 +1383,9 @@
     [self pollLatestRecoveryIntent:0 completion:^(BOOL advances) {
       NSDictionary *video = [NeoVLCFrameTap snapshot:self.movieView];
       BOOL pictures = [video[@"changes"] integerValue] >= 3 && [video[@"contentAge"] doubleValue] < 0.5;
-      completion(@{@"success": @(startsAtTarget && indexed && advances && pictures && commentsAt >= 90 && commentsAt < 100),
+      completion(@{@"success": @((BOOL)(startsAtTarget && indexed && advances && pictures && commentsAt >= 90 && commentsAt < 100)),
         @"startsWithoutReloadOrSeek": @(startsAtTarget), @"initialIndexedTargetRange": @(indexed),
-        @"commentsUseResumePosition": @(commentsAt >= 90 && commentsAt < 100), @"picturesAdvance": @(pictures),
+        @"commentsUseResumePosition": @((BOOL)(commentsAt >= 90 && commentsAt < 100)), @"picturesAdvance": @(pictures),
         @"seekMetrics": metrics});
     }]; return;
   }

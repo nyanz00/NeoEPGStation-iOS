@@ -162,12 +162,13 @@ final class NeoProfileSecrets {
   }
   private func commit(_ user: String, profile: NeoViewerProfile?, token: String?) {
     guard current else { return }
-    api.profileHeaders = [:]
+    revision += 1; busy = false
+    var headers: [String: String] = [:]
     if let profile {
-      api.profileHeaders["X-Viewer-Profile-Id"] = String(profile.id)
-      if let token { api.profileHeaders["X-Viewer-Session"] = token }
+      headers["X-Viewer-Profile-Id"] = String(profile.id)
+      if let token { headers["X-Viewer-Session"] = token }
     }
-    api.accountReady = true; api.viewer = user
+    api.activate(user: user, headers: headers)
   }
   func lockCurrent() {
     if let profile = api.profileHeaders["X-Viewer-Profile-Id"].flatMap(Int.init) { secrets.remove(profile) }

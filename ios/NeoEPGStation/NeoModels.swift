@@ -194,17 +194,36 @@ private final class NeoAPIRedirectPolicy: NSObject, URLSessionTaskDelegate {
 }
 final class NeoAPI {
   let base: URL; let session: URLSession
-  var profileHeaders: [String: String] = [:]
+  private let headersLock = NSLock()
+  private var authenticationHeaders: [String: String] = [:]
+  var profileHeaders: [String: String] {
+    get { headersLock.lock(); defer { headersLock.unlock() }; return authenticationHeaders }
+    set { headersLock.lock(); authenticationHeaders = newValue; headersLock.unlock() }
+  }
   var accountReady = false
   var identityRevision = 0
   var onLocked: ((Int) -> Void)?
   var viewer: String {
     get { UserDefaults.standard.string(forKey: "viewer." + base.absoluteString) ?? "master" }
     set {
+      headersLock.lock()
       UserDefaults.standard.set(newValue, forKey: "viewer." + base.absoluteString)
+      headersLock.unlock()
       identityRevision += 1
       NotificationCenter.default.post(name: .neoAccountChanged, object: self)
     }
+  }
+  func activate(user: String, headers: [String: String]) {
+    headersLock.lock()
+    authenticationHeaders = headers
+    UserDefaults.standard.set(user, forKey: "viewer." + base.absoluteString)
+    headersLock.unlock()
+    accountReady = true; identityRevision += 1
+    NotificationCenter.default.post(name: .neoAccountChanged, object: self)
+  }
+  private func identitySnapshot() -> (String, [String: String]) {
+    headersLock.lock(); defer { headersLock.unlock() }
+    return (viewer, authenticationHeaders)
   }
   var resumePlayback: Bool {
     get { UserDefaults.standard.object(forKey: "resume." + base.absoluteString) as? Bool ?? true }
@@ -298,8 +317,9 @@ final class NeoAPI {
     user: String? = nil, timeout: Double = 20, headers: [String: String]? = nil) async throws -> Data {
     var request = URLRequest(url: url); request.timeoutInterval = timeout; request.httpMethod = method
     request.setValue("application/json", forHTTPHeaderField: "Accept")
-    request.setValue(user ?? viewer, forHTTPHeaderField: "X-EPGStation-User-Id")
-    for (key, value) in headers ?? profileHeaders { request.setValue(value, forHTTPHeaderField: key) }
+    let identity = identitySnapshot()
+    request.setValue(user ?? identity.0, forHTTPHeaderField: "X-EPGStation-User-Id")
+    for (key, value) in headers ?? identity.1 { request.setValue(value, forHTTPHeaderField: key) }
     if let body {
       request.setValue("application/json", forHTTPHeaderField: "Content-Type")
       request.httpBody = try JSONSerialization.data(withJSONObject: body)

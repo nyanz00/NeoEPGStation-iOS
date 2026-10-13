@@ -71,6 +71,9 @@ private final class NeoAccountFixture: URLProtocol {
     checks["revocationDeletesStoredToken"] = (try? secrets.read(71)) == nil
     shell.presentedViewController?.dismiss(animated: false); account.lockCurrent()
     checks["masterHasNoProfileSession"] = api.viewer == "master" && api.accountReady && api.profileHeaders.isEmpty
+    account.smokeSelect("8"); account.lockCurrent()
+    try? await Task.sleep(nanoseconds: 200_000_000)
+    checks["lateSwitchCannotUndoMasterSelection"] = api.viewer == "master" && !account.busy && api.profileHeaders.isEmpty
     NeoAccountFixture.valid = true
     NeoNative.writeSmoke("account-smoke", ["success": checks.values.allSatisfy { $0 }, "checks": checks])
   }
