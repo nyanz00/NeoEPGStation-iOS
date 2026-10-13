@@ -13,7 +13,10 @@ final class NeoDetailPage: NeoPage {
   private lazy var encodeButton = NeoStyle.recordingButton("ENCODE", icon: "ControlPoint", success: true) { [weak self] in self?.alert("ENCODE の操作は準備中です。") }
   private lazy var thumbButton = NeoStyle.recordingButton("THUMB", icon: "ImageOutlined", success: true) { [weak self] in self?.alert("thumbnail の操作は準備中です。") }
   private let buttonRow = NeoRecordingButtonRow()
-  private lazy var beginningButton = NeoStyle.button("最初から再生") { [weak self] in self?.selectFile(fromBeginning: true) }
+  private lazy var beginningButton: UIButton = {
+    let button = NeoStyle.button("最初から再生") { [weak self] in self?.selectFile(fromBeginning: true) }
+    button.heightAnchor.constraint(equalToConstant: 36).isActive = true; return button
+  }()
   private lazy var moreButton: UIButton = NeoStyle.iconButton("MoreVert", label: "詳細メニューを開く") { [weak self] in
     guard let self else { return }; self.showRecordingMenu(self.item, anchor: self.moreButton, detail: true)
   }
@@ -93,7 +96,6 @@ final class NeoDetailPage: NeoPage {
     stack.setCustomSpacing(24, after: top)
     if !(item.videoFiles ?? []).isEmpty, shell?.api?.resumePlayback == true,
       Int(shell?.api?.viewer ?? "master").map({ $0 > 0 }) == true {
-      beginningButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
       stack.addArrangedSubview(beginningButton)
     }
     for text in [item.description, item.extended].compactMap({ $0 }) {

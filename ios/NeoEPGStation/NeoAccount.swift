@@ -32,7 +32,7 @@ final class NeoProfileSecrets {
   func remove(_ profile: Int) { SecItemDelete(query(profile) as CFDictionary) }
 }
 
-final class NeoAccountCoordinator {
+@MainActor final class NeoAccountCoordinator {
   let api: NeoAPI
   private weak var shell: NeoShell?
   private let secrets: NeoProfileSecrets
