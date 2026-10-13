@@ -1687,7 +1687,8 @@
   checks[@"tapShows"] = @(showTap); checks[@"tapHides"] = @(hideTap);
   [self.chrome smokeTapVideoBackground];
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-    checks[@"fadeInCompletes"] = self.chrome.controls.layer.presentationLayer.opacity > 0.99 ? @YES : @NO;
+    CALayer *visibleLayer = self.chrome.controls.layer.presentationLayer ?: self.chrome.controls.layer;
+    checks[@"fadeInCompletes"] = self.chrome.controlsVisible && visibleLayer.opacity > 0.99 ? @YES : @NO;
     [self performPlayerAction:@"interaction"];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
       checks[@"interactionRestartsHideTimer"] = @(self.chrome.controlsVisible);

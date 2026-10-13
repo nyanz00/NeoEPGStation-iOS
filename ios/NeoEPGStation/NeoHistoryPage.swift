@@ -41,7 +41,7 @@ private final class NeoHistoryCell: UITableViewCell {
     duration.text = "\(NeoHistoryPage.mediaTime(item.playback.duration))・\(Int((value*100).rounded()))%"
     thumbnail.load(item.recorded.thumbnails?.first.flatMap { shell.api?.url("/thumbnails/\($0)") })
 #if targetEnvironment(simulator)
-    if shell.smokeStage == "history" { thumbnail.useSmokeImage() }
+    if shell.smokeStage == "history" { thumbnail.showFixture(item.recorded.id) }
 #endif
     locateButton.isEnabled = !disabled; deleteButton.isEnabled = !disabled
     accessibilityLabel = "\(item.recorded.name)、\(position.text ?? "")、\(duration.text ?? "")"
