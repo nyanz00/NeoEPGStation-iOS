@@ -283,7 +283,8 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         if Task.isCancelled { return }
         guard self.shell?.api === api else { return }
         self.collection.alpha = 1
-        if self.records.isEmpty && requestedPage == 1 && query.isEmpty && self.shell?.smokeStage.isEmpty == true {
+        if self.records.isEmpty && requestedPage == 1 && search.isEmpty
+          && self.navigationController?.viewControllers.first === self && self.shell?.smokeStage.isEmpty == true {
           self.shell?.showConnection(message: error.localizedDescription)
         } else { self.alert(error.localizedDescription) }
       }
