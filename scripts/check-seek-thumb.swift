@@ -14,8 +14,8 @@ let width = image.width, height = image.height
 var pixels = [UInt8](repeating: 0, count: width*height*4)
 pixels.withUnsafeMutableBytes { raw in
   guard let context = CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
-    bytesPerRow: width*4, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { fatalError("Cannot render screenshot") }
-  context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+    bytesPerRow: width*4, space: space, bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue) else { fatalError("Cannot render screenshot") }
+  context.draw(image, in: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
 }
 let band = height/6
 var diameters: [Int] = []
