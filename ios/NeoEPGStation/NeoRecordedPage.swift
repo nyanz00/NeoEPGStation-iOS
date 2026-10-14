@@ -1,5 +1,35 @@
 import UIKit
 
+// UserSelector's MUI small outlined field: 160 x 40, label 16 * .75,
+// dark outline white .23, text white and a 24pt ArrowDropDown.
+private final class NeoRecordedUserSelector: UIButton {
+  private let caption = NeoStyle.label("ユーザー", size: 12, muted: true)
+  private let value = NeoStyle.label(size: 16), arrow = UIImageView()
+  private let outline = CAShapeLayer()
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    outline.fillColor = UIColor.clear.cgColor; outline.strokeColor = UIColor.white.withAlphaComponent(0.23).cgColor; outline.lineWidth = 1
+    layer.addSublayer(outline)
+    caption.backgroundColor = NeoStyle.paper
+    arrow.image = UIGraphicsImageRenderer(size: CGSize(width: 24, height: 24)).image { _ in
+      UIColor.white.setFill(); let path = UIBezierPath(); path.move(to: CGPoint(x: 7, y: 10))
+      path.addLine(to: CGPoint(x: 12, y: 15)); path.addLine(to: CGPoint(x: 17, y: 10)); path.close(); path.fill()
+    }
+    [caption, value, arrow].forEach { $0.isUserInteractionEnabled = false; addSubview($0) }
+    accessibilityLabel = "ユーザー"; accessibilityTraits = .button
+  }
+  required init?(coder: NSCoder) { fatalError() }
+  func setValue(_ text: String) { value.text = text; accessibilityValue = text }
+  override func layoutSubviews() {
+    super.layoutSubviews(); CATransaction.begin(); CATransaction.setDisableActions(true)
+    outline.frame = bounds; outline.path = UIBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), cornerRadius: 4).cgPath
+    CATransaction.commit()
+    caption.frame = CGRect(x: 12, y: -7, width: 52, height: 14)
+    value.frame = CGRect(x: 14, y: 0, width: max(0, bounds.width - 46), height: bounds.height)
+    arrow.frame = CGRect(x: bounds.width - 31, y: (bounds.height - 24) / 2, width: 24, height: 24)
+  }
+}
+
 final class NeoRecordedCard: UICollectionViewCell {
   let thumbnail = NeoThumbnail(), title = NeoStyle.label(size: 14, bold: true)
   let channel = NeoStyle.label(size: 12, muted: true), time = NeoStyle.label(size: 12, muted: true)
@@ -106,7 +136,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   private var lateThumbnails: Set<URL> = []
   private var locatedUserID: Int?, focusedRecordingID: Int?
   private var userFilterExplicit = false, users: [NeoViewer] = []
-  private let userButton = UIButton(type: .system)
+  private let userButton = NeoRecordedUserSelector()
   private var usersTask: Task<Void, Never>?, observers: [NSObjectProtocol] = []
   private var returnRecordingID: Int?, returnOffset: CGPoint?, highlightID: Int?, highlightGeneration = 0
   private(set) var lastFadeDuration: TimeInterval = 0
@@ -138,7 +168,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     refresh.tintColor = NeoStyle.accent; refresh.addTarget(self, action: #selector(refreshList), for: .valueChanged)
     collection.refreshControl = refresh; body.addSubview(collection); body.addSubview(message); body.addSubview(spinner)
     message.numberOfLines = 0; message.textAlignment = .center
-    body.addSubview(userButton); userButton.tintColor = NeoStyle.accent; userButton.contentHorizontalAlignment = .left
+    headerAccessory = userButton
     userButton.accessibilityIdentifier = "recorded-user-filter"; userButton.showsMenuAsPrimaryAction = true
     loadUsers()
     observers.append(NotificationCenter.default.addObserver(forName: .neoAccountChanged, object: nil, queue: .main) { [weak self] note in
@@ -160,8 +190,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
-    userButton.frame = CGRect(x: 12, y: 0, width: max(0, body.bounds.width - 24), height: 48)
-    let frame = CGRect(x: 0, y: 48, width: body.bounds.width, height: max(0, body.bounds.height - 48))
+    let frame = body.bounds
     let changed = collection.bounds.size != frame.size; collection.frame = frame
     if changed { collection.collectionViewLayout.invalidateLayout() }
     message.frame = body.bounds.insetBy(dx: 24, dy: 48); spinner.center = CGPoint(x: body.bounds.midX, y: 70)
@@ -197,6 +226,9 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   private func clearCache() { cache.removeAll(); cacheOrder.removeAll() }
   private func loadUsers() {
     usersTask?.cancel(); updateUserMenu()
+#if targetEnvironment(simulator)
+    if shell?.smokeStage.isEmpty == false { users = [.init(id: 7, name: "サンプルユーザー"), .init(id: 8, name: "ユーザー2")]; updateUserMenu(); return }
+#endif
     guard let api = shell?.api else { return }
     usersTask = Task { [weak self] in
       guard let self else { return }
@@ -210,7 +242,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   }
   private func updateUserMenu() {
     let name = locatedUserID.map { id in users.first { $0.id == id }?.name ?? shell?.account?.currentName ?? String(id) } ?? "master（すべて）"
-    userButton.setTitle("ユーザー：\(name) ▾", for: .normal)
+    userButton.setValue(name)
     userButton.menu = UIMenu(children: [UIAction(title: "master（すべて）", state: locatedUserID == nil ? .on : .off) { [weak self] _ in self?.selectUser(nil) }] + users.filter { $0.id > 0 }.map { user in
       UIAction(title: user.name, state: user.id == locatedUserID ? .on : .off) { [weak self] _ in self?.selectUser(user.id) }
     })
@@ -297,6 +329,12 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   }
 #if targetEnvironment(simulator)
   var smokeCurrentPage: Int { page }
+  var smokeSelectorAligned: Bool {
+    view.layoutIfNeeded()
+    return userButton.superview === header && userButton.frame.size == CGSize(width: 160, height: 40)
+      && userButton.frame.minX >= titleLabel.frame.maxX && userButton.frame.maxX <= (actions.first?.frame.minX ?? 0)
+      && collection.frame == body.bounds && userButton.showsMenuAsPrimaryAction && userButton.menu?.children.count == 3
+  }
   var smokeLoadSettled: Bool { isViewLoaded && total > 0 && !spinner.isAnimating && requestedPage == page }
   var smokeRequestedPage: Int { requestedPage }
   func smokePageSeven() { selectPage(7) }

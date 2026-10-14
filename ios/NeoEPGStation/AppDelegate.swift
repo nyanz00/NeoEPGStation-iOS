@@ -12,7 +12,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
       if let player = current as? NeoPlayerController { return player.supportedInterfaceOrientations }
       controller = current.presentedViewController
     }
-    return .portrait
+    return (window ?? self.window)?.traitCollection.userInterfaceIdiom == .pad ? .all : .portrait
   }
   func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
     let window = UIWindow(frame: UIScreen.main.bounds)

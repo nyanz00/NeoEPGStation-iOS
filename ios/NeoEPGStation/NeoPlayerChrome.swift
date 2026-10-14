@@ -8,6 +8,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   @objc let statusLabel = NeoStyle.label(size: 12), commentLabel = NeoStyle.label(size: 12)
   @objc let timeLabel = NeoStyle.label(size: 13)
   private let displayedStatus = NeoStyle.label(size: 12)
+  private let transientNotice = NeoStyle.label(size: 12)
+  private var noticeExpiry: DispatchWorkItem?
   private var bufferProgress: Float?
   private var loadingMessage: String?
   private let loadingButton = UIButton(type: .custom)
@@ -71,6 +73,14 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private var drawerOpen = false, drawerDragging = false, drawerStart: CGFloat = 0
   private var diagnostic = "", commentDiagnostic = ""
 #if targetEnvironment(simulator)
+  @objc var transientNoticeVisible: Bool { !transientNotice.isHidden }
+  @objc func smokePressRotation() { rotationButton.sendActions(for: .touchUpInside) }
+  @objc func smokeOrientationSwipe() {
+    updateOrientation(state: .began, translation: 0)
+    let translation = (orientationWasWide ? 1 : -1) * orientationDistance * 1.2
+    updateOrientation(state: .changed, translation: translation)
+    updateOrientation(state: .ended, translation: translation)
+  }
   private var smokeSafeArea: UIEdgeInsets?
 #endif
   override var safeAreaInsets: UIEdgeInsets {
@@ -90,7 +100,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     videoView.clipsToBounds = true
     self.title.text = title; self.title.lineBreakMode = .byTruncatingTail
     channel.textColor = NeoStyle.muted; logo.contentMode = .scaleAspectFit
-    [videoView, pipCover, videoDim, header, controls, centerControls, panel, loadingButton, displayedStatus, drawerDim, drawer].forEach(addSubview)
+    [videoView, pipCover, videoDim, header, controls, centerControls, panel, loadingButton, displayedStatus, transientNotice, drawerDim, drawer].forEach(addSubview)
     header.addSubview(leftHeader); header.addSubview(rightHeader)
     [menuButton, backButton, logo, channel, self.title].forEach(leftHeader.addSubview)
     [infoButton, pipButton, commentButton, settingsButton].forEach(rightHeader.addSubview)
@@ -215,6 +225,9 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     displayedStatus.numberOfLines = 3; displayedStatus.isHidden = true
     displayedStatus.layer.shadowColor = UIColor.black.cgColor; displayedStatus.layer.shadowOpacity = 1
     displayedStatus.layer.shadowRadius = 2; displayedStatus.layer.shadowOffset = .zero
+    transientNotice.textAlignment = .center; transientNotice.numberOfLines = 3; transientNotice.isHidden = true
+    transientNotice.layer.shadowColor = UIColor.black.cgColor; transientNotice.layer.shadowOpacity = 1
+    transientNotice.layer.shadowRadius = 2; transientNotice.layer.shadowOffset = .zero
   }
   required init?(coder: NSCoder) { fatalError() }
   private func configure(_ button: UIButton, icon: String? = nil, symbol: String? = nil, label: String, action: String) {
@@ -348,6 +361,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let messageWidth = min(320, max(0, videoWidth-safe.left-rightInset-24))
     displayedStatus.frame = CGRect(x: videoView.frame.midX-messageWidth/2,
       y: loadingButton.frame.maxY+4, width: messageWidth, height: 54)
+    transientNotice.frame = CGRect(x: videoView.frame.midX-messageWidth/2, y: centerControls.frame.maxY+4, width: messageWidth, height: 54)
     drawerDim.frame = bounds
     let drawerWidth = min(240 + safe.left, bounds.width * 0.8)
     drawer.frame = CGRect(x: drawerDragging ? drawer.frame.minX : drawerOpen ? 0 : -drawerWidth, y: 0, width: drawerWidth, height: bounds.height)
@@ -371,6 +385,12 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     pipCover.isHidden = !active
     centerControls.isHidden = active
   }
+  @objc func showTransientNotice(_ text: String) {
+    clearTransientNotice(); transientNotice.text = text; transientNotice.isHidden = false; setNeedsLayout()
+    let expiry = DispatchWorkItem { [weak self] in self?.transientNotice.isHidden = true }
+    noticeExpiry = expiry; DispatchQueue.main.asyncAfter(deadline: .now()+2.5, execute: expiry)
+  }
+  @objc func clearTransientNotice() { noticeExpiry?.cancel(); noticeExpiry = nil; transientNotice.isHidden = true; transientNotice.text = nil }
   @objc var interactionOpen: Bool { drawerOpen || drawerDragging || navigationAction != nil || popup != nil || orientationDragging || orientationPending }
   @objc var controlTracking: Bool {
     func tracking(_ view: UIView) -> Bool {
@@ -847,7 +867,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     tableView.deselectRow(at: indexPath, animated: true); onAction?("seekto:\(comments[indexPath.row].time)")
   }
   func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { if scrollView === commentList { followsComments = false } }
-  @objc func shutdown() { finishOrientationTransition(); task?.cancel(); relatedTask?.cancel(); logoTask?.cancel(); popup?.dismiss(); onAction = nil }
+  @objc func shutdown() { clearTransientNotice(); finishOrientationTransition(); task?.cancel(); relatedTask?.cancel(); logoTask?.cancel(); popup?.dismiss(); onAction = nil }
   deinit { task?.cancel(); relatedTask?.cancel(); logoTask?.cancel() }
 
 #if targetEnvironment(simulator)

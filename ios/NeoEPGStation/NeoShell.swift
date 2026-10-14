@@ -105,16 +105,17 @@ class NeoPage: UIViewController {
   weak var shell: NeoShell?
   let header = UIView(), body = UIView()
   let titleLabel = NeoStyle.label(size: 20, bold: true)
+  var headerAccessory: UIView? { didSet { oldValue?.removeFromSuperview(); if let headerAccessory { header.addSubview(headerAccessory) }; view.setNeedsLayout() } }
   private var menu: UIButton!, back: UIButton!
   var actions: [UIView] = [] { didSet { oldValue.forEach { $0.removeFromSuperview() }; actions.forEach(header.addSubview); view.setNeedsLayout() } }
   init(title: String, shell: NeoShell) { super.init(nibName: nil, bundle: nil); self.shell = shell; titleLabel.text = title }
   required init?(coder: NSCoder) { fatalError() }
   override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
-  override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .portrait }
-  override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { .portrait }
+  override var supportedInterfaceOrientations: UIInterfaceOrientationMask { shell?.tablet == true ? .all : .portrait }
+  override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { shell?.tablet == true ? view.window?.windowScene?.interfaceOrientation ?? .portrait : .portrait }
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
-    guard presentedViewController == nil else { return }
+    guard presentedViewController == nil, shell?.tablet != true else { return }
     setNeedsUpdateOfSupportedInterfaceOrientations()
     view.window?.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
   }
@@ -137,6 +138,11 @@ class NeoPage: UIViewController {
     back.isHidden = !canBack; back.frame = CGRect(x: 48, y: 6, width: 40, height: 44)
     var right = width - 4
     for action in actions.reversed() { right -= 44; action.frame = CGRect(x: right, y: 6, width: 44, height: 44) }
+    if let headerAccessory {
+      right -= 162
+      headerAccessory.frame = CGRect(x: right, y: 8, width: 160, height: 40)
+      right -= 8
+    }
     let left: CGFloat = menu.isHidden ? 16 : canBack ? 88 : 48
     titleLabel.frame = CGRect(x: left, y: 0, width: max(0, right - left - 4), height: 56)
     header.viewWithTag(701)?.frame = CGRect(x: 0, y: 55.5, width: width, height: 0.5)
@@ -217,6 +223,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private var shortcuts: [String] = []
   private var bottomButtons: [UIButton] = []
   private var menuOpen = false, tabletExpanded = true
+  private var tabletReveal: CGFloat = 1
 #if targetEnvironment(simulator)
   func smokeUseAPI(_ value: NeoAPI?) { api = value; account = value.map { NeoAccountCoordinator(api: $0, shell: self) } }
   private var startupDrawerWasStill = false
@@ -242,11 +249,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
 #endif
   }
   override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
-  override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .portrait }
-  override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { .portrait }
+  override var supportedInterfaceOrientations: UIInterfaceOrientationMask { tablet ? .all : .portrait }
+  override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { tablet ? view.window?.windowScene?.interfaceOrientation ?? .portrait : .portrait }
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
-    if presentedViewController == nil {
+    if presentedViewController == nil && !tablet {
       setNeedsUpdateOfSupportedInterfaceOrientations()
       view.window?.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
     }
@@ -290,7 +297,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
     let safe = view.safeAreaInsets, width = view.bounds.width
-    let sidebarWidth: CGFloat = tablet && tabletExpanded ? self.sidebarWidth : 0
+    let sidebarWidth: CGFloat = api != nil && tablet ? self.sidebarWidth * tabletReveal : 0
     let navHeight: CGFloat = tablet ? 0 : 56
     content.frame = CGRect(x: sidebarWidth, y: safe.top, width: max(0, width - sidebarWidth), height: max(0, view.bounds.height - safe.top - safe.bottom - navHeight))
     active?.view.frame = content.bounds
@@ -301,8 +308,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       b.frame = CGRect(x: CGFloat(i) * width / CGFloat(bottomButtons.count), y: 0, width: width / CGFloat(bottomButtons.count), height: navHeight)
     }
     dim.frame = view.bounds; dim.isHidden = tablet || api == nil
-    sidebar.isHidden = api == nil || tablet && !tabletExpanded
-    let sidebarX: CGFloat = menuDragging ? sidebar.frame.minX : tablet || menuOpen ? 0 : -self.sidebarWidth
+    sidebar.isHidden = api == nil
+    let sidebarX: CGFloat = tablet ? self.sidebarWidth * (tabletReveal - 1) : menuDragging ? sidebar.frame.minX : menuOpen ? 0 : -self.sidebarWidth
     sidebar.frame = CGRect(x: sidebarX, y: 0, width: self.sidebarWidth, height: view.bounds.height)
     sidebar.contentSafeArea = safe
     bottom.layer.borderColor = NeoStyle.border.cgColor; bottom.layer.borderWidth = 0.5
@@ -460,8 +467,16 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
   func dismissPopup() { popup?.dismiss() }
   func toggleMenu() {
-    if tablet { tabletExpanded.toggle(); view.setNeedsLayout(); view.layoutIfNeeded() }
+    if tablet { setTabletMenu(!tabletExpanded, animated: true) }
     else { setMenu(!menuOpen, animated: true) }
+  }
+  private func setTabletMenu(_ open: Bool, animated: Bool) {
+    if open { dismissPopup() }
+    tabletExpanded = open; tabletReveal = open ? 1 : 0
+    let changes = { self.view.setNeedsLayout(); self.view.layoutIfNeeded() }
+    if animated && view.window != nil && !UIAccessibility.isReduceMotionEnabled {
+      UIView.animate(withDuration: 0.22, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut], animations: changes)
+    } else { changes() }
   }
   @objc private func closeMenu() { setMenu(false, animated: true) }
   private func setMenu(_ open: Bool, animated: Bool) {
@@ -477,7 +492,6 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     sidebar.accessibilityViewIsModal = open
   }
   @objc private func dragMenu(_ recognizer: UIPanGestureRecognizer) {
-    guard !tablet else { return }
     if recognizer === closingPan || recognizer === backdropPan {
       if recognizer.state == .began {
         closingScrollWasEnabled = closingScroll?.isScrollEnabled == true; closingScroll?.isScrollEnabled = false
@@ -489,6 +503,22 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     updateMenu(state: recognizer.state, translation: recognizer.translation(in: view).x, velocity: recognizer.velocity(in: view).x)
   }
   private func updateMenu(state: UIGestureRecognizer.State, translation: CGFloat, velocity: CGFloat) {
+    if tablet {
+      if state == .began {
+        let current = content.layer.presentation()?.frame.minX ?? content.frame.minX
+        content.layer.removeAllAnimations(); active?.view.layer.removeAllAnimations(); sidebar.layer.removeAllAnimations()
+        menuDragging = true; panStart = min(sidebarWidth, max(0, current))
+      }
+      let progress = min(sidebarWidth, max(0, panStart + translation))
+      if state == .began || state == .changed {
+        tabletReveal = progress / max(1, sidebarWidth); view.setNeedsLayout(); view.layoutIfNeeded()
+      } else if [.ended, .cancelled, .failed].contains(state) {
+        menuDragging = false
+        let open = state == .ended ? (abs(velocity) > 350 ? velocity > 0 : progress > sidebarWidth / 2) : tabletExpanded
+        setTabletMenu(open, animated: true)
+      }
+      return
+    }
     if state == .began {
       menuDragging = true
       let x = sidebar.layer.presentation()?.frame.minX ?? sidebar.frame.minX
@@ -598,11 +628,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let pan = recognizer as? UIPanGestureRecognizer
     let velocity = pan?.velocity(in: view) ?? .zero
     guard abs(velocity.x) >= abs(velocity.y), abs(velocity.x) > 0 else { return false }
-    if recognizer === closingPan || recognizer === backdropPan { return menuOpen && !tablet && velocity.x < 0 }
+    if recognizer === closingPan || recognizer === backdropPan { return (tablet ? tabletReveal > 0 : menuOpen) && velocity.x < 0 }
     guard recognizer === contentPan, api != nil, !menuOpen, popup == nil, presentedViewController == nil,
       popInteraction == nil, active?.transitionCoordinator == nil else { return false }
     swipeAction = NeoNavigationGesture.action(startY: Double(swipeStart.y), height: Double(view.bounds.height),
-      canGoBack: canGoBack, tablet: tablet, horizontal: Double(velocity.x), vertical: Double(velocity.y))
+      canGoBack: canGoBack, tablet: tablet && tabletExpanded, horizontal: Double(velocity.x), vertical: Double(velocity.y))
     return swipeAction != nil
   }
   func saveShortcuts(_ values: [String]) throws { try storage.saveShortcuts(values); shortcuts = values; rebuildBottom(); view.setNeedsLayout() }
@@ -637,6 +667,63 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let original = recorded.collection
     showRoute("settings"); showRoute("recorded")
     let retained = original === recorded.collection
+    if smokeStage == "ipad-connection" {
+      showConnection(); view.layoutIfNeeded()
+      let original = view.bounds
+      let layouts = [CGSize(width: 1024, height: 1366), CGSize(width: 1366, height: 1024)].map { size -> Bool in
+        view.bounds.size = size; view.setNeedsLayout(); view.layoutIfNeeded()
+        return content.frame.minX == 0 && content.frame.width == size.width && sidebar.isHidden && bottom.isHidden
+      }
+      view.bounds = original; view.setNeedsLayout(); view.layoutIfNeeded()
+      writeIPadSmoke(recorded, checks: ["connectionHasNoSidebarReservation": layouts.allSatisfy { $0 }], retained: retained)
+      return
+    }
+    if smokeStage == "ipad-menu" {
+      Task { [self] in
+        toggleMenu(); try? await Task.sleep(nanoseconds: 90_000_000)
+        let x = content.layer.presentation()?.frame.minX ?? 0
+        let animated = x > 0 && x < sidebarWidth
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        let closed = content.frame.minX == 0 && !tabletExpanded
+        let action = NeoNavigationGesture.action(startY: 10, height: Double(view.bounds.height), canGoBack: false, tablet: tablet && tabletExpanded, horizontal: 100, vertical: 0)
+        updateMenu(state: .began, translation: 0, velocity: 100)
+        updateMenu(state: .changed, translation: sidebarWidth/2, velocity: 100)
+        let followed = abs(content.frame.minX-sidebarWidth/2) < 1
+        updateMenu(state: .ended, translation: sidebarWidth, velocity: 400)
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        let reopened = tabletExpanded && content.frame.minX == sidebarWidth
+        updateMenu(state: .began, translation: 0, velocity: -100)
+        updateMenu(state: .changed, translation: -sidebarWidth, velocity: -100)
+        updateMenu(state: .ended, translation: -sidebarWidth, velocity: -400)
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        let swipeClosed = !tabletExpanded && content.frame.minX == 0
+        let back = NeoNavigationGesture.action(startY: Double(view.bounds.height)*0.8, height: Double(view.bounds.height), canGoBack: true, tablet: false, horizontal: 100, vertical: 0) == .back
+        setTabletMenu(true, animated: false); view.layoutIfNeeded()
+        writeIPadSmoke(recorded, checks: ["tabletMenuAnimates": animated, "tabletMenuClosesWithoutGap": closed,
+          "collapsedTabletMenuSwipeRecognized": action == .menu, "tabletMenuFollowsFinger": followed,
+          "tabletMenuSwipeReopens": reopened, "tabletMenuSwipeCloses": swipeClosed,
+          "tabletBackRegionPreserved": back, "userSelectorMatchesHeader": recorded.smokeSelectorAligned], retained: retained)
+      }
+      return
+    }
+    if smokeStage == "ipad-player" {
+      let file = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("player-tap.ts")
+      let player = NeoPlayerController(url: file, title: "Synthetic iPad rotation", username: "", password: "", networkCaching: 100)
+      player.recordingContext = ["id": 1, "disableHistory": true]; player.modalPresentationStyle = .fullScreen
+      present(player, animated: false) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now()+3) {
+          player.runIPadOrientationSmoke { result in
+            guard let self else { return }
+            if let file = NeoPlaybackDiagnostics.exportURL(), let data = try? Data(contentsOf: file) {
+              try? data.write(to: file.deletingLastPathComponent().appendingPathComponent("ipad-orientation-diagnostics.json"))
+            }
+            NeoNative.writeSmoke("ui-ipad-player-smoke", result.merging(["stage": self.smokeStage, "route": self.route,
+              "recordCount": recorded.records.count, "theme": "neon-teal-dark", "uiEngine": "Swift / UIKit", "retainedList": retained, "sidebarWidth": 240]) { old, _ in old })
+          }
+        }
+      }
+      return
+    }
     if smokeStage == "gestures" {
       Task { [self] in
         let popupCycles = NeoAnchoredMenu.runSmoke(in: view)
@@ -728,7 +815,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
           popupCorrect = popupCorrect && detail.smokeDropDialogVisible && self.active?.viewControllers.count == 2
         }
       }
-      let correct = popupCorrect && retained && (self.tablet || cardHeight == 108) && self.controllers["recorded"]?.viewControllers.first === recorded
+      let correct = popupCorrect && retained && recorded.smokeSelectorAligned && (self.tablet || cardHeight == 108) && self.controllers["recorded"]?.viewControllers.first === recorded
         && (self.smokeStage != "pagination" || pages == ["5", "6", "7", "8", "9"])
       NeoNative.writeSmoke("ui-\(self.smokeStage)-smoke", ["success": correct, "stage": self.smokeStage,
         "route": self.route, "recordCount": recorded.records.count, "theme": "neon-teal-dark", "sidebarWidth": self.tablet ? 240 : 0,
@@ -737,6 +824,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         "detailButtons": (self.active?.topViewController as? NeoDetailPage)?.smokeButtonTitles ?? [],
         "dropDialogVisible": (self.active?.topViewController as? NeoDetailPage)?.smokeDropDialogVisible ?? false])
     }
+  }
+  private func writeIPadSmoke(_ recorded: NeoRecordedPage, checks: [String: Bool], retained: Bool) {
+    NeoNative.writeSmoke("ui-\(smokeStage)-smoke", ["success": checks.values.allSatisfy { $0 }, "checks": checks,
+      "stage": smokeStage, "route": route, "recordCount": recorded.records.count, "theme": "neon-teal-dark",
+      "uiEngine": "Swift / UIKit", "retainedList": retained, "sidebarWidth": api == nil ? 0 : 240])
   }
   private func runBackSmoke(_ recorded: NeoRecordedPage, completion: @escaping (Bool) -> Void) {
     func later(_ delay: TimeInterval = 0.45, _ action: @escaping () -> Void) {

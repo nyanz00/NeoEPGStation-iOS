@@ -2,6 +2,8 @@
 
 ## ビルド
 
+iPadの接続画面・メニュー開閉・回転と、録画一覧のユーザー選択欄は `ipad-navigation-rotation.md` を参照する。
+
 録画一覧の表示件数・検索・ユーザー絞り込み・復帰ハイライトと、視聴履歴送信形式は `recorded-search-history.md` を参照する。
 
 設定カテゴリ、アクティブユーザーと保護プロフィールの認証、視聴履歴と途中開始は `history-accounts-resume.md` を参照する。

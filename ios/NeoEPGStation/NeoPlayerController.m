@@ -175,6 +175,8 @@
 @property (nonatomic) UIViewPropertyAnimator *rotationAnimator;
 @property (nonatomic) BOOL rotatingPlayer;
 @property (nonatomic) NSInteger rotationGeneration;
+@property (nonatomic) NSInteger orientationRequestGeneration;
+@property (nonatomic) BOOL internalOrientation;
 @property (nonatomic) NSTimeInterval playerRotationDuration;
 @property (nonatomic) CGFloat rotationHandoffDelta;
 @property (nonatomic) NSTimeInterval systemRotationDuration;
@@ -358,11 +360,19 @@
 
 - (void)applyPlayerLayout:(CGSize)size {
   if (self.rotatingPlayer) { return; }
-  BOOL changed = self.landscape != (size.width > size.height);
-  self.landscape = size.width > size.height;
-  self.rotationContainer.frame = CGRectMake(0, 0, size.width, size.height);
-  self.chrome.frame = CGRectMake(0, 0, size.width, size.height);
-  [self.chrome holdRotationInsets:self.view.safeAreaInsets];
+  BOOL wide = size.width > size.height, requestedWide = self.orientationMask == UIInterfaceOrientationMaskLandscapeRight;
+  BOOL swap = self.internalOrientation && requestedWide != wide;
+  CGSize contentSize = swap ? CGSizeMake(size.height, size.width) : size;
+  CGFloat angle = swap ? (requestedWide ? M_PI_2 : -M_PI_2) : 0;
+  BOOL changed = self.landscape != (contentSize.width > contentSize.height);
+  self.landscape = contentSize.width > contentSize.height;
+  self.rotationContainer.bounds = (CGRect){CGPointZero, contentSize}; self.rotationContainer.center = CGPointMake(size.width/2, size.height/2);
+  self.rotationContainer.transform = CGAffineTransformMakeRotation(angle);
+  self.chrome.transform = CGAffineTransformIdentity; self.chrome.frame = (CGRect){CGPointZero, contentSize};
+  UIEdgeInsets safe = self.view.safeAreaInsets;
+  if (angle > 0) { safe = UIEdgeInsetsMake(safe.right, safe.top, safe.left, safe.bottom); }
+  else if (angle < 0) { safe = UIEdgeInsetsMake(safe.left, safe.bottom, safe.right, safe.top); }
+  [self.chrome holdRotationInsets:safe];
   [self.chrome setNeedsLayout]; [self.chrome layoutIfNeeded];
   [self alignVideoOutput];
   if (changed) { [self setNeedsStatusBarAppearanceUpdate]; }
@@ -371,7 +381,7 @@
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
   [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
   CGFloat angle = atan2(coordinator.targetTransform.b, coordinator.targetTransform.a);
-  if (fabs(angle) > 0.01 && !self.closing && !self.dismissingPlayer) {
+  if (fabs(angle) > 0.01 && !self.internalOrientation && !self.closing && !self.dismissingPlayer) {
     [self animatePlayerRotationToSize:size coordinator:coordinator]; return;
   }
   [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context) {
@@ -433,7 +443,7 @@
   [NeoPlaybackDiagnostics record:@"ui.orientationAnimation" fields:@{@"durationMs": @(self.playerRotationDuration*1000),
     @"systemMs": @(self.systemRotationDuration*1000), @"angle": @(atan2(rotation.b, rotation.a))}];
 }
-- (UIInterfaceOrientationMask)supportedInterfaceOrientations { return self.orientationMask; }
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations { return self.traitCollection.userInterfaceIdiom == UIUserInterfaceIdiomPad ? UIInterfaceOrientationMaskAll : self.orientationMask; }
 - (BOOL)shouldAutorotate { return !self.dismissingPlayer; }
 - (BOOL)prefersStatusBarHidden { return self.landscape; }
 - (UIStatusBarStyle)preferredStatusBarStyle { return UIStatusBarStyleLightContent; }
@@ -479,6 +489,7 @@
   if (self.dismissingPlayer) { return; }
   if ([action isEqualToString:@"toggle-controls"]) { [self toggleControls]; return; }
   if ([action isEqualToString:@"orientation-begin"] || [action hasPrefix:@"orientation:"]) {
+    [self.chrome clearTransientNotice];
     [self hideControls];
     if ([action hasPrefix:@"orientation:"]) { [self setOrientation:[action substringFromIndex:12]]; }
     return;
@@ -534,16 +545,57 @@
   else if ([action hasPrefix:@"recording:"]) { self.pendingRecording = [action substringFromIndex:10].integerValue; [self closePlayer]; }
 }
 - (void)setOrientation:(NSString *)mode {
+  NSInteger request = ++self.orientationRequestGeneration;
+  [self.chrome clearTransientNotice];
   self.orientationMask = [mode isEqualToString:@"portrait"] ? UIInterfaceOrientationMaskPortrait
     : [mode isEqualToString:@"landscape"] ? UIInterfaceOrientationMaskLandscapeRight : UIInterfaceOrientationMaskAllButUpsideDown;
+  BOOL pad = self.traitCollection.userInterfaceIdiom == UIUserInterfaceIdiomPad;
+  if (pad && self.internalOrientation && ![mode isEqualToString:@"auto"]) { [self.chrome finishOrientationTransition]; [self applyPlayerLayout:self.view.bounds.size]; }
+  if (pad && [mode isEqualToString:@"auto"]) { self.internalOrientation = NO; [self.chrome finishOrientationTransition]; [self applyPlayerLayout:self.view.bounds.size]; }
   [self setNeedsUpdateOfSupportedInterfaceOrientations];
+  [self.presentingViewController setNeedsUpdateOfSupportedInterfaceOrientations];
+  [self.view.window.rootViewController setNeedsUpdateOfSupportedInterfaceOrientations];
   UIWindowScene *scene = self.view.window.windowScene;
   if (!scene) { [self.chrome cancelOrientationPreview]; return; }
+  [NeoPlaybackDiagnostics record:@"orientation.request" fields:[self orientationDiagnosticFields]];
   UIWindowSceneGeometryPreferencesIOS *preferences = [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:self.orientationMask];
   __weak typeof(self) weakSelf = self;
   [scene requestGeometryUpdateWithPreferences:preferences errorHandler:^(NSError *error) {
-    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf.chrome cancelOrientationPreview]; weakSelf.statusLabel.text = @"画面回転エラー · この表示環境では向きを変更できません。"; [weakSelf.chrome updateDiagnostics]; });
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (!weakSelf || weakSelf.orientationRequestGeneration != request || weakSelf.closing || weakSelf.dismissingPlayer) { return; }
+      NSMutableDictionary *fields = [[weakSelf orientationDiagnosticFields] mutableCopy];
+      fields[@"errorDomain"] = error.domain; fields[@"errorCode"] = @(error.code);
+      // Fixed categories avoid exporting OS descriptions that could contain window titles.
+      NSString *description = error.localizedDescription.lowercaseString;
+      fields[@"reason"] = [description containsString:@"orientation"] ? @"orientationDenied" : [description containsString:@"geometry"] ? @"geometryDenied" : @"other";
+      [NeoPlaybackDiagnostics record:@"orientation.denied" fields:fields];
+      if (pad && ![mode isEqualToString:@"auto"]) { [weakSelf useInternalOrientation]; }
+      else { [weakSelf.chrome cancelOrientationPreview]; [weakSelf.chrome showTransientNotice:@"この表示環境では向きを変更できません。"]; }
+    });
   }];
+  if (pad && ![mode isEqualToString:@"auto"]) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 650*NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+      if (!weakSelf || weakSelf.orientationRequestGeneration != request || weakSelf.closing || weakSelf.dismissingPlayer || weakSelf.rotatingPlayer || weakSelf.transitionCoordinator) { return; }
+      BOOL requestedWide = weakSelf.orientationMask == UIInterfaceOrientationMaskLandscapeRight;
+      if (requestedWide != (weakSelf.view.bounds.size.width > weakSelf.view.bounds.size.height) && !weakSelf.internalOrientation) {
+        [NeoPlaybackDiagnostics record:@"orientation.notApplied" fields:[weakSelf orientationDiagnosticFields]];
+        [weakSelf useInternalOrientation];
+      }
+    });
+  }
+}
+- (NSDictionary *)orientationDiagnosticFields {
+  UIWindowScene *scene = self.view.window.windowScene;
+  return @{@"requestedMask": @(self.orientationMask), @"playerMask": @(self.supportedInterfaceOrientations),
+    @"hostMask": @(self.view.window.rootViewController.supportedInterfaceOrientations),
+    @"sceneOrientation": @(scene.interfaceOrientation), @"windowWidth": @(self.view.bounds.size.width),
+    @"windowHeight": @(self.view.bounds.size.height), @"ipad": @(self.traitCollection.userInterfaceIdiom == UIUserInterfaceIdiomPad),
+    @"internal": @(self.internalOrientation), @"osMajor": @(NSProcessInfo.processInfo.operatingSystemVersion.majorVersion)};
+}
+- (void)useInternalOrientation {
+  self.internalOrientation = YES; [self.chrome finishOrientationTransition]; [self.chrome clearTransientNotice];
+  [UIView animateWithDuration:UIAccessibilityIsReduceMotionEnabled() ? 0 : 0.22 animations:^{ [self applyPlayerLayout:self.view.bounds.size]; }];
+  [NeoPlaybackDiagnostics record:@"orientation.internalApplied" fields:[self orientationDiagnosticFields]];
 }
 - (void)reloadPlayback {
   if (self.reloading) { return; }
@@ -1295,6 +1347,50 @@
 }
 #if TARGET_OS_SIMULATOR
 - (void)closeTapSmoke { [self closePlayer]; }
+- (void)waitForIPadWide:(BOOL)wide attempt:(NSInteger)attempt completion:(void (^)(BOOL))completion {
+  BOOL ready = !self.rotatingPlayer && (self.chrome.bounds.size.width > self.chrome.bounds.size.height) == wide && self.landscape == wide;
+  if (ready || attempt >= 100) { completion(ready); return; }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 30*NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ [self waitForIPadWide:wide attempt:attempt+1 completion:completion]; });
+}
+- (void)runIPadOrientationSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  int64_t before = [self mediaTime];
+  VLCMedia *media = self.player.media;
+  [self setOrientation:@"portrait"];
+  [self waitForIPadWide:NO attempt:0 completion:^(BOOL initial) {
+    [self.chrome smokePressRotation];
+    [self waitForIPadWide:YES attempt:0 completion:^(BOOL button) {
+      [self showControls]; [self.chrome snapshot:@"ipad-player-landscape"];
+      [self.chrome smokeOrientationSwipe];
+      [self waitForIPadWide:NO attempt:0 completion:^(BOOL swipeDown) {
+        [self.chrome smokeOrientationSwipe];
+        [self waitForIPadWide:YES attempt:0 completion:^(BOOL swipeUp) {
+          // Exercise the same owned-content path even if this simulator permits scene rotation.
+          BOOL rootWide = self.view.bounds.size.width > self.view.bounds.size.height;
+          self.orientationMask = rootWide ? UIInterfaceOrientationMaskPortrait : UIInterfaceOrientationMaskLandscapeRight;
+          [self useInternalOrientation];
+          [self waitForIPadWide:!rootWide attempt:0 completion:^(BOOL fallback) {
+            BOOL fit = CGSizeEqualToSize(self.chrome.bounds.size, self.rotationContainer.bounds.size)
+              && fabs(self.rotationContainer.center.x-self.view.bounds.size.width/2) < 1
+              && fabs(self.rotationContainer.center.y-self.view.bounds.size.height/2) < 1;
+            [self setOrientation:@"auto"];
+            BOOL automatic = !self.internalOrientation && self.landscape == (self.view.bounds.size.width > self.view.bounds.size.height);
+            [self.chrome showTransientNotice:@"この表示環境では向きを変更できません。"];
+            BOOL notice = self.chrome.transientNoticeVisible;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2800*NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+              BOOL expired = !self.chrome.transientNoticeVisible && ![self.statusLabel.text containsString:@"向きを変更"];
+              BOOL retained = self.player.media == media && !self.reloading && [self mediaTime] > before;
+              BOOL success = initial && button && swipeDown && swipeUp && fallback && fit && automatic && notice && expired && retained;
+              completion(@{@"success": @(success), @"buttonRotates": @(button), @"swipeReturnsPortrait": @(swipeDown),
+                @"swipeEntersLandscape": @(swipeUp), @"deniedSceneUsesOwnedRotation": @(fallback && fit),
+                @"autoRestoresWindowLayout": @(automatic), @"rotationNoticeExpiresWhilePlaying": @(notice && expired),
+                @"rotationKeepsMediaAndPlayback": @(retained), @"state": [self orientationDiagnosticFields]});
+            });
+          }];
+        }];
+      }];
+    }];
+  }];
+}
 - (NSDictionary<NSString *, id> *)runSeekStateSmokeChecks {
   BOOL prior = self.wantsPlayback; BOOL buffering = self.buffering;
   self.buffering = YES; [self setPlaybackIntent:YES];
@@ -2080,8 +2176,10 @@
   // returned; retain native resources until VLC's asynchronous stop completes.
   self.closingRetain = self;
   [self.dismissalPresenter setNeedsUpdateOfSupportedInterfaceOrientations];
-  [self.dismissalScene requestGeometryUpdateWithPreferences:[[UIWindowSceneGeometryPreferencesIOS alloc]
-    initWithInterfaceOrientations:UIInterfaceOrientationMaskPortrait] errorHandler:nil];
+  if (self.traitCollection.userInterfaceIdiom != UIUserInterfaceIdiomPad) {
+    [self.dismissalScene requestGeometryUpdateWithPreferences:[[UIWindowSceneGeometryPreferencesIOS alloc]
+      initWithInterfaceOrientations:UIInterfaceOrientationMaskPortrait] errorHandler:nil];
+  }
   [NeoPlaybackDiagnostics record:@"player.close" fields:@{}];
   [self sampleHistory]; [self.history finish]; self.closing = YES;
   [self cancelVideoResume];

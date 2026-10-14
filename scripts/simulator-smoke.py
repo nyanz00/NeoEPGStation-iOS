@@ -31,9 +31,9 @@ def capture_ui(udid, stage, prefix, terminate_existing=True):
         or result.get('theme') != 'neon-teal-dark'
         or result.get('uiEngine') != 'Swift / UIKit'
         or result.get('retainedList') is not True
-        or result.get('route') != ('settings' if stage.startswith('settings') else 'history' if stage == 'history' else 'recorded')):
+        or result.get('route') != ('connection' if stage == 'ipad-connection' else 'settings' if stage.startswith('settings') else 'history' if stage == 'history' else 'recorded')):
         raise RuntimeError(f'UI smoke failed: {result}')
-    if prefix == 'ui-ipad' and result.get('sidebarWidth') != 240:
+    if prefix == 'ui-ipad' and result.get('sidebarWidth') != (0 if stage == 'ipad-connection' else 240):
         raise RuntimeError(f"Unexpected iPad sidebar width: {result.get('sidebarWidth')}")
     run('xcrun', 'simctl', 'io', udid, 'screenshot', f'dist/{prefix}-{stage}.png')
     print(f'UI smoke: captured {prefix}/{stage}', flush=True)
@@ -59,6 +59,12 @@ def capture_ipad(app, device):
     print('UI smoke: iPad installation completed', flush=True)
     capture_ui(pad, 'recorded', 'ui-ipad', terminate_existing=False)
     capture_ui(pad, 'detail', 'ui-ipad')
+    pad_container = Path(run('xcrun', 'simctl', 'get_app_container', pad, 'io.github.nyanz00.NeoEPGStation', 'data'))
+    shutil.copyfile('tests/fixtures/player-tap.ts', pad_container / 'Documents/player-tap.ts')
+    for stage in ['ipad-connection', 'ipad-menu', 'ipad-player']:
+        capture_ui(pad, stage, 'ui-ipad')
+    for name in ['ipad-orientation-diagnostics.json', 'ipad-player-landscape.png']:
+        shutil.copyfile(pad_container / 'Documents' / name, Path('dist') / name)
 
 Path('dist').mkdir(exist_ok=True)
 ui_stages = ['recorded', 'pagination', 'detail', 'record-actions', 'detail-actions', 'play-popup',
