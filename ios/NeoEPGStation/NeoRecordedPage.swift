@@ -19,7 +19,7 @@ final class NeoUserSelector: UIButton {
     accessibilityLabel = "ユーザー"; accessibilityTraits = .button
   }
   required init?(coder: NSCoder) { fatalError() }
-  func setValue(_ text: String) { value.text = text; accessibilityValue = text }
+  func setValue(_ text: String, background: UIColor = NeoStyle.paper) { value.text = text; accessibilityValue = text; caption.backgroundColor = background }
   override func layoutSubviews() {
     super.layoutSubviews(); CATransaction.begin(); CATransaction.setDisableActions(true)
     outline.frame = bounds; outline.path = UIBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), cornerRadius: 4).cgPath

@@ -145,7 +145,7 @@ final class NeoSettingsCategoryPage: NeoPage {
         } catch { if !Task.isCancelled { status?.text = "視聴履歴設定を取得できませんでした。\n\(error.localizedDescription)"; button("再試行") { [weak self] in self?.render() } } }
       }
     case .account:
-      let selector = NeoUserSelector(); selector.setValue(shell.account?.currentName ?? api.viewer)
+      let selector = NeoUserSelector(); selector.setValue(shell.account?.currentName ?? api.viewer, background: NeoStyle.background)
       selector.accessibilityIdentifier = "account-user-selector"
       selector.widthAnchor.constraint(equalToConstant: 160).isActive = true
       selector.heightAnchor.constraint(equalToConstant: 40).isActive = true
