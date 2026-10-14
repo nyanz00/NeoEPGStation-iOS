@@ -621,7 +621,10 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         active.view.transform = finish ? CGAffineTransform(translationX: self.content.bounds.width, y: 0) : .identity
       }, completion: { [weak self] _ in
         guard let self else { return }
-        active.view.transform = .identity; self.routeBackPreview?.removeFromSuperview(); self.routeBackPreview = nil
+        UIView.performWithoutAnimation {
+          active.view.transform = .identity; active.view.frame = self.content.bounds
+          self.routeBackPreview?.removeFromSuperview(); self.routeBackPreview = nil
+        }
         self.routeBackRunning = false
         if finish { self.showRoute("history") }
       })
@@ -914,7 +917,12 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     updateBack(state: .changed, translation: content.bounds.width*0.2, velocity: 100)
     let followed = abs((active?.view.transform.tx ?? 0)-content.bounds.width*0.2) < 1
     updateBack(state: .cancelled, translation: 0, velocity: 0); await settle()
-    let cancelled = canReturnToHistory && !routeBackRunning && route == "recorded" && active?.view.transform == CGAffineTransform.identity
+    let transform = active?.view.transform ?? .identity
+    let restored = abs(transform.tx) < 1 && abs(transform.ty) < 1 && abs(transform.a-1) < 0.000001
+      && abs(transform.d-1) < 0.000001 && abs(transform.b) < 0.000001 && abs(transform.c) < 0.000001
+    let cancelled = canReturnToHistory && !routeBackRunning && route == "recorded" && restored
+    backSmokeDetails["historyCancelState"] = ["target": canReturnToHistory, "running": routeBackRunning, "route": route,
+      "x": transform.tx, "y": transform.ty, "a": transform.a, "d": transform.d, "b": transform.b, "c": transform.c]
     openDetail(NeoRecordedPage.fixtures.records[0]); await settle(); goBack(); await settle()
     let detailFirst = canReturnToHistory && route == "recorded" && active?.topViewController === recorded
     if tablet {
