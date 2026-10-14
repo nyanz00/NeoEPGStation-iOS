@@ -26,6 +26,23 @@ def capture_ui(udid, stage, prefix, terminate_existing=True):
             break
         time.sleep(1)
     result = json.loads(marker.read_text())
+    if prefix == 'ui-ipad' and stage == 'ipad-player':
+        # UIKit on iPad can draw the small thumb while currentThumbImage is nil.
+        # Preserve that API observation, and assert the actual pixels/geometry.
+        picture = ui_container / 'Documents/ipad-player-landscape.png'
+        state = result.get('state', {})
+        logical_width = max(state.get('windowWidth', 0), state.get('windowHeight', 0))
+        painted = json.loads(run('swift', 'scripts/check-seek-thumb.swift', str(picture), str(logical_width)))
+        metrics = result.get('ipadSeekThumbMetrics', {})
+        flags = ['buttonRotates', 'swipeReturnsPortrait', 'swipeEntersLandscape', 'deniedSceneUsesOwnedRotation',
+                 'autoRestoresWindowLayout', 'manualDirectionSurvivesWindowResize',
+                 'rotationNoticeExpiresWhilePlaying', 'rotationKeepsMediaAndPlayback']
+        result['nativeImageGetterAssertion'] = result.get('ipadSeekThumbSmall')
+        result['nativeOverallAssertion'] = result.get('success')
+        result['renderedSeekThumb'] = painted
+        result['ipadSeekThumbSmall'] = (painted.get('success') is True and
+            0 < metrics.get('thumbWidth', 999) <= 16 and metrics.get('height', 0) >= 32)
+        result['success'] = result['ipadSeekThumbSmall'] and all(result.get(flag) == True for flag in flags)
     Path(f'dist/{prefix}-{stage}.json').write_text(json.dumps(result, indent=2) + '\n')
     if (result.get('success') is not True or result.get('recordCount') != 4
         or result.get('theme') != 'neon-teal-dark'
