@@ -1,5 +1,6 @@
 """Reuse only a previously verified binary whose application sources are unchanged."""
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -19,11 +20,22 @@ required = ['storage-smoke', 'danmaku-smoke', 'pip-composition-smoke', 'pip-play
             'ui-iphone-recorded', 'ui-iphone-menu', 'ui-iphone-settings']
 if Path('ios/NeoEPGStation/NeoPlayerChrome.swift').exists():
     required += ['player-ui-smoke', 'player-playback-smoke']
-for name in required:
+full_recheck = os.environ.get('RECHECK_PLAYBACK') == 'true'
+for name in ([] if full_recheck else required):
     result = json.loads((artifact / f'{name}.json').read_text())
     if result.get('success') is not True:
         raise RuntimeError(f'Cannot reuse an unverified build: {name}')
-if not json.loads((artifact / 'storage-smoke.json').read_text()).get('navigationSuccess'):
+if not full_recheck and not json.loads((artifact / 'storage-smoke.json').read_text()).get('navigationSuccess'):
     raise RuntimeError('Navigation storage was not verified')
+# Full rechecks may start from a failed test run, but only from successful native
+# builds/type checks. The workflow then runs every playback and UI assertion;
+# no previous pass or failed result is used to satisfy the new check.
+if full_recheck:
+    jobs = json.loads(subprocess.check_output(['gh', 'run', 'view', info['run'], '--json', 'jobs']))['jobs']
+    steps = {step['name']: step['conclusion'] for job in jobs for step in job['steps']}
+    for name in ['Native ASS parser and playback clock tests', 'Native UI type checks',
+                 'Build device application', 'Package LiveContainer IPA', 'Build simulator application']:
+        if steps.get(name) != 'success':
+            raise RuntimeError(f'Cannot retest a failed application build: {name}')
 Path('dist/reused-build-info.json').write_text(json.dumps(info, indent=2) + '\n')
 print(f'Reusing verified application build {info["build"]} at {commit}', flush=True)
