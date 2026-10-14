@@ -1390,7 +1390,7 @@
               BOOL expired = !self.chrome.transientNoticeVisible && ![self.statusLabel.text containsString:@"向きを変更"];
               BOOL retained = self.player.media == media && !self.reloading && [self mediaTime] > before;
               BOOL success = smallThumb && initial && button && swipeDown && swipeUp && fallback && fit && fixedAcrossResize && automatic && notice && expired && retained;
-              completion(@{@"success": @(success), @"ipadSeekThumbSmall": @(smallThumb), @"buttonRotates": @(button), @"swipeReturnsPortrait": @(swipeDown),
+              completion(@{@"success": @(success), @"ipadSeekThumbSmall": @(smallThumb), @"ipadSeekThumbMetrics": [self.chrome smokeSeekThumbMetrics], @"buttonRotates": @(button), @"swipeReturnsPortrait": @(swipeDown),
                 @"swipeEntersLandscape": @(swipeUp), @"deniedSceneUsesOwnedRotation": @(fallback && fit),
                 @"autoRestoresWindowLayout": @(automatic), @"rotationNoticeExpiresWhilePlaying": @(notice && expired),
                 @"manualDirectionSurvivesWindowResize": @(fixedAcrossResize),

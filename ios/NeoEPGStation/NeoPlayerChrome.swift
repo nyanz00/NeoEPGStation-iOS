@@ -1219,6 +1219,11 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let rect = timeline.thumbRect(forBounds: timeline.bounds, trackRect: timeline.trackRect(forBounds: timeline.bounds), value: timeline.value)
     return image?.size.width == 12 && rect.width <= 16 && timeline.bounds.height >= 32
   }
+  @objc func smokeSeekThumbMetrics() -> [String: NSNumber] {
+    let rect = timeline.thumbRect(forBounds: timeline.bounds, trackRect: timeline.trackRect(forBounds: timeline.bounds), value: timeline.value)
+    return ["imageWidth": NSNumber(value: Double(timeline.currentThumbImage?.size.width ?? -1)),
+      "thumbWidth": NSNumber(value: Double(rect.width)), "height": NSNumber(value: Double(timeline.bounds.height))]
+  }
   @objc func snapshotSettings(_ category: String, name: String) {
     showSettings(category); layoutIfNeeded(); snapshot(name)
   }
@@ -1386,6 +1391,13 @@ private final class NeoPlayerSeekSlider: UISlider {
 #endif
   override func trackRect(forBounds bounds: CGRect) -> CGRect {
     CGRect(x: 6, y: bounds.midY - 1.5, width: max(0, bounds.width - 12), height: 3)
+  }
+  override func thumbRect(forBounds bounds: CGRect, trackRect rect: CGRect, value: Float) -> CGRect {
+    // iPad's native slider can retain a larger drawing rectangle even with
+    // small artwork. Keep the visible thumb separate from the 44pt hit area.
+    let fraction = CGFloat(min(1, max(0, (value-minimumValue)/max(Float.ulpOfOne, maximumValue-minimumValue))))
+    let side: CGFloat = isHighlighted ? 16 : 12
+    return CGRect(x: rect.minX + rect.width*fraction-side/2, y: rect.midY-side/2, width: side, height: side)
   }
   override func point(inside point: CGPoint, with event: UIEvent?) -> Bool { bounds.insetBy(dx: 0, dy: -6).contains(point) }
 }
