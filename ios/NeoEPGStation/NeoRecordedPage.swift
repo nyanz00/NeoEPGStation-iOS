@@ -2,7 +2,7 @@ import UIKit
 
 // UserSelector's MUI small outlined field: 160 x 40, label 16 * .75,
 // dark outline white .23, text white and a 24pt ArrowDropDown.
-private final class NeoRecordedUserSelector: UIButton {
+final class NeoUserSelector: UIButton {
   private let caption = NeoStyle.label("ユーザー", size: 12, muted: true)
   private let value = NeoStyle.label(size: 16), arrow = UIImageView()
   private let outline = CAShapeLayer()
@@ -136,7 +136,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   private var lateThumbnails: Set<URL> = []
   private var locatedUserID: Int?, focusedRecordingID: Int?
   private var userFilterExplicit = false, users: [NeoViewer] = []
-  private let userButton = NeoRecordedUserSelector()
+  private let userButton = NeoUserSelector()
   private var usersTask: Task<Void, Never>?, observers: [NSObjectProtocol] = []
   private var returnRecordingID: Int?, returnOffset: CGPoint?, highlightID: Int?, highlightGeneration = 0
   private(set) var lastFadeDuration: TimeInterval = 0

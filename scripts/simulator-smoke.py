@@ -59,6 +59,7 @@ def capture_ipad(app, device):
     print('UI smoke: iPad installation completed', flush=True)
     capture_ui(pad, 'recorded', 'ui-ipad', terminate_existing=False)
     capture_ui(pad, 'detail', 'ui-ipad')
+    capture_ui(pad, 'settings-account', 'ui-ipad')
     pad_container = Path(run('xcrun', 'simctl', 'get_app_container', pad, 'io.github.nyanz00.NeoEPGStation', 'data'))
     shutil.copyfile('tests/fixtures/player-tap.ts', pad_container / 'Documents/player-tap.ts')
     for stage in ['ipad-connection', 'ipad-menu', 'ipad-player']:

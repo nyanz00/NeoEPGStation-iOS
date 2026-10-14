@@ -108,9 +108,9 @@ enum NeoSwipeAction { case menu, back }
 enum NeoNavigationGesture {
   // The starting region fixes the action for the whole drag. No edge restriction.
   static func action(startY: Double, height: Double, canGoBack: Bool, tablet: Bool,
-    horizontal: Double, vertical: Double) -> NeoSwipeAction? {
+    horizontal: Double, vertical: Double, persistentMenu: Bool = false) -> NeoSwipeAction? {
     guard horizontal > 0, horizontal >= abs(vertical) else { return nil }
-    if startY >= height * 0.4 && canGoBack { return .back }
+    if startY >= height * (persistentMenu ? 0.3 : 0.4) && canGoBack { return .back }
     return tablet ? nil : .menu
   }
 }

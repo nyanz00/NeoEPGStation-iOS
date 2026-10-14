@@ -51,6 +51,12 @@ private final class NeoAccountFixture: URLProtocol {
       secrets.remove(71); checks["keychainRemoval"] = try secrets.read(71) == nil
     } catch { checks["keychainRoundTrip"] = false }
     guard let account = shell.account else { NeoNative.writeSmoke("account-smoke", ["success": false]); return }
+    let menu: [UIMenuElement] = await withCheckedContinuation { continuation in
+      account.loadSelectionMenu { continuation.resume(returning: $0) }
+    }
+    let actions = menu.compactMap { $0 as? UIAction }
+    checks["nativeMenuListsUsersAndMaster"] = actions.count == 3 && actions.first?.title == "master（すべて）" && actions.first?.state == .on
+    checks["openingMenuKeepsIdentity"] = api.viewer == "master" && api.accountReady && !account.busy
     account.smokeSelect("8")
     checks["unprotectedSwitch"] = await wait { api.viewer == "8" && api.accountReady && !account.busy }
     account.smokeSelect("7")

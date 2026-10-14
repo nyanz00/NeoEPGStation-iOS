@@ -94,7 +94,7 @@ final class NeoHistoryPage: NeoPage, UITableViewDataSource, UITableViewDelegate 
   @objc func reload() {
     guard isViewLoaded, let api = shell?.api else { return }
 #if targetEnvironment(simulator)
-    if shell?.smokeStage == "history" {
+    if ["history", "gestures", "ipad-menu"].contains(shell?.smokeStage ?? "") {
       items = NeoRecordedPage.fixtures.records.enumerated().map { index, item in
         NeoHistoryItem(recorded: item, playback: NeoPlayback(position: Double(index+1)*120, duration: 1800, watchedSeconds: 60, updatedAt: 1_700_000_000_000))
       }

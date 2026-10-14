@@ -149,7 +149,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     commentOpacity.addAction(UIAction { [weak self] _ in guard let self else { return }; self.onAction?("interaction"); self.commentOverlay?.setOpacity(self.commentOpacity.value) }, for: .valueChanged)
     centerControls.addSubview(playButton)
     timeline.minimumTrackTintColor = NeoStyle.accent; timeline.maximumTrackTintColor = .clear
-    timeline.thumbTintColor = .white; timeline.accessibilityLabel = "再生位置"
+    timeline.accessibilityLabel = "再生位置"
     timeline.addAction(UIAction { [weak self] _ in
       guard let self else { return }; self.previewTime = self.current
       self.onAction?("scrub-begin")
@@ -1213,6 +1213,11 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       records = (1...3).map { i in NeoRecording(id: i, name: "サンプル番組 #\(i)", startAt: 1791042600000, endAt: 1791044400000, isRecording: false, description: "関連する番組の説明", extended: nil, channelId: nil, channelName: nil, thumbnails: nil, videoFiles: nil) }
     }
     renderPanel(); showControls(true); setNeedsLayout(); layoutIfNeeded()
+  }
+  @objc func smokeSeekThumbSize() -> Bool {
+    let image = timeline.currentThumbImage
+    let rect = timeline.thumbRect(forBounds: timeline.bounds, trackRect: timeline.trackRect(forBounds: timeline.bounds), value: timeline.value)
+    return image?.size.width == 12 && rect.width <= 16 && timeline.bounds.height >= 32
   }
   @objc func snapshotSettings(_ category: String, name: String) {
     showSettings(category); layoutIfNeeded(); snapshot(name)

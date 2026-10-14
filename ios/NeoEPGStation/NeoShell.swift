@@ -134,7 +134,7 @@ class NeoPage: UIViewController {
     body.frame = CGRect(x: 0, y: 56, width: width, height: max(0, view.bounds.height - 56))
     menu.frame = CGRect(x: 4, y: 6, width: 44, height: 44)
     menu.isHidden = shell?.api == nil
-    let canBack = (navigationController?.viewControllers.count ?? 1) > 1
+    let canBack = (navigationController?.viewControllers.count ?? 1) > 1 || shell?.canReturnToHistory == true
     back.isHidden = !canBack; back.frame = CGRect(x: 48, y: 6, width: 40, height: 44)
     var right = width - 4
     for action in actions.reversed() { right -= 44; action.frame = CGRect(x: right, y: 6, width: 44, height: 44) }
@@ -217,6 +217,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   // Each destination keeps its own stack. Switching tabs never adds a back target.
   private var controllers: [String: UINavigationController] = [:]
   private var active: UINavigationController?
+  private var historyReturnSnapshot: UIView?
+  private var historyReturnRevision: Int?
+  private var routeBackPreview: UIView?
+  private var routeBackRunning = false
+  var canReturnToHistory: Bool { route == "recorded" && historyReturnSnapshot != nil && historyReturnRevision == api?.identityRevision }
   private let content = UIView(), bottom = UIView(), dim = UIView()
   private let sidebar = NeoSidebar()
   private var sidebarWidth: CGFloat { 240 + view.safeAreaInsets.left }
@@ -228,7 +233,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   func smokeUseAPI(_ value: NeoAPI?) { api = value; account = value.map { NeoAccountCoordinator(api: $0, shell: self) } }
   private var startupDrawerWasStill = false
 #endif
-  private var contentPan: UIPanGestureRecognizer!, closingPan: UIPanGestureRecognizer!, backdropPan: UIPanGestureRecognizer!
+  private var contentPan: UIPanGestureRecognizer!, closingPan: UIPanGestureRecognizer!, backdropPan: UIPanGestureRecognizer!, sidebarBackPan: UIPanGestureRecognizer!
   private weak var closingScroll: UIScrollView?
   private var closingScrollWasEnabled = false
   private var popup: NeoAnchoredMenu?
@@ -276,6 +281,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     closingPan = UIPanGestureRecognizer(target: self, action: #selector(dragMenu(_:))); closingPan.delegate = self
     closingPan.maximumNumberOfTouches = 1
     sidebar.addGestureRecognizer(closingPan)
+    sidebarBackPan = UIPanGestureRecognizer(target: self, action: #selector(dragContent(_:))); sidebarBackPan.delegate = self
+    sidebarBackPan.maximumNumberOfTouches = 1; sidebar.addGestureRecognizer(sidebarBackPan)
     backdropPan = UIPanGestureRecognizer(target: self, action: #selector(dragMenu(_:))); backdropPan.delegate = self
     backdropPan.maximumNumberOfTouches = 1; dim.addGestureRecognizer(backdropPan)
     rebuildBottom()
@@ -312,11 +319,13 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let sidebarX: CGFloat = tablet ? self.sidebarWidth * (tabletReveal - 1) : menuDragging ? sidebar.frame.minX : menuOpen ? 0 : -self.sidebarWidth
     sidebar.frame = CGRect(x: sidebarX, y: 0, width: self.sidebarWidth, height: view.bounds.height)
     sidebar.contentSafeArea = safe
+    sidebar.list.isScrollEnabled = !tablet; sidebar.list.bounces = !tablet
+    sidebar.list.alwaysBounceVertical = !tablet
     bottom.layer.borderColor = NeoStyle.border.cgColor; bottom.layer.borderWidth = 0.5
     popup?.setNeedsLayout()
   }
   func connect(_ url: URL) {
-    dismissPopup(); api = NeoAPI(base: url); channels = [:]; serverConfig = nil
+    dismissPopup(); historyReturnSnapshot = nil; historyReturnRevision = nil; api = NeoAPI(base: url); channels = [:]; serverConfig = nil
     for controller in controllers.values { controller.willMove(toParent: nil); controller.view.removeFromSuperview(); controller.removeFromParent() }
     controllers.removeAll(); active = nil
     showRoute("recorded")
@@ -351,8 +360,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     attach(nav); view.setNeedsLayout()
   }
   func showRoute(_ id: String) {
-    guard api != nil, popInteraction == nil else { return }
+    guard api != nil, popInteraction == nil, !routeBackRunning else { return }
     dismissPopup()
+    if id != route { historyReturnSnapshot = nil; historyReturnRevision = nil }
     route = id
     let nav: UINavigationController
     if let cached = controllers[id] { nav = cached }
@@ -372,7 +382,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   // A navigation button returns to the retained list first. Only a second tap
   // on that list resets pagination; programmatic route changes keep the stack.
   private func selectDestination(_ id: String) {
-    guard api != nil, popInteraction == nil, active?.transitionCoordinator == nil else { return }
+    guard api != nil, popInteraction == nil, !routeBackRunning, active?.transitionCoordinator == nil else { return }
+    historyReturnSnapshot = nil; historyReturnRevision = nil
     if let nav = controllers[id] {
       if id == route, let list = nav.topViewController as? NeoRecordedPage {
         if nav.viewControllers.count > 1 { nav.popViewController(animated: true) }
@@ -395,9 +406,10 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     active?.topViewController?.view.setNeedsLayout(); view.setNeedsLayout()
   }
   func goBack() {
-    guard active?.transitionCoordinator == nil else { return }
+    guard active?.transitionCoordinator == nil, !routeBackRunning else { return }
     dismissPopup()
     if let active, active.viewControllers.count > 1 { active.popViewController(animated: true) }
+    else if canReturnToHistory { beginHistoryReturn(); finishHistoryReturn(true) }
   }
   func openDetail(_ recording: NeoRecording) {
     dismissPopup()
@@ -405,10 +417,14 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     active?.pushViewController(NeoDetailPage(item: recording, shell: self), animated: true)
   }
   func locateRecording(_ id: Int, position: NeoListPosition) {
+    guard !routeBackRunning, popInteraction == nil else { return }
+    let fromHistory = route == "history"
+    let origin = fromHistory ? active?.view.snapshotView(afterScreenUpdates: false) : nil
     showRoute("recorded")
     guard let nav = controllers["recorded"], let list = nav.viewControllers.first as? NeoRecordedPage else { return }
     nav.popToRootViewController(animated: false)
-    list.locate(id, page: position.page, userID: position.userId)
+    historyReturnSnapshot = origin; historyReturnRevision = fromHistory ? api?.identityRevision : nil
+    list.locate(id, page: position.page, userID: position.userId); list.view.setNeedsLayout()
   }
   func play(_ file: NeoVideoFile, recording: NeoRecording, fromBeginning: Bool = false, onPrepared: (() -> Void)? = nil) {
     guard player == nil, !preparingPlay, let api else { onPrepared?(); return }
@@ -467,6 +483,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
   func dismissPopup() { popup?.dismiss() }
   func toggleMenu() {
+    guard !routeBackRunning else { return }
     if tablet { setTabletMenu(!tabletExpanded, animated: true) }
     else { setMenu(!menuOpen, animated: true) }
   }
@@ -533,7 +550,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       setMenu(abs(velocity) > 350 ? velocity > 0 : progress > sidebarWidth / 2, animated: true)
     } else if state == .cancelled || state == .failed { menuDragging = false; setMenu(menuOpen, animated: true) }
   }
-  private var canGoBack: Bool { (active?.viewControllers.count ?? 1) > 1 }
+  private var canGoBack: Bool { (active?.viewControllers.count ?? 1) > 1 || canReturnToHistory }
   @objc private func dragContent(_ recognizer: UIPanGestureRecognizer) {
     if recognizer.state == .began {
       scrollWasEnabled = swipeScroll?.isScrollEnabled == true
@@ -553,6 +570,15 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     guard let active else { return }
     let width = max(1, content.bounds.width)
     let progress = min(1, max(0, translation / width))
+    if routeBackRunning || (active.viewControllers.count == 1 && canReturnToHistory) {
+      switch state {
+      case .began: beginHistoryReturn()
+      case .changed: active.view.transform = CGAffineTransform(translationX: max(0, translation), y: 0)
+      case .ended, .cancelled, .failed: finishHistoryReturn(state == .ended && (progress > 0.28 || velocity > 450))
+      default: break
+      }
+      return
+    }
     switch state {
     case .began:
       if active.viewControllers.count > 1 {
@@ -579,6 +605,25 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     default: break
     }
   }
+  // Only history's recorded-list deep link creates a cross-tab back target.
+  // Keep both stacks intact and move the recorded view over a retained preview.
+  private func beginHistoryReturn() {
+    guard canReturnToHistory, !routeBackRunning, let origin = historyReturnSnapshot, let active else { return }
+    routeBackRunning = true; origin.frame = content.bounds; routeBackPreview = origin
+    content.insertSubview(origin, belowSubview: active.view)
+  }
+  private func finishHistoryReturn(_ finish: Bool) {
+    guard routeBackRunning, let active else { return }
+    UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.22, delay: 0,
+      options: [.beginFromCurrentState, .curveEaseOut], animations: {
+        active.view.transform = finish ? CGAffineTransform(translationX: self.content.bounds.width, y: 0) : .identity
+      }, completion: { [weak self] _ in
+        guard let self else { return }
+        active.view.transform = .identity; self.routeBackPreview?.removeFromSuperview(); self.routeBackPreview = nil
+        self.routeBackRunning = false
+        if finish { self.showRoute("history") }
+      })
+  }
   func navigationController(_ navigationController: UINavigationController,
     animationControllerFor operation: UINavigationController.Operation,
     from fromVC: UIViewController, to toVC: UIViewController) -> UIViewControllerAnimatedTransitioning? {
@@ -594,6 +639,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
     popInteraction = nil; viewController.view.setNeedsLayout()
   }
+  private func acceptsSidebarBack(start: CGPoint) -> Bool {
+    tablet && tabletExpanded && start.x <= max(24, view.safeAreaInsets.left+24) && start.y >= view.bounds.height*0.3 && canGoBack
+  }
   func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
     if recognizer === closingPan || recognizer === backdropPan {
       closingScroll = nil
@@ -603,6 +651,10 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         candidate = current.superview
       }
       return true
+    }
+    if recognizer === sidebarBackPan {
+      swipeStart = touch.location(in: view); swipeScroll = nil
+      return acceptsSidebarBack(start: swipeStart)
     }
     if recognizer !== contentPan { return true }
     swipeStart = touch.location(in: view); swipeScroll = nil
@@ -629,10 +681,12 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let velocity = pan?.velocity(in: view) ?? .zero
     guard abs(velocity.x) >= abs(velocity.y), abs(velocity.x) > 0 else { return false }
     if recognizer === closingPan || recognizer === backdropPan { return (tablet ? tabletReveal > 0 : menuOpen) && velocity.x < 0 }
-    guard recognizer === contentPan, api != nil, !menuOpen, popup == nil, presentedViewController == nil,
-      popInteraction == nil, active?.transitionCoordinator == nil else { return false }
+    guard recognizer === contentPan || recognizer === sidebarBackPan, api != nil, !menuOpen, popup == nil, presentedViewController == nil,
+      popInteraction == nil, !routeBackRunning, active?.transitionCoordinator == nil else { return false }
     swipeAction = NeoNavigationGesture.action(startY: Double(swipeStart.y), height: Double(view.bounds.height),
-      canGoBack: canGoBack, tablet: tablet && tabletExpanded, horizontal: Double(velocity.x), vertical: Double(velocity.y))
+      canGoBack: canGoBack, tablet: tablet && tabletExpanded, horizontal: Double(velocity.x), vertical: Double(velocity.y), persistentMenu: tablet)
+    if recognizer === sidebarBackPan { return tablet && tabletExpanded && swipeAction == .back }
+    if tablet && tabletExpanded && swipeAction == .back { return false }
     return swipeAction != nil
   }
   func saveShortcuts(_ values: [String]) throws { try storage.saveShortcuts(values); shortcuts = values; rebuildBottom(); view.setNeedsLayout() }
@@ -699,7 +753,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         let swipeClosed = !tabletExpanded && content.frame.minX == 0
         let back = NeoNavigationGesture.action(startY: Double(view.bounds.height)*0.8, height: Double(view.bounds.height), canGoBack: true, tablet: false, horizontal: 100, vertical: 0) == .back
         setTabletMenu(true, animated: false); view.layoutIfNeeded()
-        writeIPadSmoke(recorded, checks: ["tabletMenuAnimates": animated, "tabletMenuClosesWithoutGap": closed,
+        let historyReturn = await runHistoryReturnChecks(recorded)
+        let noScroll = !sidebar.list.isScrollEnabled && !sidebar.list.bounces
+        let below30 = NeoNavigationGesture.action(startY: Double(view.bounds.height)*0.31, height: Double(view.bounds.height), canGoBack: true, tablet: true, horizontal: 100, vertical: 0, persistentMenu: true) == .back
+        writeIPadSmoke(recorded, checks: ["tabletMenuDoesNotScroll": noScroll, "tabletBackBoundaryThirtyPercent": below30,
+          "tabletSidebarEdgeBack": historyReturn, "historyListReturnsToOrigin": historyReturn, "tabletMenuAnimates": animated, "tabletMenuClosesWithoutGap": closed,
           "collapsedTabletMenuSwipeRecognized": action == .menu, "tabletMenuFollowsFinger": followed,
           "tabletMenuSwipeReopens": reopened, "tabletMenuSwipeCloses": swipeClosed,
           "tabletBackRegionPreserved": back, "userSelectorMatchesHeader": recorded.smokeSelectorAligned], retained: retained)
@@ -747,14 +805,15 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
           Task { [self] in
             let navigationButtons = await self.runNavigationButtonChecks(recorded)
             let listFeatures = await recorded.smokeListFeatures()
+            let historyReturn = await self.runHistoryReturnChecks(recorded)
             let gap = self.sidebar.logo.frame.minX - self.sidebar.brand.frame.maxX
-            NeoNative.writeSmoke("ui-gestures-smoke", ["success": correct && navigationButtons && listFeatures && self.startupDrawerWasStill && drawerClosed && popupCycles && gap == 7 && thumbnails && freshFade == 0.5 && cachedFade == 0.32,
+            NeoNative.writeSmoke("ui-gestures-smoke", ["success": correct && navigationButtons && listFeatures && historyReturn && self.startupDrawerWasStill && drawerClosed && popupCycles && gap == 7 && thumbnails && freshFade == 0.5 && cachedFade == 0.32,
               "stage": "gestures", "route": self.route, "recordCount": recorded.records.count,
               "theme": "neon-teal-dark", "uiEngine": "Swift / UIKit", "retainedList": retained,
               "shortcuts": self.shortcuts, "brandGap": gap, "interactiveBack": correct, "thumbnailLoading": thumbnails,
               "freshFade": freshFade, "cachedFade": cachedFade, "backDetails": self.backSmokeDetails,
               "drawerClosedByLeftSwipe": drawerClosed, "popupCycles": popupCycles,
-              "startupDrawerDoesNotAnimate": self.startupDrawerWasStill, "navigationButtonReturnsThenResets": navigationButtons, "recordedFiltersAndHighlight": listFeatures])
+              "startupDrawerDoesNotAnimate": self.startupDrawerWasStill, "navigationButtonReturnsThenResets": navigationButtons, "recordedFiltersAndHighlight": listFeatures, "historyListReturnsToOrigin": historyReturn])
           }
         }
       }
@@ -782,9 +841,10 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       if let settings = self.active?.topViewController as? NeoSettingsPage {
         popupCorrect = settings.smokeHistoryPreferences()
       }
+      if self.smokeStage == "settings-account" { popupCorrect = (self.active?.topViewController as? NeoSettingsCategoryPage)?.smokeAccountSelector == true }
       if self.smokeStage == "history" { popupCorrect = (self.active?.topViewController as? NeoHistoryPage)?.smokeReady == true }
       if self.smokeStage.hasPrefix("settings-") {
-        popupCorrect = self.active?.viewControllers.count == 2 && self.active?.topViewController is NeoSettingsCategoryPage
+        popupCorrect = popupCorrect && self.active?.viewControllers.count == 2 && self.active?.topViewController is NeoSettingsCategoryPage
       }
       var dropText = ""
       if self.smokeStage == "record-actions" {
@@ -829,6 +889,38 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     NeoNative.writeSmoke("ui-\(smokeStage)-smoke", ["success": checks.values.allSatisfy { $0 }, "checks": checks,
       "stage": smokeStage, "route": route, "recordCount": recorded.records.count, "theme": "neon-teal-dark",
       "uiEngine": "Swift / UIKit", "retainedList": retained, "sidebarWidth": api == nil ? 0 : 240])
+  }
+  private func runHistoryReturnChecks(_ recorded: NeoRecordedPage) async -> Bool {
+    func settle() async { try? await Task.sleep(nanoseconds: 450_000_000) }
+    showRoute("history"); view.layoutIfNeeded(); await settle()
+    let history = active
+    let position = NeoListPosition(page: 7, userId: nil)
+    locateRecording(1, position: position); view.layoutIfNeeded(); await settle()
+    let target = canReturnToHistory && canGoBack && recorded.smokeCurrentPage == 7
+    updateBack(state: .began, translation: 0, velocity: 100)
+    updateBack(state: .changed, translation: content.bounds.width*0.2, velocity: 100)
+    let followed = abs((active?.view.transform.tx ?? 0)-content.bounds.width*0.2) < 1
+    updateBack(state: .cancelled, translation: 0, velocity: 0); await settle()
+    let cancelled = canReturnToHistory && !routeBackRunning && route == "recorded" && active?.view.transform == CGAffineTransform.identity
+    openDetail(NeoRecordedPage.fixtures.records[0]); await settle(); goBack(); await settle()
+    let detailFirst = canReturnToHistory && route == "recorded" && active?.topViewController === recorded
+    if tablet {
+      // Same edge and height classification used by the sidebar recognizer.
+      let edge = acceptsSidebarBack(start: CGPoint(x: 8, y: view.bounds.height*0.31))
+      let center = acceptsSidebarBack(start: CGPoint(x: sidebarWidth/2, y: view.bounds.height*0.31))
+      guard edge && !center else { return false }
+    }
+    updateBack(state: .began, translation: 0, velocity: 100)
+    updateBack(state: .changed, translation: content.bounds.width*0.5, velocity: 100)
+    updateBack(state: .ended, translation: content.bounds.width*0.5, velocity: 500); await settle()
+    let returned = route == "history" && active === history && !canReturnToHistory
+    locateRecording(1, position: position); await settle(); goBack(); await settle()
+    let button = route == "history" && active === history
+    locateRecording(1, position: position); await settle(); selectDestination("recorded")
+    let cleared = !canReturnToHistory
+    showRoute("settings"); goBack(); let isolated = route == "settings"
+    showRoute("recorded"); view.layoutIfNeeded()
+    return target && followed && cancelled && detailFirst && returned && button && cleared && isolated
   }
   private func runBackSmoke(_ recorded: NeoRecordedPage, completion: @escaping (Bool) -> Void) {
     func later(_ delay: TimeInterval = 0.45, _ action: @escaping () -> Void) {

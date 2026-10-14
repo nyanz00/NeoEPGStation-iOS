@@ -72,6 +72,10 @@ expect(NeoNavigationGesture.action(startY: 650, height: 800, canGoBack: true, ta
 expect(NeoNavigationGesture.action(startY: 650, height: 800, canGoBack: true, tablet: false, horizontal: 20, vertical: 100) == nil, "Vertical scrolling preserved")
 expect(NeoNavigationGesture.action(startY: 100, height: 800, canGoBack: false, tablet: false, horizontal: -100, vertical: 20) == nil, "Left drag never opens menu")
 expect(NeoNavigationGesture.action(startY: 100, height: 800, canGoBack: false, tablet: true, horizontal: 100, vertical: 20) == nil, "Persistent iPad menu is not dragged")
+expect(NeoNavigationGesture.action(startY: 239.9, height: 800, canGoBack: true, tablet: false, horizontal: 100, vertical: 0, persistentMenu: true) == .menu, "Collapsed persistent menu uses upper 30 percent")
+expect(NeoNavigationGesture.action(startY: 240, height: 800, canGoBack: true, tablet: false, horizontal: 100, vertical: 0, persistentMenu: true) == .back, "Persistent-menu back begins at 30 percent")
+expect(NeoNavigationGesture.action(startY: 240, height: 800, canGoBack: true, tablet: true, horizontal: 100, vertical: 0, persistentMenu: true) == .back, "Expanded persistent menu preserves 30/70 boundary")
+expect(NeoNavigationGesture.action(startY: 239.9, height: 800, canGoBack: true, tablet: true, horizontal: 100, vertical: 0, persistentMenu: true) == nil, "Expanded menu upper region does not trigger back")
 print("Full-screen navigation gesture policy tests passed")
 
 final class FixtureProtocol: URLProtocol {

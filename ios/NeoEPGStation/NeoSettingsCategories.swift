@@ -145,9 +145,16 @@ final class NeoSettingsCategoryPage: NeoPage {
         } catch { if !Task.isCancelled { status?.text = "視聴履歴設定を取得できませんでした。\n\(error.localizedDescription)"; button("再試行") { [weak self] in self?.render() } } }
       }
     case .account:
-      button("現在のユーザー：\(shell.account?.currentName ?? api.viewer)") { [weak self, weak shell] in
-        guard let self else { return }; shell?.account?.select(from: self)
-      }
+      let selector = NeoUserSelector(); selector.setValue(shell.account?.currentName ?? api.viewer)
+      selector.accessibilityIdentifier = "account-user-selector"
+      selector.widthAnchor.constraint(equalToConstant: 160).isActive = true
+      selector.heightAnchor.constraint(equalToConstant: 40).isActive = true
+      selector.showsMenuAsPrimaryAction = true
+      selector.menu = UIMenu(children: [UIDeferredMenuElement.uncached { [weak shell] completion in
+        guard let account = shell?.account else { completion([]); return }
+        account.loadSelectionMenu(completion: completion)
+      }])
+      row("現在のユーザー", control: selector)
       info("このアプリで使用する標準ユーザー。masterでは視聴履歴を記録しません。")
       if !api.accountReady {
         info("アクティブユーザーの確認が必要です。")
@@ -178,6 +185,10 @@ final class NeoSettingsCategoryPage: NeoPage {
     row(title, explanation: explanation, control: toggle)
   }
 #if targetEnvironment(simulator)
+  var smokeAccountSelector: Bool {
+    guard category == .account, let selector = stack.arrangedSubviews.flatMap({ $0.subviews }).first(where: { $0 is NeoUserSelector }) as? NeoUserSelector else { return false }
+    return selector.bounds.size == CGSize(width: 160, height: 40) && selector.showsMenuAsPrimaryAction && selector.menu != nil
+  }
   func smokeSetHistoryDisabled(_ value: Bool) { historyToggle.isOn = value; historyToggle.sendActions(for: .valueChanged) }
 #endif
   deinit { task?.cancel(); observers.forEach(NotificationCenter.default.removeObserver) }

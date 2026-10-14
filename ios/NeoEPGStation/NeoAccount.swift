@@ -52,30 +52,28 @@ final class NeoProfileSecrets {
     NotificationCenter.default.post(name: .neoAccountChanged, object: api)
     resolve(String(user), restoring: true)
   }
-  func select(from page: UIViewController) {
-    guard current, !busy else { return }
+  // Deferred native menu stays anchored to the shared outlined selector.
+  func loadSelectionMenu(completion: @escaping ([UIMenuElement]) -> Void) {
+    guard current, !busy else { completion([]); return }
     busy = true
-    Task { [weak self, weak page] in
-      guard let self else { return }
+    Task { [weak self] in
+      guard let self else { completion([]); return }
       do {
         let users = try await api.viewers(); let profiles = try await api.viewerProfiles()
-        guard current, let page, page.view.window != nil else { busy = false; return }
-        self.users = users.users; self.profiles = profiles.profiles
-        busy = false
-        let menu = UIAlertController(title: "現在のユーザー", message: "このアプリで使用する標準ユーザー", preferredStyle: .actionSheet)
+        guard current else { busy = false; completion([]); return }
+        self.users = users.users; self.profiles = profiles.profiles; busy = false
         let values = [("master", "master（すべて）")] + users.users.filter { $0.id > 0 }.map { (String($0.id), $0.name) }
-        for (id, name) in values {
-          menu.addAction(UIAlertAction(title: name + (api.viewer == id ? " ✓" : ""), style: .default) { [weak self] _ in
-            guard let self, self.current else { return }
+        completion(values.map { id, name in
+          UIAction(title: name, state: api.viewer == id ? .on : .off) { [weak self] _ in
+            guard let self, self.current, !self.busy else { return }
             if id == "master" { self.commit(id, profile: nil, token: nil) }
             else { self.resolve(id, restoring: false) }
-          })
-        }
-        menu.addAction(UIAlertAction(title: "キャンセル", style: .cancel))
-        menu.popoverPresentationController?.sourceView = page.view
-        menu.popoverPresentationController?.sourceRect = CGRect(x: page.view.bounds.midX, y: page.view.bounds.midY, width: 1, height: 1)
-        page.present(menu, animated: true)
-      } catch { busy = false; if current { (page as? NeoPage)?.alert(error.localizedDescription) } }
+          }
+        })
+      } catch {
+        busy = false
+        completion([UIAction(title: "ユーザーを取得できません。再試行してください。", attributes: .disabled) { _ in }])
+      }
     }
   }
   private func resolve(_ user: String, restoring: Bool) {

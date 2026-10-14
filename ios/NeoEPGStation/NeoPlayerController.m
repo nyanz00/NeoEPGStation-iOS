@@ -1365,6 +1365,7 @@
     [self.chrome smokePressRotation];
     [self waitForIPadWide:YES attempt:0 completion:^(BOOL button) {
       [self showControls]; [self.chrome snapshot:@"ipad-player-landscape"];
+      BOOL smallThumb = [self.chrome smokeSeekThumbSize];
       [self.chrome smokeOrientationSwipe];
       [self waitForIPadWide:NO attempt:0 completion:^(BOOL swipeDown) {
         [self.chrome smokeOrientationSwipe];
@@ -1388,8 +1389,8 @@
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2800*NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
               BOOL expired = !self.chrome.transientNoticeVisible && ![self.statusLabel.text containsString:@"向きを変更"];
               BOOL retained = self.player.media == media && !self.reloading && [self mediaTime] > before;
-              BOOL success = initial && button && swipeDown && swipeUp && fallback && fit && fixedAcrossResize && automatic && notice && expired && retained;
-              completion(@{@"success": @(success), @"buttonRotates": @(button), @"swipeReturnsPortrait": @(swipeDown),
+              BOOL success = smallThumb && initial && button && swipeDown && swipeUp && fallback && fit && fixedAcrossResize && automatic && notice && expired && retained;
+              completion(@{@"success": @(success), @"ipadSeekThumbSmall": @(smallThumb), @"buttonRotates": @(button), @"swipeReturnsPortrait": @(swipeDown),
                 @"swipeEntersLandscape": @(swipeUp), @"deniedSceneUsesOwnedRotation": @(fallback && fit),
                 @"autoRestoresWindowLayout": @(automatic), @"rotationNoticeExpiresWhilePlaying": @(notice && expired),
                 @"manualDirectionSurvivesWindowResize": @(fixedAcrossResize),
