@@ -55,12 +55,14 @@ final class NeoProfileSecrets {
   // Deferred native menu stays anchored to the shared outlined selector.
   func loadSelectionMenu(completion: @escaping ([UIMenuElement]) -> Void) {
     guard current, !busy else { completion([]); return }
-    busy = true
+    busy = true; let attempt = revision
     Task { [weak self] in
       guard let self else { completion([]); return }
       do {
-        let users = try await api.viewers(); let profiles = try await api.viewerProfiles()
-        guard current else { busy = false; completion([]); return }
+        let users = try await api.viewers()
+        guard current, revision == attempt else { completion([]); return }
+        let profiles = try await api.viewerProfiles()
+        guard current, revision == attempt else { completion([]); return }
         self.users = users.users; self.profiles = profiles.profiles; busy = false
         let values = [("master", "master（すべて）")] + users.users.filter { $0.id > 0 }.map { (String($0.id), $0.name) }
         completion(values.map { id, name in
@@ -71,6 +73,7 @@ final class NeoProfileSecrets {
           }
         })
       } catch {
+        guard current, revision == attempt else { completion([]); return }
         busy = false
         completion([UIAction(title: "ユーザーを取得できません。再試行してください。", attributes: .disabled) { _ in }])
       }
@@ -82,7 +85,11 @@ final class NeoProfileSecrets {
     Task { [weak self] in
       guard let self else { return }
       do {
-        let users = try await api.viewers(); let profiles = try await api.viewerProfiles()
+        let users = try await api.viewers()
+        // A cancelled switch must stop before issuing another request. In
+        // particular, its session may already be closed after leaving the server.
+        guard current, attempt == revision else { return }
+        let profiles = try await api.viewerProfiles()
         guard current, attempt == revision else { return }
         self.users = users.users; self.profiles = profiles.profiles
         guard let target = users.users.first(where: { String($0.id) == user && $0.id > 0 }) else {

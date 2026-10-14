@@ -1643,6 +1643,8 @@
         fabs([current[@"scheduledInMs"] doubleValue]) < 100;
       completion(@{@"success": @((BOOL)(preparing && sameInput && pausedPosition && advancing)),
         @"interruptedVideoRebuiltWithoutInputReload": @((BOOL)(preparing && sameInput)),
+        @"interruptedWasPreparing": @(preparing), @"interruptedSameInput": @(sameInput),
+        @"interruptedReloadDelta": @(self.reloadGeneration-reload),
         @"interruptedVideoKeepsPausedPosition": @(pausedPosition),
         @"interruptedVideoResumesDecodedPictures": @(advancing),
         @"resumedPictureChanges": @([current[@"changes"] integerValue]-changes),
