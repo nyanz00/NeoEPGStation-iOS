@@ -904,7 +904,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let history = active
     let position = NeoListPosition(page: 7, userId: nil)
     locateRecording(1, position: position); view.layoutIfNeeded(); await settle()
-    let pageReady = await waitForPage(recorded, 7)
+    for _ in 0..<100 {
+      if recorded.smokeLoadSettled && recorded.smokeCurrentPage == 7 { break }
+      try? await Task.sleep(nanoseconds: 20_000_000)
+    }
+    let pageReady = recorded.smokeLoadSettled && recorded.smokeCurrentPage == 7
     let target = canReturnToHistory && canGoBack && recorded.smokeCurrentPage == 7
     updateBack(state: .began, translation: 0, velocity: 100)
     updateBack(state: .changed, translation: content.bounds.width*0.2, velocity: 100)
