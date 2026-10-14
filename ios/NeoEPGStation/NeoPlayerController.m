@@ -361,7 +361,9 @@
 - (void)applyPlayerLayout:(CGSize)size {
   if (self.rotatingPlayer) { return; }
   BOOL wide = size.width > size.height, requestedWide = self.orientationMask == UIInterfaceOrientationMaskLandscapeRight;
-  BOOL swap = self.internalOrientation && requestedWide != wide;
+  BOOL padLocked = self.traitCollection.userInterfaceIdiom == UIUserInterfaceIdiomPad &&
+    (self.orientationMask == UIInterfaceOrientationMaskPortrait || self.orientationMask == UIInterfaceOrientationMaskLandscapeRight);
+  BOOL swap = (self.internalOrientation || padLocked) && requestedWide != wide;
   CGSize contentSize = swap ? CGSizeMake(size.height, size.width) : size;
   CGFloat angle = swap ? (requestedWide ? M_PI_2 : -M_PI_2) : 0;
   BOOL changed = self.landscape != (contentSize.width > contentSize.height);
@@ -381,7 +383,9 @@
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
   [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
   CGFloat angle = atan2(coordinator.targetTransform.b, coordinator.targetTransform.a);
-  if (fabs(angle) > 0.01 && !self.internalOrientation && !self.closing && !self.dismissingPlayer) {
+  BOOL padLocked = self.traitCollection.userInterfaceIdiom == UIUserInterfaceIdiomPad &&
+    (self.orientationMask == UIInterfaceOrientationMaskPortrait || self.orientationMask == UIInterfaceOrientationMaskLandscapeRight);
+  if (fabs(angle) > 0.01 && !self.internalOrientation && !padLocked && !self.closing && !self.dismissingPlayer) {
     [self animatePlayerRotationToSize:size coordinator:coordinator]; return;
   }
   [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context) {
@@ -590,6 +594,7 @@
     @"hostMask": @(self.view.window.rootViewController.supportedInterfaceOrientations),
     @"sceneOrientation": @(scene.interfaceOrientation), @"windowWidth": @(self.view.bounds.size.width),
     @"windowHeight": @(self.view.bounds.size.height), @"ipad": @(self.traitCollection.userInterfaceIdiom == UIUserInterfaceIdiomPad),
+    @"contentWidth": @(self.chrome.bounds.size.width), @"contentHeight": @(self.chrome.bounds.size.height),
     @"internal": @(self.internalOrientation), @"osMajor": @(NSProcessInfo.processInfo.operatingSystemVersion.majorVersion)};
 }
 - (void)useInternalOrientation {
@@ -1372,6 +1377,10 @@
             BOOL fit = CGSizeEqualToSize(self.chrome.bounds.size, self.rotationContainer.bounds.size)
               && fabs(self.rotationContainer.center.x-self.view.bounds.size.width/2) < 1
               && fabs(self.rotationContainer.center.y-self.view.bounds.size.height/2) < 1;
+            self.internalOrientation = NO; self.orientationMask = UIInterfaceOrientationMaskLandscapeRight;
+            [self applyPlayerLayout:CGSizeMake(768, 1024)];
+            BOOL fixedAcrossResize = self.landscape && self.chrome.bounds.size.width > self.chrome.bounds.size.height;
+            [self applyPlayerLayout:self.view.bounds.size];
             [self setOrientation:@"auto"];
             BOOL automatic = !self.internalOrientation && self.landscape == (self.view.bounds.size.width > self.view.bounds.size.height);
             [self.chrome showTransientNotice:@"この表示環境では向きを変更できません。"];
@@ -1379,10 +1388,11 @@
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2800*NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
               BOOL expired = !self.chrome.transientNoticeVisible && ![self.statusLabel.text containsString:@"向きを変更"];
               BOOL retained = self.player.media == media && !self.reloading && [self mediaTime] > before;
-              BOOL success = initial && button && swipeDown && swipeUp && fallback && fit && automatic && notice && expired && retained;
+              BOOL success = initial && button && swipeDown && swipeUp && fallback && fit && fixedAcrossResize && automatic && notice && expired && retained;
               completion(@{@"success": @(success), @"buttonRotates": @(button), @"swipeReturnsPortrait": @(swipeDown),
                 @"swipeEntersLandscape": @(swipeUp), @"deniedSceneUsesOwnedRotation": @(fallback && fit),
                 @"autoRestoresWindowLayout": @(automatic), @"rotationNoticeExpiresWhilePlaying": @(notice && expired),
+                @"manualDirectionSurvivesWindowResize": @(fixedAcrossResize),
                 @"rotationKeepsMediaAndPlayback": @(retained), @"state": [self orientationDiagnosticFields]});
             });
           }];
