@@ -165,10 +165,13 @@ jobs:
             python3 -u scripts/simulator-smoke.py --prepare
             extra=()
             if [ -n "$UI_STAGE" ]; then extra+=("--ui-stage=$UI_STAGE"); fi
-            python3 -u scripts/simulator-smoke.py --iphone-only --ui-only "${extra[@]}"
+            iphone_result=0
+            python3 -u scripts/simulator-smoke.py --iphone-only --ui-only "${extra[@]}" || iphone_result=$?
+            ipad_result=0
             if [ "${{ inputs.check_ipad }}" = "true" ]; then
-              python3 -u scripts/simulator-smoke.py --ipad-only
+              python3 -u scripts/simulator-smoke.py --ipad-only || ipad_result=$?
             fi
+            test "$iphone_result" = "0" && test "$ipad_result" = "0"
           else
             python3 -u scripts/simulator-smoke.py --prepare --no-boot
             python3 -u scripts/simulator-smoke.py --ipad-only
