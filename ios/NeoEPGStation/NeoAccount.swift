@@ -57,7 +57,7 @@ final class NeoProfileSecrets {
     guard current, !busy else { completion([]); return }
     busy = true; let attempt = revision
     Task { [weak self] in
-      guard let self else { completion([]); return }
+      guard let self, current, revision == attempt else { completion([]); return }
       do {
         let users = try await api.viewers()
         guard current, revision == attempt else { completion([]); return }
@@ -83,7 +83,7 @@ final class NeoProfileSecrets {
     guard current, !busy else { return }
     busy = true; revision += 1; let attempt = revision
     Task { [weak self] in
-      guard let self else { return }
+      guard let self, current, revision == attempt else { return }
       do {
         let users = try await api.viewers()
         // A cancelled switch must stop before issuing another request. In

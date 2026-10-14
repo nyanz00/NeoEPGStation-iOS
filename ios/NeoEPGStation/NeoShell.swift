@@ -221,7 +221,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private var historyReturnRevision: Int?
   private var routeBackPreview: UIView?
   private var routeBackRunning = false
-  var canReturnToHistory: Bool { route == "recorded" && historyReturnSnapshot != nil && historyReturnRevision == api?.identityRevision }
+  var canReturnToHistory: Bool { route == "recorded" && historyReturnRevision != nil && historyReturnRevision == api?.identityRevision && controllers["history"] != nil }
   private let content = UIView(), bottom = UIView(), dim = UIView()
   private let sidebar = NeoSidebar()
   private var sidebarWidth: CGFloat { 240 + view.safeAreaInsets.left }
@@ -608,7 +608,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   // Only history's recorded-list deep link creates a cross-tab back target.
   // Keep both stacks intact and move the recorded view over a retained preview.
   private func beginHistoryReturn() {
-    guard canReturnToHistory, !routeBackRunning, let origin = historyReturnSnapshot, let active else { return }
+    guard canReturnToHistory, !routeBackRunning, let active else { return }
+    let origin = historyReturnSnapshot ?? UIView()
+    origin.backgroundColor = NeoStyle.background; origin.isUserInteractionEnabled = false
     routeBackRunning = true; origin.frame = content.bounds; routeBackPreview = origin
     content.insertSubview(origin, belowSubview: active.view)
   }
@@ -891,11 +893,18 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       "uiEngine": "Swift / UIKit", "retainedList": retained, "sidebarWidth": api == nil ? 0 : 240])
   }
   private func runHistoryReturnChecks(_ recorded: NeoRecordedPage) async -> Bool {
-    func settle() async { try? await Task.sleep(nanoseconds: 450_000_000) }
+    func settle() async {
+      try? await Task.sleep(nanoseconds: 100_000_000)
+      for _ in 0..<100 {
+        if active?.transitionCoordinator == nil && !routeBackRunning { return }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+      }
+    }
     showRoute("history"); view.layoutIfNeeded(); await settle()
     let history = active
     let position = NeoListPosition(page: 7, userId: nil)
     locateRecording(1, position: position); view.layoutIfNeeded(); await settle()
+    let pageReady = await waitForPage(recorded, 7)
     let target = canReturnToHistory && canGoBack && recorded.smokeCurrentPage == 7
     updateBack(state: .began, translation: 0, velocity: 100)
     updateBack(state: .changed, translation: content.bounds.width*0.2, velocity: 100)
@@ -920,7 +929,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let cleared = !canReturnToHistory
     showRoute("settings"); goBack(); let isolated = route == "settings"
     showRoute("recorded"); view.layoutIfNeeded()
-    return target && followed && cancelled && detailFirst && returned && button && cleared && isolated
+    backSmokeDetails["historyReturn"] = ["pageReady": pageReady, "target": target, "finger": followed,
+      "cancel": cancelled, "detailFirst": detailFirst, "swipe": returned, "button": button, "clear": cleared, "isolate": isolated]
+    return pageReady && target && followed && cancelled && detailFirst && returned && button && cleared && isolated
   }
   private func runBackSmoke(_ recorded: NeoRecordedPage, completion: @escaping (Bool) -> Void) {
     func later(_ delay: TimeInterval = 0.45, _ action: @escaping () -> Void) {
