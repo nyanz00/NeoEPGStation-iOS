@@ -166,6 +166,9 @@ jobs:
             extra=()
             if [ -n "$UI_STAGE" ]; then extra+=("--ui-stage=$UI_STAGE"); fi
             python3 -u scripts/simulator-smoke.py --iphone-only --ui-only "${extra[@]}"
+            if [ "${{ inputs.check_ipad }}" = "true" ]; then
+              python3 -u scripts/simulator-smoke.py --ipad-only
+            fi
           else
             python3 -u scripts/simulator-smoke.py --prepare --no-boot
             python3 -u scripts/simulator-smoke.py --ipad-only
