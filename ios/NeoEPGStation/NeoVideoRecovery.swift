@@ -60,8 +60,9 @@ final class NeoVideoRecovery: NSObject {
   }
 }
 
-// Keep one native A/V clock paused across a starved HTTP read. This is not a
-// user pause and is released by actual byte availability, not a 100% callback.
+// Hold presentation at a confirmed point across a starved HTTP read, then
+// resynchronise the same input when bytes arrive. A pause command cannot be
+// assumed to execute while VLC's input thread is blocked inside that read.
 @objc(NeoNetworkPlaybackFlow)
 final class NeoNetworkPlaybackFlow: NSObject {
   @objc private(set) var holding = false
@@ -82,7 +83,7 @@ final class NeoNetworkPlaybackFlow: NSObject {
     if verifying && (!wantsPlayback || (video > self.video && videoAge >= 0 && videoAge < 0.5)) {
       verifying = false; return 3
     }
-    // Do not re-pause the same decoder before it can consume the bytes that
+    // Do not resynchronise the same decoder again before it consumes bytes that
     // just arrived. A genuinely broken decoder is handled by video recovery.
     if verifying { return 0 }
     if eligible && wantsPlayback && waiting && video > 0 && videoAge >= staleAfter {

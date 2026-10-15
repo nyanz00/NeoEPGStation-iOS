@@ -24,10 +24,14 @@ def inspect(mode, result, diagnostics, faults):
             start = row
         else:
             drift = max(drift, row['mediaMs']-start['mediaMs'])
-    assert drift <= 3000, f'Playback clock advanced {drift}ms while A/V decoding/output was stalled'
+    assert drift <= 3000, f'Presentation advanced {drift}ms while A/V decoding/output was stalled'
     events = diagnostics['events']
     if mode == 'slow':
-        assert any(e['event'] == 'network.clockHeld' for e in events), 'The starved-read clock path was not exercised'
+        assert any(e['event'] == 'network.presentationHeld' for e in events), 'The starved-read path was not exercised'
+        assert all(r['flowMuted'] for r in rows if r.get('holding')), 'Audio escaped a held presentation'
+        resyncs = [e for e in events if e['event'] == 'network.inputResynced']
+        assert resyncs and all(not e.get('failed') and e.get('sameInput') for e in resyncs), 'Native input resynchronisation failed'
+        assert all(abs(e['nativeMs']-e['targetMs']) < 1500 for e in resyncs), 'Native time did not reach the held position'
         assert any(e['event'] == 'network.videoResumed' for e in events), 'No decoded-video confirmation after byte recovery'
     return {'success': True, 'faults': len(applied), 'quiescentClockDriftMs': drift,
             'finalVideoFrames': tail[-1]['video']-tail[0]['video'],

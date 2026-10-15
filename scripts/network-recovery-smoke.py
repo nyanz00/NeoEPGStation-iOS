@@ -22,7 +22,7 @@ if not shutil.which('ffmpeg'):
 # successful-but-9s-late responses actually exhaust the normal 5s look-ahead.
 av1 = os.environ.get('NETWORK_CODEC') == 'av1'
 video_args = (['-vf', 'noise=alls=20:allf=t', '-c:v', 'libsvtav1', '-preset', '12',
-               '-pix_fmt', 'yuv420p10le', '-b:v', '2M', '-maxrate', '2M', '-bufsize', '4M'] if av1 else
+               '-pix_fmt', 'yuv420p10le', '-b:v', '2M'] if av1 else
               ['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
                '-b:v', '2M', '-minrate', '2M', '-maxrate', '2M', '-bufsize', '4M',
                '-x264-params', 'nal-hrd=cbr:force-cfr=1'])

@@ -344,9 +344,9 @@ func networkStep(_ waiting: Bool, _ delivery: Int64, _ video: UInt64, _ age: Dou
 }
 check(networkStep(true, 1, 50, 0.1) == 0, "Slow prefetch never pauses healthy video")
 check(networkStep(false, 1, 50, 3) == 0, "Decoder-only faults are not classified as starved HTTP reads")
-check(networkStep(true, 1, 50, 3) == 1 && networkPlayback.holding, "Empty output and a pending read freeze the common A/V clock")
-check(networkStep(true, 1, 50, 4) == 0 && networkPlayback.holding, "A 100% callback without available bytes cannot resume the clock")
-check(networkStep(true, 2, 50, 4) == 2 && !networkPlayback.holding && networkPlayback.verifying, "Available bytes release the clock even while the next read is pending")
+check(networkStep(true, 1, 50, 3) == 1 && networkPlayback.holding, "Starved output and a pending read hold presentation")
+check(networkStep(true, 1, 50, 4) == 0 && networkPlayback.holding, "A 100% callback without available bytes cannot release presentation")
+check(networkStep(true, 2, 50, 4) == 2 && !networkPlayback.holding && networkPlayback.verifying, "Available bytes permit input resynchronisation even while the next read is pending")
 check(networkStep(false, 2, 50, 0.1) == 0 && networkPlayback.verifying, "A repeated paused frame does not confirm decoded video recovery")
 check(networkStep(false, 2, 51, 0.1) == 3 && !networkPlayback.verifying, "New video plus fresh output confirms recovery")
 _ = networkStep(true, 3, 52, 3)
