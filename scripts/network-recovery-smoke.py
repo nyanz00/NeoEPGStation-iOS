@@ -43,6 +43,8 @@ for mode in ['slow', 'disconnect']:
     for name in ['network-recovery-smoke.json', 'network-diagnostics.json']:
         if (container / name).exists(): shutil.copyfile(container / name, Path('dist') / f'{mode}-{name}')
     value = json.loads(result.read_text())
+    picture = container / 'player-pinch-zoom.png'
+    if picture.exists(): shutil.copyfile(picture, Path('dist') / f'{mode}-player-pinch-zoom.png')
     assert value['success'] and all(value['zoomChecks'].values()), value
     assert any(e['mode'] == mode for e in server.fault_events), 'Network fault was never exercised'
     print(mode, 'network probe captured', len(value['rows']), 'samples', flush=True)

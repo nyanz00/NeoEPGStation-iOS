@@ -63,7 +63,14 @@ def start_server(directory):
             self.send_header('ETag', '"synthetic-range-v1"')
             self.end_headers()
             try:
-                self.wfile.write(body)
+                if self.path == '/api/videos/4' and len(body) >= 256*1024:
+                    # Keep normal throughput above the media bitrate but below
+                    # loopback speed. Otherwise VLC's read-ahead downloads the
+                    # entire small fixture before the mid-playback fault arms.
+                    for at in range(0, len(body), 65536):
+                        self.wfile.write(body[at:at+65536]); self.wfile.flush(); time.sleep(0.125)
+                else:
+                    self.wfile.write(body)
             except (BrokenPipeError, ConnectionResetError):
                 pass
 

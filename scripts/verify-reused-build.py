@@ -30,7 +30,7 @@ if not full_recheck and not json.loads((artifact / 'storage-smoke.json').read_te
 # Full rechecks may start from a failed test run, but only from successful native
 # builds/type checks. The workflow then runs every playback and UI assertion;
 # no previous pass or failed result is used to satisfy the new check.
-if full_recheck:
+if full_recheck or os.environ.get('NETWORK_PROBE') == 'true':
     jobs = json.loads(subprocess.check_output(['gh', 'run', 'view', info['run'], '--json', 'jobs']))['jobs']
     steps = {step['name']: step['conclusion'] for job in jobs for step in job['steps']}
     for name in ['Native ASS parser and playback clock tests', 'Native UI type checks',
@@ -38,4 +38,4 @@ if full_recheck:
         if steps.get(name) != 'success':
             raise RuntimeError(f'Cannot retest a failed application build: {name}')
 Path('dist/reused-build-info.json').write_text(json.dumps(info, indent=2) + '\n')
-print(f'Reusing verified application build {info["build"]} at {commit}', flush=True)
+print(f'Reusing application build {info["build"]} at {commit} for the requested checks', flush=True)
