@@ -29,6 +29,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 @interface NeoObservedMediaPlayer : VLCMediaPlayer {
   NeoNativeTimePoint _observedPoint;
   int64_t _observedAt;
+  int64_t _progressAt;
   BOOL _hasObservedPoint;
 }
 - (NSDictionary<NSString *, NSNumber *> *)observedClock;
@@ -41,7 +42,11 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 - (void)mediaPlayerLastTimePointUpdated:(const NeoNativeTimePoint)point {
   [super mediaPlayerLastTimePointUpdated:point];
   if (self.isSeeking || point.ts_us < 0) { return; }
-  @synchronized(self) { _observedPoint = point; _observedAt = libvlc_clock(); _hasObservedPoint = YES; }
+  @synchronized(self) {
+    int64_t now = libvlc_clock();
+    if (!_hasObservedPoint || point.ts_us != _observedPoint.ts_us) { _progressAt = now; }
+    _observedPoint = point; _observedAt = now; _hasObservedPoint = YES;
+  }
 }
 - (NSDictionary<NSString *, NSNumber *> *)observedClock {
   @synchronized(self) {
@@ -51,7 +56,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     // value after its input loop stops publishing statistics/time updates.
     int result = libvlc_media_player_time_point_interpolate(&_observedPoint, _observedAt, &position, &fraction);
     if (result < 0) { return @{}; }
-    return @{@"positionMs": @(MAX(0, position/1000)), @"age": @(MAX(0, libvlc_clock()-_observedAt)/1000000.0)};
+    return @{@"positionMs": @(MAX(0, position/1000)), @"age": @(MAX(0, libvlc_clock()-_progressAt)/1000000.0)};
   }
 }
 @end
@@ -756,7 +761,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     [NeoVLCFrameTap monitorContent:self.movieView];
   }
   NSMutableDictionary *stats = [[NeoVLCFrameTap snapshot:self.movieView] mutableCopy];
-  if (self.flowDecodedAt > 0) {
+  if (self.flowDecodedAt > 0 && (![self.rewindCache.flowState[@"waiting"] boolValue] || now-self.flowAudioAt < 1.5)) {
     stats[@"nativeDecodeAge"] = @(now-self.flowDecodedAt);
     stats[@"nativeDecodeStaleAfter"] = @(MAX(8, self.flowStaleThreshold));
   }
@@ -1126,6 +1131,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   double now = CACurrentMediaTime();
   double age = active > 0 ? MAX(0, now-active) : -1;
   VLCMediaStats native = self.player.media.statistics;
+  NSDictionary *clock = self.player.observedClock;
+  double clockAge = clock[@"age"] ? [clock[@"age"] doubleValue] : 0;
   if (native.decodedVideo != self.flowDecodedVideo || self.flowDecodedAt <= 0) {
     self.flowDecodedVideo = native.decodedVideo; self.flowDecodedAt = now;
   }
@@ -1135,7 +1142,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   // VLC can keep re-enqueuing a paused picture with new host timestamps while
   // buffering. Its actual decoded-video counter distinguishes that path from
   // genuinely advancing pictures without comparing any image pixels.
-  if (self.buffering) { age = MAX(age, now-self.flowDecodedAt); }
+  if (self.buffering) { age = MAX(age, MIN(now-self.flowDecodedAt, clockAge)); }
   VLCMediaVideoTrack *video = self.player.media.videoTracks.firstObject.video;
   double threshold = video.frameRate > 0 ? MAX(1.5, 3.0*MAX(1,video.frameRateDenominator)/video.frameRate) : 1.5;
   self.flowStaleThreshold = threshold;
@@ -1145,7 +1152,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   // that ran ahead throughout the blackout. Healthy queued video with audio
   // still advancing is not classified by this extra condition.
   if (self.player.media.audioTracks.count > 0) {
-    age = MAX(age, MIN(now-self.flowDecodedAt, now-self.flowAudioAt));
+    age = MAX(age, MIN(clockAge, MIN(now-self.flowDecodedAt, now-self.flowAudioAt)));
   }
   NSDictionary *flow = self.rewindCache.flowState;
   int64_t before = [self mediaTime];
@@ -1166,7 +1173,6 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     return;
   }
   if (action == 1) {
-    NSDictionary *clock = self.player.observedClock;
     self.flowHoldTime = before;
     if (clock[@"positionMs"]) { self.flowHoldTime = MIN(before, self.inputStartTime+[clock[@"positionMs"] longLongValue]); }
     self.flowPreviousMute = self.player.audio.isMuted; self.flowMuted = YES; self.player.audio.muted = YES;
