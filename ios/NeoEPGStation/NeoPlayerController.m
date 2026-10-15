@@ -157,6 +157,8 @@
 @property (nonatomic) BOOL videoWatchPending;
 @property (nonatomic) NeoVideoRecovery *videoRecovery;
 @property (nonatomic) NeoNetworkPlaybackFlow *networkFlow;
+@property (nonatomic) uint64_t flowDecodedVideo;
+@property (nonatomic) NSTimeInterval flowDecodedAt;
 @property (nonatomic) NSInteger lastVideoOutputID;
 @property (nonatomic) BOOL repairingVideo;
 @property (nonatomic) BOOL videoResuming;
@@ -853,6 +855,7 @@
 }
 - (void)restartMedia {
   [self.networkFlow reset];
+  self.flowDecodedVideo = 0; self.flowDecodedAt = 0;
   self.videoWatchPending = YES;
   // Opening the replacement input is asynchronous. An older Stopped event
   // must not open it again while start-paused is still preparing it.
@@ -1057,17 +1060,26 @@
     !self.reloading && !self.seeking && !self.scrubbing && !self.videoResuming && !self.playbackEnded && !self.playbackFailed &&
     (!self.inputInBackground || self.pipActive);
   double active = self.commentPiP.videoActivityHostTime;
-  double age = active > 0 ? MAX(0, CACurrentMediaTime()-active) : -1;
+  double now = CACurrentMediaTime();
+  double age = active > 0 ? MAX(0, now-active) : -1;
+  VLCMediaStats native = self.player.media.statistics;
+  if (native.decodedVideo != self.flowDecodedVideo || self.flowDecodedAt <= 0) {
+    self.flowDecodedVideo = native.decodedVideo; self.flowDecodedAt = now;
+  }
+  // VLC can keep re-enqueuing a paused picture with new host timestamps while
+  // buffering. Its actual decoded-video counter distinguishes that path from
+  // genuinely advancing pictures without comparing any image pixels.
+  if (self.buffering) { age = MAX(age, now-self.flowDecodedAt); }
   VLCMediaVideoTrack *video = self.player.media.videoTracks.firstObject.video;
   double threshold = video.frameRate > 0 ? MAX(1.5, 3.0*MAX(1,video.frameRateDenominator)/video.frameRate) : 1.5;
   NSDictionary *flow = self.rewindCache.flowState;
   NSInteger action = [self.networkFlow updateWithWaiting:[flow[@"waiting"] boolValue]
-    delivery:[flow[@"delivery"] longLongValue] video:self.player.media.statistics.decodedVideo
+    delivery:[flow[@"delivery"] longLongValue] video:native.decodedVideo
     videoAge:age staleAfter:threshold eligible:eligible wantsPlayback:self.wantsPlayback];
   if (!action) { return; }
   [NeoPlaybackDiagnostics record:action == 1 ? @"network.clockHeld" : action == 2 ? @"network.bytesResumed" : @"network.videoResumed"
     fields:@{@"mediaMs": @([self mediaTime]), @"delivery": flow[@"delivery"] ?: @0,
-      @"videoAge": @(age), @"wantsPlayback": @(self.wantsPlayback)}];
+      @"videoAge": @(age), @"decodedVideo": @(native.decodedVideo), @"wantsPlayback": @(self.wantsPlayback)}];
   if (action == 1 || action == 2) { [self applyPlaybackIntentForced:YES]; }
   [self updateLoadingState];
 }
