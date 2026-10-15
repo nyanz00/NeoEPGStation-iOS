@@ -2,6 +2,8 @@
 
 ## ビルド
 
+PLAYの通信待機、iPadプレイヤーの戻る、1〜8倍のピンチと触覚は `player-network-zoom.md` を参照する。
+
 iPadの接続画面・メニュー開閉・回転と、録画一覧のユーザー選択欄は `ipad-navigation-rotation.md` を参照する。
 
 録画一覧の表示件数・検索・ユーザー絞り込み・復帰ハイライトと、視聴履歴送信形式は `recorded-search-history.md` を参照する。

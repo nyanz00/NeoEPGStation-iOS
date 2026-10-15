@@ -36,6 +36,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private var zoomExpiry: DispatchWorkItem?
   @objc private(set) var videoZoom: CGFloat = 1
   @objc var onZoom: ((CGFloat) -> Void)?
+  @objc var onVideoLayout: (() -> Void)?
   private var pinchStart: CGFloat = 1, pinching = false
   private var pinchExpanded = false, pinchOriginal = false
   private let zoomLight = UIImpactFeedbackGenerator(style: .light)
@@ -387,6 +388,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let drawerWidth = min(240 + safe.left, bounds.width * 0.8)
     drawer.frame = CGRect(x: drawerDragging ? drawer.frame.minX : drawerOpen ? 0 : -drawerWidth, y: 0, width: drawerWidth, height: bounds.height)
     drawer.contentSafeArea = safe
+    onVideoLayout?()
     applyOrientationPreview()
   }
   @objc func showControls(_ visible: Bool) {
@@ -765,16 +767,16 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     if state == .began || state == .changed {
       let requested = pinchStart * scale
       guard requested.isFinite else { return }
-      let next = min(8, max(1, requested))
+      let next = requested <= 1.001 ? 1 : min(8, requested)
       if next > videoZoom+0.001 && !pinchExpanded {
         pinchExpanded = true; zoomLight.impactOccurred()
       }
       // The lower boundary also acknowledges a shrink attempt starting at 1x.
-      if requested < 1.001 && scale < 0.999 && !pinchOriginal {
+      if next == 1 && scale < 0.999 && !pinchOriginal {
         pinchOriginal = true; zoomReturn.impactOccurred()
       }
       videoZoom = next; onZoom?(next)
-      zoomBadge.text = next <= 1.001 ? "元のサイズ" : String(format: "%.1f×", Double(next))
+      zoomBadge.text = next == 1 ? "元のサイズ" : String(format: "%.1f×", Double(next))
       zoomBadge.isHidden = false; setNeedsLayout()
     }
     if [.ended, .cancelled, .failed].contains(state) {
@@ -1141,6 +1143,14 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       "pinchZoomOriginalAcknowledgement": restored, "pinchZoomReleaseHasNoImpact": noEndImpact,
       "pinchZoomKeepsUIAndPanel": stable, "pinchExcludesNavigation": noNavigation,
       "singleFingerNavigationOnly": navigationPan.maximumNumberOfTouches == 1 && orientationPan.maximumNumberOfTouches == 1]
+  }
+  @objc func smokeZoomTo(_ scale: CGFloat) {
+    updateZoom(state: .began, scale: 1)
+    updateZoom(state: .changed, scale: scale/max(1,videoZoom))
+    updateZoom(state: .ended, scale: 1)
+  }
+  @objc func runIPadGestureChecks() -> [String: Bool] {
+    runNavigationChecks().merging(runZoomChecks()) { _, new in new }
   }
   private func runOrientationChecks() -> [String: Bool] {
     let savedFrame = frame, handler = onAction, savedHUD = controlsVisible

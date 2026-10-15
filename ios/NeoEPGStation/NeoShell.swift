@@ -570,7 +570,10 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     guard let active else { return }
     let width = max(1, content.bounds.width)
     let progress = min(1, max(0, translation / width))
-    if routeBackRunning || (active.viewControllers.count == 1 && canReturnToHistory) {
+    // Choose the gesture's owner at begin. UINavigationController removes
+    // the outgoing detail from its stack before an interactive pop finishes;
+    // that must not turn its subsequent change/cancel into a history return.
+    if routeBackRunning || (state == .began && active.viewControllers.count == 1 && canReturnToHistory) {
       switch state {
       case .began: beginHistoryReturn()
       case .changed: active.view.transform = CGAffineTransform(translationX: max(0, translation), y: 0)
@@ -899,10 +902,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     func settle() async {
       try? await Task.sleep(nanoseconds: 100_000_000)
       for _ in 0..<100 {
-        if active?.transitionCoordinator == nil && !routeBackRunning { return }
+        if active?.transitionCoordinator == nil && popInteraction == nil && !routeBackRunning { return }
         try? await Task.sleep(nanoseconds: 20_000_000)
       }
     }
+    await settle()
     showRoute("history"); view.layoutIfNeeded(); await settle()
     let history = active
     let position = NeoListPosition(page: 7, userId: nil)

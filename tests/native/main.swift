@@ -329,6 +329,26 @@ check(recovery.evaluate(outputStats(samples: 108, changes: 1, age: 50), mediaMs:
 check(recovery.evaluate(outputStats(samples: 132, changes: 3, age: 0), mediaMs: 7000, now: 351) == 1,
   "A held repair still verifies actual picture recovery")
 print("Video-output identity, confirmed recovery and bounded escalation: all checks passed")
+let continuousRecovery = NeoVideoRecovery()
+continuousRecovery.begin(100, timeout: 10)
+_ = continuousRecovery.evaluate(["outputID": 1, "samples": 10, "arrivalAge": 0, "scheduledInMs": 0], mediaMs: 1000, now: 200)
+check(continuousRecovery.evaluate(["outputID": 1, "samples": 10, "arrivalAge": 4, "scheduledInMs": -4000], mediaMs: 5000, now: 204) == 2,
+  "Video starvation is detected even more than 45 seconds after foregrounding")
+let flow = NeoNetworkPlaybackFlow()
+func networkStep(_ waiting: Bool, _ delivery: Int64, _ video: UInt64, _ age: Double, wants: Bool = true, eligible: Bool = true) -> Int {
+  flow.update(waiting: waiting, delivery: delivery, video: video, videoAge: age, staleAfter: 1.5, eligible: eligible, wantsPlayback: wants)
+}
+check(networkStep(true, 1, 50, 0.1) == 0, "Slow prefetch never pauses healthy video")
+check(networkStep(false, 1, 50, 3) == 0, "Decoder-only faults are not classified as starved HTTP reads")
+check(networkStep(true, 1, 50, 3) == 1 && flow.holding, "Empty output and a pending read freeze the common A/V clock")
+check(networkStep(true, 1, 50, 4) == 0 && flow.holding, "A 100% callback without available bytes cannot resume the clock")
+check(networkStep(true, 2, 50, 4) == 2 && !flow.holding && flow.verifying, "Available bytes release the clock even while the next read is pending")
+check(networkStep(false, 2, 50, 0.1) == 0 && flow.verifying, "A repeated paused frame does not confirm decoded video recovery")
+check(networkStep(false, 2, 51, 0.1) == 3 && !flow.verifying, "New video plus fresh output confirms recovery")
+_ = networkStep(true, 3, 52, 3)
+check(networkStep(true, 4, 52, 3, wants: false) == 2 && !flow.verifying, "Explicit pause during a stalled read remains paused on byte recovery")
+check(networkStep(true, 4, 52, 3, eligible: false) == 0, "Audio-only background playback is excluded")
+print("Network starvation, byte availability and video confirmation: all checks passed")
 
 func ebml(_ id: [UInt8], _ body: Data) -> Data {
   Data(id + [0x10, UInt8((body.count >> 16)&255), UInt8((body.count >> 8)&255), UInt8(body.count&255)]) + body

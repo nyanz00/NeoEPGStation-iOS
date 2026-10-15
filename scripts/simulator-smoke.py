@@ -42,7 +42,8 @@ def capture_ui(udid, stage, prefix, terminate_existing=True):
         result['renderedSeekThumb'] = painted
         result['ipadSeekThumbSmall'] = (painted.get('success') is True and
             0 < metrics.get('thumbWidth', 999) <= 16 and metrics.get('height', 0) >= 32)
-        result['success'] = result['ipadSeekThumbSmall'] and all(result.get(flag) == True for flag in flags)
+        result['success'] = (result['ipadSeekThumbSmall'] and all(result.get(flag) == True for flag in flags)
+                             and all(result.get('playerGestureChecks', {}).values()))
     Path(f'dist/{prefix}-{stage}.json').write_text(json.dumps(result, indent=2) + '\n')
     if (result.get('success') is not True or result.get('recordCount') != 4
         or result.get('theme') != 'neon-teal-dark'

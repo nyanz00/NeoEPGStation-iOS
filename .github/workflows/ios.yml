@@ -42,7 +42,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ios-${{ github.ref }}
+  group: ios-${{ github.ref }}-${{ inputs.network_probe && 'network' || 'app' }}
   cancel-in-progress: true
 
 jobs:

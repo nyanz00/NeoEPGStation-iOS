@@ -40,6 +40,20 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   private var retries: [ObjectIdentifier: DispatchWorkItem] = [:]
   private var retryActions: [ObjectIdentifier: () -> Void] = [:]
   private var fetchEpoch = 0
+  private let flowLock = NSLock()
+  private var pendingReads: Set<ObjectIdentifier> = []
+  private var availableDelivery: Int64 = 0
+  @objc var flowState: [String: NSNumber] {
+    // Never wait behind cache disk I/O on the main/rendering thread.
+    flowLock.lock(); defer { flowLock.unlock() }
+    return ["waiting": NSNumber(value: !pendingReads.isEmpty), "delivery": NSNumber(value: availableDelivery)]
+  }
+  private func markRead(_ connection: NWConnection?, pending: Bool) {
+    guard let connection else { return }
+    flowLock.lock(); defer { flowLock.unlock() }
+    let key = ObjectIdentifier(connection)
+    if pending { pendingReads.insert(key) } else { pendingReads.remove(key) }
+  }
   private var length: Int64 = 0, closed = false
   private var validator: String?, validatorHeader: String?
   private var byteClock = NeoMediaByteClock()
@@ -316,6 +330,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   }
   // Suspending transport does not destroy retained video blocks or metadata.
   private func stopTransport() {
+    flowLock.lock(); pendingReads.removeAll(); flowLock.unlock()
     fetchEpoch += 1
     retries.values.forEach { $0.cancel() }; retries.removeAll(); retryActions.removeAll()
     let old = listener; listener = nil; old?.cancel()
@@ -382,6 +397,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
       let terminal: Bool
       switch state { case .cancelled, .failed: terminal = true; default: terminal = false }
       if terminal, let connection {
+        self?.markRead(connection, pending: false)
         if case .failed(let error) = state { self?.recordConnectionEnd(connection, state: 2, error: error) }
         else { self?.recordConnectionEnd(connection, state: 1) }
         self?.finishDelivery(connection, reason: 1)
@@ -510,6 +526,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
       switch result {
       case .success(let data):
         self.report(nil, kind: "fetch")
+        self.flowLock.lock(); self.availableDelivery += 1; self.flowLock.unlock()
         let key = ObjectIdentifier(connection)
         if var entry = self.deliveries[key] { entry.networkBytes += Int64(data.count); self.deliveries[key] = entry }
         let range = self.byteClock.timeRange(offset: aligned, count: data.count) ?? self.byteClock.observeTS(data, offset: aligned) ?? self.byteClock.observeMatroska(data, offset: aligned)
@@ -542,6 +559,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
                      attempt: Int = 0, transferBegan: Double? = nil, completion: @escaping (Result<Data, Error>) -> Void) {
     guard !closed, !suspended else { return }
     if let connection, connections[ObjectIdentifier(connection)] == nil { return }
+    markRead(connection, pending: true)
     requestSequence += 1
     let requestID = requestSequence, seek = NeoPlaybackDiagnostics.seekID
     let began = ProcessInfo.processInfo.systemUptime, original = transferBegan ?? began, epoch = fetchEpoch
@@ -572,6 +590,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
           range == "bytes \(offset)-\(offset+Int64(expected)-1)/\(total)" && data?.count == expected &&
           (self.length == 0 || self.length == total)
         if valid, let data, !data.isEmpty {
+          self.markRead(connection, pending: false)
           self.length = total; self.networkBytes += Int64(data.count)
           if self.validator == nil {
             if let etag = http?.value(forHTTPHeaderField: "ETag"), !etag.hasPrefix("W/") { self.validator = etag; self.validatorHeader = "If-Match" }
@@ -611,6 +630,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
         }
         NeoPlaybackDiagnostics.record("range.retryFailed", fields: ["offset": offset, "attempt": attempt,
           "httpStatus": http?.statusCode ?? 0, "errorCode": code])
+        self.markRead(connection, pending: false)
         completion(.failure(error ?? URLError(.badServerResponse)))
       }
     }
