@@ -142,20 +142,39 @@ from http_range_server import start_server
 range_server = start_server(fixture_container / 'Documents')
 os.environ['SIMCTL_CHILD_NEO_EPG_RANGE_SMOKE'] = f'http://127.0.0.1:{range_server.server_port}'
 os.environ['SIMCTL_CHILD_NEO_EPG_STORAGE_SMOKE'] = '1'
-try:
-    launch = run('xcrun', 'simctl', 'launch', device['udid'], 'io.github.nyanz00.NeoEPGStation')
-except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-    logs = run('xcrun', 'simctl', 'spawn', device['udid'], 'log', 'show', '--last', '3m',
-               '--style', 'compact', '--predicate',
-               'process == "NeoEPGStation" OR process == "runningboardd" OR process == "SpringBoard"')
-    Path('dist/simulator-launch-errors.log').write_text(logs)
-    raise
-pid = launch.rsplit(':', 1)[1].strip()
-container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], 'io.github.nyanz00.NeoEPGStation', 'data'))
-for attempt in range(36):
-    time.sleep(5)
-    if (container / 'Documents/pip-player-smoke.json').exists() and (container / 'Documents/pip-composition-smoke.json').exists() and (container / 'Documents/player-tap-smoke.json').exists():
+for fixture_attempt in range(2):
+    try:
+        launch = run('xcrun', 'simctl', 'launch', device['udid'], 'io.github.nyanz00.NeoEPGStation')
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        logs = run('xcrun', 'simctl', 'spawn', device['udid'], 'log', 'show', '--last', '3m',
+                   '--style', 'compact', '--predicate',
+                   'process == "NeoEPGStation" OR process == "runningboardd" OR process == "SpringBoard"')
+        Path('dist/simulator-launch-errors.log').write_text(logs)
+        raise
+    pid = launch.rsplit(':', 1)[1].strip()
+    container = Path(run('xcrun', 'simctl', 'get_app_container', device['udid'], 'io.github.nyanz00.NeoEPGStation', 'data'))
+    fixture_error = None
+    for attempt in range(36):
+        time.sleep(5)
+        pip_result = container / 'Documents/pip-player-smoke.json'
+        phase_result = container / 'Documents/playback-phase-smoke.json'
+        if pip_result.exists() and phase_result.exists():
+            pip_value = json.loads(pip_result.read_text())
+            # Only retry the synthetic writer before any player was opened.
+            # A playback/gesture failure is never retried or overwritten here.
+            if (json.loads(phase_result.read_text()).get('phase') == 'encode' and
+                pip_value.get('success') is False and
+                ('合成動画の書き込み' in pip_value.get('error', '') or pip_value.get('error') == 'fixture encoding')):
+                fixture_error = pip_value
+                break
+        if pip_result.exists() and (container / 'Documents/pip-composition-smoke.json').exists() and (container / 'Documents/player-tap-smoke.json').exists():
+            break
+    if fixture_error is None or fixture_attempt == 1:
         break
+    Path('dist/fixture-encoding-retry.json').write_text(json.dumps({'attempt': 1, 'fixtureError': fixture_error}, indent=2))
+    run('xcrun', 'simctl', 'terminate', device['udid'], 'io.github.nyanz00.NeoEPGStation')
+    for marker in (container / 'Documents').glob('*-smoke.json'):
+        marker.unlink()
 processes = run('xcrun', 'simctl', 'spawn', device['udid'], 'launchctl', 'list')
 if not any(line.split()[0] == pid for line in processes.splitlines() if line.split()):
     # Keep diagnostics even if a native worker crashes before UI checks finish.
@@ -189,6 +208,8 @@ if not (container / 'Documents/player-tap-smoke.json').exists():
     logs = run('xcrun', 'simctl', 'spawn', device['udid'], 'log', 'show', '--last', '3m',
                '--style', 'compact', '--predicate', 'process == "NeoEPGStation"')
     Path('dist/simulator-native.log').write_text(logs)
+if fixture_error is not None:
+    raise RuntimeError(f'Synthetic fixture encoding failed before playback: {fixture_error}')
 storage = json.loads((container / 'Documents/storage-smoke.json').read_text())
 Path('dist/storage-smoke.json').write_text(json.dumps(storage, indent=2) + '\n')
 if storage.get('success') is not True:
