@@ -20,12 +20,17 @@ if not shutil.which('ffmpeg'):
     subprocess.check_call(['brew', 'install', 'ffmpeg'], timeout=600)
 # Constant bitrate makes each 1MiB Range represent ~4s of media, so three
 # successful-but-9s-late responses actually exhaust the normal 5s look-ahead.
+av1 = os.environ.get('NETWORK_CODEC') == 'av1'
+video_args = (['-vf', 'noise=alls=20:allf=t', '-c:v', 'libsvtav1', '-preset', '12',
+               '-pix_fmt', 'yuv420p10le', '-b:v', '2M', '-maxrate', '2M', '-bufsize', '4M'] if av1 else
+              ['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+               '-b:v', '2M', '-minrate', '2M', '-maxrate', '2M', '-bufsize', '4M',
+               '-x264-params', 'nal-hrd=cbr:force-cfr=1'])
 subprocess.check_call(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
     '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24',
     '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100', '-t', '85',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
-    '-b:v', '2M', '-minrate', '2M', '-maxrate', '2M', '-bufsize', '4M',
-    '-x264-params', 'nal-hrd=cbr:force-cfr=1', '-g', '48', '-c:a', 'aac', '-b:a', '64k', str(fixture)], timeout=120)
+    *video_args, '-g', '48', '-c:a', 'aac', '-b:a', '64k', str(fixture)], timeout=120)
+Path('dist/network-codec.json').write_text(json.dumps({'codec': 'AV1-10bit' if av1 else 'H264'}))
 sys.path.insert(0, str(Path('tests/fixtures').resolve()))
 from http_range_server import start_server
 server = start_server(container)
