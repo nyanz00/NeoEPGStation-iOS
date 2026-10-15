@@ -159,6 +159,8 @@
 @property (nonatomic) NeoNetworkPlaybackFlow *networkFlow;
 @property (nonatomic) uint64_t flowDecodedVideo;
 @property (nonatomic) NSTimeInterval flowDecodedAt;
+@property (nonatomic) uint64_t flowPlayedAudio;
+@property (nonatomic) NSTimeInterval flowAudioAt;
 @property (nonatomic) NSTimeInterval flowStaleThreshold;
 @property (nonatomic) NSInteger lastVideoOutputID;
 @property (nonatomic) BOOL repairingVideo;
@@ -861,6 +863,7 @@
 - (void)restartMedia {
   [self.networkFlow reset];
   self.flowDecodedVideo = 0; self.flowDecodedAt = 0;
+  self.flowPlayedAudio = 0; self.flowAudioAt = 0;
   self.videoWatchPending = YES;
   // Opening the replacement input is asynchronous. An older Stopped event
   // must not open it again while start-paused is still preparing it.
@@ -1071,6 +1074,9 @@
   if (native.decodedVideo != self.flowDecodedVideo || self.flowDecodedAt <= 0) {
     self.flowDecodedVideo = native.decodedVideo; self.flowDecodedAt = now;
   }
+  if (native.playedAudioBuffers != self.flowPlayedAudio || self.flowAudioAt <= 0) {
+    self.flowPlayedAudio = native.playedAudioBuffers; self.flowAudioAt = now;
+  }
   // VLC can keep re-enqueuing a paused picture with new host timestamps while
   // buffering. Its actual decoded-video counter distinguishes that path from
   // genuinely advancing pictures without comparing any image pixels.
@@ -1078,6 +1084,14 @@
   VLCMediaVideoTrack *video = self.player.media.videoTracks.firstObject.video;
   double threshold = video.frameRate > 0 ? MAX(1.5, 3.0*MAX(1,video.frameRateDenominator)/video.frameRate) : 1.5;
   self.flowStaleThreshold = threshold;
+  // With a blocked read VLC may announce buffering only when that read
+  // returns and PCR is already late. Detect both native pipelines starving
+  // before that notification, so the eventual data does not inherit a clock
+  // that ran ahead throughout the blackout. Healthy queued video with audio
+  // still advancing is not classified by this extra condition.
+  if (self.player.media.audioTracks.count > 0) {
+    age = MAX(age, MIN(now-self.flowDecodedAt, now-self.flowAudioAt));
+  }
   NSDictionary *flow = self.rewindCache.flowState;
   NSInteger action = [self.networkFlow updateWithWaiting:[flow[@"waiting"] boolValue]
     delivery:[flow[@"delivery"] longLongValue] video:native.decodedVideo
