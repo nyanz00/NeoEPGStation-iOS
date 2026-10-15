@@ -50,3 +50,6 @@ for mode in ['slow', 'disconnect']:
     print(mode, 'network probe captured', len(value['rows']), 'samples', flush=True)
 Path('dist/network-faults.json').write_text(json.dumps(server.fault_events, indent=2))
 server.shutdown()
+checked = run(sys.executable, 'scripts/check-network-recovery.py', 'dist')
+Path('dist/network-flow-checks.json').write_text(checked+'\n')
+print(checked, flush=True)
