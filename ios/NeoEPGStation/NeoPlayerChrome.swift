@@ -31,6 +31,15 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private let videoDoubleTap = UITapGestureRecognizer()
   private let navigationPan = UIPanGestureRecognizer()
   private let orientationPan = UIPanGestureRecognizer()
+  private let zoomPinch = UIPinchGestureRecognizer()
+  private let zoomBadge = NeoStyle.label(size: 15)
+  private var zoomExpiry: DispatchWorkItem?
+  @objc private(set) var videoZoom: CGFloat = 1
+  @objc var onZoom: ((CGFloat) -> Void)?
+  private var pinchStart: CGFloat = 1, pinching = false
+  private var pinchExpanded = false, pinchOriginal = false
+  private let zoomLight = UIImpactFeedbackGenerator(style: .light)
+  private let zoomReturn = UIImpactFeedbackGenerator(style: .medium)
   private var orientationProgress: CGFloat = 0
   private var orientationDragging = false, orientationPending = false, orientationWasWide = false
   private var orientationDistance: CGFloat = 1, orientationScale: CGFloat = 1, orientationTranslation: CGFloat = 0
@@ -100,7 +109,14 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     videoView.clipsToBounds = true
     self.title.text = title; self.title.lineBreakMode = .byTruncatingTail
     channel.textColor = NeoStyle.muted; logo.contentMode = .scaleAspectFit
-    [videoView, pipCover, videoDim, header, controls, centerControls, panel, loadingButton, displayedStatus, transientNotice, drawerDim, drawer].forEach(addSubview)
+    [videoView, pipCover, videoDim, header, controls, centerControls, panel, loadingButton, displayedStatus, transientNotice, zoomBadge, drawerDim, drawer].forEach(addSubview)
+    zoomBadge.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+    zoomBadge.textColor = .white; zoomBadge.textAlignment = .center
+    zoomBadge.layer.cornerRadius = 36; zoomBadge.clipsToBounds = true
+    zoomBadge.layer.borderColor = UIColor.white.withAlphaComponent(0.8).cgColor; zoomBadge.layer.borderWidth = 1
+    zoomBadge.adjustsFontSizeToFitWidth = true; zoomBadge.minimumScaleFactor = 0.65
+    zoomBadge.isHidden = true; zoomBadge.isUserInteractionEnabled = false
+    zoomBadge.accessibilityIdentifier = "player-zoom-badge"
     header.addSubview(leftHeader); header.addSubview(rightHeader)
     [menuButton, backButton, logo, channel, self.title].forEach(leftHeader.addSubview)
     [infoButton, pipButton, commentButton, settingsButton].forEach(rightHeader.addSubview)
@@ -206,11 +222,15 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     videoDoubleTap.cancelsTouchesInView = true; addGestureRecognizer(videoDoubleTap)
     videoTap.require(toFail: videoDoubleTap)
     navigationPan.addTarget(self, action: #selector(dragNavigation)); navigationPan.delegate = self
+    navigationPan.maximumNumberOfTouches = 1
     addGestureRecognizer(navigationPan); videoTap.require(toFail: navigationPan)
     orientationPan.addTarget(self, action: #selector(dragOrientation)); orientationPan.delegate = self
     orientationPan.maximumNumberOfTouches = 1
     addGestureRecognizer(orientationPan); videoTap.require(toFail: orientationPan)
     videoDoubleTap.require(toFail: navigationPan); videoDoubleTap.require(toFail: orientationPan)
+    zoomPinch.addTarget(self, action: #selector(pinchVideo)); zoomPinch.delegate = self
+    addGestureRecognizer(zoomPinch)
+    videoTap.require(toFail: zoomPinch); videoDoubleTap.require(toFail: zoomPinch)
     header.backgroundColor = .clear; controls.backgroundColor = .clear
     renderPanel()
     statusLabel.backgroundColor = .clear; statusLabel.numberOfLines = 2; statusLabel.isHidden = true
@@ -362,6 +382,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     displayedStatus.frame = CGRect(x: videoView.frame.midX-messageWidth/2,
       y: loadingButton.frame.maxY+4, width: messageWidth, height: 54)
     transientNotice.frame = CGRect(x: videoView.frame.midX-messageWidth/2, y: centerControls.frame.maxY+4, width: messageWidth, height: 54)
+    zoomBadge.frame = CGRect(x: videoView.frame.midX-36, y: videoView.frame.minY+8, width: 72, height: 72)
     drawerDim.frame = bounds
     let drawerWidth = min(240 + safe.left, bounds.width * 0.8)
     drawer.frame = CGRect(x: drawerDragging ? drawer.frame.minX : drawerOpen ? 0 : -drawerWidth, y: 0, width: drawerWidth, height: bounds.height)
@@ -391,7 +412,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     noticeExpiry = expiry; DispatchQueue.main.asyncAfter(deadline: .now()+2.5, execute: expiry)
   }
   @objc func clearTransientNotice() { noticeExpiry?.cancel(); noticeExpiry = nil; transientNotice.isHidden = true; transientNotice.text = nil }
-  @objc var interactionOpen: Bool { drawerOpen || drawerDragging || navigationAction != nil || popup != nil || orientationDragging || orientationPending }
+  @objc var interactionOpen: Bool { drawerOpen || drawerDragging || navigationAction != nil || popup != nil || orientationDragging || orientationPending || pinching }
   @objc var controlTracking: Bool {
     func tracking(_ view: UIView) -> Bool {
       (view as? UIControl)?.isTracking == true || view.subviews.contains(where: tracking)
@@ -415,6 +436,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     return ancestor === self
   }
   func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    if gesture === zoomPinch { return !pipShowing && acceptsVideoTap(touch.location(in: self), target: touch.view) }
     if gesture === videoTap || gesture === videoDoubleTap {
       return !pipShowing && acceptsVideoTap(touch.location(in: self), target: touch.view)
     }
@@ -726,9 +748,40 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     }
   }
   private func navigationTarget(start: CGPoint, velocity: CGPoint) -> NeoSwipeAction? {
-    guard !drawerOpen, !drawerDragging, !orientationDragging, !orientationPending, popup == nil else { return nil }
+    guard !drawerOpen, !drawerDragging, !orientationDragging, !orientationPending, !pinching, popup == nil else { return nil }
+    let ipad = UIDevice.current.userInterfaceIdiom == .pad
     return NeoNavigationGesture.action(startY: Double(start.y), height: Double(bounds.height),
-      canGoBack: !isWide, tablet: false, horizontal: Double(velocity.x), vertical: Double(velocity.y))
+      canGoBack: ipad || !isWide, tablet: false, horizontal: Double(velocity.x), vertical: Double(velocity.y), persistentMenu: ipad)
+  }
+  @objc private func pinchVideo(_ gesture: UIPinchGestureRecognizer) {
+    updateZoom(state: gesture.state, scale: gesture.scale)
+  }
+  private func updateZoom(state: UIGestureRecognizer.State, scale: CGFloat) {
+    if state == .began {
+      pinching = true; pinchStart = videoZoom; pinchExpanded = false; pinchOriginal = false
+      zoomExpiry?.cancel(); onAction?("interaction"); zoomLight.prepare(); zoomReturn.prepare()
+    }
+    guard pinching else { return }
+    if state == .began || state == .changed {
+      let requested = pinchStart * scale
+      guard requested.isFinite else { return }
+      let next = min(8, max(1, requested))
+      if next > videoZoom+0.001 && !pinchExpanded {
+        pinchExpanded = true; zoomLight.impactOccurred()
+      }
+      // The lower boundary also acknowledges a shrink attempt starting at 1x.
+      if requested < 1.001 && scale < 0.999 && !pinchOriginal {
+        pinchOriginal = true; zoomReturn.impactOccurred()
+      }
+      videoZoom = next; onZoom?(next)
+      zoomBadge.text = next <= 1.001 ? "元のサイズ" : String(format: "%.1f×", Double(next))
+      zoomBadge.isHidden = false; setNeedsLayout()
+    }
+    if [.ended, .cancelled, .failed].contains(state) {
+      pinching = false; onAction?("interaction")
+      let expiry = DispatchWorkItem { [weak self] in self?.zoomBadge.isHidden = true }
+      zoomExpiry = expiry; DispatchQueue.main.asyncAfter(deadline: .now()+0.8, execute: expiry)
+    }
   }
   @objc private func dragNavigation(_ gesture: UIPanGestureRecognizer) {
     updateNavigation(state: gesture.state, translation: gesture.translation(in: self).x, velocity: gesture.velocity(in: self).x)
@@ -1029,7 +1082,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       "panelTapExcluded": panelExcluded, "tabsImmediateWithoutGeometryAnimation": immediate,
       "panelTabsAlignedInitially": initiallyAligned, "panelTabsStayAlignedAfterSelection": tabsAligned]
     let all = checks.merging(gestures) { _, new in new }.merging(runOrientationChecks()) { _, new in new }
-      .merging(runDoubleTapChecks()) { _, new in new }
+      .merging(runDoubleTapChecks()) { _, new in new }.merging(runZoomChecks()) { _, new in new }
     return all.merging(["success": all.values.allSatisfy { $0 }]) { _, new in new }
   }
   private func runNavigationChecks() -> [String: Bool] {
@@ -1037,8 +1090,9 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     var actions: [String] = []; onAction = { actions.append($0) }
     frame = CGRect(x: 0, y: 0, width: 390, height: 844); setNeedsLayout(); layoutIfNeeded()
     let forward = CGPoint(x: 600, y: 400)
-    let top = navigationTarget(start: CGPoint(x: 200, y: 844 * 0.39), velocity: forward) == .menu
-    let lower = navigationTarget(start: CGPoint(x: 200, y: 844 * 0.4), velocity: forward) == .back
+    let boundary = UIDevice.current.userInterfaceIdiom == .pad ? 0.3 : 0.4
+    let top = navigationTarget(start: CGPoint(x: 200, y: 844 * (boundary-0.01)), velocity: forward) == .menu
+    let lower = navigationTarget(start: CGPoint(x: 200, y: 844 * boundary), velocity: forward) == .back
     let vertical = navigationTarget(start: .zero, velocity: CGPoint(x: 100, y: 300)) == nil
     navigationAction = .back; updateNavigation(state: .began, translation: 0, velocity: 0)
     updateNavigation(state: .changed, translation: 156, velocity: 100)
@@ -1054,13 +1108,39 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     updateNavigation(state: .ended, translation: 200, velocity: 600)
     let opened = drawerOpen; setDrawer(false)
     frame = CGRect(x: 0, y: 0, width: 844, height: 390); setNeedsLayout(); layoutIfNeeded()
-    let wide = [0.1, 0.8].allSatisfy { navigationTarget(start: CGPoint(x: 300, y: 390 * $0), velocity: forward) == .menu }
+    let wide = navigationTarget(start: CGPoint(x: 300, y: 390 * 0.1), velocity: forward) == .menu &&
+      navigationTarget(start: CGPoint(x: 300, y: 390 * 0.8), velocity: forward) == (UIDevice.current.userInterfaceIdiom == .pad ? .back : .menu)
     frame = savedFrame; onAction = handler; setNeedsLayout(); layoutIfNeeded()
     drawer.layer.removeAllAnimations(); drawerDim.layer.removeAllAnimations(); drawer.isHidden = true; drawerDim.isHidden = true
-    return ["portraitSwipe40Menu60Back": top && lower, "landscapeSwipeOnlyMenu": wide,
+    return ["deviceNavigationBoundary": top && lower, "deviceLandscapeBackPolicy": wide,
       "swipeBackCompletesAndCancels": completed && cancelled, "playerBackReportsFingerProgress": following,
       "swipeDrawerOpens": dragging && opened,
       "verticalSwipeLeavesScrolling": vertical, "rootNavigationGesture": navigationPan.view === self]
+  }
+  @objc func runZoomChecks() -> [String: Bool] {
+    let old = videoZoom, handler = onAction
+    onAction = { _ in }
+    let headerFrame = header.frame, panelFrame = panel.frame
+    updateZoom(state: .began, scale: 1); updateZoom(state: .changed, scale: 2)
+    let expanding = videoZoom == 2 && zoomBadge.text == "2.0×" && pinchExpanded && !pinchOriginal && !zoomBadge.isHidden
+    let noNavigation = navigationTarget(start: .zero, velocity: CGPoint(x: 600, y: 0)) == nil && !orientationDirection(CGPoint(x: 0, y: 600))
+    updateZoom(state: .changed, scale: 20)
+    let capped = videoZoom == 8
+    updateZoom(state: .ended, scale: 20)
+    let noEndImpact = !pinching && pinchExpanded && !pinchOriginal
+    updateZoom(state: .began, scale: 1); updateZoom(state: .changed, scale: 0.1)
+    let restored = videoZoom == 1 && zoomBadge.text == "元のサイズ" && pinchOriginal
+    updateZoom(state: .ended, scale: 0.1)
+    updateZoom(state: .began, scale: 1); updateZoom(state: .changed, scale: 0.5)
+    let minimum = videoZoom == 1 && pinchOriginal && !pinchExpanded && zoomBadge.text == "元のサイズ"
+    updateZoom(state: .changed, scale: 0.2)
+    let stable = videoZoom == 1 && header.frame == headerFrame && panel.frame == panelFrame
+    updateZoom(state: .ended, scale: 0.2)
+    videoZoom = old; onZoom?(old); onAction = handler; zoomExpiry?.cancel(); zoomBadge.isHidden = true
+    return ["pinchZoomFollowsScale": expanding, "pinchZoomMaximumEight": capped, "pinchZoomMinimumOriginal": minimum,
+      "pinchZoomOriginalAcknowledgement": restored, "pinchZoomReleaseHasNoImpact": noEndImpact,
+      "pinchZoomKeepsUIAndPanel": stable, "pinchExcludesNavigation": noNavigation,
+      "singleFingerNavigationOnly": navigationPan.maximumNumberOfTouches == 1 && orientationPan.maximumNumberOfTouches == 1]
   }
   private func runOrientationChecks() -> [String: Bool] {
     let savedFrame = frame, handler = onAction, savedHUD = controlsVisible

@@ -18,6 +18,21 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     let window = UIWindow(frame: UIScreen.main.bounds)
     window.rootViewController = NeoShell(); self.window = window; window.makeKeyAndVisible()
 #if targetEnvironment(simulator)
+    if let base = ProcessInfo.processInfo.environment["NEO_EPG_NETWORK_PROBE"], let url = URL(string: base+"/api/videos/4") {
+      DispatchQueue.main.asyncAfter(deadline: .now()+1) {
+        let player = NeoPlayerController(url: url, title: "Synthetic network recovery", username: "", password: "", networkCaching: 5000)
+        player.recordingContext = ["disableHistory": true]; player.modalPresentationStyle = .fullScreen
+        window.rootViewController?.present(player, animated: false) {
+          player.runNetworkProbe { result in
+            NeoPiPSmoke.save("network-recovery-smoke", result)
+            if let source = NeoPlaybackDiagnostics.exportURL(), let data = try? Data(contentsOf: source) {
+              try? data.write(to: NeoPiPSmoke.directory.appendingPathComponent("network-diagnostics.json"))
+            }
+          }
+        }
+      }
+      return true
+    }
     if ProcessInfo.processInfo.environment["NEO_EPG_STORAGE_SMOKE"] == "1" {
       NeoNative.runStorageSmokeTest()
       NeoCommentOverlay.runPreparationSmoke()

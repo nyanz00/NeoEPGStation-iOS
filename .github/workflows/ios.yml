@@ -105,6 +105,9 @@ jobs:
       - name: Check iPad UI
         if: ${{ inputs.check_ipad == true }}
         run: python3 -u scripts/simulator-smoke.py --ipad-only
+      - name: Exercise network loss and recovery through native VLC
+        if: always() && hashFiles('build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app/Info.plist') != ''
+        run: python3 -u scripts/network-recovery-smoke.py
       - name: Preserve simulator application for UI diagnostics
         if: always() && hashFiles('build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app/Info.plist') != ''
         run: |

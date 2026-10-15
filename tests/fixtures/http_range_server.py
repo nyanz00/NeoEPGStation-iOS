@@ -2,7 +2,9 @@
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Thread
+from threading import Thread, Lock
+import time
+import socket
 
 
 def start_server(directory):
@@ -11,6 +13,12 @@ def start_server(directory):
             pass
 
         def do_GET(self):
+            if self.path.startswith('/fault/arm/'):
+                with self.server.fault_lock:
+                    self.server.fault_mode = self.path.rsplit('/', 1)[-1]
+                    self.server.fault_remaining = 3 if self.server.fault_mode == 'slow' else 1
+                self.send_response(200); self.send_header('Content-Length', '0'); self.end_headers()
+                return
             if self.path == '/api/videos/1/duration':
                 body = b'{"duration":20}'
                 self.send_response(200)
@@ -27,10 +35,10 @@ def start_server(directory):
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            if self.path not in ['/api/videos/1', '/api/videos/2', '/api/videos/3']:
+            if self.path not in ['/api/videos/1', '/api/videos/2', '/api/videos/3', '/api/videos/4']:
                 self.send_error(404)
                 return
-            data = (Path(directory) / {'/api/videos/1': 'player-tap.ts', '/api/videos/2': 'pip-fixture.mp4', '/api/videos/3': 'player-seek.mkv'}[self.path]).read_bytes()
+            data = (Path(directory) / {'/api/videos/1': 'player-tap.ts', '/api/videos/2': 'pip-fixture.mp4', '/api/videos/3': 'player-seek.mkv', '/api/videos/4': 'network-fixture.mkv'}[self.path]).read_bytes()
             value = self.headers.get('Range', 'bytes=0-').removeprefix('bytes=')
             begin, end = value.split('-')
             begin = int(begin)
@@ -39,6 +47,16 @@ def start_server(directory):
                 self.send_error(416)
                 return
             body = data[begin:end+1]
+            mode = None
+            if self.path == '/api/videos/4':
+                with self.server.fault_lock:
+                    if self.server.fault_remaining > 0:
+                        mode = self.server.fault_mode; self.server.fault_remaining -= 1
+                if mode:
+                    self.server.fault_events.append({'mode': mode, 'offset': begin, 'time': time.monotonic()})
+                    if mode == 'slow': time.sleep(9)
+                    elif mode == 'disconnect':
+                        self.connection.shutdown(socket.SHUT_RDWR); self.connection.close(); return
             self.send_response(206)
             self.send_header('Content-Length', str(len(body)))
             self.send_header('Content-Range', f'bytes {begin}-{end}/{len(data)}')
@@ -70,5 +88,6 @@ def start_server(directory):
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     server.progress = []
     server.history_requests = []
+    server.fault_lock = Lock(); server.fault_mode = None; server.fault_remaining = 0; server.fault_events = []
     Thread(target=server.serve_forever, daemon=True).start()
     return server

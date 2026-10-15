@@ -35,7 +35,10 @@
   if ([message isEqualToString:@"EOF reached"]) { [NeoPlaybackDiagnostics record:@"vlc.inputEOF" fields:@{}]; }
   if (level == kVLCLogLevelError || level == kVLCLogLevelWarning) {
     // Classify locally; raw libVLC messages can include private URLs/text.
-    NSInteger kind = [message containsString:@"INPUT_CONTROL_SET_TIME"] || [message containsString:@"seek"] ? 1
+    NSInteger kind = [message containsString:@"PCR"] || [message containsString:@"pts_delay"] || [message containsString:@"clock"] ? 7
+      : [message containsString:@"late"] || [message containsString:@"dropp"] ? 8
+      : [message containsString:@"VideoToolbox"] || [message containsString:@"VTDecompression"] ? 9
+      : [message containsString:@"INPUT_CONTROL_SET_TIME"] || [message containsString:@"seek"] ? 1
       : [message containsString:@"EOF"] || [message containsString:@"end of file"] ? 2
       : [message containsString:@"read"] ? 3
       : [message containsString:@"connect"] || [message containsString:@"HTTP"] ? 4
@@ -222,6 +225,8 @@
   };
   if (self.recordingContext) { [self.chrome configure:self.recordingContext]; }
   self.movieView = self.chrome.videoView;
+  __weak typeof(self) zoomOwner = self;
+  self.chrome.onZoom = ^(CGFloat scale) { [zoomOwner applyVideoZoom:scale]; };
   self.statusLabel = self.chrome.statusLabel; self.statusLabel.text = @"PLAY · 準備中";
   self.timeLabel = self.chrome.timeLabel; self.commentLabel = self.chrome.commentLabel;
   self.playButton = self.chrome.playButton; self.pipButton = self.chrome.pipButton;
@@ -1076,6 +1081,8 @@
       @"state": @(self.player.state), @"buffering": @(self.buffering), @"seeking": @(self.seeking),
       @"nativePlaying": @(self.player.isPlaying), @"appState": @(UIApplication.sharedApplication.applicationState),
       @"decodedVideo": @(nativeStats.decodedVideo), @"decodedAudio": @(nativeStats.decodedAudio),
+      @"readBytes": @(nativeStats.readBytes), @"demuxBytes": @(nativeStats.demuxReadBytes),
+      @"latePictures": @(nativeStats.latePictures), @"playedAudio": @(nativeStats.playedAudioBuffers),
       @"displayedPictures": @(nativeStats.displayedPictures), @"lostPictures": @(nativeStats.lostPictures),
       @"outputArrivalAge": @(self.commentPiP.videoDecodeHostTime > 0 ? MAX(0, now-self.commentPiP.videoDecodeHostTime) : -1),
       @"decodeAge": @(self.commentPiP.videoDecodeHostTime > 0 ? MAX(0, now-self.commentPiP.videoDecodeHostTime) : -1),
@@ -1328,6 +1335,7 @@
   view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   view.frame = self.movieView.bounds;
   [self.movieView addSubview:view];
+  [self applyVideoZoom:self.chrome.videoZoom];
   [NeoVLCFrameTap bindView:view sink:self.commentPiP];
   if (self.comments) { [self.movieView bringSubviewToFront:self.comments]; }
 }
@@ -1335,8 +1343,15 @@
   // Resize VLC's outer drawable only. libVLC lays out its inner aspect-fit
   // sample-buffer view using the resulting video-output size notification.
   if (self.videoOutputView.superview != self.movieView) { return; }
+  self.videoOutputView.transform = CGAffineTransformIdentity;
   self.videoOutputView.frame = self.movieView.bounds;
   [self.videoOutputView setNeedsLayout]; [self.videoOutputView layoutIfNeeded];
+  [self applyVideoZoom:self.chrome.videoZoom];
+}
+- (void)applyVideoZoom:(CGFloat)scale {
+  // Scale only VLC's drawable. HUD, comments, program info and PiP stay at
+  // their own sizes; no input, byte range, decoder or playback clock changes.
+  self.videoOutputView.transform = CGAffineTransformMakeScale(scale, scale);
 }
 - (CGRect)bounds { return self.movieView.bounds; }
 - (void)updatePiPState {
@@ -1352,6 +1367,34 @@
 }
 #if TARGET_OS_SIMULATOR
 - (void)closeTapSmoke { [self closePlayer]; }
+- (void)runNetworkProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  [self pollNetworkProbe:0 armedAt:0 rows:[NSMutableArray new] completion:completion];
+}
+- (void)pollNetworkProbe:(NSInteger)attempt armedAt:(double)armed rows:(NSMutableArray *)rows completion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  double now = CACurrentMediaTime();
+  VLCMediaStats native = self.player.media.statistics;
+  NSDictionary *video = [NeoVLCFrameTap snapshot:self.movieView];
+  [rows addObject:@{@"host": @(now), @"mediaMs": @([self mediaTime]), @"video": @(native.decodedVideo),
+    @"audio": @(native.decodedAudio), @"late": @(native.latePictures), @"lost": @(native.lostPictures),
+    @"playedAudio": @(native.playedAudioBuffers), @"read": @(native.readBytes), @"demux": @(native.demuxReadBytes),
+    @"arrivalAge": video[@"arrivalAge"] ?: @(-1), @"scheduledInMs": video[@"scheduledInMs"] ?: @(-1),
+    @"state": @(self.player.state), @"buffering": @(self.buffering), @"loading": @(self.chrome.loadingVisible),
+    @"reloading": @(self.reloading), @"reload": @(self.reloadGeneration)}];
+  if (!armed && [self mediaTime] >= 4000 && native.decodedVideo > 10) {
+    armed = now;
+    NSString *base = NSProcessInfo.processInfo.environment[@"NEO_EPG_NETWORK_PROBE"];
+    NSString *mode = NSProcessInfo.processInfo.environment[@"NEO_EPG_NETWORK_MODE"] ?: @"slow";
+    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/fault/arm/%@", base, mode]];
+    [[NSURLSession.sharedSession dataTaskWithURL:url] resume];
+  }
+  if ((armed && now-armed >= 57) || attempt >= 150) {
+    completion(@{@"success": @(armed > 0), @"armedAt": @(armed), @"rows": rows,
+      @"zoomChecks": [self.chrome runZoomChecks]}); return;
+  }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500*NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+    [self pollNetworkProbe:attempt+1 armedAt:armed rows:rows completion:completion];
+  });
+}
 - (void)waitForIPadWide:(BOOL)wide attempt:(NSInteger)attempt completion:(void (^)(BOOL))completion {
   BOOL ready = !self.rotatingPlayer && (self.chrome.bounds.size.width > self.chrome.bounds.size.height) == wide && self.landscape == wide;
   if (ready || attempt >= 100) { completion(ready); return; }

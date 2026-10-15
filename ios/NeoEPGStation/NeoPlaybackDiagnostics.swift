@@ -37,7 +37,8 @@ final class NeoPlaybackDiagnostics: NSObject {
     if events.count > 4096 { events.removeFirst(256) }
   }
   // Fixed categories only: 0 other, 1 seek, 2 EOF, 3 read, 4 connection,
-  // 5 decoder, 6 demux. Counts preserve storms without flooding the UI/log.
+  // 5 decoder, 6 demux, 7 clock/PCR, 8 late/drop, 9 VideoToolbox.
+  // Counts preserve storms without flooding the UI/log.
   @objc(nativeError:level:) static func nativeError(_ kind: Int, level: Int) {
     lock.lock()
     let key = kind*10+level
