@@ -20,13 +20,18 @@ def inspect(mode, result, diagnostics, faults):
     drift = 0
     for row in rows:
         key = (row['video'], row['playedAudio'])
-        if start is None or key != (start['video'], start['playedAudio']) or not (row['buffering'] or row['loading']):
+        # libVLC publishes statistics from its input loop. While HTTP blocks,
+        # queued output may still advance. A progressing native time point is
+        # additional evidence; don't call that legitimate playback starvation.
+        point_stale = row.get('pointAge', 10) >= 1.5
+        if start is None or key != (start['video'], start['playedAudio']) or not point_stale or not (row['buffering'] or row['loading']):
             start = row
         else:
             drift = max(drift, row['mediaMs']-start['mediaMs'])
     assert drift <= 3000, f'Presentation advanced {drift}ms while A/V decoding/output was stalled'
     events = diagnostics['events']
     if mode == 'slow':
+        assert any(r.get('confirmedMs', -1) >= 0 for r in rows), 'Native time-point observation is unavailable'
         assert any(e['event'] == 'network.presentationHeld' for e in events), 'The starved-read path was not exercised'
         assert all(r['flowMuted'] for r in rows if r.get('holding')), 'Audio escaped a held presentation'
         resyncs = [e for e in events if e['event'] == 'network.inputResynced']
