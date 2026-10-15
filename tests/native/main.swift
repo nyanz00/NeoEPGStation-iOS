@@ -334,6 +334,10 @@ continuousRecovery.begin(100, timeout: 10)
 _ = continuousRecovery.evaluate(["outputID": 1, "samples": 10, "arrivalAge": 0, "scheduledInMs": 0], mediaMs: 1000, now: 200)
 check(continuousRecovery.evaluate(["outputID": 1, "samples": 10, "arrivalAge": 4, "scheduledInMs": -4000], mediaMs: 5000, now: 204) == 2,
   "Video starvation is detected even more than 45 seconds after foregrounding")
+continuousRecovery.begin(300, timeout: 10)
+_ = continuousRecovery.evaluate(["outputID": 1, "samples": 100, "arrivalAge": 0.1, "scheduledInMs": 0, "nativeDecodeAge": 0], mediaMs: 1000, now: 300)
+check(continuousRecovery.evaluate(["outputID": 1, "samples": 200, "arrivalAge": 0.1, "scheduledInMs": 0, "nativeDecodeAge": 9], mediaMs: 10000, now: 309) == 2,
+  "Repeating a paused image cannot conceal a stopped decoder behind fresh output timestamps")
 let networkPlayback = NeoNetworkPlaybackFlow()
 func networkStep(_ waiting: Bool, _ delivery: Int64, _ video: UInt64, _ age: Double, wants: Bool = true, eligible: Bool = true) -> Int {
   networkPlayback.update(waiting: waiting, delivery: delivery, video: video, videoAge: age, staleAfter: 1.5, eligible: eligible, wantsPlayback: wants)

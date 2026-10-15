@@ -159,6 +159,7 @@
 @property (nonatomic) NeoNetworkPlaybackFlow *networkFlow;
 @property (nonatomic) uint64_t flowDecodedVideo;
 @property (nonatomic) NSTimeInterval flowDecodedAt;
+@property (nonatomic) NSTimeInterval flowStaleThreshold;
 @property (nonatomic) NSInteger lastVideoOutputID;
 @property (nonatomic) BOOL repairingVideo;
 @property (nonatomic) BOOL videoResuming;
@@ -704,7 +705,11 @@
     [self.videoRecovery begin:now timeout:self.networkCaching/1000.0+10];
     [NeoVLCFrameTap monitorContent:self.movieView];
   }
-  NSDictionary *stats = [NeoVLCFrameTap snapshot:self.movieView];
+  NSMutableDictionary *stats = [[NeoVLCFrameTap snapshot:self.movieView] mutableCopy];
+  if (self.flowDecodedAt > 0) {
+    stats[@"nativeDecodeAge"] = @(now-self.flowDecodedAt);
+    stats[@"nativeDecodeStaleAfter"] = @(MAX(8, self.flowStaleThreshold));
+  }
   NSInteger outputID = [stats[@"outputID"] integerValue];
   if (outputID != self.lastVideoOutputID) {
     self.lastVideoOutputID = outputID;
@@ -1072,6 +1077,7 @@
   if (self.buffering) { age = MAX(age, now-self.flowDecodedAt); }
   VLCMediaVideoTrack *video = self.player.media.videoTracks.firstObject.video;
   double threshold = video.frameRate > 0 ? MAX(1.5, 3.0*MAX(1,video.frameRateDenominator)/video.frameRate) : 1.5;
+  self.flowStaleThreshold = threshold;
   NSDictionary *flow = self.rewindCache.flowState;
   NSInteger action = [self.networkFlow updateWithWaiting:[flow[@"waiting"] boolValue]
     delivery:[flow[@"delivery"] longLongValue] video:native.decodedVideo

@@ -48,7 +48,8 @@ final class NeoVideoRecovery: NSObject {
     if let arrival = stats["arrivalAge"]?.doubleValue {
       // Continuous health checks read existing timestamps only. Picture
       // fingerprinting stays limited to decoder-repair verification windows.
-      frozen = id == 0 || failed || (arrival >= 2.5 && scheduled < -1000)
+      let decoderStale = stats["nativeDecodeAge"].map { $0.doubleValue >= (stats["nativeDecodeStaleAfter"]?.doubleValue ?? 8) } ?? false
+      frozen = id == 0 || failed || (arrival >= 2.5 && scheduled < -1000) || decoderStale
     } else {
       frozen = id == 0 || failed || (age < 0 && count == samples) ||
         (age >= 2.5 && (fps < 15 || scheduled > 500))
