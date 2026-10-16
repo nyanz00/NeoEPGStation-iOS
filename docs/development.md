@@ -2,6 +2,8 @@
 
 ## ビルド
 
+TSの実況過去ログ、ARIB字幕の保持時間、ピンチの倍率表示と触覚は `player-ts-comments-feedback.md` を参照する。
+
 PLAYの通信待機、iPadプレイヤーの戻る、1〜8倍のピンチと触覚は `player-network-zoom.md` を参照する。
 
 iPadの接続画面・メニュー開閉・回転と、録画一覧のユーザー選択欄は `ipad-navigation-rotation.md` を参照する。

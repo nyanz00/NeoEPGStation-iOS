@@ -5,20 +5,51 @@
 
 static char NeoARIBStateKey, NeoARIBPictureKey, NeoARIBTimerKey;
 static void (*NeoOriginalSubtitleDraw)(id, SEL, id);
+@interface NeoStableSubtitleRegion : NSObject
+@property (nonatomic) CGRect backingFrame;
+@property (nonatomic) CGFloat alpha;
+@property (nonatomic) CGImageRef image;
+@end
+@implementation NeoStableSubtitleRegion
+- (void)dealloc { if (_image) { CGImageRelease(_image); } }
+@end
+@interface NeoStableSubtitlePicture : NSObject
+@property (nonatomic, copy) NSArray *regions;
+@end
+@implementation NeoStableSubtitlePicture
+@end
+static id NeoFreezeSubtitle(id picture) {
+  if (!picture || ![picture respondsToSelector:@selector(regions)]) { return nil; }
+  NSArray *regions = ((id (*)(id, SEL))objc_msgSend)(picture, @selector(regions));
+  if (regions.count == 0) { return nil; }
+  NSMutableArray *copies = [NSMutableArray new];
+  for (id source in regions) {
+    if (![source respondsToSelector:@selector(image)] || ![source respondsToSelector:@selector(backingFrame)] || ![source respondsToSelector:@selector(alpha)]) { return nil; }
+    CGImageRef image = ((CGImageRef (*)(id, SEL))objc_msgSend)(source, @selector(image));
+    if (!image) { return nil; }
+    NeoStableSubtitleRegion *copy = [NeoStableSubtitleRegion new];
+    copy.image = CGImageRetain(image);
+    copy.backingFrame = ((CGRect (*)(id, SEL))objc_msgSend)(source, @selector(backingFrame));
+    copy.alpha = ((CGFloat (*)(id, SEL))objc_msgSend)(source, @selector(alpha));
+    [copies addObject:copy];
+  }
+  NeoStableSubtitlePicture *copy = [NeoStableSubtitlePicture new]; copy.regions = copies; return copy;
+}
 static void NeoDrawARIBSubtitle(id view, SEL selector, id picture) {
   NSInteger (^state)(void) = objc_getAssociatedObject(view, &NeoARIBStateKey);
+  id snapshot = NeoFreezeSubtitle(picture);
   if (!state) {
     // Track selection and the app's first UI update are asynchronous. Keep the
     // image already on this view so binding after its first draw loses nothing.
-    if (picture) { objc_setAssociatedObject(view, &NeoARIBPictureKey, picture, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
+    if (snapshot) { objc_setAssociatedObject(view, &NeoARIBPictureKey, snapshot, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
     NeoOriginalSubtitleDraw(view, selector, picture); return;
   }
   NSInteger active = state();
   NSArray *regions = picture && [picture respondsToSelector:@selector(regions)] ?
     ((id (*)(id, SEL))objc_msgSend)(picture, @selector(regions)) : nil;
   if (regions.count > 0) {
-    objc_setAssociatedObject(view, &NeoARIBPictureKey, picture, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    NeoOriginalSubtitleDraw(view, selector, picture);
+    objc_setAssociatedObject(view, &NeoARIBPictureKey, snapshot ?: picture, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NeoOriginalSubtitleDraw(view, selector, snapshot ?: picture);
   } else {
     id retained = active > 0 ? objc_getAssociatedObject(view, &NeoARIBPictureKey) : nil;
     NeoOriginalSubtitleDraw(view, selector, retained ?: picture);
@@ -225,6 +256,21 @@ static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideo
 }
 #if TARGET_OS_SIMULATOR
 + (NSDictionary<NSString *, NSNumber *> *)monitoringSmoke {
+  // VLC reuses subtitle objects: retaining their container must not let later
+  // region replacement or metadata mutation erase an active ARIB caption.
+  UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(1, 1)];
+  UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+    [UIColor.whiteColor setFill]; UIRectFill(CGRectMake(0, 0, 1, 1));
+  }];
+  NeoStableSubtitleRegion *sourceRegion = [NeoStableSubtitleRegion new];
+  sourceRegion.image = CGImageRetain(image.CGImage);
+  sourceRegion.alpha = 0.75; sourceRegion.backingFrame = CGRectMake(2, 3, 4, 5);
+  NeoStableSubtitlePicture *sourcePicture = [NeoStableSubtitlePicture new]; sourcePicture.regions = @[sourceRegion];
+  NeoStableSubtitlePicture *frozen = NeoFreezeSubtitle(sourcePicture);
+  sourcePicture.regions = @[]; sourceRegion.alpha = 0; sourceRegion.backingFrame = CGRectZero;
+  NeoStableSubtitleRegion *saved = frozen.regions.firstObject;
+  BOOL subtitleStable = frozen.regions.count == 1 && saved.image == image.CGImage &&
+    saved.alpha == 0.75 && CGRectEqualToRect(saved.backingFrame, CGRectMake(2, 3, 4, 5));
   NeoTappedVideoLayer *old = [NeoTappedVideoLayer new], *layer = [NeoTappedVideoLayer new];
   BOOL fresh = [[layer snapshot][@"monitoring"] boolValue] && old.outputID != layer.outputID;
   old.resourceInterrupted = YES; [old prepareResume];
@@ -248,7 +294,7 @@ static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideo
   NSDictionary *stats = [layer snapshot];
   BOOL measured = [stats[@"changes"] integerValue] == 3 && [stats[@"contentAge"] doubleValue] >= 0;
   if (sample) { CFRelease(sample); } if (format) { CFRelease(format); } CVPixelBufferRelease(pixel);
-  return @{@"freshOutputMonitored": @(fresh), @"freshOutputContentChangesMeasured": @(measured), @"interruptedResourceSurvivesDisplayFlush": @(interrupted)};
+  return @{@"freshOutputMonitored": @(fresh), @"freshOutputContentChangesMeasured": @(measured), @"interruptedResourceSurvivesDisplayFlush": @(interrupted), @"subtitleSnapshotSurvivesVLCMutation": @(subtitleStable)};
 }
 + (UIView *)videoViewInView:(UIView *)view {
   if ([view.layer isKindOfClass:NeoTappedVideoLayer.class]) { return view; }

@@ -1583,7 +1583,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     if (next < checkpoints.count && time >= [checkpoints[next] doubleValue]) {
       UIView *view = [self aribSubtitleView:self.movieView]; NSUInteger regions = 0;
       @try { regions = [[[view valueForKey:@"pendingSubpicture"] valueForKey:@"regions"] count]; } @catch (NSException *error) {}
-      [rows addObject:@{@"time": @(time), @"regions": @(regions), @"viewFound": @(view != nil), @"selected": @(selected)}];
+      [rows addObject:@{@"time": @(time), @"regions": @(regions), @"viewFound": @(view != nil), @"selected": @(selected), @"sourceState": @([self.aribClock stateAt:time])}];
       UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:self.movieView.bounds.size];
       UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) { [self.movieView drawViewHierarchyInRect:self.movieView.bounds afterScreenUpdates:NO]; }];
       NSString *name = [NSString stringWithFormat:@"arib-%lu.png", (unsigned long)next];
@@ -1845,7 +1845,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
           BOOL bounded = !self.videoReloadRecovery && !self.repairingVideo && !self.videoResuming &&
             self.playbackFailed && !self.chrome.loadingVisible && self.chrome.controlsVisible && self.reloadGeneration == reload;
           checks[@"failedVideoRecoveryStopsSpinnerAndReloadLoop"] = @(bounded);
-          BOOL monitored = [monitor[@"freshOutputMonitored"] boolValue] && [monitor[@"freshOutputContentChangesMeasured"] boolValue] && [monitor[@"interruptedResourceSurvivesDisplayFlush"] boolValue];
+          BOOL monitored = [monitor[@"freshOutputMonitored"] boolValue] && [monitor[@"freshOutputContentChangesMeasured"] boolValue] && [monitor[@"interruptedResourceSurvivesDisplayFlush"] boolValue] && [monitor[@"subtitleSnapshotSurvivesVLCMutation"] boolValue];
           // Delayed terminal notifications after failure must not route back
           // through the older background-connection recovery path.
           [self.player stop];
