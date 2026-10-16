@@ -39,3 +39,4 @@ shutil.copyfile(result, 'dist/arib-timing-smoke.json')
 value = json.loads(result.read_text())
 print(json.dumps(value, indent=2))
 assert value['success'], 'Native ARIB fixture did not complete'
+assert value['matchesWebTiming'], 'Native ARIB captions expired before the broadcast replacement/clear'

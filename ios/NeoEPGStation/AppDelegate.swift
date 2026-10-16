@@ -22,7 +22,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
       UserDefaults.standard.removeObject(forKey: "player.subtitle.name")
       DispatchQueue.main.asyncAfter(deadline: .now()+1) {
         let player = NeoPlayerController(url: NeoPiPSmoke.directory.appendingPathComponent("arib-timing.ts"), title: "Synthetic ARIB timing", username: "", password: "", networkCaching: 100)
-        player.recordingContext = ["disableHistory": true]; player.modalPresentationStyle = .fullScreen
+        player.recordingContext = ["disableHistory": true, "videoFileType": "ts"]; player.modalPresentationStyle = .fullScreen
         window.rootViewController?.present(player, animated: false) {
           player.runARIBProbe { result in NeoPiPSmoke.save("arib-timing-smoke", result) }
         }

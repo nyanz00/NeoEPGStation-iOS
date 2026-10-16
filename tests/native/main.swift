@@ -161,6 +161,17 @@ let jikkyoLoader = NeoCommentLoader(source: URL(string: "https://example.com/neo
 check(jikkyoLoader.permitsRedirect(to: URL(string: "https://example.com/neo/api/videos/7/comments")!), "Allow the same-origin TS comment API")
 check(!jikkyoLoader.permitsRedirect(to: URL(string: "https://example.com/neo/api/videos/8/comments")!), "Never redirect comments to another recording")
 jikkyoLoader.close()
+let aribPackets = try Data(contentsOf: URL(fileURLWithPath: "tests/fixtures/arib-timing-meta.ts"))
+var aribTiming = NeoARIBTiming()
+for offset in stride(from: 0, to: aribPackets.count, by: 321) {
+  aribTiming.observe(aribPackets.subdata(in: offset..<min(offset+321, aribPackets.count)), offset: Int64(offset))
+}
+func aribVisible(_ time: Double) -> Bool? { aribTiming.schedule.last(where: { $0.0 <= time })?.1 }
+check(aribVisible(0.5) == nil && aribVisible(2) == true && aribVisible(4) == true, "ARIB indefinite caption survives until the next presentation")
+check(aribVisible(6.5) == true && aribVisible(8) == true, "ARIB wait without clear does not expire a caption")
+check(aribVisible(10) == true && aribVisible(12) == false && aribVisible(14) == true && aribVisible(17) == false, "ARIB delayed and standalone clears retain their exact schedule")
+aribTiming.observe(aribPackets, offset: 0)
+check(aribTiming.schedule.count == 6 && aribVisible(4) == true, "Cached TS replay deduplicates ARIB timing events")
 do {
   _ = try NeoCommentLoader.parseJikkyo(Data(String(decoding: jikkyoData, as: UTF8.self).replacingOccurrences(of: #""timeBase":"video""#, with: #""timeBase":"absolute""#).utf8))
   check(false, "Reject a non-video time base")

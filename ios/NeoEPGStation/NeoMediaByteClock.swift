@@ -1,5 +1,138 @@
 import Foundation
 
+// Timing-only ARIB adapter. Glyphs, colors and DRCS remain rendered by VLC.
+// Read already downloaded TS packets; never perform another media request.
+struct NeoARIBTiming {
+  private var nextOffset: Int64 = -1, carry = Data()
+  private var origin: Double?
+  private var packets: [Int: Data] = [:], counters: [Int: Int] = [:]
+  private var events: [Int64: Bool] = [:]
+  var schedule: [(Double, Bool)] { events.sorted { $0.key < $1.key }.map { (Double($0.key)/1000, $0.value) } }
+
+  mutating func observe(_ data: Data, offset: Int64) {
+    if offset != nextOffset { carry.removeAll(); packets.removeAll(); counters.removeAll() }
+    let carryCount = carry.count
+    var bytes = Array(carry); bytes.append(contentsOf: data); carry.removeAll()
+    let absolute = offset-Int64(carryCount)
+    var at = Int((188-absolute%188)%188)
+    while at+188 <= bytes.count {
+      defer { at += 188 }
+      guard bytes[at] == 0x47, bytes[at+1] & 0x80 == 0 else { continue }
+      let pid = Int(bytes[at+1]&31)*256+Int(bytes[at+2]), flags = bytes[at+3]
+      var payload = at+4
+      if flags & 0x20 != 0 {
+        let count = Int(bytes[payload]); payload += 1
+        guard payload+count <= at+188 else { continue }
+        if count >= 7, bytes[payload] & 0x10 != 0, origin == nil, absolute+Int64(at) < 1024*1024 {
+          let p = payload+1
+          let base = UInt64(bytes[p])<<25 | UInt64(bytes[p+1])<<17 | UInt64(bytes[p+2])<<9 | UInt64(bytes[p+3])<<1 | UInt64(bytes[p+4]>>7)
+          origin = Double(base)/90000
+        }
+        payload += count
+      }
+      guard flags & 0x10 != 0, payload < at+188 else { continue }
+      let cc = Int(flags & 15)
+      if let old = counters[pid], old == cc { continue }
+      if let old = counters[pid], (old+1)%16 != cc { packets[pid] = nil }
+      counters[pid] = cc
+      if bytes[at+1] & 0x40 != 0 {
+        packets[pid] = nil
+        guard payload+14 <= at+188, Array(bytes[payload..<payload+4]) == [0,0,1,0xbd],
+              bytes[payload+7]&0x80 != 0 else { continue }
+        packets[pid] = Data()
+      }
+      guard var packet = packets[pid], packet.count < 256*1024 else { continue }
+      packet.append(contentsOf: bytes[payload..<at+188])
+      if packet.count >= 6 {
+        let size = 6+Int(packet[4])*256+Int(packet[5])
+        if size > 6, packet.count >= size {
+          parsePES(Array(packet.prefix(size))); packets[pid] = nil
+        } else { packets[pid] = packet }
+      } else { packets[pid] = packet }
+    }
+    if at < bytes.count { carry = Data(bytes[at...]) }
+    nextOffset = offset+Int64(data.count)
+  }
+  private mutating func parsePES(_ pes: [UInt8]) {
+    guard let origin, pes.count >= 17, pes[8] >= 5 else { return }
+    let p = 9
+    let pts = UInt64(pes[p]>>1&7)<<30 | UInt64(pes[p+1])<<22 | UInt64(pes[p+2]>>1)<<15 | UInt64(pes[p+3])<<7 | UInt64(pes[p+4]>>1)
+    var seconds = Double(pts)/90000-origin
+    if seconds < -40000 { seconds += Double(UInt64(1)<<33)/90000 }
+    let begin = 9+Int(pes[8])
+    guard begin+8 <= pes.count, pes[begin] == 0x80, pes[begin+1] == 0xff else { return }
+    let group = begin+3+Int(pes[begin+2]&15)
+    guard group+9 <= pes.count, (pes[group]>>2)&15 != 0 else { return } // not language management
+    let end = group+5+Int(pes[group+3])*256+Int(pes[group+4])
+    var unit = group+5
+    guard end <= pes.count, pes[unit]>>6 == 0 else { return } // unsupported absolute-time mode stays with VLC
+    unit += 1
+    let loop = Int(pes[unit])<<16 | Int(pes[unit+1])<<8 | Int(pes[unit+2]); unit += 3
+    guard unit+loop <= end else { return }
+    let limit = unit+loop
+    var elapsed = 0.0
+    while unit+5 <= limit {
+      let count = Int(pes[unit+2])<<16 | Int(pes[unit+3])<<8 | Int(pes[unit+4])
+      let start = unit+5; unit = start+count
+      guard unit <= limit else { return }
+      if pes[start-4] == 0x20 { parseText(pes, start: start, end: unit, seconds: seconds, elapsed: &elapsed) }
+    }
+    if events.count > 20000 { for key in events.keys.sorted().prefix(events.count-20000) { events[key] = nil } }
+  }
+  private mutating func parseText(_ bytes: [UInt8], start: Int, end: Int, seconds: Double, elapsed: inout Double) {
+    var at = start
+    func key(_ elapsed: Double) -> Int64 { Int64(((seconds+elapsed)*1000).rounded()) }
+    while at < end {
+      let code = bytes[at]; at += 1
+      if code == 0x0c { events[key(elapsed)] = false }
+      else if code == 0x9d {
+        guard at+1 < end, bytes[at] == 0x20 else { return }
+        elapsed += Double(bytes[at+1]&63)/10; at += 2
+      } else if code == 0x9b { // CSI parameters and final byte
+        while at < end && bytes[at] != 0x20 { at += 1 }
+        at = min(end, at+2)
+      } else if code == 0x1b {
+        while at < end && (0x20...0x2f).contains(bytes[at]) { at += 1 }
+        at = min(end, at+1)
+      } else if code == 0x19 { events[key(elapsed)] = true; at = min(end, at+1) }
+      else if [0x16,0x1d,0x8b,0x91,0x93,0x94,0x97,0x98].contains(code) {
+        at = min(end, at+1)
+      } else if code == 0x1c { at = min(end, at+2) }
+      else if code == 0x90 || code == 0x92 {
+        if at < end && bytes[at] == 0x20 { at += 1 }; at = min(end, at+1)
+      } else if code == 0x95 { return } // macro definitions: do not guess their display lifetime
+      else if code >= 0x20 && code != 0x7f && code != 0xff && !(0x80...0x9f).contains(code) {
+        events[key(elapsed)] = true
+      }
+    }
+  }
+}
+
+@objc(NeoARIBCaptionClock)
+final class NeoARIBCaptionClock: NSObject {
+  private var parser = NeoARIBTiming()
+  private let queue = DispatchQueue(label: "neo.arib.timing", qos: .userInitiated)
+  private let lock = NSLock()
+  private var events: [(Double, Bool)] = []
+  @objc(observeData:offset:)
+  func observe(_ data: Data, offset: Int64) {
+    queue.async { [weak self] in
+      guard let self else { return }
+      self.parser.observe(data, offset: offset)
+      let schedule = self.parser.schedule
+      self.lock.lock(); self.events = schedule; self.lock.unlock()
+    }
+  }
+  // -1 = no known timing, 0 = explicit clear, 1 = a caption is active.
+  @objc func state(at seconds: Double) -> Int {
+    guard seconds.isFinite else { return -1 }
+    lock.lock(); defer { lock.unlock() }
+    var low = 0, high = events.count
+    while low < high { let mid = (low+high)/2; if events[mid].0 <= seconds { low = mid+1 } else { high = mid } }
+    return low == 0 ? -1 : events[low-1].1 ? 1 : 0
+  }
+}
+
 // Read only EBML metadata, never infer seek positions from bitrate or scan
 // encoded frames. Offsets in Cues/SeekHead are relative to Segment's body.
 struct NeoMatroskaSeekIndex {

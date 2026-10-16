@@ -1,6 +1,43 @@
 #import "NeoVLCFrameTap.h"
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
+
+static char NeoARIBStateKey, NeoARIBPictureKey, NeoARIBTimerKey;
+static void (*NeoOriginalSubtitleDraw)(id, SEL, id);
+static void NeoDrawARIBSubtitle(id view, SEL selector, id picture) {
+  NSInteger (^state)(void) = objc_getAssociatedObject(view, &NeoARIBStateKey);
+  if (!state) { NeoOriginalSubtitleDraw(view, selector, picture); return; }
+  NSInteger active = state();
+  NSArray *regions = picture && [picture respondsToSelector:@selector(regions)] ?
+    ((id (*)(id, SEL))objc_msgSend)(picture, @selector(regions)) : nil;
+  if (regions.count > 0) {
+    objc_setAssociatedObject(view, &NeoARIBPictureKey, picture, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NeoOriginalSubtitleDraw(view, selector, picture);
+  } else {
+    id retained = active > 0 ? objc_getAssociatedObject(view, &NeoARIBPictureKey) : nil;
+    NeoOriginalSubtitleDraw(view, selector, retained ?: picture);
+    if (!retained) { objc_setAssociatedObject(view, &NeoARIBPictureKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
+    // A known broadcast clear must still clear a retained image, including
+    // when VLC has stopped issuing callbacks after its premature expiration.
+    if (retained && !objc_getAssociatedObject(view, &NeoARIBTimerKey)) {
+      __weak id weakView = view;
+      NSTimer *timer = [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer *timer) {
+        id target = weakView;
+        NSInteger (^provider)(void) = target ? objc_getAssociatedObject(target, &NeoARIBStateKey) : nil;
+        if (!provider || provider() <= 0) {
+          if (target) {
+            NeoOriginalSubtitleDraw(target, selector, nil);
+            objc_setAssociatedObject(target, &NeoARIBPictureKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            objc_setAssociatedObject(target, &NeoARIBTimerKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+          }
+          [timer invalidate];
+        }
+      }];
+      objc_setAssociatedObject(view, &NeoARIBTimerKey, timer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+  }
+}
 
 @interface NeoTappedVideoLayer : AVSampleBufferDisplayLayer
 @property (atomic, weak) id<NeoVideoFrameSink> frameSink;
@@ -116,6 +153,28 @@
 static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideoLayer.class; }
 
 @implementation NeoVLCFrameTap
++ (void)bindARIBView:(UIView *)view state:(NSInteger (^)(void))state {
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    Class type = NSClassFromString(@"VLCSampleBufferSubpictureView");
+    Method method = class_getInstanceMethod(type, NSSelectorFromString(@"drawSubpicture:"));
+    if (method) { NeoOriginalSubtitleDraw = (void *)method_getImplementation(method); method_setImplementation(method, (IMP)NeoDrawARIBSubtitle); }
+  });
+  if ([NSStringFromClass(view.class) isEqualToString:@"VLCSampleBufferSubpictureView"]) {
+    if (!state && objc_getAssociatedObject(view, &NeoARIBStateKey)) { [self clearARIBView:view]; }
+    objc_setAssociatedObject(view, &NeoARIBStateKey, state, OBJC_ASSOCIATION_COPY_NONATOMIC);
+  }
+  for (UIView *child in view.subviews) { [self bindARIBView:child state:state]; }
+}
++ (void)clearARIBView:(UIView *)view {
+  if (objc_getAssociatedObject(view, &NeoARIBStateKey)) {
+    [(NSTimer *)objc_getAssociatedObject(view, &NeoARIBTimerKey) invalidate];
+    objc_setAssociatedObject(view, &NeoARIBTimerKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(view, &NeoARIBPictureKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NeoOriginalSubtitleDraw(view, NSSelectorFromString(@"drawSubpicture:"), nil);
+  }
+  for (UIView *child in view.subviews) { [self clearARIBView:child]; }
+}
 + (NeoTappedVideoLayer *)layerIn:(UIView *)view {
   if ([view.layer isKindOfClass:NeoTappedVideoLayer.class]) { return (NeoTappedVideoLayer *)view.layer; }
   for (UIView *child in view.subviews) { NeoTappedVideoLayer *layer = [self layerIn:child]; if (layer) { return layer; } }

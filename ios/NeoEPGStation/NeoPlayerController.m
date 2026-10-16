@@ -145,6 +145,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 @property (nonatomic) UIButton *commentButton;
 @property (nonatomic) UILabel *commentLabel;
 @property (nonatomic) NeoCommentOverlay *comments;
+@property (nonatomic) NeoARIBCaptionClock *aribClock;
 @property (nonatomic) NSMutableSet<NSString *> *suppressedCommentTracks;
 @property (nonatomic) BOOL buffering;
 @property (nonatomic) UISlider *timeline;
@@ -386,6 +387,13 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 #endif
   { [self.comments configureWithSource:self.sourceURL username:self.username password:self.password
       jikkyo:[self.recordingContext[@"videoFileType"] isEqual:@"ts"]]; }
+  if ([self.recordingContext[@"videoFileType"] isEqual:@"ts"]) { self.aribClock = [NeoARIBCaptionClock new]; }
+#if TARGET_OS_SIMULATOR
+  if (self.aribClock && self.sourceURL.isFileURL) {
+    NSData *data = [NSData dataWithContentsOfURL:self.sourceURL];
+    if (data) { [self.aribClock observeData:data offset:0]; }
+  }
+#endif
   [self updateCommentState];
   self.timer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer) { [weakSelf updateControls]; }];
   [NSRunLoop.mainRunLoop addTimer:self.timer forMode:NSRunLoopCommonModes];
@@ -401,6 +409,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if (self.sourceURL.isFileURL || [self.recordingContext[@"isRecording"] boolValue]) { [self startWhenCommentsReady]; }
   else {
     self.rewindCache = [[NeoPlaybackCache alloc] initWithSource:self.sourceURL username:self.username password:self.password];
+    self.rewindCache.onSourceData = ^(NSData *data, int64_t offset) { [weakSelf.aribClock observeData:data offset:offset]; };
     self.rewindCache.onChange = ^{ [weakSelf updateControls]; };
     self.rewindCache.onTransportFailure = ^{
       if (!weakSelf || weakSelf.closing || weakSelf.transportSuspended || weakSelf.reloading) { return; }
@@ -915,6 +924,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   else { [self.player stop]; }
 }
 - (void)restartMedia {
+  [NeoVLCFrameTap clearARIBView:self.movieView];
   [self resetNetworkFlow];
   self.flowDecodedVideo = 0; self.flowDecodedAt = 0;
   self.flowPlayedAudio = 0; self.flowAudioAt = 0;
@@ -1057,6 +1067,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 - (void)beginScrubbing { [self showControls]; self.scrubbing = YES; }
 - (void)cancelScrubbing { self.scrubbing = NO; [self.chrome finishSeekPreview]; [self showControls]; }
 - (void)endScrubbing {
+  [NeoVLCFrameTap clearARIBView:self.movieView];
   if (self.player.isSeekable) { [self seekBy:(int64_t)(self.timeline.value * [self mediaLength]) - [self mediaTime] completion:^{}]; }
   else { [self.chrome finishSeekPreview]; }
   self.scrubbing = NO; [self showControls];
@@ -1091,6 +1102,15 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     [tracks addObject:@{@"index": @(index++), @"name": track.trackName ?: @"字幕", @"detail": track.trackDescription ?: @"", @"selected": @(track.isSelected)}];
   }
   [self.chrome updateSubtitleTracks:tracks];
+  BOOL arib = NO;
+  for (VLCMediaPlayerTrack *track in self.player.textTracks) {
+    NSString *description = [NSString stringWithFormat:@"%@ %@", track.trackName ?: @"", track.trackDescription ?: @""];
+    if (track.isSelected && [description rangeOfString:@"ARIB" options:NSCaseInsensitiveSearch].location != NSNotFound) { arib = YES; }
+  }
+  __weak typeof(self) weakSelf = self;
+  NSInteger (^provider)(void) = nil;
+  if (self.aribClock && arib) { provider = ^NSInteger { return [weakSelf.aribClock stateAt:[weakSelf mediaTime]/1000.0]; }; }
+  [NeoVLCFrameTap bindARIBView:self.movieView state:provider];
 }
 - (void)showSubtitles { [self showControls]; [self updateSubtitleSettings]; [self.chrome showSettings:@"subtitles"]; }
 - (void)showComments { [self showControls]; [self.chrome showSettings:@"comments"]; }
@@ -1575,7 +1595,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       BOOL comparison = rows.count == checkpoints.count;
       NSArray *expected = @[@YES, @YES, @YES, @YES, @YES, @NO, @YES, @NO];
       for (NSUInteger i=0; i<rows.count; i++) { comparison &= [rows[i][@"viewFound"] boolValue] && ([rows[i][@"regions"] unsignedIntegerValue] > 0) == [expected[i] boolValue]; }
-      completion(@{@"success": @(rows.count == checkpoints.count && selected), @"matchesWebTiming": @(comparison), @"rows": rows});
+      NSMutableArray *tracks = [NSMutableArray new];
+      for (VLCMediaPlayerTrack *track in self.player.textTracks) { [tracks addObject:@{@"name": track.trackName ?: @"", @"description": track.trackDescription ?: @""}]; }
+      completion(@{@"success": @(rows.count == checkpoints.count && selected && comparison), @"matchesWebTiming": @(comparison), @"rows": rows, @"tracks": tracks});
     }
   }];
 }
@@ -2311,6 +2333,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 - (void)play { [self setPlaybackIntent:YES]; }
 - (void)pause { [self setPlaybackIntent:NO]; }
 - (void)seekBy:(int64_t)offset completion:(dispatch_block_t)completion {
+  [NeoVLCFrameTap clearARIBView:self.movieView];
   if ((self.networkFlow.holding || self.networkFlow.verifying) && !self.flowResyncing) {
     int64_t target = [self mediaTime]+offset;
     [self resetNetworkFlow]; offset = target-[self mediaTime];
@@ -2484,6 +2507,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [NSNotificationCenter.defaultCenter removeObserver:self];
   if (self.loginReference) { [self.dialogs dismissDialogWithReference:self.loginReference]; }
   [NeoVLCFrameTap bindView:self.movieView sink:nil]; [self.commentPiP stop];
+  [NeoVLCFrameTap bindARIBView:self.movieView state:nil];
   // VLC 4 stops asynchronously. Keep the drawable and player alive until stopped.
   if (!self.player || self.player.state == VLCMediaPlayerStateStopped || self.player.state == VLCMediaPlayerStateNothingSpecial) {
     [self finishClosing];

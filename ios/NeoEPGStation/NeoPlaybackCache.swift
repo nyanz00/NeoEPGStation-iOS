@@ -67,6 +67,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   @objc private(set) var downloadedRanges: [[NSNumber]] = []
   @objc var onChange: (() -> Void)?
   @objc var onTransportFailure: (() -> Void)?
+  @objc var onSourceData: ((Data, Int64) -> Void)?
   private var suspended = false
   private(set) var networkBytes: Int64 = 0, hitBytes: Int64 = 0
   private var requestSequence = 0
@@ -496,6 +497,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
         "originSeek": deliveries[key]?.seek ?? NeoPlaybackDiagnostics.seekID,
         "offset": aligned, "bytes": data.count, "requestedOffset": offset, "blockEndTime": block.endTime ?? -1,
         "payloadBytes": min(data.count-Int(offset-aligned), Int(end-offset+1))])
+      onSourceData?(data, aligned)
       block.used = lastUse; blocks[aligned] = block; hitBytes += Int64(data.count); deliver(data); return
     }
     // A replacement MKV input first reads container headers before jumping to
@@ -527,6 +529,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
       case .success(let data):
         self.report(nil, kind: "fetch")
         self.flowLock.lock(); self.availableDelivery += 1; self.flowLock.unlock()
+        self.onSourceData?(data, aligned)
         let key = ObjectIdentifier(connection)
         if var entry = self.deliveries[key] { entry.networkBytes += Int64(data.count); self.deliveries[key] = entry }
         let range = self.byteClock.timeRange(offset: aligned, count: data.count) ?? self.byteClock.observeTS(data, offset: aligned) ?? self.byteClock.observeMatroska(data, offset: aligned)

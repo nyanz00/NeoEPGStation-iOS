@@ -247,6 +247,7 @@ jobs:
           elif [ "$RECHECK_PLAYBACK" = "true" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
             python3 -u scripts/simulator-smoke.py --iphone-only
+            python3 -u scripts/arib-timing-smoke.py
             python3 -u scripts/simulator-smoke.py --ipad-only
           elif [ "${{ inputs.recheck_iphone }}" = "true" ]; then
             python3 -u scripts/simulator-smoke.py --prepare

@@ -16,6 +16,8 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)monitorContent:(UIView *)view;
 + (NSDictionary<NSString *, NSNumber *> *)snapshot:(UIView *)view;
 + (void)bindView:(UIView *)view sink:(nullable id<NeoVideoFrameSink>)sink;
++ (void)bindARIBView:(UIView *)view state:(nullable NSInteger (^)(void))state;
++ (void)clearARIBView:(UIView *)view;
 #if TARGET_OS_SIMULATOR
 + (void)simulateResourceInterruption:(UIView *)view;
 + (nullable UIView *)videoViewInView:(UIView *)view;
