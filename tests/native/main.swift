@@ -149,7 +149,7 @@ check(!loader.permitsRedirect(to: URL(string: "http://example.com/neo/api/videos
 check(!loader.permitsRedirect(to: URL(string: "https://example.com/neo/api/videos/7/subtitles-other")!), "Keep redirects in the subtitle API")
 loader.close()
 
-let jikkyoData = Data(#"{"isSuccess":true,"source":"jikkyo","timeBase":"video","comments":[{"time":1.25,"text":"{\\pos(1,2)} literal","color":"#123456","position":"right","size":"big"},{"time":2,"text":"top","color":"#FF0000","position":"top","size":"small"},{"time":3,"text":"bottom","color":"#00FF00","position":"bottom","size":"medium"}]}"#.utf8)
+let jikkyoData = Data(##"{"isSuccess":true,"source":"jikkyo","timeBase":"video","comments":[{"time":1.25,"text":"{\\pos(1,2)} literal","color":"#123456","position":"right","size":"big"},{"time":2,"text":"top","color":"#FF0000","position":"top","size":"small"},{"time":3,"text":"bottom","color":"#00FF00","position":"bottom","size":"medium"}]}"##.utf8)
 let jikkyo = try NeoCommentLoader.parseJikkyo(jikkyoData)
 check(jikkyo.comments.count == 3 && jikkyo.comments[0].text == #"{\pos(1,2)} literal"#, "JSON text is literal, not ASS commands")
 check(jikkyo.comments[0].start == 1.25 && jikkyo.comments[0].end == 6.5 && jikkyo.comments[0].motion != nil, "Jikkyo uses video seconds and 5.25-second movement")
