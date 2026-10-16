@@ -26,6 +26,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   private var metal: MTKView?
   private var renderer: NeoDanmakuRenderer?
   private var loader: NeoCommentLoader?
+  private var usesJikkyo = false
   private var task: URLSessionDataTask?
   private var fullTask: URLSessionDataTask?
   private var rawTimeline: CommentTimeline?
@@ -102,6 +103,25 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   @objc static func isCommentName(_ value: String) -> Bool { NeoASSComments.isCommentName(value) }
 
 #if targetEnvironment(simulator)
+  static func runJikkyoSmoke(base: String) {
+    Task { @MainActor in
+      let overlay = NeoCommentOverlay(frame: CGRect(x: 0, y: 0, width: 640, height: 360))
+      overlay.enabled = true; overlay.timeProvider = { 2.5 }
+      overlay.configure(source: URL(string: base+"/api/videos/1")!, username: "", password: "", jikkyo: true)
+      for _ in 0..<100 {
+        if overlay.ready && overlay.fullLoaded { break }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+      }
+      let comments = overlay.compositionState.timeline?.comments ?? []
+      let checks = ["jsonAPISelected": overlay.tracks.first?.isJikkyo == true,
+        "commentsReachSharedRenderer": overlay.ready && comments.count == 3,
+        "pipUsesSameTimeline": overlay.compositionState.enabled && comments.first?.style.color.red == 1,
+        "fixedAndScrolling": comments.filter { $0.motion != nil }.count == 1 && comments.filter { $0.motion == nil }.count == 2,
+        "panelHasComments": overlay.panelComments().count == 3]
+      NeoPiPSmoke.save("jikkyo-comments-smoke", ["success": checks.values.allSatisfy { $0 }, "checks": checks])
+      overlay.stop()
+    }
+  }
   static func runPreparationSmoke() {
     Task { @MainActor in
       var checks: [String: Bool] = [:]
@@ -165,10 +185,11 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   }
 #endif
 
-  @objc(configureWithSource:username:password:)
-  func configure(source: URL, username: String, password: String) {
+  @objc(configureWithSource:username:password:jikkyo:)
+  func configure(source: URL, username: String, password: String, jikkyo: Bool = false) {
     guard renderer != nil, !closed else { settled = true; finishPreparationIfPossible(); onChange?(); return }
     loader = NeoCommentLoader(source: source, username: username, password: password)
+    usesJikkyo = jikkyo
     loader?.onMetric = { [weak self] event, milliseconds, count in
       NeoPlaybackDiagnostics.record(event, fields: ["durationMs": milliseconds, "count": count])
       if event == "comments.previewFetch" {
@@ -187,7 +208,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     task?.cancel(); task = nil; fullTask?.cancel(); fullTask = nil
     ready = false; settled = false; timeline = nil; rawTimeline = nil; contentVersion += 1; renderer?.reset(); status = "コメントを確認中…"
     refreshRendering(); onChange?()
-    task = loader.tracks { [weak self] result in
+    task = loader.tracks(jikkyo: usesJikkyo) { [weak self] result in
       DispatchQueue.main.async {
         guard let self = self, !self.closed, self.version == requestVersion else { return }
         switch result {
@@ -264,7 +285,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     windowRequest += 1; let window = windowRequest, requestVersion = version
     task?.cancel()
     let range = NeoCommentLoader.previewRange(at: time); previewStart = range.startAt
-    preparationStage = "コメント字幕を抽出・取得中"; status = preparationStage
+    preparationStage = usesJikkyo ? "実況ログを取得中" : "コメント字幕を抽出・取得中"; status = preparationStage
     refreshRendering(); onChange?()
     task = loader.text(track: track, range: range) { [weak self] result in
       DispatchQueue.main.async {
@@ -289,7 +310,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
         case .failure(let error):
           self.settled = true; self.preparationStage = ""; self.status = error.localizedDescription
           self.finishPreparationIfPossible(); self.onChange?()
-          self.loadFull(track, version: requestVersion)
+          if !self.usesJikkyo { self.loadFull(track, version: requestVersion) }
         }
       }
     }

@@ -1,4 +1,46 @@
 import UIKit
+import CoreHaptics
+
+// A short impact followed by a quiet, decaying tail; never fired on release.
+private final class NeoZoomHaptics {
+  private var engine: CHHapticEngine?
+  private let fallbackLight = UIImpactFeedbackGenerator(style: .light)
+  private let fallbackReturn = UIImpactFeedbackGenerator(style: .medium)
+  func prepare() {
+    fallbackLight.prepare(); fallbackReturn.prepare()
+    guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
+    do {
+      if engine == nil {
+        let created = try CHHapticEngine()
+        created.playsHapticsOnly = true
+        created.isAutoShutdownEnabled = true
+        engine = created
+      }
+      try engine?.start()
+    } catch { engine = nil }
+  }
+  func play(returning: Bool) {
+    if let engine {
+      do {
+        let impact = CHHapticEvent(eventType: .hapticTransient, parameters: [
+          CHHapticEventParameter(parameterID: .hapticIntensity, value: returning ? 0.6 : 0.22),
+          CHHapticEventParameter(parameterID: .hapticSharpness, value: returning ? 0.5 : 0.35)
+        ], relativeTime: 0)
+        let tail = CHHapticEvent(eventType: .hapticContinuous, parameters: [
+          CHHapticEventParameter(parameterID: .hapticIntensity, value: returning ? 0.16 : 0.07),
+          CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.2),
+          CHHapticEventParameter(parameterID: .decayTime, value: returning ? 0.045 : 0.02),
+          CHHapticEventParameter(parameterID: .sustained, value: 0)
+        ], relativeTime: 0, duration: returning ? 0.055 : 0.028)
+        let player = try engine.makePlayer(with: CHHapticPattern(events: [impact, tail], parameters: []))
+        try player.start(atTime: CHHapticTimeImmediate)
+        return
+      } catch { self.engine = nil }
+    }
+    if returning { fallbackReturn.impactOccurred(intensity: 0.7) }
+    else { fallbackLight.impactOccurred(intensity: 0.25) }
+  }
+}
 
 // UIKit controls stay independent of VLC's drawable and native playback clock.
 @objc(NeoPlayerChrome)
@@ -39,8 +81,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   @objc var onVideoLayout: (() -> Void)?
   private var pinchStart: CGFloat = 1, pinching = false
   private var pinchExpanded = false, pinchOriginal = false
-  private let zoomLight = UIImpactFeedbackGenerator(style: .light)
-  private let zoomReturn = UIImpactFeedbackGenerator(style: .medium)
+  private let zoomHaptics = NeoZoomHaptics()
   private var orientationProgress: CGFloat = 0
   private var orientationDragging = false, orientationPending = false, orientationWasWide = false
   private var orientationDistance: CGFloat = 1, orientationScale: CGFloat = 1, orientationTranslation: CGFloat = 0
@@ -113,7 +154,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     [videoView, pipCover, videoDim, header, controls, centerControls, panel, loadingButton, displayedStatus, transientNotice, zoomBadge, drawerDim, drawer].forEach(addSubview)
     zoomBadge.backgroundColor = UIColor.black.withAlphaComponent(0.6)
     zoomBadge.textColor = .white; zoomBadge.textAlignment = .center
-    zoomBadge.layer.cornerRadius = 36; zoomBadge.clipsToBounds = true
+    zoomBadge.clipsToBounds = true
     zoomBadge.layer.borderColor = UIColor.white.withAlphaComponent(0.8).cgColor; zoomBadge.layer.borderWidth = 1
     zoomBadge.adjustsFontSizeToFitWidth = true; zoomBadge.minimumScaleFactor = 0.65
     zoomBadge.isHidden = true; zoomBadge.isUserInteractionEnabled = false
@@ -383,7 +424,13 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     displayedStatus.frame = CGRect(x: videoView.frame.midX-messageWidth/2,
       y: loadingButton.frame.maxY+4, width: messageWidth, height: 54)
     transientNotice.frame = CGRect(x: videoView.frame.midX-messageWidth/2, y: centerControls.frame.maxY+4, width: messageWidth, height: 54)
-    zoomBadge.frame = CGRect(x: videoView.frame.midX-36, y: videoView.frame.minY+8, width: 72, height: 72)
+    let originalZoom = videoZoom == 1
+    let badgeText = zoomBadge.sizeThatFits(CGSize(width: 200, height: 40))
+    let badgeHeight = originalZoom ? ceil(zoomBadge.font.lineHeight)+12 : max(32, ceil(badgeText.width)+10)
+    let badgeWidth = originalZoom ? ceil(badgeText.width)+20 : badgeHeight
+    zoomBadge.frame = CGRect(x: videoView.frame.midX-badgeWidth/2, y: videoView.frame.minY+8, width: badgeWidth, height: badgeHeight)
+    zoomBadge.layer.cornerRadius = originalZoom ? 5 : badgeHeight/2
+    zoomBadge.layer.borderWidth = originalZoom ? 0 : 1
     drawerDim.frame = bounds
     let drawerWidth = min(240 + safe.left, bounds.width * 0.8)
     drawer.frame = CGRect(x: drawerDragging ? drawer.frame.minX : drawerOpen ? 0 : -drawerWidth, y: 0, width: drawerWidth, height: bounds.height)
@@ -761,7 +808,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private func updateZoom(state: UIGestureRecognizer.State, scale: CGFloat) {
     if state == .began {
       pinching = true; pinchStart = videoZoom; pinchExpanded = false; pinchOriginal = false
-      zoomExpiry?.cancel(); onAction?("interaction"); zoomLight.prepare(); zoomReturn.prepare()
+      zoomExpiry?.cancel(); onAction?("interaction"); zoomHaptics.prepare()
     }
     guard pinching else { return }
     if state == .began || state == .changed {
@@ -769,11 +816,11 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       guard requested.isFinite else { return }
       let next = requested <= 1.001 ? 1 : min(8, requested)
       if next > videoZoom+0.001 && !pinchExpanded {
-        pinchExpanded = true; zoomLight.impactOccurred()
+        pinchExpanded = true; zoomHaptics.play(returning: false)
       }
       // The lower boundary also acknowledges a shrink attempt starting at 1x.
       if next == 1 && scale < 0.999 && !pinchOriginal {
-        pinchOriginal = true; zoomReturn.impactOccurred()
+        pinchOriginal = true; zoomHaptics.play(returning: true)
       }
       videoZoom = next; onZoom?(next)
       zoomBadge.text = next == 1 ? "元のサイズ" : String(format: "%.1f×", Double(next))
@@ -1124,6 +1171,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     onAction = { _ in }
     let headerFrame = header.frame, panelFrame = panel.frame
     updateZoom(state: .began, scale: 1); updateZoom(state: .changed, scale: 2)
+    layoutIfNeeded()
+    let compactCircle = zoomBadge.bounds.width == zoomBadge.bounds.height && zoomBadge.bounds.width <= 44 && zoomBadge.layer.cornerRadius == zoomBadge.bounds.height/2
     let expanding = videoZoom == 2 && zoomBadge.text == "2.0×" && pinchExpanded && !pinchOriginal && !zoomBadge.isHidden
     let noNavigation = navigationTarget(start: .zero, velocity: CGPoint(x: 600, y: 0)) == nil && !orientationDirection(CGPoint(x: 0, y: 600))
     updateZoom(state: .changed, scale: 20)
@@ -1132,6 +1181,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let noEndImpact = !pinching && pinchExpanded && !pinchOriginal
     updateZoom(state: .began, scale: 1); updateZoom(state: .changed, scale: 0.1)
     let restored = videoZoom == 1 && zoomBadge.text == "元のサイズ" && pinchOriginal
+    layoutIfNeeded()
+    let originalRectangle = zoomBadge.bounds.width > zoomBadge.bounds.height && zoomBadge.layer.cornerRadius == 5 && zoomBadge.bounds.height <= 34
     updateZoom(state: .ended, scale: 0.1)
     updateZoom(state: .began, scale: 1); updateZoom(state: .changed, scale: 0.5)
     let minimum = videoZoom == 1 && pinchOriginal && !pinchExpanded && zoomBadge.text == "元のサイズ"
@@ -1139,7 +1190,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let stable = videoZoom == 1 && header.frame == headerFrame && panel.frame == panelFrame
     updateZoom(state: .ended, scale: 0.2)
     videoZoom = old; onZoom?(old); onAction = handler; zoomExpiry?.cancel(); zoomBadge.isHidden = true
-    return ["pinchZoomFollowsScale": expanding, "pinchZoomMaximumEight": capped, "pinchZoomMinimumOriginal": minimum,
+    return ["compactNumericZoomCircle": compactCircle, "originalSizeUsesTextRectangle": originalRectangle,
+      "pinchZoomFollowsScale": expanding, "pinchZoomMaximumEight": capped, "pinchZoomMinimumOriginal": minimum,
       "pinchZoomOriginalAcknowledgement": restored, "pinchZoomReleaseHasNoImpact": noEndImpact,
       "pinchZoomKeepsUIAndPanel": stable, "pinchExcludesNavigation": noNavigation,
       "singleFingerNavigationOnly": navigationPan.maximumNumberOfTouches == 1 && orientationPan.maximumNumberOfTouches == 1]

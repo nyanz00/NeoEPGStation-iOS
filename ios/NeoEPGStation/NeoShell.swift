@@ -456,7 +456,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let controller = NeoPlayerController(url: api.url("/videos/\(file.id)"), title: recording.name, username: "", password: "", networkCaching: 5000)
     controller.initialPosition = start
     controller.recordingContext = ["baseURL": api.base.absoluteString, "id": recording.id, "user": user,
-      "disableHistory": api.disablePlaybackHistory,
+      "disableHistory": api.disablePlaybackHistory, "videoFileType": file.type,
       "channelId": recording.channelId ?? 0, "channelName": recording.channelName ?? recording.channelId.flatMap { channels[$0] } ?? "",
       "name": recording.name, "startAt": recording.startAt, "endAt": recording.endAt, "isRecording": recording.isRecording,
       "description": recording.description ?? "", "extended": recording.extended ?? "", "ruleId": recording.ruleId ?? 0]

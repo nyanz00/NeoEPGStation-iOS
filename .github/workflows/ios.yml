@@ -161,6 +161,10 @@ jobs:
       - name: Check native playback and iPhone UI
         id: iphone-checks
         run: python3 -u scripts/simulator-smoke.py --iphone-only
+      - name: Compare native ARIB subtitle timing
+        id: arib-checks
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' }}
+        run: python3 -u scripts/arib-timing-smoke.py
       - name: Check iPad UI
         id: ipad-checks
         if: ${{ inputs.check_ipad == true }}

@@ -235,6 +235,10 @@ for name, result in results.items():
     if result.get('success') is not True:
         raise RuntimeError(f"{name} failed: {result}")
 assert range_server.progress, 'Native player never registered Web playback history'
+assert range_server.comment_requests, 'TS comment API was never requested'
+jikkyo = json.loads((container / 'Documents/jikkyo-comments-smoke.json').read_text())
+Path('dist/jikkyo-comments-smoke.json').write_text(json.dumps(jikkyo, indent=2))
+assert jikkyo.get('success') is True, jikkyo
 for _ in range(10):
     if range_server.progress[-1]['position'] == range_server.progress[-1]['duration']:
         break

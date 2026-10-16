@@ -18,6 +18,17 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     let window = UIWindow(frame: UIScreen.main.bounds)
     window.rootViewController = NeoShell(); self.window = window; window.makeKeyAndVisible()
 #if targetEnvironment(simulator)
+    if ProcessInfo.processInfo.environment["NEO_EPG_ARIB_PROBE"] == "1" {
+      UserDefaults.standard.removeObject(forKey: "player.subtitle.name")
+      DispatchQueue.main.asyncAfter(deadline: .now()+1) {
+        let player = NeoPlayerController(url: NeoPiPSmoke.directory.appendingPathComponent("arib-timing.ts"), title: "Synthetic ARIB timing", username: "", password: "", networkCaching: 100)
+        player.recordingContext = ["disableHistory": true]; player.modalPresentationStyle = .fullScreen
+        window.rootViewController?.present(player, animated: false) {
+          player.runARIBProbe { result in NeoPiPSmoke.save("arib-timing-smoke", result) }
+        }
+      }
+      return true
+    }
     if let base = ProcessInfo.processInfo.environment["NEO_EPG_NETWORK_PROBE"], let url = URL(string: base+"/api/videos/4") {
       DispatchQueue.main.asyncAfter(deadline: .now()+1) {
         let player = NeoPlayerController(url: url, title: "Synthetic network recovery", username: "", password: "", networkCaching: 5000)
@@ -36,6 +47,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     if ProcessInfo.processInfo.environment["NEO_EPG_STORAGE_SMOKE"] == "1" {
       NeoNative.runStorageSmokeTest()
       NeoCommentOverlay.runPreparationSmoke()
+      if let base = ProcessInfo.processInfo.environment["NEO_EPG_RANGE_SMOKE"] { NeoCommentOverlay.runJikkyoSmoke(base: base) }
       if let base = ProcessInfo.processInfo.environment["NEO_EPG_RANGE_SMOKE"], let url = URL(string: base+"/api/videos/1") { NeoPlaybackCache.runSmoke(url) }
       DispatchQueue.global(qos: .userInitiated).async {
         NeoNative.writeSmoke("danmaku-smoke", NeoDanmakuRenderer.smokeTest())

@@ -149,6 +149,23 @@ check(!loader.permitsRedirect(to: URL(string: "http://example.com/neo/api/videos
 check(!loader.permitsRedirect(to: URL(string: "https://example.com/neo/api/videos/7/subtitles-other")!), "Keep redirects in the subtitle API")
 loader.close()
 
+let jikkyoData = Data(#"{"isSuccess":true,"source":"jikkyo","timeBase":"video","comments":[{"time":1.25,"text":"{\\pos(1,2)} literal","color":"#123456","position":"right","size":"big"},{"time":2,"text":"top","color":"#FF0000","position":"top","size":"small"},{"time":3,"text":"bottom","color":"#00FF00","position":"bottom","size":"medium"}]}"#.utf8)
+let jikkyo = try NeoCommentLoader.parseJikkyo(jikkyoData)
+check(jikkyo.comments.count == 3 && jikkyo.comments[0].text == #"{\pos(1,2)} literal"#, "JSON text is literal, not ASS commands")
+check(jikkyo.comments[0].start == 1.25 && jikkyo.comments[0].end == 6.5 && jikkyo.comments[0].motion != nil, "Jikkyo uses video seconds and 5.25-second movement")
+check(jikkyo.comments[0].style.size == 96 && abs(jikkyo.comments[0].style.color.red - 18.0/255) < 0.001, "Jikkyo big size and RGB command color")
+check(jikkyo.comments[1].style.alignment == 8 && jikkyo.comments[1].motion == nil && jikkyo.comments[1].style.size == 48, "Top small comments retain fixed layout")
+check(jikkyo.comments[2].style.alignment == 2 && jikkyo.comments[2].motion == nil, "Bottom comments retain fixed layout")
+check(jikkyo.visible(at: 5).count == 3 && jikkyo.visible(at: 2).count == 2, "Seeking restores the correct JSON comments")
+let jikkyoLoader = NeoCommentLoader(source: URL(string: "https://example.com/neo/api/videos/7")!, username: "", password: "")
+check(jikkyoLoader.permitsRedirect(to: URL(string: "https://example.com/neo/api/videos/7/comments")!), "Allow the same-origin TS comment API")
+check(!jikkyoLoader.permitsRedirect(to: URL(string: "https://example.com/neo/api/videos/8/comments")!), "Never redirect comments to another recording")
+jikkyoLoader.close()
+do {
+  _ = try NeoCommentLoader.parseJikkyo(Data(String(decoding: jikkyoData, as: UTF8.self).replacingOccurrences(of: #""timeBase":"video""#, with: #""timeBase":"absolute""#).utf8))
+  check(false, "Reject a non-video time base")
+} catch { check(true, "Reject a non-video time base") }
+
 // Long-duration comments must survive binary-search pruning, including after seeks.
 var many = (0..<20000).map { NativeComment(id: $0, layer: 0, start: Double($0), end: Double($0) + 8,
   text: "comment", style: CommentStyle()) }

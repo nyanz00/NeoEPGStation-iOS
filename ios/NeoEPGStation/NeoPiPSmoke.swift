@@ -187,7 +187,7 @@ enum NeoPiPSmoke {
     let url = base.flatMap { URL(string: $0+"/api/videos/1") } ?? file
     let player = NeoPlayerController(url: url, title: "Synthetic TS tap test", username: "", password: "", networkCaching: 100)
     player.modalPresentationStyle = .fullScreen
-    if let base { player.recordingContext = ["baseURL": base, "id": 1, "user": "7", "name": "Synthetic HTTP TS"] }
+    if let base { player.recordingContext = ["baseURL": base, "id": 1, "user": "7", "name": "Synthetic HTTP TS", "videoFileType": "ts"] }
     root.present(player, animated: false) {
       player.runVideoTapSmoke { ts in
         save("playback-phase-smoke", ["phase": "TS tap", "success": ts["success"] ?? false])

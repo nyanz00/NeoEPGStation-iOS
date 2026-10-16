@@ -384,7 +384,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     [self.commentPiP beginCompositionSmoke];
   } else
 #endif
-  { [self.comments configureWithSource:self.sourceURL username:self.username password:self.password]; }
+  { [self.comments configureWithSource:self.sourceURL username:self.username password:self.password
+      jikkyo:[self.recordingContext[@"videoFileType"] isEqual:@"ts"]]; }
   [self updateCommentState];
   self.timer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer *timer) { [weakSelf updateControls]; }];
   [NSRunLoop.mainRunLoop addTimer:self.timer forMode:NSRunLoopCommonModes];
@@ -1543,6 +1544,41 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self showControls]; [self.commentPiP start];
 }
 #if TARGET_OS_SIMULATOR
+- (UIView *)aribSubtitleView:(UIView *)view {
+  if ([NSStringFromClass(view.class) isEqualToString:@"VLCSampleBufferSubpictureView"]) { return view; }
+  for (UIView *child in view.subviews) { UIView *found = [self aribSubtitleView:child]; if (found) { return found; } }
+  return nil;
+}
+- (void)runARIBProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  NSMutableArray *rows = [NSMutableArray new];
+  NSArray *checkpoints = @[@2, @4, @6.5, @8, @10, @12, @14, @17];
+  __block NSUInteger next = 0; __block BOOL selected = NO;
+  CFTimeInterval began = CACurrentMediaTime();
+  __block NSTimer *probe;
+  probe = [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer *timer) {
+    if (!selected && self.player.textTracks.count > 0) {
+      [self.player selectTextTracks:@[self.player.textTracks.firstObject]]; selected = YES;
+    }
+    double time = [self mediaTime]/1000.0;
+    if (next < checkpoints.count && time >= [checkpoints[next] doubleValue]) {
+      UIView *view = [self aribSubtitleView:self.movieView]; NSUInteger regions = 0;
+      @try { regions = [[[view valueForKey:@"pendingSubpicture"] valueForKey:@"regions"] count]; } @catch (NSException *error) {}
+      [rows addObject:@{@"time": @(time), @"regions": @(regions), @"viewFound": @(view != nil), @"selected": @(selected)}];
+      UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:self.movieView.bounds.size];
+      UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) { [self.movieView drawViewHierarchyInRect:self.movieView.bounds afterScreenUpdates:NO]; }];
+      NSString *name = [NSString stringWithFormat:@"arib-%lu.png", (unsigned long)next];
+      [UIImagePNGRepresentation(image) writeToURL:[[NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject URLByAppendingPathComponent:name] atomically:YES];
+      next++;
+    }
+    if (next == checkpoints.count || CACurrentMediaTime()-began > 40) {
+      [probe invalidate]; probe = nil;
+      BOOL comparison = rows.count == checkpoints.count;
+      NSArray *expected = @[@YES, @YES, @YES, @YES, @YES, @NO, @YES, @NO];
+      for (NSUInteger i=0; i<rows.count; i++) { comparison &= [rows[i][@"viewFound"] boolValue] && ([rows[i][@"regions"] unsignedIntegerValue] > 0) == [expected[i] boolValue]; }
+      completion(@{@"success": @(rows.count == checkpoints.count && selected), @"matchesWebTiming": @(comparison), @"rows": rows});
+    }
+  }];
+}
 - (void)closeTapSmoke { [self closePlayer]; }
 - (void)runNetworkProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
   [self pollNetworkProbe:0 armedAt:0 rows:[NSMutableArray new] completion:completion];

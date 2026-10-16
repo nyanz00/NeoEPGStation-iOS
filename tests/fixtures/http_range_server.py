@@ -13,6 +13,18 @@ def start_server(directory):
             pass
 
         def do_GET(self):
+            if self.path == '/api/videos/1/comments':
+                self.server.comment_requests.append(self.path)
+                body = json.dumps({'isSuccess': True, 'source': 'jikkyo', 'timeBase': 'video', 'detail': 'Synthetic comments',
+                    'comments': [{'id': i, 'time': t, 'text': text, 'color': color, 'position': position,
+                                  'size': size, 'userId': 'fixture', 'postedAt': 0}
+                        for i, (t, text, color, position, size) in enumerate([
+                            (1, 'TS scrolling', '#FF0000', 'right', 'big'),
+                            (2, 'TS top', '#00FF00', 'top', 'small'),
+                            (3, 'TS bottom', '#0000FF', 'bottom', 'medium')])]}).encode()
+                self.send_response(200); self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)
+                return
             if self.path.startswith('/fault/arm/'):
                 with self.server.fault_lock:
                     self.server.fault_mode = self.path.rsplit('/', 1)[-1]
@@ -94,6 +106,7 @@ def start_server(directory):
 
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     server.progress = []
+    server.comment_requests = []
     server.history_requests = []
     server.fault_lock = Lock(); server.fault_mode = None; server.fault_remaining = 0; server.fault_events = []
     Thread(target=server.serve_forever, daemon=True).start()
