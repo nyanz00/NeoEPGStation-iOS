@@ -7,7 +7,12 @@ static char NeoARIBStateKey, NeoARIBPictureKey, NeoARIBTimerKey;
 static void (*NeoOriginalSubtitleDraw)(id, SEL, id);
 static void NeoDrawARIBSubtitle(id view, SEL selector, id picture) {
   NSInteger (^state)(void) = objc_getAssociatedObject(view, &NeoARIBStateKey);
-  if (!state) { NeoOriginalSubtitleDraw(view, selector, picture); return; }
+  if (!state) {
+    // Track selection and the app's first UI update are asynchronous. Keep the
+    // image already on this view so binding after its first draw loses nothing.
+    if (picture) { objc_setAssociatedObject(view, &NeoARIBPictureKey, picture, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
+    NeoOriginalSubtitleDraw(view, selector, picture); return;
+  }
   NSInteger active = state();
   NSArray *regions = picture && [picture respondsToSelector:@selector(regions)] ?
     ((id (*)(id, SEL))objc_msgSend)(picture, @selector(regions)) : nil;
@@ -22,7 +27,7 @@ static void NeoDrawARIBSubtitle(id view, SEL selector, id picture) {
     // when VLC has stopped issuing callbacks after its premature expiration.
     if (retained && !objc_getAssociatedObject(view, &NeoARIBTimerKey)) {
       __weak id weakView = view;
-      NSTimer *timer = [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer *timer) {
+      NSTimer *timer = [NSTimer timerWithTimeInterval:0.05 repeats:YES block:^(NSTimer *timer) {
         id target = weakView;
         NSInteger (^provider)(void) = target ? objc_getAssociatedObject(target, &NeoARIBStateKey) : nil;
         if (!provider || provider() <= 0) {
@@ -34,6 +39,7 @@ static void NeoDrawARIBSubtitle(id view, SEL selector, id picture) {
           [timer invalidate];
         }
       }];
+      [NSRunLoop.mainRunLoop addTimer:timer forMode:NSRunLoopCommonModes];
       objc_setAssociatedObject(view, &NeoARIBTimerKey, timer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
   }
@@ -160,9 +166,14 @@ static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideo
     Method method = class_getInstanceMethod(type, NSSelectorFromString(@"drawSubpicture:"));
     if (method) { NeoOriginalSubtitleDraw = (void *)method_getImplementation(method); method_setImplementation(method, (IMP)NeoDrawARIBSubtitle); }
   });
+  if (!NeoOriginalSubtitleDraw) { return; }
   if ([NSStringFromClass(view.class) isEqualToString:@"VLCSampleBufferSubpictureView"]) {
-    if (!state && objc_getAssociatedObject(view, &NeoARIBStateKey)) { [self clearARIBView:view]; }
+    id old = objc_getAssociatedObject(view, &NeoARIBStateKey);
+    if (!state && old) { [self clearARIBView:view]; }
     objc_setAssociatedObject(view, &NeoARIBStateKey, state, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    if (state && !old && state() > 0 && objc_getAssociatedObject(view, &NeoARIBPictureKey)) {
+      NeoDrawARIBSubtitle(view, NSSelectorFromString(@"drawSubpicture:"), nil);
+    }
   }
   for (UIView *child in view.subviews) { [self bindARIBView:child state:state]; }
 }

@@ -2264,6 +2264,14 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       @"playerDismissalStartsBeforeNativeStop": @NO, @"error": @"portrait back did not begin",
       @"rotatingAtBegin": @(self.rotatingPlayer), @"coordinatorAtBegin": @(self.transitionCoordinator != nil)}); return;
   }
+  // A real pan supplies updates on successive display cycles. Do not send the
+  // only update before UIKit has created and committed its dismissal context.
+  [self waitForBackSmokeContext:0 completion:^(BOOL ready) {
+  if (!ready) { [self performPlayerAction:@"back-cancel"]; completion(@{@"playerBackTracksFinger": @NO, @"error": @"interactive context was not ready"}); return; }
+  [CATransaction flush];
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(NSEC_PER_SEC/30)), dispatch_get_main_queue(), ^{
+  [self performPlayerAction:@"back-progress:0.2"];
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(NSEC_PER_SEC/30)), dispatch_get_main_queue(), ^{
   [self performPlayerAction:@"back-progress:0.4"];
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
     CGFloat position = self.view.layer.presentationLayer.transform.m41;
@@ -2278,6 +2286,16 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       completion(@{@"playerBackTracksFinger": @(following), @"cancelledPlayerBackKeepsInput": @(retained),
         @"playerDismissalStartsBeforeNativeStop": @(early), @"dragX": @(position)});
     });
+  });
+  });
+  });
+  }];
+}
+- (void)waitForBackSmokeContext:(NSInteger)attempt completion:(void (^)(BOOL))completion {
+  BOOL ready = self.transitionCoordinator != nil && self.transitionCoordinator.isInteractive;
+  if (ready || attempt >= 60) { completion(ready); return; }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(NSEC_PER_SEC/60)), dispatch_get_main_queue(), ^{
+    [self waitForBackSmokeContext:attempt+1 completion:completion];
   });
 }
 - (void)runCommittedExitSmokeFromHost:(UIViewController *)host drag:(NSDictionary *)drag completion:(void (^)(NSDictionary<NSString *, id> *))completion {
@@ -2333,7 +2351,6 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 - (void)play { [self setPlaybackIntent:YES]; }
 - (void)pause { [self setPlaybackIntent:NO]; }
 - (void)seekBy:(int64_t)offset completion:(dispatch_block_t)completion {
-  [NeoVLCFrameTap clearARIBView:self.movieView];
   if ((self.networkFlow.holding || self.networkFlow.verifying) && !self.flowResyncing) {
     int64_t target = [self mediaTime]+offset;
     [self resetNetworkFlow]; offset = target-[self mediaTime];
@@ -2344,6 +2361,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     if (superseded) { superseded(); } return;
   }
   if (self.closing || !self.player.isSeekable) { completion(); return; }
+  [NeoVLCFrameTap clearARIBView:self.movieView];
   [self sampleHistory]; [self.history flush];
   [self completeSeek:self.seekGeneration failed:NO];
   int64_t length = [self mediaLength];
