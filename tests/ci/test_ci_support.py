@@ -29,7 +29,7 @@ class CISupportTests(unittest.TestCase):
             with self.subTest(change=change):
                 self.assertEqual(ci.find_equivalent(self.current, [dict(self.prior, **change)]), [])
 
-    def run_guard(self, prior_job='success', attempt='1', runs=None):
+    def run_guard(self, prior_job='success', attempt='1', runs=None, expired=False):
         with tempfile.TemporaryDirectory() as temp:
             output, summary = Path(temp) / 'output', Path(temp) / 'summary'
             def response(path):
@@ -37,6 +37,9 @@ class CISupportTests(unittest.TestCase):
                     return self.current
                 if '/workflows/' in path:
                     return {'workflow_runs': [self.prior] if runs is None else runs}
+                if '/artifacts?' in path:
+                    return {'artifacts': [{'expired': expired, 'size_in_bytes': 1024,
+                                           'name': 'NeoEPGStation-iOS-180'}]}
                 return {'jobs': [{'name': 'build', 'conclusion': prior_job}]}
             with patch.dict(os.environ, GITHUB_REPOSITORY='example/app', GITHUB_RUN_ID='200',
                             GITHUB_RUN_ATTEMPT=attempt, GITHUB_OUTPUT=str(output),
@@ -52,6 +55,10 @@ class CISupportTests(unittest.TestCase):
 
     def test_skipped_build_is_not_success_evidence(self):
         output, _ = self.run_guard(prior_job='skipped')
+        self.assertEqual(output, 'proceed=true\n')
+
+    def test_expired_artifacts_do_not_suppress_a_new_build(self):
+        output, _ = self.run_guard(expired=True)
         self.assertEqual(output, 'proceed=true\n')
 
     def test_explicit_rerun_and_first_run_proceed(self):

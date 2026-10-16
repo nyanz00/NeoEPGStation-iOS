@@ -51,8 +51,12 @@ def guard():
                 jobs = api(f'{base}/runs/{candidate["id"]}/jobs?per_page=100')['jobs']
                 if any(job['name'] in ('build', 'Reused simulator UI checks')
                        and job['conclusion'] == 'success' for job in jobs):
-                    previous = candidate
-                    break
+                    artifacts = api(f'{base}/runs/{candidate["id"]}/artifacts?per_page=100')['artifacts']
+                    if any(not artifact['expired'] and artifact['size_in_bytes'] > 0
+                           and artifact['name'].startswith(('NeoEPGStation-iOS-', 'NeoEPGStation-Reused-UI-'))
+                           for artifact in artifacts):
+                        previous = candidate
+                        break
             if previous or last_page:
                 break
     with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
