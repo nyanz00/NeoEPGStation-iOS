@@ -1597,7 +1597,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       for (NSUInteger i=0; i<rows.count; i++) { comparison &= [rows[i][@"viewFound"] boolValue] && ([rows[i][@"regions"] unsignedIntegerValue] > 0) == [expected[i] boolValue]; }
       NSMutableArray *tracks = [NSMutableArray new];
       for (VLCMediaPlayerTrack *track in self.player.textTracks) { [tracks addObject:@{@"name": track.trackName ?: @"", @"description": track.trackDescription ?: @""}]; }
-      completion(@{@"success": @(rows.count == checkpoints.count && selected && comparison), @"matchesWebTiming": @(comparison), @"rows": rows, @"tracks": tracks});
+      completion(@{@"success": @(rows.count == checkpoints.count && selected && comparison), @"matchesWebTiming": @(comparison), @"rows": rows, @"tracks": tracks, @"output": [NeoVLCFrameTap aribSmokeStatistics]});
     }
   }];
 }
@@ -1778,16 +1778,24 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     double commentsAt = self.comments.timeProvider();
     [NeoVLCFrameTap monitorContent:self.movieView];
     [self pollLatestRecoveryIntent:0 completion:^(BOOL advances) {
-      NSDictionary *video = [NeoVLCFrameTap snapshot:self.movieView];
-      BOOL pictures = [video[@"changes"] integerValue] >= 3 && [video[@"contentAge"] doubleValue] < 0.5;
+      [self waitForInitialVideoSmoke:0 completion:^(BOOL pictures, NSDictionary *video) {
       completion(@{@"success": @((BOOL)(startsAtTarget && indexed && advances && pictures && commentsAt >= 90 && commentsAt < 100)),
         @"startsWithoutReloadOrSeek": @(startsAtTarget), @"initialIndexedTargetRange": @(indexed),
         @"commentsUseResumePosition": @((BOOL)(commentsAt >= 90 && commentsAt < 100)), @"picturesAdvance": @(pictures),
-        @"seekMetrics": metrics});
+        @"seekMetrics": metrics, @"video": video});
+      }];
     }]; return;
   }
   if (attempt >= 100) { completion(@{@"success": @NO, @"state": @(self.player.state), @"time": @([self mediaTime])}); return; }
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self pollInitialResumeSmoke:attempt+1 completion:completion]; });
+}
+- (void)waitForInitialVideoSmoke:(NSInteger)attempt completion:(void (^)(BOOL, NSDictionary *))completion {
+  NSDictionary *video = [NeoVLCFrameTap snapshot:self.movieView];
+  BOOL pictures = [video[@"changes"] integerValue] >= 3 && [video[@"contentAge"] doubleValue] < 0.5;
+  if (pictures || attempt >= 30) { completion(pictures, video); return; }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [self waitForInitialVideoSmoke:attempt+1 completion:completion];
+  });
 }
 - (void)runLateReloadSmoke:(void (^)(BOOL))completion {
   VLCMedia *input = self.player.media; NSInteger generation = self.reloadGeneration;

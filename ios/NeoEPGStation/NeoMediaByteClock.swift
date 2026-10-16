@@ -123,13 +123,14 @@ final class NeoARIBCaptionClock: NSObject {
       self.lock.lock(); self.events = schedule; self.lock.unlock()
     }
   }
-  // -1 = no known timing, 0 = explicit clear, 1 = a caption is active.
+  // -1 = unknown, 0 = explicit clear, 1 = active, 2 = before the first known cue.
+  // A renderer can submit that first cue slightly before the player clock reaches its PTS.
   @objc func state(at seconds: Double) -> Int {
     guard seconds.isFinite else { return -1 }
     lock.lock(); defer { lock.unlock() }
     var low = 0, high = events.count
     while low < high { let mid = (low+high)/2; if events[mid].0 <= seconds { low = mid+1 } else { high = mid } }
-    return low == 0 ? -1 : events[low-1].1 ? 1 : 0
+    return low == 0 ? (events.isEmpty ? -1 : 2) : events[low-1].1 ? 1 : 0
   }
 }
 
