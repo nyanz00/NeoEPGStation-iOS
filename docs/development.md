@@ -19,6 +19,16 @@ Swift / UIKitの型検査・テスト・ビルドは `.github/workflows/ios.yml`
 Xcodeは26.6、CocoaPodsは1.16.2に固定している。Node / Metro / React Nativeは使用しない。
 VLCKitは `ios/VLCKit.podspec` の公式ダウンロードURLとSHA-256で固定する。
 
+### Actionsの実行と再検証
+
+- `docs/`、`AGENTS.md`、`README.md` だけの変更では自動実行しない。配布アプリに含まれるライセンス文書などは除外しない。手動実行は引き続き可能。
+- 通常ビルド・保存アプリのUI再検証・通信試験は実行グループを分け、後の実行で進行中の検証を自動キャンセルしない。同じグループでは直列に実行し、待機中の古い実行はGitHubの制御で置き換わる場合がある。
+- 最初の軽量ジョブで、同じコミット・ブランチ・要求条件の成功済み実行を確認する。実際のビルド／再検証ジョブが成功している場合だけ重いジョブを省略し、概要欄に元の実行とArtifactへのリンクを表示する。失敗・キャンセル・重複省略だけの実行は成功の根拠にしない。意図的に繰り返す場合は `Re-run all jobs` を使う。PRはマージ結果が異なり得るため、この重複省略を適用しない。
+- Ruby依存に加え、CocoaPodsのダウンロードをOS・CPU・Xcode・Podfile・podspec・依存ロックに対応するキーで保存する。`pod install --deployment` は毎回実行し、ロックを変更しない。コンパイル済みアプリの再利用は従来の `reuse_run` による同一性確認を使う。
+- 各ジョブの概要欄に、要求した試験範囲、ワークフローとアプリのコミット、ステップ結果、明示的な成否を持つ結果ファイルを表示する。未生成・未実施は成功扱いにしない。再利用による検証は新しいIPAを生成しない。
+
+CI補助処理だけの確認は `python -m unittest discover -s tests/ci -v` で実行できる。
+
 Actionsの `NeoEPGStation-iOS-<run number>` ArtifactからZIPをダウンロードし、
 中の `NeoEPGStation.ipa` をLiveContainerに取り込む。
 このIPAはad-hoc署名であり、LiveContainerでの取り込み用。通常の直接インストールやApp Store提出には使わない。

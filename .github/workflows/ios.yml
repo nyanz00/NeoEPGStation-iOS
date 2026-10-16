@@ -1,9 +1,12 @@
 name: iOS prototype
+run-name: "iOS | source=${{ inputs.reuse_run || 'build' }} | mode=${{ inputs.network_probe && 'network' || inputs.recheck_playback && 'playback' || inputs.recheck_iphone && 'iphone' || inputs.reuse_run && 'ipad' || 'build' }} | codec=${{ inputs.network_codec || 'h264' }} | ipad=${{ inputs.check_ipad && 'yes' || 'no' }} | stage=${{ inputs.ui_stage || 'all' }}"
 
 on:
   push:
     branches: [master, 'codex/**']
+    paths-ignore: ['docs/**', 'AGENTS.md', 'README.md']
   pull_request:
+    paths-ignore: ['docs/**', 'AGENTS.md', 'README.md']
   workflow_dispatch:
     inputs:
       network_codec:
@@ -40,20 +43,41 @@ on:
       ui_stage:
         description: 'Optional single iPhone UI stage to recheck'
         required: false
-        default: ''
+        default: all
         type: choice
-        options: ['', recorded, pagination, detail, record-actions, detail-actions, play-popup, list-actions, drop-dialog, menu, settings, gestures]
+        options: [all, recorded, pagination, detail, record-actions, detail-actions, play-popup, list-actions, drop-dialog, menu, settings, gestures]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ios-${{ github.ref }}-${{ inputs.network_probe && 'network' || 'app' }}
-  cancel-in-progress: true
+  # Rechecks must not cancel a build, nor a running check of another binary.
+  group: ios-${{ github.ref }}-${{ inputs.reuse_run || 'build' }}-${{ inputs.network_probe && 'network' || inputs.reuse_run && 'ui' || 'build' }}
+  cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: Check for equivalent completed verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      proceed: ${{ steps.guard.outputs.proceed }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate CI helpers
+        run: python3 -m unittest discover -s tests/ci -v
+      - name: Avoid duplicate successful verification
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci-support.py guard
+
   build:
-    if: ${{ !inputs.reuse_run }}
+    needs: preflight
+    if: ${{ needs.preflight.outputs.proceed == 'true' && !inputs.reuse_run }}
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -62,14 +86,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
+        id: ruby
         with:
           ruby-version: '3.3'
           bundler-cache: true
       - name: Environment
+        id: environment
         run: |
           xcodebuild -version
           bundle exec pod --version
       - name: Native ASS parser and playback clock tests
+        id: native-tests
         run: |
           mkdir -p build/native-tests
           swiftc ios/NeoEPGStation/NeoASSComments.swift ios/NeoEPGStation/NeoCommentLoader.swift ios/NeoEPGStation/NeoCommentLayout.swift ios/NeoEPGStation/NeoMediaByteClock.swift ios/NeoEPGStation/NeoPlaybackHistory.swift ios/NeoEPGStation/NeoVideoRecovery.swift tests/native/main.swift -o build/native-tests/comments
@@ -77,6 +104,7 @@ jobs:
           swiftc ios/NeoEPGStation/NeoModels.swift tests/ui/main.swift -o build/native-tests/ui
           build/native-tests/ui
       - name: Native UI type checks
+        id: type-checks
         run: |
           sdk=$(xcrun --sdk iphonesimulator --show-sdk-path)
           swiftc -typecheck -target arm64-apple-ios18.0-simulator -sdk "$sdk" \
@@ -86,11 +114,27 @@ jobs:
           xcrun clang -fsyntax-only -fobjc-arc -target arm64-apple-ios18.0-simulator \
             -isysroot "$sdk" ios/NeoEPGStation/NeoVLCFrameTap.m
       - name: Prepare simulator
+        id: simulator
         run: python3 scripts/simulator-smoke.py --prepare
+      - name: Restore CocoaPods downloads
+        id: pods-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: pods-v1-${{ runner.os }}-${{ runner.arch }}-xcode26.6-${{ hashFiles('ios/Podfile', 'ios/Podfile.lock', 'ios/*.podspec', 'Gemfile.lock') }}
       - name: Install pods
+        id: install-pods
         working-directory: ios
-        run: bundle exec pod install
+        run: bundle exec pod install --deployment
+      - name: Save CocoaPods downloads
+        id: save-pods-cache
+        if: ${{ steps.pods-cache.outputs.cache-hit != 'true' && github.event_name != 'pull_request' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: ${{ steps.pods-cache.outputs.cache-primary-key }}
       - name: Build device application
+        id: device-build
         run: |
           set -o pipefail
           mkdir -p dist
@@ -101,8 +145,10 @@ jobs:
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             build 2>&1 | tee dist/device-build.log | xcbeautify
       - name: Package LiveContainer IPA
+        id: package-ipa
         run: bash scripts/package-ipa.sh
       - name: Build simulator application
+        id: simulator-build
         run: |
           set -o pipefail
           xcodebuild -workspace ios/NeoEPGStation.xcworkspace \
@@ -113,18 +159,23 @@ jobs:
             CODE_SIGN_LOCAL_EXECUTION_IDENTITY='Ad Hoc' \
             build 2>&1 | tee dist/simulator-build.log | xcbeautify
       - name: Check native playback and iPhone UI
+        id: iphone-checks
         run: python3 -u scripts/simulator-smoke.py --iphone-only
       - name: Check iPad UI
+        id: ipad-checks
         if: ${{ inputs.check_ipad == true }}
         run: python3 -u scripts/simulator-smoke.py --ipad-only
       - name: Exercise network loss and recovery through native VLC
+        id: network-checks
         if: always() && hashFiles('build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app/Info.plist') != ''
         run: python3 -u scripts/network-recovery-smoke.py
       - name: Preserve simulator application for UI diagnostics
+        id: preserve-simulator
         if: always() && hashFiles('build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app/Info.plist') != ''
         run: |
           ditto -c -k --keepParent build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app dist/simulator-app.zip
       - name: Upload IPA and diagnostics
+        id: upload
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -141,10 +192,17 @@ jobs:
             Gemfile.lock
           retention-days: 7
           if-no-files-found: error
+      - name: Summarize build and verification
+        if: always()
+        env:
+          CI_STEPS: ${{ toJSON(steps) }}
+          CI_SCOPE: build; iPhone playback/UI; network ${{ inputs.network_codec || 'h264' }}; iPad=${{ inputs.check_ipad && 'yes' || 'no' }}
+        run: python3 scripts/ci-support.py summary
 
   ipad-ui:
     name: Reused simulator UI checks
-    if: ${{ inputs.reuse_run != '' }}
+    needs: preflight
+    if: ${{ needs.preflight.outputs.proceed == 'true' && inputs.reuse_run != '' }}
     runs-on: macos-26
     timeout-minutes: 25
     permissions:
@@ -163,6 +221,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Retrieve verified simulator application
+        id: retrieve
         run: |
           [[ "$REUSE_RUN" =~ ^[0-9]+$ ]]
           mkdir -p reused dist
@@ -173,6 +232,7 @@ jobs:
           ditto -x -k reused/artifact/dist/simulator-app.zip build/simulator/Build/Products/Release-iphonesimulator
           codesign --verify --deep --strict build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app
       - name: Check reused application UI
+        id: reused-checks
         run: |
           if [ "$NETWORK_PROBE" = "true" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
@@ -187,7 +247,7 @@ jobs:
           elif [ "${{ inputs.recheck_iphone }}" = "true" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
             extra=()
-            if [ -n "$UI_STAGE" ]; then extra+=("--ui-stage=$UI_STAGE"); fi
+            if [ -n "$UI_STAGE" ] && [ "$UI_STAGE" != "all" ]; then extra+=("--ui-stage=$UI_STAGE"); fi
             iphone_result=0
             python3 -u scripts/simulator-smoke.py --iphone-only --ui-only "${extra[@]}" || iphone_result=$?
             ipad_result=0
@@ -200,9 +260,16 @@ jobs:
             python3 -u scripts/simulator-smoke.py --ipad-only
           fi
       - uses: actions/upload-artifact@v4
+        id: upload
         if: always()
         with:
           name: NeoEPGStation-Reused-UI-${{ github.run_number }}
           path: dist/
           retention-days: 7
           if-no-files-found: error
+      - name: Summarize reused application verification
+        if: always()
+        env:
+          CI_STEPS: ${{ toJSON(steps) }}
+          CI_SCOPE: ${{ inputs.network_probe && 'network' || inputs.recheck_playback && 'playback + iPhone/iPad' || inputs.recheck_iphone && 'iPhone UI' || 'iPad UI' }}; stage=${{ inputs.ui_stage || 'all' }}; codec=${{ inputs.network_codec || 'h264' }}; extra-iPad=${{ inputs.check_ipad && 'yes' || 'no' }}
+        run: python3 scripts/ci-support.py summary
