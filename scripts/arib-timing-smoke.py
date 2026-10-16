@@ -37,11 +37,11 @@ for attempt in range(3):
         time.sleep(1)
     value = json.loads(result.read_text())
     observations.append(value)
-    evidence = Path('dist') / f'arib-attempt-{attempt+1}'
-    evidence.mkdir(exist_ok=True)
+    evidence = Path('dist')
+    prefix = f'arib-attempt-{attempt+1}-'
     for path in container.glob('arib-*.png'):
-        shutil.copyfile(path, evidence / path.name)
-    shutil.copyfile(result, evidence / result.name)
+        shutil.copyfile(path, evidence / (prefix+path.name))
+    shutil.copyfile(result, evidence / (prefix+result.name))
     print(f'ARIB attempt {attempt+1}: '+json.dumps(value), flush=True)
 summary = dict(observations[-1])
 summary.update(success=all(v['success'] for v in observations),
