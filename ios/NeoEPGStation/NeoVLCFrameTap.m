@@ -5,10 +5,6 @@
 
 static char NeoARIBStateKey, NeoARIBPictureKey, NeoARIBTimerKey;
 static void (*NeoOriginalSubtitleDraw)(id, SEL, id);
-static void (*NeoOriginalSubtitleRegions)(id, SEL, id);
-#if TARGET_OS_SIMULATOR
-static NSUInteger NeoRegionUpdates, NeoNonemptyDraws, NeoEmptyDraws;
-#endif
 @interface NeoStableSubtitleRegion : NSObject
 @property (nonatomic) CGRect backingFrame;
 @property (nonatomic) CGFloat alpha;
@@ -40,9 +36,6 @@ static id NeoFreezeSubtitle(id picture) {
   NeoStableSubtitlePicture *copy = [NeoStableSubtitlePicture new]; copy.regions = copies; return copy;
 }
 static void NeoDrawARIBSubtitle(id view, SEL selector, id picture) {
-#if TARGET_OS_SIMULATOR
-  if (picture && [((id (*)(id, SEL))objc_msgSend)(picture, @selector(regions)) count]) { NeoNonemptyDraws++; } else { NeoEmptyDraws++; }
-#endif
   NSInteger (^state)(void) = objc_getAssociatedObject(view, &NeoARIBStateKey);
   id snapshot = NeoFreezeSubtitle(picture);
   if (!state) {
@@ -81,39 +74,6 @@ static void NeoDrawARIBSubtitle(id view, SEL selector, id picture) {
       objc_setAssociatedObject(view, &NeoARIBTimerKey, timer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
   }
-}
-
-// VLC queues a block that reads sys.subpicture later, after its render thread
-// may already have cleared it. Capture the immutable region images at production.
-static void NeoSetSubtitleRegions(id picture, SEL selector, NSArray *regions) {
-  NeoOriginalSubtitleRegions(picture, selector, regions);
-  id snapshot = NeoFreezeSubtitle(picture);
-  if (!snapshot || ![picture respondsToSelector:@selector(sys)]) { return; }
-  id output = ((id (*)(id, SEL))objc_msgSend)(picture, @selector(sys));
-  if (!output || ![output respondsToSelector:@selector(spuView)]) { return; }
-  dispatch_async(dispatch_get_main_queue(), ^{
-#if TARGET_OS_SIMULATOR
-    NeoRegionUpdates++;
-#endif
-    id view = ((id (*)(id, SEL))objc_msgSend)(output, @selector(spuView));
-    if (!view) { return; }
-    NSInteger (^state)(void) = objc_getAssociatedObject(view, &NeoARIBStateKey);
-    if (state && state() > 0) { NeoDrawARIBSubtitle(view, NSSelectorFromString(@"drawSubpicture:"), snapshot); }
-    else if (!state) { objc_setAssociatedObject(view, &NeoARIBPictureKey, snapshot, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
-  });
-}
-static void NeoInstallSubtitleHooks(void) {
-  static dispatch_once_t once;
-  dispatch_once(&once, ^{
-    Class type = NSClassFromString(@"VLCSampleBufferSubpictureView");
-    Method draw = class_getInstanceMethod(type, NSSelectorFromString(@"drawSubpicture:"));
-    Method regions = class_getInstanceMethod(NSClassFromString(@"VLCSampleBufferSubpicture"), NSSelectorFromString(@"setRegions:"));
-    if (!draw || !regions) { return; }
-    NeoOriginalSubtitleDraw = (void *)method_getImplementation(draw);
-    NeoOriginalSubtitleRegions = (void *)method_getImplementation(regions);
-    method_setImplementation(draw, (IMP)NeoDrawARIBSubtitle);
-    method_setImplementation(regions, (IMP)NeoSetSubtitleRegions);
-  });
 }
 
 @interface NeoTappedVideoLayer : AVSampleBufferDisplayLayer
@@ -231,7 +191,12 @@ static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideo
 
 @implementation NeoVLCFrameTap
 + (void)bindARIBView:(UIView *)view state:(NSInteger (^)(void))state {
-  NeoInstallSubtitleHooks();
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    Class type = NSClassFromString(@"VLCSampleBufferSubpictureView");
+    Method method = class_getInstanceMethod(type, NSSelectorFromString(@"drawSubpicture:"));
+    if (method) { NeoOriginalSubtitleDraw = (void *)method_getImplementation(method); method_setImplementation(method, (IMP)NeoDrawARIBSubtitle); }
+  });
   if (!NeoOriginalSubtitleDraw) { return; }
   if ([NSStringFromClass(view.class) isEqualToString:@"VLCSampleBufferSubpictureView"]) {
     id old = objc_getAssociatedObject(view, &NeoARIBStateKey);
@@ -268,7 +233,6 @@ static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideo
 }
 #endif
 + (BOOL)install {
-  NeoInstallSubtitleHooks();
   static BOOL installed;
   static dispatch_once_t once;
   dispatch_once(&once, ^{
@@ -291,10 +255,6 @@ static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideo
   for (UIView *child in view.subviews) { [self bindView:child sink:sink]; }
 }
 #if TARGET_OS_SIMULATOR
-+ (NSDictionary *)aribSmokeStatistics {
-  return @{@"regionUpdates": @(NeoRegionUpdates), @"nonemptyDraws": @(NeoNonemptyDraws), @"emptyDraws": @(NeoEmptyDraws),
-    @"producerHookInstalled": @(NeoOriginalSubtitleRegions != NULL)};
-}
 + (NSDictionary<NSString *, NSNumber *> *)monitoringSmoke {
   // VLC reuses subtitle objects: retaining their container must not let later
   // region replacement or metadata mutation erase an active ARIB caption.

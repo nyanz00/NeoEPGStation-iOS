@@ -25,18 +25,27 @@ subprocess.check_call(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-f
     '-f', 'mpegts', str(container / 'arib-base.ts')], timeout=120)
 inject(container / 'arib-base.ts', container / 'arib-timing.ts')
 result = container / 'arib-timing-smoke.json'
-result.unlink(missing_ok=True)
-subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True)
 os.environ['SIMCTL_CHILD_NEO_EPG_ARIB_PROBE'] = '1'
-run('xcrun', 'simctl', 'launch', device, bundle)
-for _ in range(50):
-    if result.exists():
-        break
-    time.sleep(1)
-for path in container.glob('arib-*.png'):
-    shutil.copyfile(path, Path('dist') / path.name)
-shutil.copyfile(result, 'dist/arib-timing-smoke.json')
-value = json.loads(result.read_text())
-print(json.dumps(value, indent=2))
-assert value['success'], 'Native ARIB fixture did not complete'
-assert value['matchesWebTiming'], 'Native ARIB captions expired before the broadcast replacement/clear'
+observations = []
+for attempt in range(3):
+    result.unlink(missing_ok=True)
+    subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True)
+    run('xcrun', 'simctl', 'launch', device, bundle)
+    for _ in range(50):
+        if result.exists():
+            break
+        time.sleep(1)
+    value = json.loads(result.read_text())
+    observations.append(value)
+    evidence = Path('dist') / f'arib-attempt-{attempt+1}'
+    evidence.mkdir(exist_ok=True)
+    for path in container.glob('arib-*.png'):
+        shutil.copyfile(path, evidence / path.name)
+    shutil.copyfile(result, evidence / result.name)
+    print(f'ARIB attempt {attempt+1}: '+json.dumps(value), flush=True)
+summary = dict(observations[-1])
+summary.update(success=all(v['success'] for v in observations),
+               matchesWebTiming=all(v['matchesWebTiming'] for v in observations), runs=observations)
+Path('dist/arib-timing-smoke.json').write_text(json.dumps(summary, indent=2))
+assert summary['success'], 'Native ARIB timing comparison failed; inspect all three preserved attempts'
+assert summary['matchesWebTiming'], 'Native ARIB captions expired before the broadcast replacement/clear'

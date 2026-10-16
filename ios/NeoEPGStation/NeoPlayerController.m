@@ -947,6 +947,11 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self.rewindCache beginSeek:self.inputStartTime / 1000.0];
   if (self.reloading) { [self.comments beginSeek:self.inputStartTime / 1000.0]; }
   VLCMedia *media = [VLCMedia mediaWithURL:self.playbackURL ?: self.sourceURL];
+#if TARGET_OS_SIMULATOR
+  // Select the fixture's known track before the first PES, not by resetting
+  // a running subtitle decoder after asynchronous track discovery.
+  if ([NSProcessInfo.processInfo.environment[@"NEO_EPG_ARIB_PROBE"] isEqual:@"1"]) { [media addOption:@":sub-track=0"]; }
+#endif
   // Ordinary HTTP reports CAN_FASTSEEK=false. The default MKV demuxer may
   // consequently reject unverified Cues and fall back to the first cluster.
   // Opt in only after parsing video Cues and checking their file positions.
@@ -1572,12 +1577,13 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 - (void)runARIBProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
   NSMutableArray *rows = [NSMutableArray new];
   NSArray *checkpoints = @[@2, @4, @6.5, @8, @10, @12, @14, @17];
-  __block NSUInteger next = 0; __block BOOL selected = NO;
+  __block NSUInteger next = 0; __block BOOL selected = NO; __block double selectedAt = -1;
   CFTimeInterval began = CACurrentMediaTime();
   __block NSTimer *probe;
   probe = [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer *timer) {
-    if (!selected && self.player.textTracks.count > 0) {
-      [self.player selectTextTracks:@[self.player.textTracks.firstObject]]; selected = YES;
+    VLCMediaPlayerTrack *firstTrack = self.player.textTracks.firstObject;
+    if (!selected && firstTrack.isSelected) {
+      selected = YES; selectedAt = [self mediaTime]/1000.0;
     }
     double time = [self mediaTime]/1000.0;
     if (next < checkpoints.count && time >= [checkpoints[next] doubleValue]) {
@@ -1597,7 +1603,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       for (NSUInteger i=0; i<rows.count; i++) { comparison &= [rows[i][@"viewFound"] boolValue] && ([rows[i][@"regions"] unsignedIntegerValue] > 0) == [expected[i] boolValue]; }
       NSMutableArray *tracks = [NSMutableArray new];
       for (VLCMediaPlayerTrack *track in self.player.textTracks) { [tracks addObject:@{@"name": track.trackName ?: @"", @"description": track.trackDescription ?: @""}]; }
-      completion(@{@"success": @(rows.count == checkpoints.count && selected && comparison), @"matchesWebTiming": @(comparison), @"rows": rows, @"tracks": tracks, @"output": [NeoVLCFrameTap aribSmokeStatistics]});
+      completion(@{@"success": @(rows.count == checkpoints.count && selected && comparison), @"matchesWebTiming": @(comparison), @"rows": rows, @"tracks": tracks, @"selectedAt": @(selectedAt)});
     }
   }];
 }
