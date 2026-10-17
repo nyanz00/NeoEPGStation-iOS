@@ -4,7 +4,7 @@ import CoreHaptics
 // A short impact followed by a quiet, decaying tail; never fired on release.
 private final class NeoZoomHaptics {
   static let expansionStyle: UIImpactFeedbackGenerator.FeedbackStyle = .light
-  static let originalStyle: UIImpactFeedbackGenerator.FeedbackStyle = .heavy
+  static let originalStyle: UIImpactFeedbackGenerator.FeedbackStyle = .medium
   static let expansionTail = 0.028, originalTail = 0.055
   private var engine: CHHapticEngine?
   private let fallbackLight = UIImpactFeedbackGenerator(style: NeoZoomHaptics.expansionStyle)
@@ -1231,7 +1231,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       "centerToEdgesReachesEight": edgesReachMaximum, "limitReversalImmediate": upperReversal && lowerReversal,
       "newGestureKeepsZoom": noJump, "invalidPinchIgnored": invalidIgnored && zeroStartIgnored,
       "hapticsOnlyOncePerBoundary": onceAtMinimum && expansionTriggers,
-      "standardLightAndHeavyWithTails": NeoZoomHaptics.expansionStyle == .light && NeoZoomHaptics.originalStyle == .heavy && NeoZoomHaptics.originalTail > NeoZoomHaptics.expansionTail && NeoZoomHaptics.expansionTail > 0,
+      "standardLightAndMediumWithTails": NeoZoomHaptics.expansionStyle == .light && NeoZoomHaptics.originalStyle == .medium && NeoZoomHaptics.originalTail > NeoZoomHaptics.expansionTail && NeoZoomHaptics.expansionTail > 0,
       "pinchZoomKeepsUIAndPanel": stable, "pinchExcludesNavigation": noNavigation,
       "singleFingerNavigationOnly": navigationPan.maximumNumberOfTouches == 1 && orientationPan.maximumNumberOfTouches == 1]
   }

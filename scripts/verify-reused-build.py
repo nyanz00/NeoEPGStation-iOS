@@ -22,7 +22,7 @@ if Path('ios/NeoEPGStation/NeoPlayerChrome.swift').exists():
     required += ['player-ui-smoke', 'player-playback-smoke']
 full_recheck = os.environ.get('RECHECK_PLAYBACK') == 'true'
 network_probe = os.environ.get('NETWORK_PROBE') == 'true'
-focused = os.environ.get('CHECK_SCOPE') == 'zoom-font'
+focused = os.environ.get('CHECK_SCOPE') in ('zoom-font', 'ts-comments')
 for name in ([] if full_recheck or network_probe or focused else required):
     result = json.loads((artifact / f'{name}.json').read_text())
     if result.get('success') is not True:

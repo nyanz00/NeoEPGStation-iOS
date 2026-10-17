@@ -18,6 +18,25 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     let window = UIWindow(frame: UIScreen.main.bounds)
     window.rootViewController = NeoShell(); self.window = window; window.makeKeyAndVisible()
 #if targetEnvironment(simulator)
+    if let base = ProcessInfo.processInfo.environment["NEO_EPG_TS_RESUME"], let url = URL(string: base+"/api/videos/1") {
+      NeoCommentOverlay.waitBeforePlayback = true
+      UserDefaults.standard.set(true, forKey: "player.comments.enabled")
+      DispatchQueue.main.asyncAfter(deadline: .now()+1) {
+        let player = NeoPlayerController(url: url, title: "Synthetic TS resume", username: "", password: "", networkCaching: 300)
+        player.initialPosition = 49
+        player.recordingContext = ["disableHistory": true, "videoFileType": "ts"]
+        player.modalPresentationStyle = .fullScreen
+        window.rootViewController?.present(player, animated: false) {
+          player.runTSResumeProbe { result in
+            NeoPiPSmoke.save("ts-resume-smoke", result)
+            if let source = NeoPlaybackDiagnostics.exportURL(), let data = try? Data(contentsOf: source) {
+              try? data.write(to: NeoPiPSmoke.directory.appendingPathComponent("ts-resume-diagnostics.json"))
+            }
+          }
+        }
+      }
+      return true
+    }
     if ProcessInfo.processInfo.environment["NEO_EPG_ZOOM_FONT_SMOKE"] == "1" {
       DispatchQueue.main.asyncAfter(deadline: .now()+1) {
         let chrome = NeoPlayerChrome(title: "Zoom feedback")

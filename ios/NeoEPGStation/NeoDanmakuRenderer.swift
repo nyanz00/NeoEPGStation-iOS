@@ -161,9 +161,11 @@ final class NeoDanmakuRenderer {
   // italic bearings, outline/shadow and one raster pixel of antialiasing safety.
   private func geometry(_ key: CommentTextureKey) -> RasterGeometry {
     let style = key.style, scale = min(key.pixelScale, 128/style.size)
-    let base = CTFontCreateWithName(style.font as CFString, CGFloat(style.size*scale), nil)
-    var traits: CTFontSymbolicTraits = []
-    if style.bold { traits.insert(.traitBold) }; if style.italic { traits.insert(.traitItalic) }
+    // TS JSON and commentary ASS share the same bundled face for both layout
+    // measurement and rasterization. Ordinary subtitles are rendered by VLC.
+    let base = CTFontCreateWithName("NotoSansJP-Bold" as CFString, CGFloat(style.size*scale), nil)
+    var traits: CTFontSymbolicTraits = [.traitBold]
+    if style.italic { traits.insert(.traitItalic) }
     let font = CTFontCreateCopyWithSymbolicTraits(base, 0, nil, traits, traits) ?? base
     let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key(kCTFontAttributeName as String): font,
       NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true]
@@ -478,6 +480,9 @@ final class NeoDanmakuRenderer {
       NeoPlaybackDiagnostics.begin()
       let reset = try snapshot()["commentFonts"] as? [[String: Any]] ?? []
       return ["realRasterFontRunsRecorded": bothStyles && valid && renderer.error == nil,
+        "bundledBoldUsedForTSAndASS": bothStyles && !fonts.isEmpty && fonts.allSatisfy {
+          ($0["actualPostScript"] as? String) == "NotoSansJP-Bold" && ($0["actualBold"] as? Bool) == true
+        },
         "fontSamplesDeduplicated": !first.isEmpty && first.count == repeated.count,
         "fontSamplesSurviveEventRing": fonts.count == first.count && fonts.count <= 64,
         "commentTextExcluded": !json.contains("FontProbePrivate") && !json.contains("日本語あア"),

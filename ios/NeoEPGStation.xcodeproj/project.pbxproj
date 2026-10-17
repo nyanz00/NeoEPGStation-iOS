@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+    BDEF00000000000000000025 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000025; };
+    BDEF00000000000000000026 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000026; };
     BDEF00000000000000000024 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000024; };
     BDEF00000000000000000023 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000023; };
     BDEF00000000000000000022 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000022; };
@@ -46,6 +48,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+    ADEF00000000000000000025 = {isa = PBXFileReference; lastKnownFileType = file; name = NotoSansJP-Bold.otf; path = "NeoEPGStation/Fonts/NotoSansJP-Bold.otf"; sourceTree = "<group>"; };
+    ADEF00000000000000000026 = {isa = PBXFileReference; lastKnownFileType = text; name = NotoSansJP-OFL.txt; path = "../licenses/NotoSansJP-OFL.txt"; sourceTree = "<group>"; };
     ADEF00000000000000000024 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoRecordedSearch.swift; path = NeoEPGStation/NeoRecordedSearch.swift; sourceTree = "<group>"; };
     ADEF00000000000000000023 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoAccountSmoke.swift; path = NeoEPGStation/NeoAccountSmoke.swift; sourceTree = "<group>"; };
     ADEF00000000000000000022 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoHistoryPage.swift; path = NeoEPGStation/NeoHistoryPage.swift; sourceTree = "<group>"; };
@@ -106,6 +110,8 @@
 		13B07FAE1A68108700A75B9A /* NeoEPGStation */ = {
 			isa = PBXGroup;
 			children = (
+        ADEF00000000000000000025,
+        ADEF00000000000000000026,
         AABC00000000000000000001,
         AABC00000000000000000002,
         AABC00000000000000000003,
@@ -254,6 +260,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+        BDEF00000000000000000025,
+        BDEF00000000000000000026,
 				81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
         BDEF00000000000000000008 /* PrivacyInfo.xcprivacy in Resources */,
