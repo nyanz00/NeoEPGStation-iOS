@@ -1,11 +1,13 @@
 import Foundation
 
-// Bounded, opt-in export. Callers supply only numeric state and fixed event
-// names: never URLs, headers, titles, comment text or localized errors.
+// Bounded, opt-in export. Numeric state, fixed event names and font metadata
+// only: never URLs, headers, titles, comment text or localized errors.
 @objc(NeoPlaybackDiagnostics)
 final class NeoPlaybackDiagnostics: NSObject {
   private static let lock = NSLock()
   private static var events: [[String: Any]] = []
+  private static var commentFonts: [[String: Any]] = []
+  private static var fontKeys = Set<String>()
   private static var started = ProcessInfo.processInfo.systemUptime
   private static var currentSeek = 0
   private static var awaitingVideo = false
@@ -14,7 +16,8 @@ final class NeoPlaybackDiagnostics: NSObject {
   @objc static var seekID: Int { lock.lock(); defer { lock.unlock() }; return currentSeek }
   @objc static func begin() {
     lock.lock(); events.removeAll(); started = ProcessInfo.processInfo.systemUptime; currentSeek = 0; awaitingVideo = false
-    nativeErrors.removeAll(); nativeErrorPending = false; nativeErrorGeneration += 1; lock.unlock()
+    nativeErrors.removeAll(); nativeErrorPending = false; nativeErrorGeneration += 1
+    commentFonts.removeAll(); fontKeys.removeAll(); lock.unlock()
     record("session.start", fields: ["rewindSeconds": NeoPlaybackCache.savedSeconds,
       "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"])
   }
@@ -36,6 +39,20 @@ final class NeoPlaybackDiagnostics: NSObject {
     events.append(row)
     if events.count > 4096 { events.removeFirst(256) }
   }
+  static func commentFont(requested: String, bold: Bool, italic: Bool, base: String,
+                          actual: String, family: String, actualBold: Bool, actualItalic: Bool,
+                          weight: Double, script: String) {
+    // Preserve samples separately from the event ring, so long playback cannot
+    // evict them. Deduplicate across comments, sizes and raster cache rebuilds.
+    let names = [requested, base, actual, family].map { String($0.prefix(128)) }
+    let key = names.joined(separator: "\u{1f}")+"|\(bold)|\(italic)|\(actualBold)|\(actualItalic)|\(script)"
+    lock.lock(); defer { lock.unlock() }
+    guard commentFonts.count < 64, fontKeys.insert(key).inserted else { return }
+    commentFonts.append(["requestedFont": names[0], "requestedBold": bold, "requestedItalic": italic,
+      "resolvedBasePostScript": names[1], "actualPostScript": names[2], "actualFamily": names[3],
+      "actualBold": actualBold, "actualItalic": actualItalic, "weight": weight,
+      "script": script, "elapsed": ProcessInfo.processInfo.systemUptime-started])
+  }
   // Fixed categories only: 0 other, 1 seek, 2 EOF, 3 read, 4 connection,
   // 5 decoder, 6 demux, 7 clock/PCR, 8 late/drop, 9 VideoToolbox.
   // Counts preserve storms without flooding the UI/log.
@@ -53,12 +70,12 @@ final class NeoPlaybackDiagnostics: NSObject {
     }
   }
   @objc static func exportURL() -> URL? {
-    lock.lock(); let snapshot = events; lock.unlock()
+    lock.lock(); let snapshot = events, fonts = commentFonts; lock.unlock()
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("NeoPlaybackDiagnostics", isDirectory: true)
     let url = directory.appendingPathComponent("playback-diagnostics.json")
     do {
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-      let data = try JSONSerialization.data(withJSONObject: ["schema": 1, "events": snapshot], options: [.prettyPrinted, .sortedKeys])
+      let data = try JSONSerialization.data(withJSONObject: ["schema": 1, "events": snapshot, "commentFonts": fonts], options: [.prettyPrinted, .sortedKeys])
       try data.write(to: url, options: .atomic); return url
     } catch { return nil }
   }

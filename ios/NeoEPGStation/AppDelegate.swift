@@ -18,6 +18,27 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     let window = UIWindow(frame: UIScreen.main.bounds)
     window.rootViewController = NeoShell(); self.window = window; window.makeKeyAndVisible()
 #if targetEnvironment(simulator)
+    if ProcessInfo.processInfo.environment["NEO_EPG_ZOOM_FONT_SMOKE"] == "1" {
+      DispatchQueue.main.asyncAfter(deadline: .now()+1) {
+        let chrome = NeoPlayerChrome(title: "Zoom feedback")
+        window.rootViewController?.view.addSubview(chrome)
+        chrome.frame = CGRect(x: 0, y: 0, width: 844, height: 390)
+        chrome.setNeedsLayout(); chrome.layoutIfNeeded()
+        var checks = chrome.runZoomChecks()
+        chrome.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        chrome.setNeedsLayout(); chrome.layoutIfNeeded()
+        for (key, value) in chrome.runZoomChecks() { checks["portrait."+key] = value }
+        let zoomChecks = checks
+        DispatchQueue.global(qos: .userInitiated).async {
+          let fonts = NeoDanmakuRenderer.fontDiagnosticsSmoke()
+          DispatchQueue.main.async {
+            let result = zoomChecks.merging(fonts) { _, new in new }
+            NeoPiPSmoke.save("player-zoom-font-smoke", ["success": result.values.allSatisfy { $0 }, "checks": result])
+          }
+        }
+      }
+      return true
+    }
     if ProcessInfo.processInfo.environment["NEO_EPG_ARIB_PROBE"] == "1" {
       UserDefaults.standard.removeObject(forKey: "player.subtitle.name")
       DispatchQueue.main.asyncAfter(deadline: .now()+1) {

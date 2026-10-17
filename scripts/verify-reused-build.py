@@ -22,16 +22,17 @@ if Path('ios/NeoEPGStation/NeoPlayerChrome.swift').exists():
     required += ['player-ui-smoke', 'player-playback-smoke']
 full_recheck = os.environ.get('RECHECK_PLAYBACK') == 'true'
 network_probe = os.environ.get('NETWORK_PROBE') == 'true'
-for name in ([] if full_recheck or network_probe else required):
+focused = os.environ.get('CHECK_SCOPE') == 'zoom-font'
+for name in ([] if full_recheck or network_probe or focused else required):
     result = json.loads((artifact / f'{name}.json').read_text())
     if result.get('success') is not True:
         raise RuntimeError(f'Cannot reuse an unverified build: {name}')
-if not full_recheck and not network_probe and not json.loads((artifact / 'storage-smoke.json').read_text()).get('navigationSuccess'):
+if not full_recheck and not network_probe and not focused and not json.loads((artifact / 'storage-smoke.json').read_text()).get('navigationSuccess'):
     raise RuntimeError('Navigation storage was not verified')
 # Full rechecks may start from a failed test run, but only from successful native
 # builds/type checks. The workflow then runs every playback and UI assertion;
 # no previous pass or failed result is used to satisfy the new check.
-if full_recheck or network_probe:
+if full_recheck or network_probe or focused:
     jobs = json.loads(subprocess.check_output(['gh', 'run', 'view', info['run'], '--json', 'jobs']))['jobs']
     steps = {step['name']: step['conclusion'] for job in jobs for step in job['steps']}
     for name in ['Native ASS parser and playback clock tests', 'Native UI type checks',

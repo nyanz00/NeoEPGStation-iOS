@@ -167,7 +167,37 @@ final class NeoDanmakuRenderer {
     let font = CTFontCreateCopyWithSymbolicTraits(base, 0, nil, traits, traits) ?? base
     let attributes: [NSAttributedString.Key: Any] = [NSAttributedString.Key(kCTFontAttributeName as String): font,
       NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true]
-    let lines = key.text.components(separatedBy: "\n").map { CTLineCreateWithAttributedString(NSAttributedString(string: $0, attributes: attributes) as CFAttributedString) }
+    let strings = key.text.components(separatedBy: "\n")
+    let lines = strings.map { CTLineCreateWithAttributedString(NSAttributedString(string: $0, attributes: attributes) as CFAttributedString) }
+    for (line, string) in zip(lines, strings) {
+      // Inspect shaped runs: the requested/base font alone misses per-script
+      // substitutions. This runs during text preparation, never per frame.
+      for run in CTLineGetGlyphRuns(line) as! [CTRun] {
+        let attributes = CTRunGetAttributes(run) as NSDictionary
+        guard let value = attributes[kCTFontAttributeName] else { continue }
+        let actual = value as! CTFont
+        let range = CTRunGetStringRange(run), text = string as NSString
+        guard range.location >= 0, range.length > 0, range.location+range.length <= text.length else { continue }
+        var scripts = Set<String>()
+        for scalar in text.substring(with: NSRange(location: range.location, length: range.length)).unicodeScalars {
+          switch scalar.value {
+          case 0x3040...0x30ff, 0x31f0...0x31ff, 0x3400...0x9fff, 0xf900...0xfaff, 0xff66...0xff9f, 0x20000...0x323af:
+            scripts.insert("japanese")
+          case 0x30...0x39, 0x41...0x5a, 0x61...0x7a, 0xc0...0x24f: scripts.insert("latin")
+          default: break
+          }
+        }
+        if scripts.isEmpty { scripts.insert("other") }
+        let traits = CTFontGetSymbolicTraits(actual)
+        let weight = (CTFontCopyTraits(actual) as NSDictionary)[kCTFontWeightTrait] as? NSNumber
+        for script in scripts.sorted() {
+          NeoPlaybackDiagnostics.commentFont(requested: style.font, bold: style.bold, italic: style.italic,
+            base: CTFontCopyPostScriptName(font) as String, actual: CTFontCopyPostScriptName(actual) as String,
+            family: CTFontCopyFamilyName(actual) as String, actualBold: traits.contains(.traitBold),
+            actualItalic: traits.contains(.traitItalic), weight: weight?.doubleValue ?? 0, script: script)
+        }
+      }
+    }
     let lineHeight = ceil(CTFontGetAscent(font)+CTFontGetDescent(font)+CTFontGetLeading(font))
     var ink = CGRect.null
     for (index, line) in lines.enumerated() {
@@ -412,6 +442,48 @@ final class NeoDanmakuRenderer {
   }
 
 #if targetEnvironment(simulator)
+  static func fontDiagnosticsSmoke() -> [String: Bool] {
+    do {
+      NeoPlaybackDiagnostics.begin()
+      guard let device = MTLCreateSystemDefaultDevice() else { return ["fontDeviceAvailable": false] }
+      let renderer = try NeoDanmakuRenderer(device: device, cpuOnly: true)
+      let text = "FontProbePrivate123 日本語あア"
+      let styles = [CommentStyle(font: "MS PGothic", size: 32, bold: true), CommentStyle(size: 32)]
+      let comments = styles.enumerated().map { index, style in
+        NativeComment(id: index, layer: 0, start: 0, end: 5.25, text: text, style: style, position: nil, motion: nil)
+      }
+      func snapshot() throws -> [String: Any] {
+        guard let url = NeoPlaybackDiagnostics.exportURL() else { throw CommentParseError.invalid("diagnostics") }
+        return try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+      }
+      renderer.prepare(comments); renderer.waitForPreparedImages()
+      let first = try snapshot()["commentFonts"] as? [[String: Any]] ?? []
+      renderer.prepare(comments, pixelScale: 2); renderer.waitForPreparedImages()
+      let repeated = try snapshot()["commentFonts"] as? [[String: Any]] ?? []
+      for _ in 0..<5000 { NeoPlaybackDiagnostics.record("font.smoke", fields: [:]) }
+      let retained = try snapshot(), fonts = retained["commentFonts"] as? [[String: Any]] ?? []
+      if let url = NeoPlaybackDiagnostics.exportURL() {
+        try Data(contentsOf: url).write(to: NeoPiPSmoke.directory.appendingPathComponent("font-diagnostics.json"))
+      }
+      let bothStyles = styles.allSatisfy { style in
+        ["japanese", "latin"].allSatisfy { script in fonts.contains {
+          ($0["requestedFont"] as? String) == style.font && ($0["requestedBold"] as? Bool) == style.bold && ($0["script"] as? String) == script
+        } }
+      }
+      let valid = fonts.allSatisfy {
+        !($0["actualPostScript"] as? String ?? "").isEmpty && !($0["actualFamily"] as? String ?? "").isEmpty &&
+          $0["weight"] is NSNumber && $0["actualBold"] is Bool && $0["actualItalic"] is Bool
+      }
+      let json = String(data: try JSONSerialization.data(withJSONObject: retained), encoding: .utf8) ?? ""
+      NeoPlaybackDiagnostics.begin()
+      let reset = try snapshot()["commentFonts"] as? [[String: Any]] ?? []
+      return ["realRasterFontRunsRecorded": bothStyles && valid && renderer.error == nil,
+        "fontSamplesDeduplicated": !first.isEmpty && first.count == repeated.count,
+        "fontSamplesSurviveEventRing": fonts.count == first.count && fonts.count <= 64,
+        "commentTextExcluded": !json.contains("FontProbePrivate") && !json.contains("日本語あア"),
+        "fontSamplesResetPerPlayback": reset.isEmpty]
+    } catch { return ["fontDiagnosticsCompleted": false] }
+  }
   // GPU readback tests exercise the same shader/encoder as playback. They are
   // correctness tests, not a throughput claim for physical iPhones/iPads.
   static func smokeTest() -> [String: Any] {

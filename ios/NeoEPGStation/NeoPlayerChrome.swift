@@ -3,9 +3,13 @@ import CoreHaptics
 
 // A short impact followed by a quiet, decaying tail; never fired on release.
 private final class NeoZoomHaptics {
+  static let expansionStyle: UIImpactFeedbackGenerator.FeedbackStyle = .light
+  static let originalStyle: UIImpactFeedbackGenerator.FeedbackStyle = .heavy
+  static let expansionTail = 0.028, originalTail = 0.055
   private var engine: CHHapticEngine?
-  private let fallbackLight = UIImpactFeedbackGenerator(style: .light)
-  private let fallbackReturn = UIImpactFeedbackGenerator(style: .medium)
+  private let fallbackLight = UIImpactFeedbackGenerator(style: NeoZoomHaptics.expansionStyle)
+  private let fallbackReturn = UIImpactFeedbackGenerator(style: NeoZoomHaptics.originalStyle)
+  private(set) var expansionCount = 0, returnCount = 0
   func prepare() {
     fallbackLight.prepare(); fallbackReturn.prepare()
     guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
@@ -20,25 +24,22 @@ private final class NeoZoomHaptics {
     } catch { engine = nil }
   }
   func play(returning: Bool) {
+    // Keep the standard UIKit impact strength; Core Haptics adds only the tail.
+    if returning { returnCount += 1; fallbackReturn.impactOccurred() }
+    else { expansionCount += 1; fallbackLight.impactOccurred() }
     if let engine {
       do {
-        let impact = CHHapticEvent(eventType: .hapticTransient, parameters: [
-          CHHapticEventParameter(parameterID: .hapticIntensity, value: returning ? 0.6 : 0.22),
-          CHHapticEventParameter(parameterID: .hapticSharpness, value: returning ? 0.5 : 0.35)
-        ], relativeTime: 0)
         let tail = CHHapticEvent(eventType: .hapticContinuous, parameters: [
           CHHapticEventParameter(parameterID: .hapticIntensity, value: returning ? 0.16 : 0.07),
           CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.2),
           CHHapticEventParameter(parameterID: .decayTime, value: returning ? 0.045 : 0.02),
           CHHapticEventParameter(parameterID: .sustained, value: 0)
-        ], relativeTime: 0, duration: returning ? 0.055 : 0.028)
-        let player = try engine.makePlayer(with: CHHapticPattern(events: [impact, tail], parameters: []))
+        ], relativeTime: 0, duration: returning ? Self.originalTail : Self.expansionTail)
+        let player = try engine.makePlayer(with: CHHapticPattern(events: [tail], parameters: []))
         try player.start(atTime: CHHapticTimeImmediate)
         return
       } catch { self.engine = nil }
     }
-    if returning { fallbackReturn.impactOccurred(intensity: 0.7) }
-    else { fallbackLight.impactOccurred(intensity: 0.25) }
   }
 }
 
@@ -79,7 +80,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   @objc private(set) var videoZoom: CGFloat = 1
   @objc var onZoom: ((CGFloat) -> Void)?
   @objc var onVideoLayout: (() -> Void)?
-  private var pinchStart: CGFloat = 1, pinching = false
+  private var pinchDistance: CGFloat = 0, pinchGain: CGFloat = 0, pinching = false
   private var pinchExpanded = false, pinchOriginal = false
   private let zoomHaptics = NeoZoomHaptics()
   private var orientationProgress: CGFloat = 0
@@ -803,23 +804,35 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       canGoBack: ipad || !isWide, tablet: false, horizontal: Double(velocity.x), vertical: Double(velocity.y), persistentMenu: ipad)
   }
   @objc private func pinchVideo(_ gesture: UIPinchGestureRecognizer) {
-    updateZoom(state: gesture.state, scale: gesture.scale)
+    let distance: CGFloat
+    if gesture.numberOfTouches >= 2 {
+      let first = gesture.location(ofTouch: 0, in: self), second = gesture.location(ofTouch: 1, in: self)
+      distance = hypot(second.x-first.x, second.y-first.y)
+    } else { distance = pinchDistance }
+    updateZoom(state: gesture.state, distance: distance)
   }
-  private func updateZoom(state: UIGestureRecognizer.State, scale: CGFloat) {
+  private func updateZoom(state: UIGestureRecognizer.State, distance: CGFloat) {
     if state == .began {
-      pinching = true; pinchStart = videoZoom; pinchExpanded = false; pinchOriginal = false
+      guard distance.isFinite, distance > 0, videoView.bounds.height > 0 else { return }
+      pinching = true; pinchDistance = distance; pinchExpanded = false; pinchOriginal = false
+      // Center-to-edge travel reaches 8x. Bound sensitivity for widely spaced
+      // starting fingers; subsequent deltas are rebased even at either clamp.
+      let height = videoView.bounds.height
+      pinchGain = 7 / max(height-distance, height*0.25)
       zoomExpiry?.cancel(); onAction?("interaction"); zoomHaptics.prepare()
     }
     guard pinching else { return }
     if state == .began || state == .changed {
-      let requested = pinchStart * scale
-      guard requested.isFinite else { return }
+      guard distance.isFinite, distance >= 0 else { return }
+      let delta = distance-pinchDistance
+      pinchDistance = distance
+      let requested = max(1, videoZoom + delta*pinchGain)
       let next = requested <= 1.001 ? 1 : min(8, requested)
       if next > videoZoom+0.001 && !pinchExpanded {
         pinchExpanded = true; zoomHaptics.play(returning: false)
       }
       // The lower boundary also acknowledges a shrink attempt starting at 1x.
-      if next == 1 && scale < 0.999 && !pinchOriginal {
+      if next == 1 && delta < -0.001 && !pinchOriginal {
         pinchOriginal = true; zoomHaptics.play(returning: true)
       }
       videoZoom = next; onZoom?(next)
@@ -1167,39 +1180,67 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       "verticalSwipeLeavesScrolling": vertical, "rootNavigationGesture": navigationPan.view === self]
   }
   @objc func runZoomChecks() -> [String: Bool] {
-    let old = videoZoom, handler = onAction
+    let old = videoZoom, handler = onAction, zoomHandler = onZoom
     onAction = { _ in }
+    var applied: CGFloat = 1
+    onZoom = { applied = $0 }
+    videoZoom = 1
+    let height = videoView.bounds.height, start = height*0.2, travel = height-start
+    let initialExpansions = zoomHaptics.expansionCount, initialReturns = zoomHaptics.returnCount
     let headerFrame = header.frame, panelFrame = panel.frame
-    updateZoom(state: .began, scale: 1); updateZoom(state: .changed, scale: 2)
+    updateZoom(state: .began, distance: start); updateZoom(state: .changed, distance: start+travel/7)
     layoutIfNeeded()
     let compactCircle = zoomBadge.bounds.width == zoomBadge.bounds.height && zoomBadge.bounds.width <= 44 && zoomBadge.layer.cornerRadius == zoomBadge.bounds.height/2
-    let expanding = videoZoom == 2 && zoomBadge.text == "2.0×" && pinchExpanded && !pinchOriginal && !zoomBadge.isHidden
+    let expanding = abs(videoZoom-2) < 0.001 && applied == videoZoom && zoomBadge.text == "2.0×" && pinchExpanded && !pinchOriginal && !zoomBadge.isHidden
     let noNavigation = navigationTarget(start: .zero, velocity: CGPoint(x: 600, y: 0)) == nil && !orientationDirection(CGPoint(x: 0, y: 600))
-    updateZoom(state: .changed, scale: 20)
+    updateZoom(state: .changed, distance: height)
+    let edgesReachMaximum = abs(videoZoom-8) < 0.001
+    updateZoom(state: .changed, distance: height+100)
     let capped = videoZoom == 8
-    updateZoom(state: .ended, scale: 20)
-    let noEndImpact = !pinching && pinchExpanded && !pinchOriginal
-    updateZoom(state: .began, scale: 1); updateZoom(state: .changed, scale: 0.1)
+    updateZoom(state: .changed, distance: height+99)
+    let upperReversal = videoZoom < 8
+    let counts = (zoomHaptics.expansionCount, zoomHaptics.returnCount)
+    updateZoom(state: .ended, distance: height+99)
+    let noEndImpact = !pinching && zoomHaptics.expansionCount == counts.0 && zoomHaptics.returnCount == counts.1
+    let beforeNextGesture = videoZoom
+    updateZoom(state: .began, distance: height*0.9)
+    let noJump = videoZoom == beforeNextGesture && videoZoom == applied
+    updateZoom(state: .changed, distance: 0)
     let restored = videoZoom == 1 && zoomBadge.text == "元のサイズ" && pinchOriginal
     layoutIfNeeded()
     let originalRectangle = zoomBadge.bounds.width > zoomBadge.bounds.height && zoomBadge.layer.cornerRadius == 5 && zoomBadge.bounds.height <= 34
-    updateZoom(state: .ended, scale: 0.1)
-    updateZoom(state: .began, scale: 1); updateZoom(state: .changed, scale: 0.5)
+    updateZoom(state: .ended, distance: 0)
+    updateZoom(state: .began, distance: start); updateZoom(state: .changed, distance: start/2)
     let minimum = videoZoom == 1 && pinchOriginal && !pinchExpanded && zoomBadge.text == "元のサイズ"
-    updateZoom(state: .changed, scale: 0.2)
+    updateZoom(state: .changed, distance: start/4)
     let stable = videoZoom == 1 && header.frame == headerFrame && panel.frame == panelFrame
-    updateZoom(state: .ended, scale: 0.2)
-    videoZoom = old; onZoom?(old); onAction = handler; zoomExpiry?.cancel(); zoomBadge.isHidden = true
+    let onceAtMinimum = zoomHaptics.returnCount == initialReturns+2
+    updateZoom(state: .changed, distance: start/4+1)
+    let lowerReversal = videoZoom > 1
+    let beforeInvalid = videoZoom
+    updateZoom(state: .changed, distance: .nan)
+    let invalidIgnored = videoZoom == beforeInvalid
+    updateZoom(state: .ended, distance: start/4+1)
+    let expansionTriggers = zoomHaptics.expansionCount == initialExpansions+2
+    updateZoom(state: .began, distance: 0)
+    let zeroStartIgnored = !pinching
+    videoZoom = old; onZoom = zoomHandler; onZoom?(old); onAction = handler; zoomExpiry?.cancel(); zoomBadge.isHidden = true
     return ["compactNumericZoomCircle": compactCircle, "originalSizeUsesTextRectangle": originalRectangle,
       "pinchZoomFollowsScale": expanding, "pinchZoomMaximumEight": capped, "pinchZoomMinimumOriginal": minimum,
       "pinchZoomOriginalAcknowledgement": restored, "pinchZoomReleaseHasNoImpact": noEndImpact,
+      "centerToEdgesReachesEight": edgesReachMaximum, "limitReversalImmediate": upperReversal && lowerReversal,
+      "newGestureKeepsZoom": noJump, "invalidPinchIgnored": invalidIgnored && zeroStartIgnored,
+      "hapticsOnlyOncePerBoundary": onceAtMinimum && expansionTriggers,
+      "standardLightAndHeavyWithTails": NeoZoomHaptics.expansionStyle == .light && NeoZoomHaptics.originalStyle == .heavy && NeoZoomHaptics.originalTail > NeoZoomHaptics.expansionTail && NeoZoomHaptics.expansionTail > 0,
       "pinchZoomKeepsUIAndPanel": stable, "pinchExcludesNavigation": noNavigation,
       "singleFingerNavigationOnly": navigationPan.maximumNumberOfTouches == 1 && orientationPan.maximumNumberOfTouches == 1]
   }
   @objc func smokeZoomTo(_ scale: CGFloat) {
-    updateZoom(state: .began, scale: 1)
-    updateZoom(state: .changed, scale: scale/max(1,videoZoom))
-    updateZoom(state: .ended, scale: 1)
+    let start = videoView.bounds.height*0.5
+    updateZoom(state: .began, distance: start)
+    let target = start+(min(8,max(1,scale))-videoZoom)/max(0.001,pinchGain)
+    updateZoom(state: .changed, distance: max(0,target))
+    updateZoom(state: .ended, distance: max(0,target))
   }
   @objc func runIPadGestureChecks() -> [String: Bool] {
     runNavigationChecks().merging(runZoomChecks()) { _, new in new }
