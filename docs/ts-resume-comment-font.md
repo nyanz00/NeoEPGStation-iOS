@@ -32,3 +32,22 @@ The TS probe checks initial resume at 49 seconds and paused reopen at 63 and
 progress, and opening only after comment preparation. It does not run unrelated
 iPad UI, rotation, ARIB timing or network fault suites. Simulator success does
 not establish physical haptic feel or results on every broadcast TS file.
+
+## Build 195 result
+
+Source `b7dbbd856c333bcd2ac88f8f87cda496fac155d9` passed on the first build:
+[Actions 39066173776](https://github.com/nyanz00/NeoEPGStation-iOS/actions/runs/39066173776).
+Native model/type checks, device packaging, simulator build, 38 zoom/font/haptic
+assertions and 18 native TS assertions passed. The extra HTTP assertions
+confirmed the preparation gate and three native arrivals through the
+unknown-duration byte-position path. Unrelated suites were skipped.
+
+The synthetic TS restore completed about 0.20–0.30 seconds after reopening;
+native positions were within 0.72 seconds of requested times, followed by
+advancing video and comments. This is a synthetic constant-rate measurement,
+not a real-network latency guarantee. Both requested font styles resolved
+Japanese and Latin runs to `NotoSansJP-Bold` with bold traits.
+
+The downloaded IPA's build number, source metadata, bundled font checksum and
+license were verified. IPA SHA-256:
+`cac0fd44e3e919ebabaa37d14dde1660fb854c1db6f914c23e29f6f15d5f7767`.
