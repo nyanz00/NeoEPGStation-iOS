@@ -1622,7 +1622,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   view.hidden = self.tsPositionPending;
   view.frame = self.movieView.bounds;
   [self.movieView addSubview:view];
-  [self applyVideoZoom:self.chrome.videoZoom];
+  [self alignVideoOutput];
   [NeoVLCFrameTap bindView:view sink:self.commentPiP];
   if (self.comments) { [self.movieView bringSubviewToFront:self.comments]; }
 }
@@ -1630,10 +1630,15 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   CGRect normal = [self.chrome convertRect:self.chrome.normalVideoFrame toView:self.movieView];
   self.comments.frame = normal;
   VLCMediaVideoTrack *video = self.player.media.videoTracks.firstObject.video;
-  if (video.width > 0 && video.height > 0) { self.chrome.videoAspectRatio = (CGFloat)video.width/video.height; }
-  CGRect bounds = self.movieView.bounds;
+  if (video.width > 0 && video.height > 0) {
+    CGFloat pixelRatio = video.sourceAspectRatio > 0 && video.sourceAspectRatioDenominator > 0
+      ? (CGFloat)video.sourceAspectRatio/video.sourceAspectRatioDenominator : 1;
+    self.chrome.videoAspectRatio = (CGFloat)video.width/video.height*pixelRatio;
+  }
+  CGRect bounds = CGRectMake(0, 0, self.chrome.normalVideoFrame.size.width, self.chrome.normalVideoFrame.size.height);
+  CGPoint center = CGPointMake(CGRectGetMidX(self.movieView.bounds), CGRectGetMidY(self.movieView.bounds));
   if (!CGRectEqualToRect(self.videoOutputView.bounds, bounds) ||
-      !CGPointEqualToPoint(self.videoOutputView.center, CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds)))) {
+      !CGPointEqualToPoint(self.videoOutputView.center, center)) {
     [self alignVideoOutput];
   }
 }
@@ -1642,7 +1647,14 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   // sample-buffer view using the resulting video-output size notification.
   if (self.videoOutputView.superview != self.movieView) { return; }
   self.videoOutputView.transform = CGAffineTransformIdentity;
-  self.videoOutputView.frame = self.movieView.bounds;
+  // Expanding the clipping viewport must not resize VLC's drawable: its
+  // inner sample-buffer layout updates asynchronously and can retain the old
+  // video origin. Keep the normal drawable size, center it in the viewport,
+  // and use only an affine transform for zoom/pan.
+  CGSize size = self.chrome.normalVideoFrame.size;
+  if (size.width <= 0 || size.height <= 0) { size = self.movieView.bounds.size; }
+  self.videoOutputView.bounds = (CGRect){CGPointZero, size};
+  self.videoOutputView.center = CGPointMake(CGRectGetMidX(self.movieView.bounds), CGRectGetMidY(self.movieView.bounds));
   [self.videoOutputView setNeedsLayout]; [self.videoOutputView layoutIfNeeded];
   [self applyVideoZoom:self.chrome.videoZoom];
 }
@@ -1783,11 +1795,15 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if ((armed && now-armed >= (tunnel ? 85 : 57)) || attempt >= (tunnel ? 220 : 150)) {
     VLCMedia *input = self.player.media;
     [self.chrome smokeZoomTo:2];
+    BOOL stableDrawable = CGSizeEqualToSize(self.videoOutputView.bounds.size, self.chrome.normalVideoFrame.size);
     BOOL zoomedDrawableOnly = fabs(self.videoOutputView.transform.a-2) < 0.01 && CGAffineTransformIsIdentity(self.comments.transform) && self.player.media == input;
     [self showControls]; [self.chrome snapshot:@"player-pinch-zoom"];
     [self.chrome smokeZoomTo:1];
     completion(@{@"success": @(armed > 0), @"armedAt": @(armed), @"rows": rows,
-      @"zoomedDrawableOnly": @(zoomedDrawableOnly), @"zoomChecks": [self.chrome runZoomChecks]}); return;
+      @"zoomedDrawableOnly": @(zoomedDrawableOnly && stableDrawable), @"zoomChecks": [self.chrome runZoomChecks]});
+    [self.chrome smokeZoomTo:2];
+    NSURL *documents = [NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
+    [@"ready" writeToURL:[documents URLByAppendingPathComponent:@"zoom-screen-ready.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil]; return;
   }
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500*NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
     [self pollNetworkProbe:attempt+1 armedAt:armed rows:rows completion:completion];

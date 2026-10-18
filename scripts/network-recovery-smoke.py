@@ -38,7 +38,7 @@ os.environ['SIMCTL_CHILD_NEO_EPG_NETWORK_PROBE'] = f'http://127.0.0.1:{server.se
 profiles = ['tunnel'] if os.environ.get('CHECK_SCOPE') == 'recovery-ui' else ['slow', 'disconnect']
 for mode in profiles:
     subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True)
-    for name in ['network-recovery-smoke.json', 'network-diagnostics.json']:
+    for name in ['network-recovery-smoke.json', 'network-diagnostics.json', 'zoom-screen-ready.txt']:
         (container / name).unlink(missing_ok=True)
     os.environ['SIMCTL_CHILD_NEO_EPG_NETWORK_MODE'] = mode
     run('xcrun', 'simctl', 'launch', device, bundle)
@@ -49,6 +49,13 @@ for mode in profiles:
     for name in ['network-recovery-smoke.json', 'network-diagnostics.json']:
         if (container / name).exists(): shutil.copyfile(container / name, Path('dist') / f'{mode}-{name}')
     value = json.loads(result.read_text())
+    if mode == 'tunnel':
+        for _ in range(50):
+            if (container / 'zoom-screen-ready.txt').exists(): break
+            time.sleep(.1)
+        time.sleep(1)
+        run('xcrun', 'simctl', 'io', device, 'screenshot', 'dist/tunnel-zoom-screen.png')
+        subprocess.check_call(['swift', 'scripts/check-zoom-screen.swift', 'dist/tunnel-zoom-screen.png'], timeout=60)
     picture = container / 'player-pinch-zoom.png'
     if picture.exists(): shutil.copyfile(picture, Path('dist') / f'{mode}-player-pinch-zoom.png')
     assert value['success'] and all(value['zoomChecks'].values()), value

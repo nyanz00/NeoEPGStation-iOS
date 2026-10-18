@@ -17,6 +17,9 @@
   scaled image bounds. At 1x the normal viewport and center are restored.
   Navigation/orientation pans cannot steal an enlarged-video drag. Maximum 8x,
   zoom badges and existing light/medium haptic tails remain.
+  VLC's drawable retains the normal viewport size while its center/affine
+  transform change, avoiding asynchronous inner-video resize races. Pan limits
+  use the source pixel aspect ratio as well as encoded dimensions.
 - Sidebar row and bottom shortcut content have explicit reusable geometry.
   Visible recording cells update their horizontal/vertical mode with the list
   width, in addition to invalidating collection layout.
@@ -34,3 +37,7 @@ crossing the 25-second opening deadline. Assertions require
 retirement, an upstream availability check, a fresh reopen, held presentation
 time and actual changing video/audio/comment progress after recovery. Unrelated
 ARIB timing, complete page/navigation suites and TS startup checks are excluded.
+The native probe leaves playback at 2x after completion; a compositor screenshot
+must contain the synthetic video pattern at the display center. This detects
+cases where view-frame assertions pass while the actual video stays at an old
+origin. `drawHierarchy` snapshots alone are not accepted for this assertion.

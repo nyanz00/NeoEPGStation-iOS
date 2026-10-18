@@ -909,7 +909,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private func clampVideoOffset() {
     guard videoZoom > 1 else { videoOffset = .zero; return }
     let ratio = max(0.01, videoAspectRatio)
-    let width = min(videoView.bounds.width, videoView.bounds.height*ratio)
+    let width = min(normalVideoFrame.width, normalVideoFrame.height*ratio)
     let height = width/ratio
     let x = max(0, (width*videoZoom-videoView.bounds.width)/2)
     let y = max(0, (height*videoZoom-videoView.bounds.height)/2)
