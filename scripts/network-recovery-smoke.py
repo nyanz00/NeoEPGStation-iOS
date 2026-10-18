@@ -35,14 +35,15 @@ sys.path.insert(0, str(Path('tests/fixtures').resolve()))
 from http_range_server import start_server
 server = start_server(container)
 os.environ['SIMCTL_CHILD_NEO_EPG_NETWORK_PROBE'] = f'http://127.0.0.1:{server.server_port}'
-for mode in ['slow', 'disconnect']:
+profiles = ['tunnel'] if os.environ.get('CHECK_SCOPE') == 'recovery-ui' else ['slow', 'disconnect']
+for mode in profiles:
     subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True)
     for name in ['network-recovery-smoke.json', 'network-diagnostics.json']:
         (container / name).unlink(missing_ok=True)
     os.environ['SIMCTL_CHILD_NEO_EPG_NETWORK_MODE'] = mode
     run('xcrun', 'simctl', 'launch', device, bundle)
     result = container / 'network-recovery-smoke.json'
-    for _ in range(100):
+    for _ in range(130):
         if result.exists(): break
         time.sleep(1)
     for name in ['network-recovery-smoke.json', 'network-diagnostics.json']:
@@ -55,6 +56,6 @@ for mode in ['slow', 'disconnect']:
     print(mode, 'network probe captured', len(value['rows']), 'samples', flush=True)
 Path('dist/network-faults.json').write_text(json.dumps(server.fault_events, indent=2))
 server.shutdown()
-checked = run(sys.executable, 'scripts/check-network-recovery.py', 'dist')
+checked = run(sys.executable, 'scripts/check-network-recovery.py', 'dist', *profiles)
 Path('dist/network-flow-checks.json').write_text(checked+'\n')
 print(checked, flush=True)

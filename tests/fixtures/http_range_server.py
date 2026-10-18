@@ -29,6 +29,8 @@ def start_server(directory):
                 with self.server.fault_lock:
                     self.server.fault_mode = self.path.rsplit('/', 1)[-1]
                     self.server.fault_remaining = 3 if self.server.fault_mode == 'slow' else 1
+                    if self.server.fault_mode == 'tunnel':
+                        self.server.outage_until = time.monotonic()+58
                 self.send_response(200); self.send_header('Content-Length', '0'); self.end_headers()
                 return
             if self.path == '/api/videos/1/duration':
@@ -61,12 +63,17 @@ def start_server(directory):
             body = data[begin:end+1]
             mode = None
             if self.path == '/api/videos/4':
+                if time.monotonic() < getattr(self.server, 'outage_until', 0):
+                    self.server.fault_events.append({'mode': 'tunnel', 'offset': begin, 'time': time.monotonic()})
+                    time.sleep(6)
+                    self.connection.shutdown(socket.SHUT_RDWR); self.connection.close(); return
                 with self.server.fault_lock:
                     if self.server.fault_remaining > 0:
                         mode = self.server.fault_mode; self.server.fault_remaining -= 1
                 if mode:
                     self.server.fault_events.append({'mode': mode, 'offset': begin, 'time': time.monotonic()})
-                    if mode == 'slow': time.sleep(9)
+                    if mode == 'tunnel': pass
+                    elif mode == 'slow': time.sleep(9)
                     elif mode == 'disconnect':
                         self.connection.shutdown(socket.SHUT_RDWR); self.connection.close(); return
             self.send_response(206)

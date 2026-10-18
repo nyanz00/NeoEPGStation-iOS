@@ -167,6 +167,18 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
       DispatchQueue.main.async { completion(duration) }
     }.resume()
   }
+  @objc func checkAvailability(_ completion: @escaping (Bool) -> Void) {
+    queue.async { [self] in
+      guard !closed else { return }
+      var request = URLRequest(url: source, timeoutInterval: 5)
+      request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
+      if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
+      session.dataTask(with: request) { data, response, error in
+        let available = error == nil && (response as? HTTPURLResponse)?.statusCode == 206 && data?.count == 1
+        DispatchQueue.main.async { completion(available) }
+      }.resume()
+    }
+  }
   private func listen() {
     guard !closed, !suspended else { return }
           do {

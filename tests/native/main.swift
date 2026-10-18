@@ -208,6 +208,23 @@ check(NeoSubtitlePreference.preferredIndex(["English", "日本語"]) == 0 && Neo
 check(NeoSubtitlePreference.preferredIndex(["日本語"]) == -1, "Missing saved subtitle does not select an unrelated track")
 if let oldSubtitle { UserDefaults.standard.set(oldSubtitle, forKey: subtitleKey) } else { UserDefaults.standard.removeObject(forKey: subtitleKey) }
 print("Native ASS parser, timeline, clock, packing, subtitle preferences: all checks passed")
+let commentKey = NeoCommentPreference.key, oldComment = UserDefaults.standard.object(forKey: NeoCommentPreference.key)
+let commentTracks = ["実況 少数", "実況 全体"].enumerated().map { i, name in
+  NativeCommentTrack(subtitleIndex: i, streamIndex: i+2, codecName: "ass", displayName: name, title: name, language: "jpn")
+}
+UserDefaults.standard.removeObject(forKey: commentKey)
+check(NeoCommentPreference.preferred(commentTracks)?.subtitleIndex == 0, "Comments default to the first available track")
+NeoCommentPreference.save(commentTracks[1].displayName)
+check(NeoCommentPreference.preferred(commentTracks)?.subtitleIndex == 1, "Restore the chosen dense commentary track")
+check(NeoCommentPreference.preferred(Array(commentTracks.reversed()))?.displayName == commentTracks[1].displayName, "Comment preference survives reordered tracks")
+check(NeoCommentPreference.preferred([commentTracks[0]])?.subtitleIndex == 0 && UserDefaults.standard.string(forKey: commentKey) == commentTracks[1].displayName, "Missing commentary uses a fallback without replacing preference")
+if let oldComment { UserDefaults.standard.set(oldComment, forKey: commentKey) } else { UserDefaults.standard.removeObject(forKey: commentKey) }
+let allDropped = NeoVideoRecovery(); allDropped.begin(100, timeout: 10)
+_ = allDropped.evaluate(["outputID": 1, "samples": 1, "arrivalAge": 0.05, "scheduledInMs": -80, "nativeDecoded": 278, "nativeLost": 0], mediaMs: 1000, now: 100)
+check(allDropped.evaluate(["outputID": 1, "samples": 40, "arrivalAge": 0.05, "scheduledInMs": -80, "nativeDecoded": 350, "nativeLost": 72], mediaMs: 4000, now: 103) == 2, "Fresh repeated callbacks cannot hide all decoded pictures being dropped")
+let staticPicture = NeoVideoRecovery(); staticPicture.begin(100, timeout: 10)
+_ = staticPicture.evaluate(["outputID": 1, "samples": 1, "arrivalAge": 0.05, "scheduledInMs": 0, "nativeDecoded": 278, "nativeLost": 0], mediaMs: 1000, now: 100)
+check(staticPicture.evaluate(["outputID": 1, "samples": 73, "arrivalAge": 0.05, "scheduledInMs": 0, "nativeDecoded": 350, "nativeLost": 0], mediaMs: 4000, now: 103) == 0, "A correctly decoded static picture stays healthy")
 
 var presentationClock = CommentPresentationClock()
 _ = presentationClock.time(media: 10, running: true, now: 100, videoHost: 100)

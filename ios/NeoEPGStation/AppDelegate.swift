@@ -18,6 +18,19 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     let window = UIWindow(frame: UIScreen.main.bounds)
     window.rootViewController = NeoShell(); self.window = window; window.makeKeyAndVisible()
 #if targetEnvironment(simulator)
+    if ProcessInfo.processInfo.environment["NEO_EPG_REFLOW_ZOOM"] == "1" {
+      DispatchQueue.main.asyncAfter(deadline: .now()+1) {
+        var checks = NeoShell.reflowSmoke(in: window.rootViewController!.view)
+        let chrome = NeoPlayerChrome(title: "Synthetic fullscreen zoom")
+        window.rootViewController?.view.addSubview(chrome)
+        for size in [CGSize(width: 844, height: 390), CGSize(width: 390, height: 844), CGSize(width: 1194, height: 834)] {
+          chrome.frame = CGRect(origin: .zero, size: size); chrome.setNeedsLayout(); chrome.layoutIfNeeded()
+          for (key, value) in chrome.runZoomPanChecks() { checks["\(Int(size.width))."+key] = value }
+        }
+        NeoPiPSmoke.save("reflow-zoom-smoke", ["success": checks.values.allSatisfy { $0 }, "checks": checks])
+      }
+      return true
+    }
     if let base = ProcessInfo.processInfo.environment["NEO_EPG_TS_RESUME"], let url = URL(string: base+"/api/videos/1") {
       NeoCommentOverlay.waitBeforePlayback = true
       UserDefaults.standard.set(true, forKey: "player.comments.enabled")

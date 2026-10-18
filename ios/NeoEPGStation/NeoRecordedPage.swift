@@ -34,7 +34,7 @@ final class NeoRecordedCard: UICollectionViewCell {
   let thumbnail = NeoThumbnail(), title = NeoStyle.label(size: 14, bold: true)
   let channel = NeoStyle.label(size: 12, muted: true), time = NeoStyle.label(size: 12, muted: true)
   let descriptionLabel = NeoStyle.label(size: 12)
-  var mobile = true
+  var mobile = true { didSet { if oldValue != mobile { setNeedsLayout() } } }
   func setFocused(_ focused: Bool) {
     // MUI dark warning.main orange[400], action.hover white at 0.08.
     contentView.layer.borderWidth = focused ? 2 : 0
@@ -192,7 +192,12 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     super.viewDidLayoutSubviews()
     let frame = body.bounds
     let changed = collection.bounds.size != frame.size; collection.frame = frame
-    if changed { collection.collectionViewLayout.invalidateLayout() }
+    if changed {
+      // Layout invalidation resizes cells; it does not call configure again.
+      // Update the content mode of retained cells as well as their outer frames.
+      for case let cell as NeoRecordedCard in collection.visibleCells { cell.mobile = mobile }
+      collection.collectionViewLayout.invalidateLayout()
+    }
     message.frame = body.bounds.insetBy(dx: 24, dy: 48); spinner.center = CGPoint(x: body.bounds.midX, y: 70)
   }
   func reloadLabels() { collection.reloadData() }
@@ -391,6 +396,9 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     cell.onMore = { [weak self] anchor in self?.showRecordingMenu(item, anchor: anchor, detail: false) }; return cell
   }
   func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) { shell?.openDetail(records[indexPath.item]) }
+  func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+    (cell as? NeoRecordedCard)?.mobile = mobile
+  }
   func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize { CGSize(width: itemWidth, height: cardHeight) }
   func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, insetForSectionAt section: Int) -> UIEdgeInsets {
     let columns = max(1, Int((collectionView.bounds.width - 8 + 8) / (itemWidth + 8)))
@@ -459,5 +467,28 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         .init(id: index + 10, name: "AV1 / MKV", type: "encoded", size: 352200000, filename: nil)],
       ruleId: 1, dropLogFile: .init(id: index, errorCnt: 0, dropCnt: 2, scramblingCnt: 0))
   }, total: 300)
+  static func reflowSmoke(in host: UIView) -> Bool {
+    let shell = NeoShell()
+    let page = NeoRecordedPage(shell: shell)
+    page.loadViewIfNeeded(); host.addSubview(page.view)
+    defer { page.view.removeFromSuperview() }
+    page.records = fixtures.records; page.total = 4
+    page.collection.reloadData()
+    for width: CGFloat in [1200, 390, 768, 500, 1200, 390] {
+      page.view.frame = CGRect(x: 0, y: 0, width: width, height: 850)
+      page.view.setNeedsLayout(); page.view.layoutIfNeeded(); page.collection.layoutIfNeeded()
+      guard !page.collection.visibleCells.isEmpty else { return false }
+      for case let cell as NeoRecordedCard in page.collection.visibleCells {
+        cell.layoutIfNeeded()
+        guard cell.mobile == page.mobile else { return false }
+        if cell.mobile {
+          guard cell.thumbnail.frame.width < cell.bounds.width*0.5 && cell.title.frame.minX > cell.thumbnail.frame.maxX else { return false }
+        } else {
+          guard abs(cell.thumbnail.frame.width-cell.bounds.width) < 1 && cell.title.frame.minY > cell.thumbnail.frame.maxY else { return false }
+        }
+      }
+    }
+    return true
+  }
 #endif
 }

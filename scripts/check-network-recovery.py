@@ -15,6 +15,20 @@ def inspect(mode, result, diagnostics, faults):
     assert tail[-1]['video']-tail[0]['video'] >= 12, 'Video did not resume decoding'
     assert tail[-1]['playedAudio']-tail[0]['playedAudio'] >= 12, 'Audio did not resume'
     assert all(r['state'] == 2 and not r['loading'] for r in tail[-3:]), 'Recovery never left the loading state'
+    if mode == 'tunnel':
+        events = diagnostics['events']
+        assert any(e['event'] == 'input.retiredAfterDeadline' for e in events), 'Opening deadline was not exercised'
+        assert any(e['event'] == 'input.networkAvailable' for e in events), 'No upstream recovery gate'
+        assert max(r['reload'] for r in rows) >= 2, 'Late input was reused instead of reopening'
+        assert any(r['waitingNetwork'] for r in rows), 'No waiting interval after input retirement'
+        assert tail[-1]['samples']-tail[0]['samples'] >= 12, 'No video delivery after tunnel recovery'
+        assert tail[-1]['changes']-tail[0]['changes'] >= 2, 'Output is still the same frozen picture'
+        assert tail[-1]['lost']-tail[0]['lost'] < (tail[-1]['video']-tail[0]['video'])/2, 'New video is still being dropped'
+        for group in [[r for r in rows if r['waitingNetwork']], [r for r in rows if r['restoreVerifying'] and not r['reloading'] and not r['waitingNetwork']]]:
+            if group:
+                assert max(r['mediaMs'] for r in group)-min(r['mediaMs'] for r in group) <= 1500, 'Clock escaped a blocked restore'
+        assert tail[-1]['commentTime'] > tail[0]['commentTime']+1, 'Comments did not resume'
+        return {'success': True, 'lateInputRetired': True, 'freshVideoAndAudioConfirmed': True, 'reloads': max(r['reload'] for r in rows)}
     assert max(r['reload'] for r in rows) == 0, 'An ordinary network wait reopened the VLC input'
     start = None
     drift = 0
@@ -46,7 +60,7 @@ if __name__ == '__main__':
     directory = Path(sys.argv[1])
     faults = json.loads((directory / 'network-faults.json').read_text())
     results = {}
-    for mode in ['slow', 'disconnect']:
+    for mode in (sys.argv[2:] or ['slow', 'disconnect']):
         result = json.loads((directory / f'{mode}-network-recovery-smoke.json').read_text())
         diagnostics = json.loads((directory / f'{mode}-network-diagnostics.json').read_text())
         results[mode] = inspect(mode, result, diagnostics, faults)

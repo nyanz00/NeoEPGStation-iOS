@@ -75,9 +75,14 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private let navigationPan = UIPanGestureRecognizer()
   private let orientationPan = UIPanGestureRecognizer()
   private let zoomPinch = UIPinchGestureRecognizer()
+  private let zoomPan = UIPanGestureRecognizer()
   private let zoomBadge = NeoStyle.label(size: 15)
   private var zoomExpiry: DispatchWorkItem?
   @objc private(set) var videoZoom: CGFloat = 1
+  @objc private(set) var videoOffset = CGPoint.zero
+  @objc private(set) var normalVideoFrame = CGRect.zero
+  @objc var videoAspectRatio: CGFloat = 16/9
+  private var zoomDragging = false, zoomPanStart = CGPoint.zero
   @objc var onZoom: ((CGFloat) -> Void)?
   @objc var onVideoLayout: (() -> Void)?
   private var pinchDistance: CGFloat = 0, pinchGain: CGFloat = 0, pinching = false
@@ -273,6 +278,9 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     videoDoubleTap.require(toFail: navigationPan); videoDoubleTap.require(toFail: orientationPan)
     zoomPinch.addTarget(self, action: #selector(pinchVideo)); zoomPinch.delegate = self
     addGestureRecognizer(zoomPinch)
+    zoomPan.addTarget(self, action: #selector(panZoomedVideo)); zoomPan.delegate = self
+    zoomPan.maximumNumberOfTouches = 1; addGestureRecognizer(zoomPan)
+    videoTap.require(toFail: zoomPan); videoDoubleTap.require(toFail: zoomPan)
     videoTap.require(toFail: zoomPinch); videoDoubleTap.require(toFail: zoomPinch)
     header.backgroundColor = .clear; controls.backgroundColor = .clear
     renderPanel()
@@ -353,6 +361,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     // underneath the home indicator instead of reserving a black bottom strip.
     videoView.frame = wide ? CGRect(x: safe.left, y: safe.top, width: max(0, videoWidth - safe.left - (panelOpen ? 0 : safe.right)), height: max(0, bounds.height - safe.top))
       : CGRect(x: 0, y: safe.top, width: videoWidth, height: videoWidth * 9 / 16)
+    normalVideoFrame = videoView.frame
+    if videoZoom > 1 { videoView.frame = bounds }
     videoDim.frame = videoView.frame; pipCover.frame = videoView.frame
     pipMessage.frame = pipCover.bounds.insetBy(dx: 20, dy: 20)
     let rightInset = panelOpen && wide ? 8 : safe.right + 8
@@ -394,7 +404,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     }
     panel.frame = wide ? CGRect(x: videoWidth, y: 0, width: panelWidth, height: bounds.height)
       : CGRect(x: 0, y: videoView.frame.maxY, width: bounds.width, height: max(0, bounds.height - videoView.frame.maxY))
-    panel.isHidden = !panelVisible; panel.alpha = panelVisible ? 1 : 0
+    panel.isHidden = !panelVisible || videoZoom > 1; panel.alpha = panelVisible && videoZoom == 1 ? 1 : 0
     let panelTop: CGFloat = wide ? safe.top : 0, panelBottom = safe.bottom
     let panelHeaderHeight: CGFloat = wide || tab == "settings" ? 44 : 0
     panelHeader.isHidden = panelHeaderHeight == 0
@@ -436,7 +446,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let drawerWidth = min(240 + safe.left, bounds.width * 0.8)
     drawer.frame = CGRect(x: drawerDragging ? drawer.frame.minX : drawerOpen ? 0 : -drawerWidth, y: 0, width: drawerWidth, height: bounds.height)
     drawer.contentSafeArea = safe
-    onVideoLayout?()
+    clampVideoOffset(); onVideoLayout?()
     applyOrientationPreview()
   }
   @objc func showControls(_ visible: Bool) {
@@ -462,7 +472,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     noticeExpiry = expiry; DispatchQueue.main.asyncAfter(deadline: .now()+2.5, execute: expiry)
   }
   @objc func clearTransientNotice() { noticeExpiry?.cancel(); noticeExpiry = nil; transientNotice.isHidden = true; transientNotice.text = nil }
-  @objc var interactionOpen: Bool { drawerOpen || drawerDragging || navigationAction != nil || popup != nil || orientationDragging || orientationPending || pinching }
+  @objc var interactionOpen: Bool { drawerOpen || drawerDragging || navigationAction != nil || popup != nil || orientationDragging || orientationPending || pinching || zoomDragging }
   @objc var controlTracking: Bool {
     func tracking(_ view: UIView) -> Bool {
       (view as? UIControl)?.isTracking == true || view.subviews.contains(where: tracking)
@@ -486,6 +496,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     return ancestor === self
   }
   func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    if gesture === zoomPan { return videoZoom > 1 && !pipShowing && acceptsVideoTap(touch.location(in: self), target: touch.view) }
     if gesture === zoomPinch { return !pipShowing && acceptsVideoTap(touch.location(in: self), target: touch.view) }
     if gesture === videoTap || gesture === videoDoubleTap {
       return !pipShowing && acceptsVideoTap(touch.location(in: self), target: touch.view)
@@ -798,7 +809,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     }
   }
   private func navigationTarget(start: CGPoint, velocity: CGPoint) -> NeoSwipeAction? {
-    guard !drawerOpen, !drawerDragging, !orientationDragging, !orientationPending, !pinching, popup == nil else { return nil }
+    guard videoZoom == 1, !drawerOpen, !drawerDragging, !orientationDragging, !orientationPending, !pinching, popup == nil else { return nil }
     let ipad = UIDevice.current.userInterfaceIdiom == .pad
     return NeoNavigationGesture.action(startY: Double(start.y), height: Double(bounds.height),
       canGoBack: ipad || !isWide, tablet: false, horizontal: Double(velocity.x), vertical: Double(velocity.y), persistentMenu: ipad)
@@ -835,7 +846,9 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       if next == 1 && delta < -0.001 && !pinchOriginal {
         pinchOriginal = true; zoomHaptics.play(returning: true)
       }
-      videoZoom = next; onZoom?(next)
+      videoZoom = next
+      if next == 1 { videoOffset = .zero }
+      setNeedsLayout(); layoutIfNeeded(); clampVideoOffset(); onZoom?(next)
       zoomBadge.text = next == 1 ? "元のサイズ" : String(format: "%.1f×", Double(next))
       zoomBadge.isHidden = false; setNeedsLayout()
     }
@@ -876,6 +889,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     }
   }
   override func gestureRecognizerShouldBegin(_ gesture: UIGestureRecognizer) -> Bool {
+    if gesture === zoomPan { return videoZoom > 1 && !interactionOpen && !pipShowing }
     guard let pan = gesture as? UIPanGestureRecognizer else { return true }
     let v = pan.velocity(in: self)
     if gesture === orientationPan { return orientationDirection(v) }
@@ -887,7 +901,28 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   }
   private var orientationViews: [UIView] { [videoView, pipCover, videoDim, header, controls, centerControls, loadingButton, displayedStatus, panel] }
   private func orientationDirection(_ velocity: CGPoint) -> Bool {
-    !interactionOpen && !pipShowing && abs(velocity.y) > abs(velocity.x)*1.2 && (isWide ? velocity.y > 0 : velocity.y < 0)
+    videoZoom == 1 && !interactionOpen && !pipShowing && abs(velocity.y) > abs(velocity.x)*1.2 && (isWide ? velocity.y > 0 : velocity.y < 0)
+  }
+  private func clampVideoOffset() {
+    guard videoZoom > 1 else { videoOffset = .zero; return }
+    let ratio = max(0.01, videoAspectRatio)
+    let width = min(videoView.bounds.width, videoView.bounds.height*ratio)
+    let height = width/ratio
+    let x = max(0, (width*videoZoom-videoView.bounds.width)/2)
+    let y = max(0, (height*videoZoom-videoView.bounds.height)/2)
+    videoOffset.x = min(x, max(-x, videoOffset.x)); videoOffset.y = min(y, max(-y, videoOffset.y))
+  }
+  @objc private func panZoomedVideo(_ gesture: UIPanGestureRecognizer) {
+    updateZoomPan(state: gesture.state, translation: gesture.translation(in: self))
+  }
+  private func updateZoomPan(state: UIGestureRecognizer.State, translation: CGPoint) {
+    guard videoZoom > 1 else { return }
+    if state == .began { zoomDragging = true; zoomPanStart = videoOffset; onAction?("interaction") }
+    if state == .changed {
+      videoOffset = CGPoint(x: zoomPanStart.x+translation.x, y: zoomPanStart.y+translation.y)
+      clampVideoOffset(); onZoom?(videoZoom)
+    }
+    if [.ended, .cancelled, .failed].contains(state) { zoomDragging = false; onAction?("interaction") }
   }
   @objc private func dragOrientation(_ gesture: UIPanGestureRecognizer) {
     updateOrientation(state: gesture.state, translation: gesture.translation(in: self).y,
@@ -1241,6 +1276,26 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let target = start+(min(8,max(1,scale))-videoZoom)/max(0.001,pinchGain)
     updateZoom(state: .changed, distance: max(0,target))
     updateZoom(state: .ended, distance: max(0,target))
+  }
+  func runZoomPanChecks() -> [String: Bool] {
+    smokeZoomTo(1); setNeedsLayout(); layoutIfNeeded()
+    let original = videoView.frame
+    smokeZoomTo(8); layoutIfNeeded()
+    let fullscreen = videoView.frame == bounds && panel.isHidden
+    updateZoomPan(state: .began, translation: .zero)
+    updateZoomPan(state: .changed, translation: CGPoint(x: 35, y: 20))
+    let follows = videoOffset.x == 35 && videoOffset.y == 20
+    updateZoomPan(state: .ended, translation: CGPoint(x: 35, y: 20))
+    let kept = videoOffset.x == 35 && videoOffset.y == 20
+    updateZoomPan(state: .began, translation: .zero)
+    updateZoomPan(state: .changed, translation: CGPoint(x: 100000, y: 100000))
+    let bounded = videoOffset.x < 100000 && videoOffset.y < 100000
+    updateZoomPan(state: .ended, translation: .zero)
+    let exclusive = navigationTarget(start: .zero, velocity: CGPoint(x: 600, y: 0)) == nil && !orientationDirection(CGPoint(x: 0, y: 600))
+    smokeZoomTo(1); layoutIfNeeded()
+    return ["zoomUsesWholeDisplay": fullscreen, "zoomPanFollowsFinger": follows, "zoomPanRetainsPosition": kept,
+      "zoomPanClampedToImage": bounded, "zoomPanExcludesNavigation": exclusive,
+      "originalRestoresViewportAndCenter": videoView.frame == original && videoOffset == .zero]
   }
   @objc func runIPadGestureChecks() -> [String: Bool] {
     runNavigationChecks().merging(runZoomChecks()) { _, new in new }

@@ -8,6 +8,7 @@ final class NeoVideoRecovery: NSObject {
   @objc private(set) var outputID = 0
   private var enabled = false, deadline = 0.0, repairTimeout = 10.0
   private var began = 0.0, media: Int64 = 0, samples = 0, changes = 0
+  private var decoded: UInt64 = 0, lost: UInt64 = 0
   @objc func begin(_ now: Double, timeout: Double) {
     stage = 0; outputID = 0; enabled = true; deadline = 0
     // Recreated output can arrive late, with network-cache look-ahead still
@@ -27,7 +28,8 @@ final class NeoVideoRecovery: NSObject {
     let scheduled = stats["scheduledInMs"]?.doubleValue ?? .infinity
     let failed = stats["layerStatus"]?.intValue == 2 || stats["requiresFlush"]?.boolValue == true
     if id != outputID || count < samples { outputID = id; began = 0 }
-    if began == 0 { began = now; media = mediaMs; samples = count; changes = change }
+    let nativeDecoded = stats["nativeDecoded"]?.uint64Value ?? 0, nativeLost = stats["nativeLost"]?.uint64Value ?? 0
+    if began == 0 { began = now; media = mediaMs; samples = count; changes = change; decoded = nativeDecoded; lost = nativeLost }
     // Two different sampled pictures, recently delivered and due for display.
     if stage > 0 && id > 0 && change-changes >= 2 && age >= 0 && age < 0.5 &&
         scheduled <= 100 && scheduled >= -500 && !failed {
@@ -44,7 +46,7 @@ final class NeoVideoRecovery: NSObject {
     if mediaMs < media { media = mediaMs }
     guard stage == 0, now-began >= 3, mediaMs-media >= 1500 else { return 0 }
     let fps = Double(count-samples)/(now-began)
-    let frozen: Bool
+    var frozen: Bool
     if let arrival = stats["arrivalAge"]?.doubleValue {
       // Continuous health checks read existing timestamps only. Picture
       // fingerprinting stays limited to decoder-repair verification windows.
@@ -54,7 +56,12 @@ final class NeoVideoRecovery: NSObject {
       frozen = id == 0 || failed || (age < 0 && count == samples) ||
         (age >= 2.5 && (fps < 15 || scheduled > 500))
     }
-    began = now; media = mediaMs; samples = count; changes = change
+    let decodedDelta = nativeDecoded >= decoded ? nativeDecoded-decoded : 0
+    let lostDelta = nativeLost >= lost ? nativeLost-lost : 0
+    // Fresh callbacks can be repeated paused pictures. All actual video being
+    // dropped for several seconds is not healthy output, even in a static scene.
+    if decodedDelta >= 12 && Double(lostDelta) >= Double(decodedDelta)*0.95 { frozen = true }
+    began = now; media = mediaMs; samples = count; changes = change; decoded = nativeDecoded; lost = nativeLost
     if frozen { stage = 1; deadline = now+3; return 2 } // flush first
     return 0
   }

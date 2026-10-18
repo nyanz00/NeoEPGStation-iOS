@@ -214,7 +214,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
         switch result {
         case .success(let tracks):
           self.tracks = tracks
-          if let first = tracks.first { self.select(first) }
+          if let first = NeoCommentPreference.preferred(tracks) { self.select(first, remember: false) }
           else { self.settled = true; self.status = "コメント字幕がありません"; self.finishPreparationIfPossible(); self.onChange?() }
         case .failure(let error): self.settled = true; self.status = error.localizedDescription; self.finishPreparationIfPossible(); self.onChange?()
         }
@@ -222,8 +222,9 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     }
   }
 
-  func select(_ track: NativeCommentTrack) {
+  func select(_ track: NativeCommentTrack, remember: Bool = true) {
     guard !closed, loader != nil else { return }
+    if remember { NeoCommentPreference.save(track.displayName) }
     version += 1; contentVersion += 1
     task?.cancel(); fullTask?.cancel(); fullTask = nil
     selectedIndex = track.subtitleIndex; ready = false; settled = false; fullLoaded = false

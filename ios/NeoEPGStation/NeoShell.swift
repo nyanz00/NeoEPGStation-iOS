@@ -22,11 +22,12 @@ struct NeoDestination {
 // UINavigationController's private edge-gesture implementation.
 @objc(NeoSwipeBackAnimator)
 final class NeoSwipeBackAnimator: NSObject, UIViewControllerAnimatedTransitioning {
+  var duration: TimeInterval = 0.22
   private var animator: UIViewPropertyAnimator?
   var curve: UIView.AnimationCurve = .linear
   var onCompletion: ((Bool) -> Void)?
   func transitionDuration(using transitionContext: UIViewControllerContextTransitioning?) -> TimeInterval {
-    UIAccessibility.isReduceMotionEnabled ? 0.01 : 0.3
+    UIAccessibility.isReduceMotionEnabled ? 0.01 : duration
   }
   func animateTransition(using context: UIViewControllerContextTransitioning) {
     interruptibleAnimator(using: context).startAnimation()
@@ -90,6 +91,7 @@ final class NeoPlayerTransition: NSObject, UIViewControllerTransitioningDelegate
   }
   func animationController(forDismissed dismissed: UIViewController) -> UIViewControllerAnimatedTransitioning? {
     let animator = NeoSwipeBackAnimator()
+    animator.duration = 0.3 // Player dismissal keeps its existing timing.
     animator.curve = interactive ? .linear : .easeOut
     animator.onCompletion = { [weak self] completed in
       guard let self else { return }; self.interaction = nil; self.onCompletion?(completed)
@@ -155,6 +157,41 @@ class NeoPage: UIViewController {
 
 // The same drawer content is used by navigation and fullscreen playback.
 // Explicit safe-area margins keep the brand and icons aligned in either host.
+private final class NeoSidebarCell: UITableViewCell {
+  let icon = UIImageView(), caption = NeoStyle.label(size: 14)
+  var leftInset: CGFloat = 0 { didSet { setNeedsLayout() } }
+  override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+    super.init(style: style, reuseIdentifier: reuseIdentifier)
+    // Own the row geometry. UIListContentView can retain safe-area margins
+    // from a previous orientation on only the reused/visible rows.
+    addSubview(icon); addSubview(caption); icon.contentMode = .scaleAspectFit
+    icon.tintColor = NeoStyle.muted; isAccessibilityElement = true
+  }
+  required init?(coder: NSCoder) { fatalError() }
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    icon.frame = CGRect(x: leftInset+16, y: (bounds.height-27)/2, width: 27, height: 27)
+    caption.frame = CGRect(x: leftInset+56, y: 0, width: max(0, bounds.width-leftInset-72), height: bounds.height)
+  }
+}
+
+private final class NeoNavigationButton: UIButton {
+  let icon = UIImageView(), caption = NeoStyle.label(size: 10)
+  init(item: NeoDestination) {
+    super.init(frame: .zero)
+    icon.image = NeoIcon.image(item.icon); icon.contentMode = .scaleAspectFit
+    caption.text = item.title; caption.textAlignment = .center
+    addSubview(icon); addSubview(caption); isAccessibilityElement = true
+  }
+  required init?(coder: NSCoder) { fatalError() }
+  override func tintColorDidChange() { super.tintColorDidChange(); icon.tintColor = tintColor; caption.textColor = tintColor }
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    icon.frame = CGRect(x: (bounds.width-24)/2, y: 7, width: 24, height: 24)
+    caption.frame = CGRect(x: 1, y: 34, width: max(0, bounds.width-2), height: 14)
+  }
+}
+
 final class NeoSidebar: UIView, UITableViewDataSource, UITableViewDelegate {
   let brand = NeoStyle.label("NeoEPGStation", size: 18, bold: true)
   let logo = UIImageView(image: UIImage(named: "Brand"))
@@ -173,7 +210,7 @@ final class NeoSidebar: UIView, UITableViewDataSource, UITableViewDelegate {
     list.backgroundColor = .clear; list.separatorStyle = .none; list.rowHeight = 40
     list.contentInsetAdjustmentBehavior = .never; list.insetsContentViewsToSafeArea = false
     list.contentInset.top = 8; list.dataSource = self; list.delegate = self
-    list.register(UITableViewCell.self, forCellReuseIdentifier: "navigation")
+    list.register(NeoSidebarCell.self, forCellReuseIdentifier: "navigation")
     layer.borderColor = NeoStyle.border.cgColor; layer.borderWidth = 0.5
   }
   required init?(coder: NSCoder) { fatalError() }
@@ -187,18 +224,12 @@ final class NeoSidebar: UIView, UITableViewDataSource, UITableViewDelegate {
   }
   func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { NeoDestination.all.count }
   func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-    let cell = tableView.dequeueReusableCell(withIdentifier: "navigation", for: indexPath), item = NeoDestination.all[indexPath.row]
+    let cell = tableView.dequeueReusableCell(withIdentifier: "navigation", for: indexPath) as! NeoSidebarCell, item = NeoDestination.all[indexPath.row]
     cell.insetsLayoutMarginsFromSafeArea = false; cell.preservesSuperviewLayoutMargins = false
     cell.contentView.insetsLayoutMarginsFromSafeArea = false; cell.contentView.preservesSuperviewLayoutMargins = false
-    var config = cell.defaultContentConfiguration(); config.text = item.title; config.image = NeoIcon.image(item.icon)
-    config.axesPreservingSuperviewLayoutMargins = []
-    config.textProperties.font = .systemFont(ofSize: 14); config.textProperties.color = .white
-    config.imageProperties.tintColor = NeoStyle.muted
-    config.imageProperties.maximumSize = CGSize(width: 27, height: 27)
-    config.imageProperties.reservedLayoutSize = CGSize(width: item.icon == "AlphaA" ? 27 : 24, height: 27)
-    config.imageToTextPadding = item.icon == "AlphaA" ? 13 : 16
-    config.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: contentSafeArea.left + 16, bottom: 0, trailing: 16)
-    cell.contentConfiguration = config; cell.backgroundColor = item.id == selected ? NeoStyle.accent.withAlphaComponent(0.16) : .clear
+    cell.leftInset = contentSafeArea.left; cell.icon.image = NeoIcon.image(item.icon); cell.caption.text = item.title
+    cell.accessibilityLabel = item.title
+    cell.backgroundColor = item.id == selected ? NeoStyle.accent.withAlphaComponent(0.16) : .clear
     cell.accessibilityIdentifier = "menu-" + item.id; return cell
   }
   func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
@@ -702,12 +733,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     bottomButtons.forEach { $0.removeFromSuperview() }; bottomButtons = []
     for id in shortcuts {
       guard let item = NeoDestination.all.first(where: { $0.id == id }) else { continue }
-      let b = UIButton(type: .system)
-      var config = UIButton.Configuration.plain(); config.image = NeoIcon.image(item.icon); config.title = item.title
-      config.imagePlacement = .top; config.imagePadding = 3; config.contentInsets = .zero
-      config.background = .clear()
-      config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attrs in var attrs = attrs; attrs.font = .systemFont(ofSize: 10); return attrs }
-      b.configuration = config; b.accessibilityLabel = item.title; b.accessibilityIdentifier = "tab-" + id
+      let b = NeoNavigationButton(item: item)
+      b.accessibilityLabel = item.title; b.accessibilityIdentifier = "tab-" + id
       b.addAction(UIAction { [weak self] _ in self?.selectDestination(id) }, for: .touchUpInside)
       bottom.addSubview(b); bottomButtons.append(b)
     }
@@ -724,6 +751,34 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
 
 #if targetEnvironment(simulator)
   private var backSmokeDetails: [String: Any] = [:]
+  static func reflowSmoke(in host: UIView) -> [String: Bool] {
+    let drawer = NeoSidebar(frame: CGRect(x: 0, y: 0, width: 300, height: 650)); host.addSubview(drawer)
+    var aligned = true
+    for inset: CGFloat in [0, 59, 0, 59, 0] {
+      drawer.contentSafeArea = UIEdgeInsets(top: 0, left: inset, bottom: 0, right: 0)
+      drawer.setNeedsLayout(); drawer.layoutIfNeeded(); drawer.list.layoutIfNeeded()
+      for row in [0, 5, 11, 0] {
+        drawer.list.scrollToRow(at: IndexPath(row: row, section: 0), at: .top, animated: false); drawer.list.layoutIfNeeded()
+        for case let cell as NeoSidebarCell in drawer.list.visibleCells {
+          cell.layoutIfNeeded()
+          aligned = aligned && cell.icon.frame.minX == inset+16 && cell.caption.frame.minX == inset+56
+        }
+      }
+    }
+    drawer.removeFromSuperview()
+    let buttons = ["recorded", "onair", "guide", "history", "settings"].compactMap { id in NeoDestination.all.first { $0.id == id } }.map(NeoNavigationButton.init)
+    var centered = true
+    for width: CGFloat in [390, 844, 390, 1194, 834, 390] {
+      for (i, button) in buttons.enumerated() {
+        button.frame = CGRect(x: CGFloat(i)*width/5, y: 0, width: width/5, height: 56)
+        button.setNeedsLayout(); button.layoutIfNeeded()
+        centered = centered && abs(button.icon.frame.midX-button.bounds.midX) < 0.1 && abs(button.caption.frame.midX-button.bounds.midX) < 0.1
+      }
+    }
+    return ["sidebarSafeAreaAndReusedRowsAligned": aligned, "bottomIconsAndTitlesStayCentered": centered,
+      "recordedVisibleCellsFollowWidth": NeoRecordedPage.reflowSmoke(in: host),
+      "detailBackCompletesFaster": NeoSwipeBackAnimator().transitionDuration(using: nil) == 0.22]
+  }
   private func runUISmoke() {
     let recorded = controllers["recorded"]!.viewControllers.first as! NeoRecordedPage
     let original = recorded.collection
