@@ -13,8 +13,10 @@
   clock or an independently extrapolated watcher point. Watcher updates are
   retained to verify fresh output. Do not invent a new relative time origin.
 - All TS position changes, including paused decoder priming, require the seek
-  notification, a new native point near the target, decoded video and a new
-  due sample. The output stays hidden and the clock stays held until then.
+  notification, LibVLC's native movie time near the target, newly decoded video
+  and a new due sample. A same-position paused repair may not emit a new watcher
+  point because its timestamp is unchanged; this is not a failed seek. The
+  output stays hidden and the clock stays held until arrival is confirmed.
 - JSON commentary uses normal 56 / big 84 / small 42 in a 1920x1080 space.
   Existing commentary ASS styles remain honored; a 28/200% normal style and
   JSON 56 both become 70 logical units at 1.25x.

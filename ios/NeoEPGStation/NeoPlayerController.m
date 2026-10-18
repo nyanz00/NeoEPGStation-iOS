@@ -1080,8 +1080,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     else { self.player.time = [VLCTime timeWithInt:(int)self.tsPositionTarget]; }
     return;
   }
-  // A seek notification alone is not proof of arrival. Inspect a real native
-  // clock point, not mediaTime (which intentionally retains the UI target).
+  // A seek notification alone is not proof of arrival. Read LibVLC's native
+  // pause-aware clock and require fresh decoded/due video. A paused same-position
+  // repair need not publish another watcher point: its timestamp is unchanged.
   NSDictionary *clock = [(NeoObservedMediaPlayer *)self.player observedClock];
   int64_t native = self.player.nativeTimeMs;
   NSDictionary *video = [NeoVLCFrameTap snapshot:self.movieView];
@@ -1091,15 +1092,15 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       @"point": clock, @"decoded": @(self.player.media.statistics.decodedVideo), @"baselineDecoded": @(self.tsPositionDecoded),
       @"samples": video[@"samples"] ?: @0, @"callback": @(self.tsPositionCallback), @"seeking": @(self.player.isSeeking)}];
   }
-  if (!self.tsPositionCallback || !clock[@"positionMs"] || self.player.isSeeking ||
-      [clock[@"sequence"] unsignedLongLongValue] <= self.tsPositionSequence ||
+  if (!self.tsPositionCallback || self.player.isSeeking ||
       self.player.media.statistics.decodedVideo <= self.tsPositionDecoded ||
       [video[@"samples"] unsignedIntegerValue] <= self.tsPositionSamples ||
-      [clock[@"age"] doubleValue] > 2 || native < 0 || llabs(native-self.tsPositionTarget) > 2000 ||
+      native < 0 || llabs(native-self.tsPositionTarget) > 2000 ||
       [video[@"scheduledInMs"] doubleValue] < -500 || [video[@"scheduledInMs"] doubleValue] > 100 ||
       [video[@"layerStatus"] integerValue] == AVQueuedSampleBufferRenderingStatusFailed) { return; }
   [NeoPlaybackDiagnostics record:@"ts.positionReady" fields:@{@"targetMs": @(self.tsPositionTarget), @"nativeMs": @(native),
-    @"newPoint": @YES, @"newVideo": @YES}];
+    @"nativeClockConfirmed": @YES, @"newVideo": @YES,
+    @"newWatcherPoint": @([clock[@"sequence"] unsignedLongLongValue] > self.tsPositionSequence)}];
   self.tsPositionPending = NO; [self.tsPositionTimer invalidate]; self.tsPositionTimer = nil;
   self.lastObservedTime = native;
   self.videoOutputView.hidden = NO;

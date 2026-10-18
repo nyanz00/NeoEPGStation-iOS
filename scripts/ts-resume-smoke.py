@@ -106,7 +106,7 @@ try:
     assert warm < opened, 'TS input opened before comment textures were prepared'
     arrivals = [e for e in events if e['event'] == 'ts.positionReady']
     assert len(arrivals) >= 4, arrivals
-    assert all(e.get("newPoint") and e.get("newVideo") for e in arrivals), arrivals
+    assert all(e.get("nativeClockConfirmed") and e.get("newVideo") for e in arrivals), arrivals
     assert all(abs(e['nativeMs']-e['targetMs']) <= 2000 for e in arrivals), arrivals
     assert any(e['event'] == 'ts.positionRequested' and e['bytes'] for e in events), 'Unknown-duration TS fallback not exercised'
     print(f"PASS: {len(result['checks'])} native TS assertions, comment gate, retained paused repair and verified output arrivals", flush=True)
