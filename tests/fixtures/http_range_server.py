@@ -66,7 +66,11 @@ def start_server(directory):
                 if time.monotonic() < getattr(self.server, 'outage_until', 0):
                     self.server.fault_events.append({'mode': 'tunnel', 'offset': begin, 'time': time.monotonic()})
                     time.sleep(6)
-                    self.connection.shutdown(socket.SHUT_RDWR); self.connection.close(); return
+                    try:
+                        self.connection.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass  # The client may already have timed out/cancelled.
+                    self.connection.close(); return
                 with self.server.fault_lock:
                     if self.server.fault_remaining > 0:
                         mode = self.server.fault_mode; self.server.fault_remaining -= 1

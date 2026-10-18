@@ -571,6 +571,9 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     commentList.backgroundView = label
   }
   private func selectPanel(_ id: String, toggle: Bool) {
+    if videoZoom > 1 {
+      videoZoom = 1; videoOffset = .zero; setNeedsLayout(); layoutIfNeeded(); onZoom?(1)
+    }
     if toggle && isWide && panelOpen && tab == id { setPanel(false); return }
     tab = id; renderPanel(); setPanel(true)
     if id == "comments" { onAction?("comment-list") }
@@ -1125,9 +1128,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let covered = !pipCover.isHidden && pipCover.frame == videoView.frame && pipCover.backgroundColor == UIColor.black && !videoView.isHidden && videoView.frame == frameBefore && centerControls.isHidden
     updatePiP(false); let restored = pipCover.isHidden && !videoView.isHidden && !centerControls.isHidden
     let cell = drawer.tableView(drawer.list, cellForRowAt: IndexPath(row: 0, section: 0))
-    let config = cell.contentConfiguration as? UIListContentConfiguration
     let shared = drawer.brand.frame.minX == drawer.contentSafeArea.left + 16 && drawer.logo.frame.minX - drawer.brand.frame.maxX == 7
-      && config?.imageProperties.reservedLayoutSize == CGSize(width: 24, height: 27)
+      && drawer.rowHasExpectedLayout(cell)
     onAction = handler; subtitleTracks = oldTracks; subtitleKey = ""; settingsCategory = oldCategory
     return runDiagnosticsChecks().merging(["retentionDropdown": retentionDropdown, "waitForCommentsSettingPersisted": waitSaved, "settingsStayInPanel": returns, "fixedSettingsCategoryTabs": categories, "settingsBottomTab": settingsTab,
       "videoReloadOnlyAtGeneralBottom": reloadAtBottom && reloadRouted && commentsNoReload && subtitlesNoReload,
@@ -1238,7 +1240,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     updateZoom(state: .ended, distance: height+99)
     let noEndImpact = !pinching && zoomHaptics.expansionCount == counts.0 && zoomHaptics.returnCount == counts.1
     let beforeNextGesture = videoZoom
-    updateZoom(state: .began, distance: height*0.9)
+    updateZoom(state: .began, distance: videoView.bounds.height*0.9)
     let noJump = videoZoom == beforeNextGesture && videoZoom == applied
     updateZoom(state: .changed, distance: 0)
     let restored = videoZoom == 1 && zoomBadge.text == "元のサイズ" && pinchOriginal

@@ -28,7 +28,9 @@
 Actions `check_scope=recovery-ui` builds both binaries, runs native model/type
 checks, cycles sidebar safe-area margins and recording-list widths, and checks
 full-display zoom/panning on iPhone and iPad. A synthetic HTTP MKV tunnel outage
-lasts 58 seconds, crossing the 25-second opening deadline. Assertions require
+lasts 58 seconds. Playback begins at 90 seconds so the file header has aged out
+of the default 60-second rewind cache, matching a mid-recording outage and
+crossing the 25-second opening deadline. Assertions require
 retirement, an upstream availability check, a fresh reopen, held presentation
 time and actual changing video/audio/comment progress after recovery. Unrelated
 ARIB timing, complete page/navigation suites and TS startup checks are excluded.

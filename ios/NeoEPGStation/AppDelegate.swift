@@ -85,6 +85,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     if let base = ProcessInfo.processInfo.environment["NEO_EPG_NETWORK_PROBE"], let url = URL(string: base+"/api/videos/4") {
       DispatchQueue.main.asyncAfter(deadline: .now()+1) {
         let player = NeoPlayerController(url: url, title: "Synthetic network recovery", username: "", password: "", networkCaching: 5000)
+          if ProcessInfo.processInfo.environment["NEO_EPG_NETWORK_MODE"] == "tunnel" { player.initialPosition = 90 }
         player.recordingContext = ["disableHistory": true]; player.modalPresentationStyle = .fullScreen
         window.rootViewController?.present(player, animated: false) {
           player.runNetworkProbe { result in

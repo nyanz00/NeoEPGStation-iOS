@@ -1496,7 +1496,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 - (void)updateNowPlaying {
   [self.nowPlaying updateWithPosition:self.reloading ? self.reloadTime/1000.0 : (self.playbackEnded ? self.lastObservedLength/1000.0 : MAX(0, (double)[self mediaTime]/1000.0))
     duration:[self mediaLength]/1000.0 rate:self.playbackRate
-    playing:self.wantsPlayback && self.player.isPlaying && !self.buffering && !self.reloading && !self.playbackEnded
+    playing:self.wantsPlayback && self.player.isPlaying && !self.buffering && !self.reloading && !self.networkReloadWaiting && !self.videoReloadRecovery && !self.playbackEnded
     seekable:self.player.isSeekable && !self.reloading artwork:self.chrome.channelArtwork];
 }
 
@@ -1753,7 +1753,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 - (void)closeTapSmoke { [self closePlayer]; }
 - (void)runNetworkProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
-  [self.comments loadSmokeComments];
+  [self.comments loadNetworkSmokeComments];
   [self pollNetworkProbe:0 armedAt:0 rows:[NSMutableArray new] completion:completion];
 }
 - (void)pollNetworkProbe:(NSInteger)attempt armedAt:(double)armed rows:(NSMutableArray *)rows completion:(void (^)(NSDictionary<NSString *, id> *))completion {
@@ -1772,14 +1772,14 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     @"commentTime": @(self.comments.renderedTime), @"waitingNetwork": @(self.networkReloadWaiting), @"restoreVerifying": @(self.videoReloadRecovery),
     @"state": @(self.player.state), @"buffering": @(self.buffering), @"loading": @(self.chrome.loadingVisible),
     @"reloading": @(self.reloading), @"reload": @(self.reloadGeneration)}];
-  if (!armed && [self mediaTime] >= 4000 && native.decodedVideo > 10) {
+  BOOL tunnel = [NSProcessInfo.processInfo.environment[@"NEO_EPG_NETWORK_MODE"] isEqual:@"tunnel"];
+  if (!armed && [self mediaTime] >= (tunnel ? 94000 : 4000) && self.inputBufferReady && !self.buffering && native.decodedVideo > 10) {
     armed = now;
     NSString *base = NSProcessInfo.processInfo.environment[@"NEO_EPG_NETWORK_PROBE"];
     NSString *mode = NSProcessInfo.processInfo.environment[@"NEO_EPG_NETWORK_MODE"] ?: @"slow";
     NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/fault/arm/%@", base, mode]];
     [[NSURLSession.sharedSession dataTaskWithURL:url] resume];
   }
-  BOOL tunnel = [NSProcessInfo.processInfo.environment[@"NEO_EPG_NETWORK_MODE"] isEqual:@"tunnel"];
   if ((armed && now-armed >= (tunnel ? 85 : 57)) || attempt >= (tunnel ? 220 : 150)) {
     VLCMedia *input = self.player.media;
     [self.chrome smokeZoomTo:2];

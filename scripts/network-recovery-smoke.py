@@ -28,7 +28,7 @@ video_args = (['-vf', 'noise=alls=20:allf=t', '-c:v', 'libsvtav1', '-preset', '1
                '-x264-params', 'nal-hrd=cbr:force-cfr=1'])
 subprocess.check_call(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
     '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24',
-    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100', '-t', '85',
+    '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100', '-t', '180' if os.environ.get('CHECK_SCOPE') == 'recovery-ui' else '85',
     *video_args, '-g', '48', '-c:a', 'aac', '-b:a', '64k', str(fixture)], timeout=120)
 Path('dist/network-codec.json').write_text(json.dumps({'codec': 'AV1-10bit' if av1 else 'H264'}))
 sys.path.insert(0, str(Path('tests/fixtures').resolve()))

@@ -160,6 +160,7 @@ class NeoPage: UIViewController {
 private final class NeoSidebarCell: UITableViewCell {
   let icon = UIImageView(), caption = NeoStyle.label(size: 14)
   var leftInset: CGFloat = 0 { didSet { setNeedsLayout() } }
+  var iconWidth: CGFloat = 24 { didSet { setNeedsLayout() } }
   override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
     super.init(style: style, reuseIdentifier: reuseIdentifier)
     // Own the row geometry. UIListContentView can retain safe-area margins
@@ -170,7 +171,7 @@ private final class NeoSidebarCell: UITableViewCell {
   required init?(coder: NSCoder) { fatalError() }
   override func layoutSubviews() {
     super.layoutSubviews()
-    icon.frame = CGRect(x: leftInset+16, y: (bounds.height-27)/2, width: 27, height: 27)
+    icon.frame = CGRect(x: leftInset+16, y: (bounds.height-27)/2, width: iconWidth, height: 27)
     caption.frame = CGRect(x: leftInset+56, y: 0, width: max(0, bounds.width-leftInset-72), height: bounds.height)
   }
 }
@@ -228,12 +229,19 @@ final class NeoSidebar: UIView, UITableViewDataSource, UITableViewDelegate {
     cell.insetsLayoutMarginsFromSafeArea = false; cell.preservesSuperviewLayoutMargins = false
     cell.contentView.insetsLayoutMarginsFromSafeArea = false; cell.contentView.preservesSuperviewLayoutMargins = false
     cell.leftInset = contentSafeArea.left; cell.icon.image = NeoIcon.image(item.icon); cell.caption.text = item.title
+    cell.iconWidth = item.icon == "AlphaA" ? 27 : 24
     cell.accessibilityLabel = item.title
     cell.backgroundColor = item.id == selected ? NeoStyle.accent.withAlphaComponent(0.16) : .clear
     cell.accessibilityIdentifier = "menu-" + item.id; return cell
   }
   func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
     tableView.deselectRow(at: indexPath, animated: false); onSelect?(NeoDestination.all[indexPath.row].id)
+  }
+  func rowHasExpectedLayout(_ cell: UITableViewCell) -> Bool {
+    guard let cell = cell as? NeoSidebarCell else { return false }
+    cell.layoutIfNeeded()
+    return cell.icon.frame.minX == contentSafeArea.left+16 && cell.icon.bounds.size == CGSize(width: cell.iconWidth, height: 27)
+      && cell.caption.frame.minX == contentSafeArea.left+56
   }
 }
 

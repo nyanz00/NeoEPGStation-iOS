@@ -183,6 +183,17 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     version += 1; timeline = NeoPiPSmoke.fixture; ready = true; settled = true; status = "Synthetic comments · 80"
     renderer?.prepare(NeoPiPSmoke.fixture.comments); refreshRendering(); onChange?()
   }
+  @objc func loadNetworkSmokeComments() {
+    version += 1
+    let template = NeoPiPSmoke.fixture
+    let comments = (0..<180).map { index -> NativeComment in
+      var comment = template.comments[index % template.comments.count]
+      comment.id = index; comment.start = Double(index); comment.end = Double(index)+5.25
+      return comment
+    }
+    timeline = CommentTimeline(width: template.width, height: template.height, comments: comments)
+    ready = true; settled = true; renderer?.prepare(comments); refreshRendering(); onChange?()
+  }
 #endif
 
   @objc(configureWithSource:username:password:jikkyo:)
