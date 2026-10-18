@@ -121,7 +121,9 @@ final class NeoCommentLoader: NSObject, URLSessionTaskDelegate {
             item.color.range(of: #"^#[0-9a-fA-F]{6}$"#, options: .regularExpression) != nil,
             let rgb = UInt32(item.color.dropFirst(), radix: 16) else { throw CommentLoadError.response }
       var style = CommentStyle()
-      style.size = item.size == "big" ? 96 : item.size == "small" ? 48 : 64
+      // Match the commentary ASS baseline (28 at 200%) in the same 1920x1080
+      // coordinate space. The user's multiplier is applied by the renderer.
+      style.size = item.size == "big" ? 84 : item.size == "small" ? 42 : 56
       style.color = CommentColor(red: Double((rgb >> 16) & 255)/255,
         green: Double((rgb >> 8) & 255)/255, blue: Double(rgb & 255)/255, alpha: 1)
       style.alignment = scrolling ? 7 : item.position == "top" ? 8 : 2

@@ -175,7 +175,9 @@ jobs:
       - name: Check TS resume and comment startup
         id: ts-comments-checks
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'ts-comments' }}
-        run: python3 -u scripts/ts-resume-smoke.py
+        run: |
+          python3 -u scripts/ts-resume-smoke.py
+          python3 -u scripts/ts-resume-smoke.py mpeg2
       - name: Check repeated UI reflow and fullscreen zoom
         id: reflow-checks
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'recovery-ui' }}
@@ -271,7 +273,7 @@ jobs:
           elif [ "$CHECK_SCOPE" = "zoom-font" ] || [ "$CHECK_SCOPE" = "ts-comments" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
             python3 -u scripts/zoom-font-smoke.py
-            if [ "$CHECK_SCOPE" = "ts-comments" ]; then python3 -u scripts/ts-resume-smoke.py; fi
+            if [ "$CHECK_SCOPE" = "ts-comments" ]; then python3 -u scripts/ts-resume-smoke.py; python3 -u scripts/ts-resume-smoke.py mpeg2; fi
           elif [ "$NETWORK_PROBE" = "true" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
             device=$(python3 -c 'import json; print(json.load(open("dist/simulator-device.json"))["udid"])')

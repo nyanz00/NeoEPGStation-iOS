@@ -79,7 +79,9 @@ final class NeoDanmakuRenderer {
   // Only newly visible or imminent comments are rasterized, away from the main
   // thread. Textures stay immutable once published to the render thread.
   private func key(_ comment: NativeComment, pixelScale: Double, absoluteOpacity: Float? = nil) -> CommentTextureKey {
-    CommentTextureKey(text: comment.text, style: comment.style.withAbsoluteOpacity(absoluteOpacity), pixelScale: min(2, max(0.25, ceil(pixelScale * 4) / 4)))
+    let expanded = pixelScale * max(comment.style.scaleX, comment.style.scaleY)
+    return CommentTextureKey(text: comment.text, style: comment.style.withAbsoluteOpacity(absoluteOpacity),
+      pixelScale: min(8, max(0.25, ceil(expanded * 4) / 4)))
   }
 
   func prepare(_ comments: [NativeComment], pixelScale: Double = 1, absoluteOpacity: Float? = nil) {
@@ -148,7 +150,7 @@ final class NeoDanmakuRenderer {
   }
   func fittingEnd(_ timeline: CommentTimeline, duration: Double, size: Double, pixelScale: Double) -> CommentTimeline {
     timeline.fittingEnd(duration: duration) { c in
-      Double(self.geometry(CommentTextureKey(text: c.text, style: c.style, pixelScale: max(0.25, pixelScale))).size.width) * c.style.scaleX * size
+      Double(self.geometry(self.key(c, pixelScale: pixelScale*size)).size.width) * c.style.scaleX * size
     }
   }
 
@@ -160,7 +162,9 @@ final class NeoDanmakuRenderer {
   // Identical geometry is used by packing and drawing. Glyph ink bounds include
   // italic bearings, outline/shadow and one raster pixel of antialiasing safety.
   private func geometry(_ key: CommentTextureKey) -> RasterGeometry {
-    let style = key.style, scale = min(key.pixelScale, 128/style.size)
+    // The bitmap already contains enough pixels for ASS scaling and the user
+    // multiplier. Keep logical geometry unchanged; avoid enlarging a small glyph.
+    let style = key.style, scale = min(key.pixelScale, 256/style.size)
     // TS JSON and commentary ASS share the same bundled face for both layout
     // measurement and rasterization. Ordinary subtitles are rendered by VLC.
     let base = CTFontCreateWithName("NotoSansJP-Bold" as CFString, CGFloat(style.size*scale), nil)
@@ -219,14 +223,15 @@ final class NeoDanmakuRenderer {
   func warmWindow(_ timeline: CommentTimeline, time: Double, size: Double, pixelScale: Double,
                   opacity: Float?, completion: @escaping () -> Void) {
     let comments = timeline.visible(at: time, lookAhead: 1.5)
-    prepare(comments, pixelScale: pixelScale, absoluteOpacity: opacity)
+    let rasterScale = pixelScale*size
+    prepare(comments, pixelScale: rasterScale, absoluteOpacity: opacity)
     lock.lock(); let version = generation, warmVersion = warmGeneration; lock.unlock()
     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
       if let self {
         self.waitForPreparedImages()
         self.lock.lock()
         let metrics = Dictionary(uniqueKeysWithValues: comments.compactMap { c in
-          self.cache[self.key(c, pixelScale: pixelScale, absoluteOpacity: opacity)].map { (c.id, $0.size) }
+          self.cache[self.key(c, pixelScale: rasterScale, absoluteOpacity: opacity)].map { (c.id, $0.size) }
         })
         self.lock.unlock()
         let window = CommentTimeline(width: timeline.width, height: timeline.height, comments: comments.filter { metrics[$0.id] != nil })
@@ -235,7 +240,7 @@ final class NeoDanmakuRenderer {
         }
         self.lock.lock()
         if self.generation == version && self.warmGeneration == warmVersion {
-          self.warmIdentity = timeline.identity; self.warmLanes = plan; self.warmSize = size; self.warmScale = pixelScale
+          self.warmIdentity = timeline.identity; self.warmLanes = plan; self.warmSize = size; self.warmScale = rasterScale
         }
         self.lock.unlock()
       }
@@ -314,7 +319,7 @@ final class NeoDanmakuRenderer {
               sizeMultiplier: Double, opacity: Float, pixelScale: Double = 1, usesSourceOpacity: Bool = false,
               schedulingTime: Double? = nil, encoder: MTLRenderCommandEncoder) -> Int {
     let visible = movingComments(timeline, media: schedulingTime ?? time, motion: time,
-      size: sizeMultiplier, scale: pixelScale, opacity: usesSourceOpacity ? nil : opacity)
+      size: sizeMultiplier, scale: pixelScale*sizeMultiplier, opacity: usesSourceOpacity ? nil : opacity)
     guard viewport.width > 0, viewport.height > 0, videoRect.width > 0, videoRect.height > 0 else { return 0 }
     encoder.setRenderPipelineState(pipeline)
     var alpha: Float = 1
@@ -325,7 +330,7 @@ final class NeoDanmakuRenderer {
     encoder.setScissorRect(MTLScissorRect(x: Int(clip.minX), y: Int(clip.minY),
       width: max(1, Int(clip.maxX) - Int(clip.minX)), height: max(1, Int(clip.maxY) - Int(clip.minY))))
     var drawn = 0
-    for (comment, image, top) in snapshot(visible, pixelScale: pixelScale, opacity: usesSourceOpacity ? nil : opacity, size: sizeMultiplier) {
+    for (comment, image, top) in snapshot(visible, pixelScale: pixelScale*sizeMultiplier, opacity: usesSourceOpacity ? nil : opacity, size: sizeMultiplier) {
       guard let texture = image.texture else { continue }
       guard let rect = placement(comment, imageSize: image.size, timeline: timeline, time: time,
         videoRect: videoRect, sizeMultiplier: sizeMultiplier, laneTop: top) else { continue }
@@ -477,16 +482,32 @@ final class NeoDanmakuRenderer {
           $0["weight"] is NSNumber && $0["actualBold"] is Bool && $0["actualItalic"] is Bool
       }
       let json = String(data: try JSONSerialization.data(withJSONObject: retained), encoding: .utf8) ?? ""
+      // Compare actual glyph bitmaps: an ASS 28/200% and a JSON 56 at 1.25x
+      // must rasterize at the same final resolution, including outlines.
+      var sizeChecks: [String: Bool] = [:]
+      for (label, points) in [("small", 42.0), ("medium", 56.0), ("big", 84.0)] {
+        let ts = NativeComment(id: 900, layer: 0, start: 0, end: 5, text: "同じ文字 Aa", style: CommentStyle(size: points), position: nil, motion: nil)
+        var ass = ts; ass.style.size = points/2; ass.style.scaleX = 2; ass.style.scaleY = 2; ass.style.outline = 1
+        let t = try renderer.rasterize(renderer.key(ts, pixelScale: 1.25))
+        let a = try renderer.rasterize(renderer.key(ass, pixelScale: 1.25))
+        let logical = abs(t.size.height-a.size.height*2) < 0.01 && abs(t.size.width-a.size.width*2) < 0.01
+        let samePixels: Bool
+        if let first = t.image?.dataProvider?.data, let second = a.image?.dataProvider?.data {
+          samePixels = t.image?.width == a.image?.width && t.image?.height == a.image?.height && (first as Data) == (second as Data)
+        } else { samePixels = false }
+        sizeChecks["\(label)TSAndASSMatchAt125Percent"] = logical && samePixels
+        sizeChecks["\(label)BitmapHasFinalDisplayResolution"] = Double(t.image?.height ?? 0) >= t.size.height*1.25-1
+      }
       NeoPlaybackDiagnostics.begin()
       let reset = try snapshot()["commentFonts"] as? [[String: Any]] ?? []
-      return ["realRasterFontRunsRecorded": bothStyles && valid && renderer.error == nil,
+      return sizeChecks.merging(["realRasterFontRunsRecorded": bothStyles && valid && renderer.error == nil,
         "bundledBoldUsedForTSAndASS": bothStyles && !fonts.isEmpty && fonts.allSatisfy {
           ($0["actualPostScript"] as? String) == "NotoSansJP-Bold" && ($0["actualBold"] as? Bool) == true
         },
         "fontSamplesDeduplicated": !first.isEmpty && first.count == repeated.count,
         "fontSamplesSurviveEventRing": fonts.count == first.count && fonts.count <= 64,
         "commentTextExcluded": !json.contains("FontProbePrivate") && !json.contains("日本語あア"),
-        "fontSamplesResetPerPlayback": reset.isEmpty]
+        "fontSamplesResetPerPlayback": reset.isEmpty]) { a, _ in a }
     } catch { return ["fontDiagnosticsCompleted": false] }
   }
   // GPU readback tests exercise the same shader/encoder as playback. They are
@@ -511,7 +532,7 @@ final class NeoDanmakuRenderer {
         // These fixture jumps simulate explicit user seeks, unlike native
         // clock corrections (which keep the active motion scheduler).
         if time < previousTime { renderer.seekWindow() }; previousTime = time
-        renderer.prepare(comments, absoluteOpacity: opacity)
+        renderer.prepare(comments, pixelScale: size, absoluteOpacity: opacity)
         renderer.waitForPreparedImages()
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = target; pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store

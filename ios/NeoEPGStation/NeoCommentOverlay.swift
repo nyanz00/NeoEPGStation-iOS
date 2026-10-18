@@ -380,7 +380,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     if !fullLoaded, let track = tracks.first(where: { $0.subtitleIndex == selectedIndex }),
        time < previewStart || time > previewStart+210 { loadWindow(track, at: time) }
     seeking = true; seekVersion += 1; seekTarget = max(0, time); resumeGate = CommentSeekResumeGate(); clock.reset(); renderer?.seekWindow(); refreshRendering()
-    if let timeline { renderer?.prepareAhead(timeline, time: time, pixelScale: renderScale, opacity: usesSourceOpacity ? nil : opacity) }
+    if let timeline { renderer?.prepareAhead(timeline, time: time, pixelScale: renderScale*sizeMultiplier, opacity: usesSourceOpacity ? nil : opacity) }
   }
   @objc func endSeek() {
     guard seeking else { return }
@@ -474,7 +474,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     let fittedWidth = min(viewport.width, viewport.height * ratio), fittedHeight = fittedWidth / ratio
     let pixelScale = max(Double(fittedWidth) / timeline.width, Double(fittedHeight) / timeline.height)
     canDraw = canDraw && (clock.ready || !(wantsPlaybackProvider?() ?? running))
-    renderer.prepareAhead(timeline, time: canDraw ? clock.schedulingTime : seekTarget ?? media, pixelScale: pixelScale, opacity: usesSourceOpacity ? nil : opacity)
+    renderer.prepareAhead(timeline, time: canDraw ? clock.schedulingTime : seekTarget ?? media, pixelScale: pixelScale*sizeMultiplier, opacity: usesSourceOpacity ? nil : opacity)
     let state = DrawState(timeline: timeline.identity, motion: time, scheduling: clock.schedulingTime, viewport: viewport,
       fittedVideo: CGSize(width: fittedWidth, height: fittedHeight),
       size: sizeMultiplier, opacity: opacity, sourceOpacity: usesSourceOpacity, canDraw: canDraw, revision: renderer.visualRevision)

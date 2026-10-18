@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,6 +14,9 @@ def run(*args, timeout=120):
     return subprocess.check_output(args, text=True, timeout=timeout).strip()
 
 
+codec = sys.argv[1] if len(sys.argv) > 1 else 'h264'
+assert codec in ('h264', 'mpeg2')
+prefix = '' if codec == 'h264' else 'mpeg2-'
 dist = Path('dist')
 device = json.loads((dist / 'simulator-device.json').read_text())['udid']
 bundle = 'io.github.nyanz00.NeoEPGStation'
@@ -26,7 +30,7 @@ if not shutil.which('ffmpeg'):
 subprocess.check_call(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
     '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24',
     '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '90',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+    *( ['-c:v', 'libx264', '-preset', 'ultrafast'] if codec == 'h264' else ['-c:v', 'mpeg2video'] ), '-pix_fmt', 'yuv420p',
     '-b:v', '700k', '-maxrate', '700k', '-bufsize', '1400k', '-g', '24',
     '-c:a', 'aac', '-b:a', '64k', '-muxrate', '1500k',
     '-output_ts_offset', '3390', '-f', 'mpegts', str(fixture)], timeout=120)
@@ -91,19 +95,20 @@ try:
         if (documents / names[1]).exists(): break
         time.sleep(.1)
     for name in names:
-        if (documents / name).exists(): shutil.copyfile(documents / name, dist / name)
-    (dist / 'ts-resume-ranges.json').write_text(json.dumps(requests, indent=2))
-    result = json.loads((dist / names[0]).read_text())
+        if (documents / name).exists(): shutil.copyfile(documents / name, dist / (prefix+name))
+    (dist / (prefix+'ts-resume-ranges.json')).write_text(json.dumps(requests, indent=2))
+    result = json.loads((dist / (prefix+names[0])).read_text())
     assert result['success'] and all(result['checks'].values()), result
-    diagnostic = json.loads((dist / names[1]).read_text())
+    diagnostic = json.loads((dist / (prefix+names[1])).read_text())
     events = diagnostic['events']
     warm = next(i for i, event in enumerate(events) if event['event'] == 'comments.previewWarm')
     opened = next(i for i, event in enumerate(events) if event['event'] == 'input.restart')
     assert warm < opened, 'TS input opened before comment textures were prepared'
     arrivals = [e for e in events if e['event'] == 'ts.positionReady']
-    assert len(arrivals) == 3, arrivals
+    assert len(arrivals) >= 4, arrivals
+    assert all(e.get("newPoint") and e.get("newVideo") for e in arrivals), arrivals
     assert all(abs(e['nativeMs']-e['targetMs']) <= 2000 for e in arrivals), arrivals
     assert any(e['event'] == 'ts.positionRequested' and e['bytes'] for e in events), 'Unknown-duration TS fallback not exercised'
-    print(f"PASS: {len(result['checks'])} native TS assertions, comment gate and three verified arrivals", flush=True)
+    print(f"PASS: {len(result['checks'])} native TS assertions, comment gate, retained paused repair and verified output arrivals", flush=True)
 finally:
     server.shutdown()
