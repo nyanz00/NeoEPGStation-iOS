@@ -41,3 +41,34 @@ The native probe leaves playback at 2x after completion; a compositor screenshot
 must contain the synthetic video pattern at the display center. This detects
 cases where view-frame assertions pass while the actual video stays at an old
 origin. `drawHierarchy` snapshots alone are not accepted for this assertion.
+
+## Verification result — Build 198
+
+- Source: `f92597ad7df8e48e6b1493500aa73eb17ed84a7d` on `master`.
+- [Focused Actions run](https://github.com/nyanz00/NeoEPGStation-iOS/actions/runs/39125596654)
+  succeeded: native model checks, Swift type checks, device and simulator builds,
+  reflow/zoom checks on both simulator device classes, and the long tunnel test.
+- iPhone and iPad each passed all 22 reflow/pan assertions. All 16 existing
+  zoom-boundary, badge and haptic assertions also passed. The actual compositor
+  screenshot passed the center-video pixel check and was visually reviewed.
+  The drawable retained its normal bounds at 2x while only video was transformed.
+- During the tunnel test, the opening deadline retired the input and the
+  availability probe gated a fresh open at the retained position. Both
+  `lateInputRetired` and `freshVideoAndAudioConfirmed` passed. The final samples
+  showed video, audio and comment progress with no lost pictures.
+- Commentary preference model checks cover name-based restoration, reordered
+  indexes, and missing-name fallback without replacing the saved preference.
+- Local workflow lint, eight CI-helper tests and whitespace checks passed.
+- Build 196 exposed a legacy zoom test that reused the pre-expansion viewport
+  height; its second gesture now uses the current viewport. Build 197 passed
+  automated checks, but visual review exposed an ambiguous live-video snapshot
+  with a stale origin. The final source keeps VLC drawable geometry stable and
+  adds the compositor pixel assertion; these were verified in Build 198.
+- IPA metadata confirms build `198`, bundle
+  `io.github.nyanz00.NeoEPGStation`, and the bundled Noto Sans JP Bold font.
+  SHA-256: `39548742033fe72df76912b5689876de8919c1bf0c198015eaec1ee5f6104b50`.
+
+Actual train-radio conditions, hardware decoding differences, physical rotation
+and the feel of interactive gestures still require device observation. Simulator
+fault injection confirms this failure path and does not cover every network or
+decoder failure mode.
