@@ -8,9 +8,10 @@
   Its pinned watcher sends the point before setting `seeking=true`; invalidate
   it at that transition, then retain genuine output updates arriving before
   `seeking=false`. Do not register a second, conflicting time watcher.
-- TS uses confirmed native presentation points rather than the wrapper's
-  cached interpolated convenience clock. Interpolation is bounded to 500 ms
-  beyond the latest real update. Do not invent a new relative time origin.
+- TS reads LibVLC's native movie-time getter, whose timer accounts for paused
+  dates and discontinuities, rather than VLCKit's separate cached convenience
+  clock or an independently extrapolated watcher point. Watcher updates are
+  retained to verify fresh output. Do not invent a new relative time origin.
 - All TS position changes, including paused decoder priming, require the seek
   notification, a new native point near the target, decoded video and a new
   due sample. The output stays hidden and the clock stays held until then.

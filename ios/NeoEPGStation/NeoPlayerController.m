@@ -21,11 +21,13 @@ typedef struct {
   int64_t ts_us, length_us, system_date_us;
 } NeoNativeTimePoint;
 extern int64_t libvlc_clock(void);
+extern int64_t libvlc_media_player_get_time(void *);
 extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *, int64_t, int64_t *, double *);
 @interface VLCMediaPlayer (NeoNativeTimeObserver)
 @property (nonatomic, readonly, getter=isSeeking) BOOL seeking;
 - (void)setSeeking:(BOOL)seeking;
 - (void)mediaPlayerLastTimePointUpdated:(const NeoNativeTimePoint)point;
+- (void *)libVLCMediaPlayer;
 @end
 @interface NeoObservedMediaPlayer : VLCMediaPlayer {
   NeoNativeTimePoint _observedPoint;
@@ -38,8 +40,17 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 @property (nonatomic) BOOL smokeUntrustedTime;
 #endif
 - (NSDictionary<NSString *, NSNumber *> *)observedClock;
+- (int64_t)nativeTimeMs;
 @end
 @implementation NeoObservedMediaPlayer
+- (int64_t)nativeTimeMs {
+  // LibVLC's getter accounts for pause_date/discontinuities in the player
+  // timer. The wrapper caches a separate interpolation which can be stale.
+  void *instance = self.libVLCMediaPlayer;
+  if (!instance) { return -1; }
+  int64_t microseconds = libvlc_media_player_get_time(instance);
+  return microseconds < 0 ? -1 : microseconds/1000;
+}
 #if TARGET_OS_SIMULATOR
 - (VLCTime *)time {
   return self.smokeUntrustedTime ? [VLCTime timeWithInt:34000] : super.time;
@@ -73,9 +84,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     // value after its input loop stops publishing statistics/time updates.
     int result = libvlc_media_player_time_point_interpolate(&_observedPoint, _observedAt, &position, &fraction);
     if (result < 0) { return @{}; }
-    int64_t current = position;
-    libvlc_media_player_time_point_interpolate(&_observedPoint, MIN(libvlc_clock(), _observedAt+500000), &current, &fraction);
-    return @{@"positionMs": @(MAX(0, position/1000)), @"currentMs": @(MAX(0, current/1000)),
+    return @{@"positionMs": @(MAX(0, position/1000)),
       @"sequence": @(_observedSequence), @"age": @(MAX(0, libvlc_clock()-_progressAt)/1000000.0)};
   }
 }
@@ -221,6 +230,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 @property (nonatomic) NSTimeInterval tsPositionDeadline;
 @property (nonatomic) uint64_t tsPositionSequence, tsPositionDecoded;
 @property (nonatomic) NSUInteger tsPositionSamples;
+@property (nonatomic) NSTimeInterval tsPositionLastDiagnostic;
 @property (nonatomic) BOOL reloadTimedOut;
 @property (nonatomic) BOOL networkReloadWaiting, networkProbePending, restoreMuted, restorePreviousMute;
 @property (nonatomic) NSTimer *networkRetryTimer;
@@ -911,7 +921,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       [stats[@"samples"] integerValue] > 0 && ![stats[@"resourceInterrupted"] boolValue] &&
       [stats[@"scheduledInMs"] doubleValue] >= -500 && [stats[@"scheduledInMs"] doubleValue] <= 100 &&
       llabs(([self.recordingContext[@"videoFileType"] isEqual:@"ts"]
-        ? [self.player.observedClock[@"positionMs"] longLongValue] : self.inputStartTime+self.player.time.value.longLongValue)-self.videoResumeTime) < 2000 &&
+        ? self.player.nativeTimeMs : self.inputStartTime+self.player.time.value.longLongValue)-self.videoResumeTime) < 2000 &&
       [stats[@"layerStatus"] integerValue] != AVQueuedSampleBufferRenderingStatusFailed) {
     NSNumber *deferred = self.videoResumeDeferredTime;
     dispatch_block_t completion = self.videoResumeDeferredCompletion; self.videoResumeDeferredCompletion = nil;
@@ -1033,6 +1043,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 - (void)armTSPosition {
   [self.tsPositionTimer invalidate];
   self.tsPositionDeadline = CACurrentMediaTime()+20;
+  self.tsPositionLastDiagnostic = CACurrentMediaTime();
   __weak typeof(self) weakSelf = self;
   self.tsPositionTimer = [NSTimer timerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer) { [weakSelf advanceTSPosition]; }];
   [NSRunLoop.mainRunLoop addTimer:self.tsPositionTimer forMode:NSRunLoopCommonModes];
@@ -1072,13 +1083,19 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   // A seek notification alone is not proof of arrival. Inspect a real native
   // clock point, not mediaTime (which intentionally retains the UI target).
   NSDictionary *clock = [(NeoObservedMediaPlayer *)self.player observedClock];
-  int64_t native = [clock[@"positionMs"] longLongValue];
+  int64_t native = self.player.nativeTimeMs;
   NSDictionary *video = [NeoVLCFrameTap snapshot:self.movieView];
+  if (CACurrentMediaTime()-self.tsPositionLastDiagnostic >= 2) {
+    self.tsPositionLastDiagnostic = CACurrentMediaTime();
+    [NeoPlaybackDiagnostics record:@"ts.positionWaiting" fields:@{@"targetMs": @(self.tsPositionTarget), @"nativeMs": @(native),
+      @"point": clock, @"decoded": @(self.player.media.statistics.decodedVideo), @"baselineDecoded": @(self.tsPositionDecoded),
+      @"samples": video[@"samples"] ?: @0, @"callback": @(self.tsPositionCallback), @"seeking": @(self.player.isSeeking)}];
+  }
   if (!self.tsPositionCallback || !clock[@"positionMs"] || self.player.isSeeking ||
       [clock[@"sequence"] unsignedLongLongValue] <= self.tsPositionSequence ||
       self.player.media.statistics.decodedVideo <= self.tsPositionDecoded ||
       [video[@"samples"] unsignedIntegerValue] <= self.tsPositionSamples ||
-      [clock[@"age"] doubleValue] > 2 || llabs(native-self.tsPositionTarget) > 2000 ||
+      [clock[@"age"] doubleValue] > 2 || native < 0 || llabs(native-self.tsPositionTarget) > 2000 ||
       [video[@"scheduledInMs"] doubleValue] < -500 || [video[@"scheduledInMs"] doubleValue] > 100 ||
       [video[@"layerStatus"] integerValue] == AVQueuedSampleBufferRenderingStatusFailed) { return; }
   [NeoPlaybackDiagnostics record:@"ts.positionReady" fields:@{@"targetMs": @(self.tsPositionTarget), @"nativeMs": @(native),
@@ -1329,7 +1346,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
   if (action == 1) {
     self.flowHoldTime = before;
-    if (clock[@"positionMs"]) { self.flowHoldTime = MIN(before, self.inputStartTime+[clock[@"positionMs"] longLongValue]); }
+    if (clock[@"positionMs"] && ![self.recordingContext[@"videoFileType"] isEqual:@"ts"]) {
+      self.flowHoldTime = MIN(before, self.inputStartTime+[clock[@"positionMs"] longLongValue]);
+    }
     self.flowPreviousMute = self.player.audio.isMuted; self.flowMuted = YES; self.player.audio.muted = YES;
   }
   [NeoPlaybackDiagnostics record:action == 1 ? @"network.presentationHeld" : action == 2 ? @"network.bytesResumed" : @"network.videoResumed"
@@ -1425,6 +1444,11 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       return;
     }
     if (self.networkReloadWaiting) { [self updateLoadingState]; return; }
+    if (state == VLCMediaPlayerStatePaused && self.player.state == state && !self.seeking && !self.reloading &&
+        !self.tsPositionPending && !self.videoResuming && [self.recordingContext[@"videoFileType"] isEqual:@"ts"]) {
+      int64_t paused = self.player.nativeTimeMs;
+      if (paused >= 0 && ([self mediaLength] <= 0 || paused <= [self mediaLength]+1500)) { self.lastObservedTime = paused; }
+    }
     if ((state == VLCMediaPlayerStateStopped || state == VLCMediaPlayerStateError) && self.player.state != state) {
       [NeoPlaybackDiagnostics record:@"player.staleTerminalState" fields:@{@"state": @(state), @"currentState": @(self.player.state)}];
       return;
@@ -1725,7 +1749,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 - (void)waitTSResumePhase:(NSInteger)phase target:(int64_t)target attempt:(NSInteger)attempt
                   checks:(NSMutableDictionary *)checks rows:(NSMutableArray *)rows
               completion:(void (^)(NSDictionary<NSString *, id> *))completion {
-  int64_t native = self.player.time.value.longLongValue;
+  int64_t native = self.player.nativeTimeMs;
   NSDictionary *clock = self.player.observedClock;
   BOOL ready = !self.tsPositionPending && !self.reloading && !self.playbackFailed && self.inputBufferReady &&
     llabs(native-target) < 2500 && llabs([clock[@"positionMs"] longLongValue]-target) < 2500 &&
@@ -1746,7 +1770,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   uint64_t frames = self.player.media.statistics.decodedVideo;
   [self setPlaybackIntent:YES];
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2.5*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-    int64_t current = self.player.time.value.longLongValue;
+    int64_t current = self.player.nativeTimeMs;
     checks[[prefix stringByAppendingString:@".clockAdvancesWithoutTargetDelay"]] = @(current > start+1500 && current < start+4000);
     checks[[prefix stringByAppendingString:@".videoAdvances"]] = @(self.player.media.statistics.decodedVideo > frames+15);
     checks[[prefix stringByAppendingString:@".commentsFollowNativeClock"]] = @(self.comments.renderedTime > start/1000.0+1 && fabs(self.comments.renderedTime-current/1000.0) < 1.5);
@@ -1786,7 +1810,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
   checks[@"pausedRepairPositionConfirmed"] = @(!self.videoResuming && !self.reloading && !self.playbackFailed &&
     !self.wantsPlayback && llabs([self mediaTime]-target) < 2000 &&
-    llabs([self.player.observedClock[@"positionMs"] longLongValue]-target) < 2000);
+    llabs(self.player.nativeTimeMs-target) < 2000);
+  checks[@"pausedRepairKeepsInput"] = @(!self.videoRecoveryFallbackAttempted);
   uint64_t video = self.player.media.statistics.decodedVideo, audio = self.player.media.statistics.playedAudioBuffers;
   [self setPlaybackIntent:YES];
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2.5*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -2694,8 +2719,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
   if (!failed && self.player.state == VLCMediaPlayerStatePaused) {
     int64_t position = [self.recordingContext[@"videoFileType"] isEqual:@"ts"]
-      ? [self.player.observedClock[@"positionMs"] longLongValue] : self.inputStartTime+MAX(0,self.player.time.value.longLongValue);
-    if (self.lastObservedLength <= 0 || position <= self.lastObservedLength+1500) { self.lastObservedTime = position; }
+      ? self.player.nativeTimeMs : self.inputStartTime+MAX(0,self.player.time.value.longLongValue);
+    if (position >= 0 && (self.lastObservedLength <= 0 || position <= self.lastObservedLength+1500)) { self.lastObservedTime = position; }
   }
   // Establish the new history position while it is still marked as a seek.
   // Even a short jump or a delayed completion must not become watched time.
@@ -2765,8 +2790,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     return self.lastObservedTime;
   }
   if (self.networkFlow.holding || self.networkFlow.verifying || self.flowResyncing) { return self.flowHoldTime; }
-  NSDictionary *confirmed = [self.recordingContext[@"videoFileType"] isEqual:@"ts"] ? self.player.observedClock : nil;
-  int64_t raw = confirmed ? (confirmed[@"currentMs"] ? [confirmed[@"currentMs"] longLongValue] : self.lastObservedTime) : self.player.time.value.longLongValue;
+  BOOL ts = [self.recordingContext[@"videoFileType"] isEqual:@"ts"];
+  int64_t raw = ts ? self.player.nativeTimeMs : self.player.time.value.longLongValue;
+  if (ts && raw < 0) { return self.lastObservedTime; }
   int64_t time = self.inputStartTime + MAX(0, raw);
   int64_t length = self.lastObservedLength;
   // VLCKit's interpolation can briefly reuse an old host-time point when
