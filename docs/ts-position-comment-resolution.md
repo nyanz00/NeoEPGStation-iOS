@@ -4,6 +4,11 @@
 
 - Preserve the paused presentation position before entering decoder repair.
   Keep UI/history/comments at that target until fresh output confirms arrival.
+- Healthy paused TS inputs remain retained. When foreground resource revocation
+  requires rebuilding video, recreate the damaged TS input once at the saved
+  position. Reselecting only paused TS video leaves the audio-master host-time
+  origin stale: actual tests observed a roughly 4.5-second clock jump on play.
+  Encoded inputs retain their existing partial decoder-repair path.
 - Do not treat VLCKit's synthetic requested seek point as actual playback.
   Its pinned watcher sends the point before setting `seeking=true`; invalidate
   it at that transition, then retain genuine output updates arriving before
@@ -31,7 +36,8 @@ Use Actions `check_scope=ts-comments`. The HTTP TS probe runs H.264 and MPEG-2
 with a nonzero source PCR origin, initial/later/earlier positions and paused
 decoder repair after a background interval. A simulator-only incorrect wrapper
 clock verifies that restoration uses the retained position and real native
-points. Require continued video, audio and correctly timed comments afterwards.
+points. Require exactly one reopen for damaged TS output, no repeated recovery
+or seek loop, and continued video, audio and correctly timed comments afterwards.
 
 The font probe compares actual bitmaps for matching TS and ASS small/normal/big
 comments at 1.25x, including outline pixels and final display resolution. Native

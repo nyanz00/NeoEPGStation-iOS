@@ -231,6 +231,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 @property (nonatomic) uint64_t tsPositionSequence, tsPositionDecoded;
 @property (nonatomic) NSUInteger tsPositionSamples;
 @property (nonatomic) NSTimeInterval tsPositionLastDiagnostic;
+#if TARGET_OS_SIMULATOR
+@property (nonatomic) NSInteger smokeTSRepairReloadBaseline;
+#endif
 @property (nonatomic) BOOL reloadTimedOut;
 @property (nonatomic) BOOL networkReloadWaiting, networkProbePending, restoreMuted, restorePreviousMute;
 @property (nonatomic) NSTimer *networkRetryTimer;
@@ -871,6 +874,16 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   // Read the retained paused position before enabling the repair path, which
   // intentionally bypasses the ordinary paused-clock guard.
   int64_t retained = [self mediaTime];
+  if ([self.recordingContext[@"videoFileType"] isEqual:@"ts"]) {
+    // A TS byte seek after reselecting only paused video can leave the audio
+    // master clock anchored to the pre-suspension host date. On play it skips
+    // the paused interval. Recreate the damaged input once at the retained
+    // position so audio/video share a fresh clock; healthy pauses keep input.
+    self.videoResumeTime = retained;
+    self.videoResumeOldOutput = [[NeoVLCFrameTap snapshot:self.movieView][@"outputID"] integerValue];
+    [NeoPlaybackDiagnostics record:@"video.tsClockReopen" fields:@{@"targetMs": @(retained)}];
+    [self fallbackVideoResume:5]; return;
+  }
   self.videoResuming = YES; self.repairingVideo = YES;
   self.videoResumeMedia = self.player.media; self.videoResumeTrack = selected.trackId;
   self.videoResumeTime = retained; self.videoResumeStage = 0; self.videoResumeSeekFinished = NO;
@@ -1780,6 +1793,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     if (phase == 2) {
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.4*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         int64_t retained = [self mediaTime];
+        self.smokeTSRepairReloadBaseline = self.reloadGeneration;
         [self backgrounded];
         // The wrapper may publish a stale interpolated clock after suspension.
         // Deliberately corrupt that convenience getter while real native clock
@@ -1804,7 +1818,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 - (void)waitTSRetainedRepair:(int64_t)target attempt:(NSInteger)attempt checks:(NSMutableDictionary *)checks
                        rows:(NSMutableArray *)rows completion:(void (^)(NSDictionary *))completion {
-  if ((self.videoResuming || self.tsPositionPending || self.reloading) && attempt < 180) {
+  if ((self.videoResuming || self.tsPositionPending || self.reloading || self.videoReloadRecovery) && attempt < 180) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.1*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [self waitTSRetainedRepair:target attempt:attempt+1 checks:checks rows:rows completion:completion];
     }); return;
@@ -1812,7 +1826,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   checks[@"pausedRepairPositionConfirmed"] = @(!self.videoResuming && !self.reloading && !self.playbackFailed &&
     !self.wantsPlayback && llabs([self mediaTime]-target) < 2000 &&
     llabs(self.player.nativeTimeMs-target) < 2000);
-  checks[@"pausedRepairKeepsInput"] = @(!self.videoRecoveryFallbackAttempted);
+  checks[@"damagedTSInputReopensExactlyOnce"] = @(self.reloadGeneration == self.smokeTSRepairReloadBaseline+1);
   uint64_t video = self.player.media.statistics.decodedVideo, audio = self.player.media.statistics.playedAudioBuffers;
   [self setPlaybackIntent:YES];
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2.5*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
