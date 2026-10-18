@@ -43,3 +43,34 @@ The font probe compares actual bitmaps for matching TS and ASS small/normal/big
 comments at 1.25x, including outline pixels and final display resolution. Native
 model checks also assert that normal TS 56 at 1.25x is 70. No full navigation,
 iPad rotation-notice, ARIB subtitle or unrelated network suite is requested.
+
+## Verified result — Build 202
+
+- Source `b095a65e598dce505f45e99bbc136142fbe21643`, on `master`.
+- [Focused Actions verification](https://github.com/nyanz00/NeoEPGStation-iOS/actions/runs/39162417080)
+  passed native models, Swift UI type checking, device/simulator builds and all
+  targeted runtime checks. H.264 and MPEG-2 each passed 24 TS assertions.
+- Both codecs preserved the paused position across the background interval and
+  reopened the damaged input exactly once. New clock/video confirmation took
+  approximately 0.43/0.45 seconds from the repair request; final paused output
+  verification completed in approximately 1.39/0.47 seconds. Video, audio and
+  comments subsequently advanced with the incorrect wrapper getter still
+  injected. No 10-second partial-repair timeout or repeated reload occurred.
+- The font/gesture probe passed all 44 assertions, including six new checks for
+  matching small/normal/big bitmaps at 1.25x and final display resolution.
+- Earlier runs informed the final implementation: Build 199 exposed the MPEG-2
+  watcher-clock mismatch; Build 200 demonstrated that paused same-position
+  video can arrive without another watcher point; Build 201 then exposed the
+  native shared-clock jump on resuming a partially rebuilt TS input. Build 202
+  avoids that damaged-clock path instead of masking its displayed position.
+- Local workflow lint, Python syntax checks, eight CI-helper tests and
+  whitespace checks passed. The packaged IPA confirms build `202`, unchanged
+  bundle identity and the bundled Noto Sans JP Bold font.
+- IPA SHA-256:
+  `9daa343599910dc219aa799c8fe3fd554d3bf31eb97e39d45c0c5e987ff46f4e`.
+
+The synthetic HTTP TS fixtures have a nonzero PCR origin and exercise unknown
+native duration/byte-position seeking. Arrival checks allow a two-second
+tolerance for that seek path; this is not a claim of frame-exact TS seeking.
+Actual device resource revocation and the supplied recording remain unverified
+on hardware.
