@@ -1929,19 +1929,29 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     // provisional value; later recovery already has a confirmed pause clock.
     int64_t origin = target;
     checks[[NSString stringWithFormat:@"phase%ld.clockAdvancesFromTarget", (long)phase]] = @(current > origin+1000 && current < origin+4000);
-    checks[[NSString stringWithFormat:@"phase%ld.runningClockMatchesNative", (long)phase]] = @(llabs([self mediaTime]-current) < 250);
     checks[[NSString stringWithFormat:@"phase%ld.videoAdvances", (long)phase]] = @(self.player.media.statistics.decodedVideo > video+12);
     [NeoPlaybackDiagnostics record:@"hls.probeProgress" fields:@{@"phase": @(phase), @"targetMs": @(target), @"initialMs": @(start), @"afterMs": @(current),
-      @"videoBefore": @(video), @"videoAfter": @(self.player.media.statistics.decodedVideo)}];
+      @"appMs": @([self mediaTime]), @"videoBefore": @(video), @"videoAfter": @(self.player.media.statistics.decodedVideo)}];
     checks[[NSString stringWithFormat:@"phase%ld.commentsFollowClock", (long)phase]] = @(fabs(self.comments.renderedTime-current/1000.0) < 1.5);
     checks[@"segmentRangesAvailable"] = @(self.streamingSession.downloadedRanges.count > 0);
-    [self setPlaybackIntent:NO];
-    if (phase == 0) {
-      [self seekBy:20000-[self mediaTime] completion:^{ [self waitStreamingPhase:1 target:20000 attempt:0 checks:checks completion:completion]; }]; return;
-    }
-    BOOL passed = YES; for (NSNumber *value in checks.allValues) { passed &= value.boolValue; }
-    [self closePlayer];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ completion(@{@"success": @(passed), @"checks": checks}); });
+    // During the five-second transition guard a native PCR correction can
+    // legitimately lag the last confirmed app time. Check exact agreement
+    // after that guard expires, while still requiring early video/progress.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      int64_t settled = self.player.nativeTimeMs, app = [self mediaTime];
+      checks[[NSString stringWithFormat:@"phase%ld.runningClockMatchesNative", (long)phase]] = @(llabs(app-settled) < 250);
+      checks[[NSString stringWithFormat:@"phase%ld.settledPlaybackAdvances", (long)phase]] =
+        @(settled > current+2500 && settled < current+5500 && self.player.media.statistics.decodedVideo > video+60);
+      checks[[NSString stringWithFormat:@"phase%ld.settledCommentsFollowClock", (long)phase]] = @(fabs(self.comments.renderedTime-settled/1000.0) < 1.5);
+      [NeoPlaybackDiagnostics record:@"hls.probeSettled" fields:@{@"phase": @(phase), @"nativeMs": @(settled), @"appMs": @(app)}];
+      [self setPlaybackIntent:NO];
+      if (phase == 0) {
+        [self seekBy:20000-[self mediaTime] completion:^{ [self waitStreamingPhase:1 target:20000 attempt:0 checks:checks completion:completion]; }]; return;
+      }
+      BOOL passed = YES; for (NSNumber *value in checks.allValues) { passed &= value.boolValue; }
+      [self closePlayer];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ completion(@{@"success": @(passed), @"checks": checks}); });
+    });
   });
 }
 - (void)runTSResumeProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {

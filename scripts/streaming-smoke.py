@@ -148,8 +148,8 @@ for kind, segment, fps, gop in [('encoded', 4, '25', '100'), ('ts', 6.006, '3000
         assert any('keep' in row for row in rows), 'No session heartbeat'
         events = json.loads((documents / names[1]).read_text())['events']
         wait = next(e for e in events if e['event'] == 'hls.networkWaiting')
-        available = next(e for e in events if e['event'] == 'input.networkAvailable')
-        assert available['elapsed']-wait['elapsed'] < 20, 'HLS waited through the unrelated 25-second input deadline'
+        restored = next(e for e in events if e['event'] == 'input.restoreReady' and e['elapsed'] > wait['elapsed'])
+        assert restored['elapsed']-wait['elapsed'] < 20, 'HLS did not actually restore within 20 seconds of the 12-second outage'
         assert not any(e['event'] == 'input.retiredAfterDeadline' for e in events), 'Known playlist failure waited for the input deadline'
         assert not any(e['event'] in ('seek.timeout', 'ts.positionFailed') for e in events), 'Seek fell back after a deadline'
         if kind == 'ts':
