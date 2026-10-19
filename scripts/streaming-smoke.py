@@ -145,6 +145,9 @@ for kind, segment, fps, gop in [('encoded', 4, '25', '100'), ('ts', 6.006, '3000
         events = json.loads((documents / names[1]).read_text())['events']
         assert any(e['event'] == 'input.retiredAfterDeadline' for e in events), 'Opening deadline recovery not exercised'
         assert any(e['event'] == 'input.networkAvailable' for e in events), 'No reconnection'
+        assert not any(e['event'] in ('seek.timeout', 'ts.positionFailed') for e in events), 'Seek fell back after a deadline'
+        if kind == 'ts':
+            assert any(e['event'] == 'ts.positionReady' and e.get('seek') == 1 and e.get('outputChanged') for e in events), 'Replaced video output not exercised'
         print(f"PASS {kind}: {len(result['checks'])} native HLS assertions, actual outage/recovery, two sessions released", flush=True)
     finally:
         server.shutdown()

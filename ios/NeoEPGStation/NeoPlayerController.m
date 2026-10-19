@@ -232,7 +232,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 @property (nonatomic) NSTimer *tsPositionTimer;
 @property (nonatomic) NSTimeInterval tsPositionDeadline;
 @property (nonatomic) uint64_t tsPositionSequence, tsPositionDecoded;
-@property (nonatomic) NSUInteger tsPositionSamples;
+@property (nonatomic) NSUInteger tsPositionSamples, tsPositionOutputID;
 @property (nonatomic) NSTimeInterval tsPositionLastDiagnostic;
 #if TARGET_OS_SIMULATOR
 @property (nonatomic) NSInteger smokeTSRepairReloadBaseline;
@@ -1171,7 +1171,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     self.tsPositionIssued = YES;
     self.tsPositionSequence = [self.player.observedClock[@"sequence"] unsignedLongLongValue];
     self.tsPositionDecoded = self.player.media.statistics.decodedVideo;
-    self.tsPositionSamples = [NeoVLCFrameTap snapshot:self.movieView][@"samples"].unsignedIntegerValue;
+    NSDictionary *output = [NeoVLCFrameTap snapshot:self.movieView];
+    self.tsPositionSamples = [output[@"samples"] unsignedIntegerValue];
+    self.tsPositionOutputID = [output[@"outputID"] unsignedIntegerValue];
     __weak typeof(self) weakSelf = self;
     VLCMedia *media = self.player.media;
     self.player.onSeekCompletion = ^{
@@ -1196,14 +1198,15 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       @"point": clock, @"decoded": @(self.player.media.statistics.decodedVideo), @"baselineDecoded": @(self.tsPositionDecoded),
       @"samples": video[@"samples"] ?: @0, @"callback": @(self.tsPositionCallback), @"seeking": @(self.player.isSeeking)}];
   }
+  BOOL replacedOutput = [video[@"outputID"] unsignedIntegerValue] != self.tsPositionOutputID;
+  BOOL newSample = replacedOutput ? [video[@"samples"] unsignedIntegerValue] > 0 : [video[@"samples"] unsignedIntegerValue] > self.tsPositionSamples;
   if (!self.tsPositionCallback || self.player.isSeeking ||
-      self.player.media.statistics.decodedVideo <= self.tsPositionDecoded ||
-      [video[@"samples"] unsignedIntegerValue] <= self.tsPositionSamples ||
+      self.player.media.statistics.decodedVideo <= self.tsPositionDecoded || !newSample ||
       native < 0 || llabs(native-self.tsPositionTarget) > 2000 ||
       [video[@"scheduledInMs"] doubleValue] < -500 || [video[@"scheduledInMs"] doubleValue] > 100 ||
       [video[@"layerStatus"] integerValue] == AVQueuedSampleBufferRenderingStatusFailed) { return; }
   [NeoPlaybackDiagnostics record:@"ts.positionReady" fields:@{@"targetMs": @(self.tsPositionTarget), @"nativeMs": @(native),
-    @"nativeClockConfirmed": @YES, @"newVideo": @YES,
+    @"nativeClockConfirmed": @YES, @"newVideo": @YES, @"outputChanged": @(replacedOutput),
     @"newWatcherPoint": @([clock[@"sequence"] unsignedLongLongValue] > self.tsPositionSequence)}];
   self.tsPositionPending = NO; [self.tsPositionTimer invalidate]; self.tsPositionTimer = nil;
   self.lastObservedTime = native;
@@ -1883,6 +1886,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if (!ready) { completion(@{@"success": @NO, @"checks": checks, @"phase": @(phase), @"native": @(native), @"state": @(self.player.state)}); return; }
   checks[@"commentsPrepared"] = @(self.comments.ready);
   if (phase == 1) {
+    checks[@"seekFinishesWithoutFallbackReload"] = @(self.reloadGeneration == 0 && !self.lastSeekFailed && CACurrentMediaTime()-self.seekStartedAt < 5);
     if (self.streamingSubtitles) { checks[@"externalSubtitleAttached"] = @(self.attachedSubtitles.count > 0); }
     [self performPlayerAction:@"quality:1"];
     [self waitStreamingPhase:2 target:target attempt:0 checks:checks completion:completion]; return;
@@ -1902,7 +1906,14 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self setPlaybackIntent:YES];
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
     int64_t current = self.player.nativeTimeMs;
-    checks[[NSString stringWithFormat:@"phase%ld.videoAndClockAdvance", (long)phase]] = @(current > start+1000 && current < start+4000 && self.player.media.statistics.decodedVideo > video+12);
+    // At startup the first native interpolation may still include TS PCR
+    // preroll. Measure progress from the requested content position, not that
+    // provisional value; later recovery already has a confirmed pause clock.
+    int64_t origin = phase == 0 ? target : start;
+    checks[[NSString stringWithFormat:@"phase%ld.clockAdvancesFromTarget", (long)phase]] = @(current > origin+1000 && current < origin+4000);
+    checks[[NSString stringWithFormat:@"phase%ld.videoAdvances", (long)phase]] = @(self.player.media.statistics.decodedVideo > video+12);
+    [NeoPlaybackDiagnostics record:@"hls.probeProgress" fields:@{@"phase": @(phase), @"targetMs": @(target), @"initialMs": @(start), @"afterMs": @(current),
+      @"videoBefore": @(video), @"videoAfter": @(self.player.media.statistics.decodedVideo)}];
     checks[[NSString stringWithFormat:@"phase%ld.commentsFollowClock", (long)phase]] = @(fabs(self.comments.renderedTime-current/1000.0) < 1.5);
     checks[@"segmentRangesAvailable"] = @(self.streamingSession.downloadedRanges.count > 0);
     [self setPlaybackIntent:NO];

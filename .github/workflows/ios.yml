@@ -169,7 +169,10 @@ jobs:
       - name: Check VOD HLS streaming, cache, quality and recovery
         id: streaming-checks
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'streaming' }}
-        run: python3 -u scripts/streaming-smoke.py
+        run: |
+          python3 -u scripts/streaming-smoke.py
+          python3 -u scripts/ts-resume-smoke.py
+          python3 -u scripts/ts-resume-smoke.py mpeg2
       - name: Check native playback and iPhone UI
         id: iphone-checks
         if: ${{ inputs.check_scope != 'zoom-font' && inputs.check_scope != 'ts-comments' && inputs.check_scope != 'recovery-ui' && inputs.check_scope != 'streaming' }}
@@ -274,6 +277,8 @@ jobs:
         run: |
           if [ "$CHECK_SCOPE" = "streaming" ]; then
             python3 -u scripts/streaming-smoke.py
+            python3 -u scripts/ts-resume-smoke.py
+            python3 -u scripts/ts-resume-smoke.py mpeg2
           elif [ "$CHECK_SCOPE" = "recovery-ui" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
             python3 -u scripts/reflow-zoom-smoke.py
