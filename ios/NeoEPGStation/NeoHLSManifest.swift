@@ -1,5 +1,26 @@
 import Foundation
 
+// HLS PCR preroll and pause->play can briefly expose an obsolete native timer
+// point, even after a target picture is decoded. Keep the confirmed content
+// position until the native clock enters the physically reachable interval.
+// This is a bounded transition guard, not an independent playback clock.
+@objc(NeoStreamingClock)
+final class NeoStreamingClock: NSObject {
+  private var target = 0.0, began = -100.0, stable = 0.0
+  @objc(resetAt:host:)
+  func reset(at milliseconds: Int64, host: Double) {
+    target = Double(max(0, milliseconds)); stable = target; began = host
+  }
+  @objc(positionAt:host:running:rate:)
+  func position(at milliseconds: Int64, host: Double, running: Bool, rate: Double) -> Int64 {
+    let value = Double(milliseconds), elapsed = max(0, host-began)
+    guard elapsed < 5 else { return milliseconds }
+    let reachable = target+(running ? elapsed*1000*max(0, rate) : 0)+500
+    guard value >= target-250, value <= reachable, value >= stable-100 else { return Int64(stable) }
+    stable = max(stable, value); return Int64(stable)
+  }
+}
+
 // Server VOD HLS: encoded=4s, TS=180 frames at 30000/1001 fps.
 // Store segment counts, not rounded display seconds.
 enum NeoStreamBuffer {
