@@ -24,7 +24,7 @@ final class NeoStreamingSubtitles: NSObject {
             guard !self.closed, case .success(let text) = result else { return }
             do {
               try FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)
-              let ext = ["ass", "ssa"].contains(track.codecName ?? "") ? "ass" : track.codecName == "webvtt" ? "vtt" : "srt"
+              let ext = text.contains("[Events]") ? "ass" : text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("WEBVTT") ? "vtt" : "srt"
               let name = track.displayName.replacingOccurrences(of: #"[^\p{L}\p{N} _-]"#, with: "_", options: .regularExpression)
               let url = self.directory.appendingPathComponent("\(track.subtitleIndex)-\(name.prefix(80)).\(ext)")
               try Data(text.utf8).write(to: url, options: .atomic); self.files.append(url); self.onChange?()

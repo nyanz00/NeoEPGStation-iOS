@@ -35,7 +35,7 @@ final class NeoStreamingDialog: UIViewController {
     updateQuality(button); stack.addArrangedSubview(button)
     let row = UIStackView(); row.spacing = 24; row.distribution = .fillEqually
     row.addArrangedSubview(NeoStyle.button("キャンセル") { [weak self] in self?.dismiss(animated: true) })
-    row.addArrangedSubview(NeoStyle.button("再生") { [weak self] in
+    row.addArrangedSubview(NeoStyle.button("視聴") { [weak self] in
       guard let self else { return }; UserDefaults.standard.set(mode, forKey: "player.streaming.mode."+file.type)
       dismiss(animated: true) { [start, mode] in start(mode) }
     }); stack.addArrangedSubview(row)

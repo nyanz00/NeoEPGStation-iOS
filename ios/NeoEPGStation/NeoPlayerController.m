@@ -1121,6 +1121,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       @"expectedOffset": @([self.rewindCache matroskaSeekOffset:self.inputStartTime/1000.0])}];
   }
   [media addOption:[NSString stringWithFormat:@":network-caching=%ld", (long)self.networkCaching]];
+  if ([self isStreaming]) {
+    [media addOption:[NSString stringWithFormat:@":adaptive-maxbuffer=%ld", (long)self.networkCaching]];
+  }
   if (self.inputStartTime > 0) {
     [media addOption:[NSString stringWithFormat:@":start-time=%.3f", self.inputStartTime / 1000.0]];
   }
@@ -1561,6 +1564,13 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     }
     if (self.reloading && state == VLCMediaPlayerStateStopped && !self.restoringReload && !self.awaitingEndpoint) { [self restartMedia]; return; }
     if (state == VLCMediaPlayerStateError && (self.transportSuspended || self.awaitingEndpoint || self.player.state != state)) { return; }
+    if ([self isStreaming] && !self.reloading && !self.playbackFailed &&
+        (state == VLCMediaPlayerStateError || (state == VLCMediaPlayerStateStopped && self.lastObservedTime < [self mediaLength]-1500))) {
+      int64_t retained = self.networkFlow.holding || self.networkFlow.verifying ? self.flowHoldTime : self.lastObservedTime;
+      self.transportRecoveryAttempted = YES;
+      [NeoPlaybackDiagnostics record:@"hls.inputInterrupted" fields:@{@"targetMs": @(retained)}];
+      [self reloadPlaybackAtTime:retained completion:nil]; return;
+    }
     if (state == VLCMediaPlayerStateError && !self.playbackFailed && self.backgroundPositionValid && !self.reloading && !self.transportRecoveryAttempted) {
       self.transportSuspended = YES;
       if (!self.inputInBackground || self.wantsPlayback) {

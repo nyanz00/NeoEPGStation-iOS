@@ -276,7 +276,13 @@ static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideo
           CGContextSetAlpha(context, region.alpha); CGContextDrawImage(context, region.backingFrame, region.image);
         }
       }];
-      [target receiveSubtitleImage:image];
+      CGRect videoRect = source.bounds;
+      for (UIView *sibling in source.superview.subviews) {
+        if ([sibling.layer isKindOfClass:NeoTappedVideoLayer.class]) { videoRect = CGRectIntersection(source.bounds, [source convertRect:sibling.bounds fromView:sibling]); break; }
+      }
+      CGImageRef cropped = CGRectIsEmpty(videoRect) ? nil : CGImageCreateWithImageInRect(image.CGImage, videoRect);
+      [target receiveSubtitleImage:cropped ? [UIImage imageWithCGImage:cropped] : image];
+      if (cropped) { CGImageRelease(cropped); }
     } : nil;
     objc_setAssociatedObject(view, &NeoSubtitleSinkKey, handler, OBJC_ASSOCIATION_COPY_NONATOMIC);
   }
