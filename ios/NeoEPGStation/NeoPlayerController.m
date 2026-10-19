@@ -843,7 +843,12 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     self.awaitingEndpoint = YES; [self.player stop];
     [self prepareStreamingAt:self.reloadTime/1000.0 completion:^(NSURL *url, NSString *message) {
       if (!weakSelf || weakSelf.closing || !weakSelf.reloading || weakSelf.reloadGeneration != generation) { return; }
-      if (!url) { weakSelf.statusLabel.text = message; [weakSelf.chrome updateDiagnostics]; return; }
+      if (!url) {
+        weakSelf.statusLabel.text = message; [weakSelf.chrome updateDiagnostics];
+        if (weakSelf.streamingSession.retryableFailure) { [weakSelf waitForStreamingNetwork]; }
+        else { [weakSelf finishReload:YES]; [weakSelf showControls]; }
+        return;
+      }
       weakSelf.playbackURL = url; [weakSelf restartInputAfterEndpointReady];
     }];
   } else if (self.rewindCache) {
@@ -2971,6 +2976,19 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 - (void)releaseRestoreMute {
   if (self.restoreMuted) { self.player.audio.muted = self.restorePreviousMute; self.restoreMuted = NO; }
+}
+- (void)waitForStreamingNetwork {
+  if (self.closing) { return; }
+  self.networkReloadWaiting = YES; self.reloading = NO; self.restoringReload = NO;
+  self.reloadTimedOut = NO; self.awaitingEndpoint = YES; self.inputBufferReady = NO;
+  self.tsPositionPending = NO; [self.tsPositionTimer invalidate]; self.tsPositionTimer = nil;
+  [self.reloadTimer invalidate]; self.reloadTimer = nil; self.player.onSeekCompletion = nil; [self.player stop];
+  [self.networkRetryTimer invalidate];
+  __weak typeof(self) weakSelf = self;
+  self.networkRetryTimer = [NSTimer timerWithTimeInterval:2 repeats:YES block:^(NSTimer *timer) { [weakSelf retryNetworkReload]; }];
+  [NSRunLoop.mainRunLoop addTimer:self.networkRetryTimer forMode:NSRunLoopCommonModes];
+  [NeoPlaybackDiagnostics record:@"hls.networkWaiting" fields:@{@"targetMs": @(self.reloadTime)}];
+  [self retryNetworkReload]; [self updateLoadingState];
 }
 - (void)retryNetworkReload {
   if (self.closing || !self.networkReloadWaiting || self.networkProbePending) { return; }

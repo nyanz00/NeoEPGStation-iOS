@@ -22,6 +22,7 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
   private var pending: Set<ObjectIdentifier> = [], delivered: Int64 = 0
   @objc private(set) var downloadedRanges: [[NSNumber]] = []
   @objc private(set) var status = ""
+  @objc private(set) var retryableFailure = false
   @objc var onChange: (() -> Void)?
   @objc var onTransportFailure: (() -> Void)?
   @objc var flowState: [String: NSNumber] {
@@ -88,20 +89,23 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
       URLQueryItem(name: "ss", value: String(format: "%.3f", position)), URLQueryItem(name: "subtitleIndex", value: "-1"),
       URLQueryItem(name: "startupBufferSegments", value: "1"), URLQueryItem(name: "vodSessionId", value: sessionID)]
     let endpoint = url.url!, generation = epoch
-    session.dataTask(with: request(endpoint)) { [weak self] data, response, _ in
+    session.dataTask(with: request(endpoint)) { [weak self] data, response, error in
       guard let self else { return }; self.queue.async {
         guard !self.closed, generation == self.epoch else { return }
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        self.retryableFailure = error != nil || code == 0 || code == 408 || code == 429 || (500..<600).contains(code)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200, let data,
           data.count <= 16*1024*1024, let text = String(data: data, encoding: .utf8) else {
           completion("配信に接続できませんでした。再読み込みで再試行してください。"); return
         }
         do {
           let value = try NeoHLSManifest(text: text, source: endpoint)
+          self.retryableFailure = false
           self.manifest = value; self.playlistURL = endpoint; self.publish(error: false)
           NeoPlaybackDiagnostics.record("hls.playlist", fields: ["segments": value.segments.count, "duration": value.duration,
             "target": self.position, "mode": self.mode, "ahead": self.ahead, "rewind": self.rewind])
           completion(nil)
-        } catch { completion(error.localizedDescription) }
+        } catch { self.retryableFailure = false; completion(error.localizedDescription) }
       }
     }.resume()
   }

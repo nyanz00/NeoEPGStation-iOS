@@ -143,8 +143,10 @@ for kind, segment, fps, gop in [('encoded', 4, '25', '100'), ('ts', 6.006, '3000
         assert sessions <= released and len(sessions) == 2, (sessions, released)
         assert any('keep' in row for row in rows), 'No session heartbeat'
         events = json.loads((documents / names[1]).read_text())['events']
-        assert any(e['event'] == 'input.retiredAfterDeadline' for e in events), 'Opening deadline recovery not exercised'
-        assert any(e['event'] == 'input.networkAvailable' for e in events), 'No reconnection'
+        wait = next(e for e in events if e['event'] == 'hls.networkWaiting')
+        available = next(e for e in events if e['event'] == 'input.networkAvailable')
+        assert available['elapsed']-wait['elapsed'] < 20, 'HLS waited through the unrelated 25-second input deadline'
+        assert not any(e['event'] == 'input.retiredAfterDeadline' for e in events), 'Known playlist failure waited for the input deadline'
         assert not any(e['event'] in ('seek.timeout', 'ts.positionFailed') for e in events), 'Seek fell back after a deadline'
         if kind == 'ts':
             assert any(e['event'] == 'ts.positionReady' and e.get('seek') == 1 and e.get('outputChanged') for e in events), 'Replaced video output not exercised'

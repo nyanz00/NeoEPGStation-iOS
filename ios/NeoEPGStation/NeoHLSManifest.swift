@@ -6,13 +6,16 @@ import Foundation
 // This is a bounded transition guard, not an independent playback clock.
 @objc(NeoStreamingClock)
 final class NeoStreamingClock: NSObject {
+  private let lock = NSLock()
   private var target = 0.0, began = -100.0, stable = 0.0
   @objc(resetAt:host:)
   func reset(at milliseconds: Int64, host: Double) {
+    lock.lock(); defer { lock.unlock() }
     target = Double(max(0, milliseconds)); stable = target; began = host
   }
   @objc(positionAt:host:running:rate:)
   func position(at milliseconds: Int64, host: Double, running: Bool, rate: Double) -> Int64 {
+    lock.lock(); defer { lock.unlock() }
     let value = Double(milliseconds), elapsed = max(0, host-began)
     guard elapsed < 5 else { return milliseconds }
     let reachable = target+(running ? elapsed*1000*max(0, rate) : 0)+500
