@@ -1972,7 +1972,10 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   int64_t start = native;
   uint64_t frames = self.player.media.statistics.decodedVideo;
   [self setPlaybackIntent:YES];
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2.5*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+  // A paused decoder can report a PCR point ahead of the displayed frame.
+  // Observe three seconds so that ordinary preroll/resume latency does not
+  // consume the whole 1.5-second advancement margin.
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
     int64_t current = self.player.nativeTimeMs;
     checks[[prefix stringByAppendingString:@".clockAdvancesWithoutTargetDelay"]] = @(current > start+1500 && current < start+4000);
     checks[[prefix stringByAppendingString:@".videoAdvances"]] = @(self.player.media.statistics.decodedVideo > frames+15);
@@ -2988,7 +2991,10 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.networkRetryTimer = [NSTimer timerWithTimeInterval:2 repeats:YES block:^(NSTimer *timer) { [weakSelf retryNetworkReload]; }];
   [NSRunLoop.mainRunLoop addTimer:self.networkRetryTimer forMode:NSRunLoopCommonModes];
   [NeoPlaybackDiagnostics record:@"hls.networkWaiting" fields:@{@"targetMs": @(self.reloadTime)}];
-  [self retryNetworkReload]; [self updateLoadingState];
+  // A reachable control API may coexist with an unavailable encoder/playlist.
+  // Let the two-second timer initiate the next attempt; probing immediately
+  // here would recursively reopen a failing playlist without any backoff.
+  [self updateLoadingState];
 }
 - (void)retryNetworkReload {
   if (self.closing || !self.networkReloadWaiting || self.networkProbePending) { return; }

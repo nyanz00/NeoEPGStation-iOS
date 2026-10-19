@@ -111,7 +111,9 @@ for kind, segment, fps, gop in [('encoded', 4, '25', '100'), ('ts', 6.006, '3000
 
         def do_PUT(self):
             rows.append({'keep': self.path, 'failed': time.monotonic() < fault_until[0]})
-            self.respond(code=503 if time.monotonic() < fault_until[0] else 204)
+            # Keep the control API reachable while media/playlist is down.
+            # This must not turn availability probes into a tight reopen loop.
+            self.respond(code=204)
 
         def do_DELETE(self):
             rows.append({'release': self.path}); self.respond(code=204)
@@ -135,6 +137,8 @@ for kind, segment, fps, gop in [('encoded', 4, '25', '100'), ('ts', 6.006, '3000
         result = json.loads((documents / names[0]).read_text())
         assert result['success'] and all(result['checks'].values()), result
         assert any('fault' in row for row in rows) and any(row.get('failed') for row in rows), 'Outage not injected'
+        failed_playlists = [row for row in rows if isinstance(row.get('failed'), str) and row['failed'].endswith('/playlist')]
+        assert len(failed_playlists) <= 10, 'Unbounded playlist retry loop during a 12-second media outage'
         playlists = [row['playlist'] for row in rows if 'playlist' in row]
         assert {p['mode'][0] for p in playlists} == {'0', '1'}, playlists
         assert all(p['subtitleIndex'] == ['-1'] for p in playlists), 'Burned subtitles requested'
