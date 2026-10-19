@@ -1124,8 +1124,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if ([self isStreaming]) {
     [media addOption:[NSString stringWithFormat:@":adaptive-maxbuffer=%ld", (long)self.networkCaching]];
   }
-  if (self.inputStartTime > 0 || ([self isStreaming] && target > 0)) {
-    [media addOption:[NSString stringWithFormat:@":start-time=%.3f", ([self isStreaming] ? target : self.inputStartTime) / 1000.0]];
+  if (self.inputStartTime > 0) {
+    [media addOption:[NSString stringWithFormat:@":start-time=%.3f", self.inputStartTime / 1000.0]];
   }
   // Initialise at the requested position, paused. Never play the beginning
   // to prepare a later seek, including when the user wants playback resumed.
