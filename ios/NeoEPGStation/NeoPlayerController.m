@@ -720,7 +720,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   else if ([action hasPrefix:@"quality:"] && [self isStreaming]) {
     NSInteger mode = [action substringFromIndex:8].integerValue;
     NSArray *qualities = self.recordingContext[@"streamQualities"];
-    if (self.reloading || mode < 0 || mode >= qualities.count || [qualities[mode] length] == 0 || mode == [self.recordingContext[@"streamMode"] integerValue]) { return; }
+    if (self.reloading || mode < 0 || mode >= qualities.count || [qualities[mode] length] == 0 || mode == [self.recordingContext[@"streamMode"] integerValue]) { [self.chrome updateStreamQuality:[self.recordingContext[@"streamMode"] integerValue]]; return; }
     int64_t target = [self mediaTime];
     NSMutableDictionary *context = [self.recordingContext mutableCopy]; context[@"streamMode"] = @(mode); self.recordingContext = context;
     [self.streamingSession close]; self.streamingSession.onChange = nil; self.streamingSession.onTransportFailure = nil; self.streamingSession = nil;
@@ -1097,7 +1097,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   BOOL ts = [self wholeFileClock];
   self.inputStartTime = ts ? 0 : target;
   [self.tsPositionTimer invalidate]; self.tsPositionTimer = nil;
-  self.tsPositionPending = ts && target > 0;
+  self.tsPositionPending = (ts && target > 0) || [self isStreaming];
   self.videoOutputView.hidden = self.tsPositionPending;
   self.tsPositionIssued = NO; self.tsPositionCallback = NO; self.tsPositionTarget = target;
   self.initialPosition = 0;
@@ -1124,14 +1124,19 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if ([self isStreaming]) {
     [media addOption:[NSString stringWithFormat:@":adaptive-maxbuffer=%ld", (long)self.networkCaching]];
   }
-  if (self.inputStartTime > 0) {
-    [media addOption:[NSString stringWithFormat:@":start-time=%.3f", self.inputStartTime / 1000.0]];
+  if (self.inputStartTime > 0 || ([self isStreaming] && target > 0)) {
+    [media addOption:[NSString stringWithFormat:@":start-time=%.3f", ([self isStreaming] ? target : self.inputStartTime) / 1000.0]];
   }
   // Initialise at the requested position, paused. Never play the beginning
   // to prepare a later seek, including when the user wants playback resumed.
-  if (self.reloading || self.tsPositionPending) { [media addOption:@":start-paused"]; }
+  BOOL pausedStart = ![self isStreaming] && (self.reloading || self.tsPositionPending);
+  if (pausedStart) { [media addOption:@":start-paused"]; }
+  if ([self isStreaming]) {
+    if (!self.restoreMuted) { self.restorePreviousMute = self.player.audio.isMuted; self.restoreMuted = YES; }
+    self.player.audio.muted = YES;
+  }
   [NeoPlaybackDiagnostics record:@"input.startPosition" fields:@{@"targetMs": @(target),
-    @"paused": @(self.reloading || self.tsPositionPending), @"absoluteTS": @(ts)}];
+    @"paused": @(pausedStart), @"absoluteTS": @(ts)}];
   self.player.media = media; [self.player play];
   if (self.tsPositionPending) { [self armTSPosition]; }
 }
@@ -1157,8 +1162,12 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
   if (!self.tsPositionIssued) {
     int64_t length = [self mediaLength];
-    if (!self.inputBufferReady || self.buffering || self.player.state != VLCMediaPlayerStatePaused ||
-        !self.player.isSeekable || length <= 0) { return; }
+    BOOL stateReady = self.player.state == VLCMediaPlayerStatePaused || ([self isStreaming] && self.player.state == VLCMediaPlayerStatePlaying);
+    if (!self.inputBufferReady || self.buffering || !stateReady || !self.player.isSeekable || length <= 0) { return; }
+    // Adaptive HLS does not output the target picture while start-paused.
+    // Decode invisibly/muted at the requested time until a real due frame
+    // arrives. Keep the user's playback intent separate from this preparation.
+    if ([self isStreaming] && self.player.state == VLCMediaPlayerStatePaused) { [self.player play]; }
     self.tsPositionIssued = YES;
     self.tsPositionSequence = [self.player.observedClock[@"sequence"] unsignedLongLongValue];
     self.tsPositionDecoded = self.player.media.statistics.decodedVideo;
@@ -1198,6 +1207,10 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     @"newWatcherPoint": @([clock[@"sequence"] unsignedLongLongValue] > self.tsPositionSequence)}];
   self.tsPositionPending = NO; [self.tsPositionTimer invalidate]; self.tsPositionTimer = nil;
   self.lastObservedTime = native;
+  if ([self isStreaming]) {
+    if (self.reloading || !self.wantsPlayback) { [self.player pause]; }
+    else if (!self.videoReloadRecovery) { [self releaseRestoreMute]; }
+  }
   self.videoOutputView.hidden = NO;
   if (self.seeking) { [self completeSeek:self.seekGeneration failed:NO]; }
   if (self.reloading) { [self restoreReloadIfReady]; }
@@ -1226,6 +1239,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       self.player.audio.muted = YES;
     }
     self.transportRecoveryAttempted = NO;
+    if ([self isStreaming] && !self.videoReloadRecovery) { [self releaseRestoreMute]; }
     [self.player deselectAllTextTracks];
     for (VLCMediaPlayerTrack *track in self.player.textTracks) {
       if ([self.reloadTextTracks containsObject:track.trackId]) { track.selected = YES; }
@@ -1484,7 +1498,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   int64_t length = [self mediaLength] / 1000;
   if (!self.scrubbing && length > 0) { self.timeline.value = self.playbackEnded ? 1 : MIN(1, MAX(0, (double)[self mediaTime] / [self mediaLength])); }
   [self rememberPlaybackTime];
-  [self.streamingSession observeTime:current running:self.player.isPlaying];
+  if (self.inputBufferReady && !self.tsPositionPending && !self.reloading && !self.networkReloadWaiting && !self.awaitingComments) {
+    [self.streamingSession observeTime:current running:self.player.isPlaying];
+  }
   [self.rewindCache observeTime:current running:self.player.isPlaying && !self.buffering && !self.seeking];
   [self.chrome updatePlayback:self.wantsPlayback && !self.playbackEnded current:self.playbackEnded ? self.lastObservedLength / 1000 : current duration:length > 0 ? length : self.lastObservedLength / 1000];
   [self.chrome updateDownloadedRanges:(self.streamingSession ? self.streamingSession.downloadedRanges : self.rewindCache.downloadedRanges) ?: @[]];
@@ -1543,6 +1559,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       return;
     }
     if (self.networkReloadWaiting) { [self updateLoadingState]; return; }
+    if ([self isStreaming] && state == VLCMediaPlayerStatePaused && !self.tsPositionPending && !self.reloading && !self.videoReloadRecovery) { [self releaseRestoreMute]; }
     if (state == VLCMediaPlayerStatePaused && self.player.state == state && !self.seeking && !self.reloading &&
         !self.tsPositionPending && !self.videoResuming && [self wholeFileClock]) {
       int64_t paused = self.player.nativeTimeMs;
@@ -1854,7 +1871,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
                    checks:(NSMutableDictionary *)checks completion:(void (^)(NSDictionary *))completion {
   int64_t native = self.player.nativeTimeMs;
   BOOL ready = !self.tsPositionPending && !self.reloading && !self.networkReloadWaiting && !self.playbackFailed &&
-    self.inputBufferReady && llabs(native-target) < 3000 &&
+    self.inputBufferReady && !self.lastSeekFailed && !self.seeking && llabs(native-target) < 3000 &&
     self.player.state == (phase == 0 ? VLCMediaPlayerStatePlaying : VLCMediaPlayerStatePaused);
   if (!ready && attempt < 450 && !self.playbackFailed) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.2*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -2844,8 +2861,11 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     self.tsPositionPending = YES; self.tsPositionTarget = target;
     self.tsPositionIssued = NO; self.tsPositionCallback = NO;
     self.videoOutputView.hidden = YES;
-    [self.player pause]; [self armTSPosition]; [self updateLoadingState];
-    return;
+    if ([self isStreaming]) {
+      if (!self.restoreMuted) { self.restorePreviousMute = self.player.audio.isMuted; self.restoreMuted = YES; }
+      self.player.audio.muted = YES; [self.player play];
+    } else { [self.player pause]; }
+    [self armTSPosition]; [self updateLoadingState]; return;
   }
   BOOL accepted;
   if (!self.hasInputLength && self.player.media.length.value.longLongValue <= 0 && length > 0) {

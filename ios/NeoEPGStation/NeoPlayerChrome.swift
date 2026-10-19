@@ -330,6 +330,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     default: onAction?(action)
     }
   }
+  @objc func updateStreamQuality(_ mode: Int) { context["streamMode"] = mode; if tab == "settings" { renderPanel() } }
   @objc func configure(_ context: [String: Any]) {
     self.context = context; channel.text = context["channelName"] as? String; renderPanel()
     guard let base = (context["baseURL"] as? String).flatMap(URL.init(string:)), let id = context["id"] as? Int else { return }
@@ -676,7 +677,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
           row.distribution = .equalSpacing; row.alignment = .center; row.spacing = 12; stack.addArrangedSubview(row)
         }
         let qualities = context["streamQualities"] as? [String] ?? []
-        selection("画質", values: Array(qualities.indices), current: context["streamMode"] as? Int ?? 0,
+        selection("画質", values: qualities.indices.filter { !qualities[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }, current: context["streamMode"] as? Int ?? 0,
           text: { qualities.indices.contains($0) ? qualities[$0] : "" }) { [weak self] value in
             self?.context["streamMode"] = value; self?.onAction?("quality:\(value)"); self?.renderPanel()
           }

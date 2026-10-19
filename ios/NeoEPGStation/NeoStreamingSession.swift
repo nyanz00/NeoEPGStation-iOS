@@ -16,7 +16,7 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
   private var tasks: [Int: URLSessionDataTask] = [:]
   private var waiters: [Int: [(Data?) -> Void]] = [:]
   private var cache: [Int: Int] = [:], cacheBytes = 0
-  private var epoch = 0, closed = false, position = 0.0
+  private var epoch = 0, closed = false, position = 0.0, refreshingSession = false
   private var ahead: Int, rewind: Int, mode: Int, quality: String
   private let flowLock = NSLock()
   private var pending: Set<ObjectIdentifier> = [], delivered: Int64 = 0
@@ -71,6 +71,7 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
               self.keepAlive(); self.prefetch()
               DispatchQueue.main.async { completion(self.localURL, nil) }
             } else if case .failed = state {
+              self.localURL = nil
               if !reported { reported = true; DispatchQueue.main.async { completion(nil, "STREAMINGを開始できません。") } }
               else { DispatchQueue.main.async { self.onTransportFailure?() } }
             }
@@ -96,7 +97,7 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
         }
         do {
           let value = try NeoHLSManifest(text: text, source: endpoint)
-          self.manifest = value; self.playlistURL = endpoint
+          self.manifest = value; self.playlistURL = endpoint; self.publish(error: false)
           NeoPlaybackDiagnostics.record("hls.playlist", fields: ["segments": value.segments.count, "duration": value.duration,
             "target": self.position, "mode": self.mode, "ahead": self.ahead, "rewind": self.rewind])
           completion(nil)
@@ -110,19 +111,35 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
     timer.schedule(deadline: .now()+10, repeating: 10)
     timer.setEventHandler { [weak self] in
       guard let self, !self.closed else { return }
-      self.session.dataTask(with: self.request(self.sessionURL, method: "PUT")) { _, response, error in
-        NeoPlaybackDiagnostics.record("hls.keepAlive", fields: ["status": (response as? HTTPURLResponse)?.statusCode ?? 0, "failed": error != nil])
-      }.resume()
+      self.renewLease()
+
     }; timer.resume()
+  }
+  private func renewLease() {
+    guard !closed else { return }
+    let generation = epoch
+    session.dataTask(with: request(sessionURL, method: "PUT")) { [weak self] _, response, error in
+      let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+      NeoPlaybackDiagnostics.record("hls.keepAlive", fields: ["status": code, "failed": error != nil])
+      guard let self, code == 404 else { return }
+      self.queue.async {
+        guard !self.closed, self.epoch == generation, !self.refreshingSession else { return }
+        self.refreshingSession = true
+        self.loadPlaylist { [weak self] error in
+          guard let self else { return }; self.refreshingSession = false
+          if error == nil { self.prefetch() }
+        }
+      }
+    }.resume()
   }
   @objc(reopenAt:completion:)
   func reopen(at time: Double, completion: @escaping (URL?, String?) -> Void) {
     queue.async { [self] in
       guard !closed else { return }
-      if localURL == nil { listener?.cancel(); start(at: time, completion: completion); return }
-      position = max(0, time); epoch += 1
+      position = max(0, time); epoch += 1; refreshingSession = false
       tasks.values.forEach { $0.cancel() }; tasks.removeAll()
       let previous = waiters.values.flatMap { $0 }; waiters.removeAll(); previous.forEach { $0(nil) }
+      if localURL == nil { listener?.cancel(); start(at: time, completion: completion); return }
       loadPlaylist { [weak self] error in
         guard let self else { return }; self.keepAlive()
         if error == nil { self.evict(); self.prefetch() }
@@ -141,7 +158,7 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
       }.resume()
     }
   }
-  @objc func resumeFetching() { queue.async { [weak self] in self?.prefetch() } }
+  @objc func resumeFetching() { queue.async { [weak self] in self?.renewLease(); self?.prefetch() } }
   @objc func beginSeek(_ time: Double) { observeTime(time, running: false) }
   @objc(observeTime:running:)
   func observeTime(_ time: Double, running: Bool) {
@@ -159,7 +176,7 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
     }
   }
   private func prefetch() {
-    guard !closed, let manifest, tasks.isEmpty else { return }
+    guard !closed, let manifest, tasks.isEmpty, waiters.isEmpty else { return }
     let current = manifest.index(at: position)
     guard let next = (current...min(manifest.segments.count-1, current+ahead-1)).first(where: { cache[$0] == nil }) else { return }
     fetch(next) { [weak self] data in if data != nil { self?.prefetch() } }
@@ -213,9 +230,12 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
     guard let manifest else { return }
     let ranges: [[NSNumber]] = cache.keys.sorted().map { [NSNumber(value: manifest.segments[$0].start), NSNumber(value: manifest.segments[$0].start+manifest.segments[$0].duration)] }
     DispatchQueue.main.async { [weak self] in
-      guard let self, !self.closed else { return }; self.downloadedRanges = ranges
-      if let error { self.status = error ? "配信に接続できません。再接続しています…" : "" }
-      self.onChange?()
+      guard let self, !self.closed else { return }
+      // observeTime follows UI updates. Publish only actual changes; otherwise
+      // onChange -> updateControls -> observeTime becomes an unbounded loop.
+      let newStatus = error.map { failed in failed && self.flowState["waiting"]?.boolValue == true ? "配信に接続できません。再接続しています…" : "" } ?? self.status
+      guard self.downloadedRanges != ranges || self.status != newStatus else { return }
+      self.downloadedRanges = ranges; self.status = newStatus; self.onChange?()
     }
   }
   private func accept(_ connection: NWConnection) {

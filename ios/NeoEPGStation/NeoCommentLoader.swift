@@ -55,6 +55,7 @@ final class NeoCommentLoader: NSObject, URLSessionTaskDelegate {
     configuration.timeoutIntervalForRequest = 90
     configuration.timeoutIntervalForResource = 120
     configuration.urlCache = nil
+    configuration.httpCookieStorage = .shared; configuration.urlCredentialStorage = .shared
     session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
   }
 
