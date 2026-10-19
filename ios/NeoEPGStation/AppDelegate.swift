@@ -31,6 +31,27 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
       }
       return true
     }
+    if let base = ProcessInfo.processInfo.environment["NEO_EPG_STREAMING"], let url = URL(string: base+"/api/videos/1") {
+      NeoCommentOverlay.waitBeforePlayback = true
+      UserDefaults.standard.set(true, forKey: "player.comments.enabled")
+      let ts = ProcessInfo.processInfo.environment["NEO_EPG_STREAM_TYPE"] == "ts"
+      DispatchQueue.main.asyncAfter(deadline: .now()+1) {
+        let player = NeoPlayerController(url: url, title: "Synthetic HLS", username: "", password: "", networkCaching: 300)
+        player.initialPosition = 49
+        player.recordingContext = ["disableHistory": true, "videoFileType": ts ? "ts" : "encoded", "streaming": true,
+          "streamMode": 0, "streamQualities": ["Synthetic A", "Synthetic B"]]
+        player.modalPresentationStyle = .fullScreen
+        window.rootViewController?.present(player, animated: false) {
+          player.runStreamingProbe { result in
+            NeoPiPSmoke.save("streaming-smoke", result)
+            if let source = NeoPlaybackDiagnostics.exportURL(), let data = try? Data(contentsOf: source) {
+              try? data.write(to: NeoPiPSmoke.directory.appendingPathComponent("streaming-diagnostics.json"))
+            }
+          }
+        }
+      }
+      return true
+    }
     if let base = ProcessInfo.processInfo.environment["NEO_EPG_TS_RESUME"], let url = URL(string: base+"/api/videos/1") {
       NeoCommentOverlay.waitBeforePlayback = true
       UserDefaults.standard.set(true, forKey: "player.comments.enabled")

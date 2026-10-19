@@ -118,9 +118,21 @@ final class NeoDetailPage: NeoPage {
     let files = (item.videoFiles ?? []).filter {
       ($0.type == "ts" && config?.isEnableTSRecordedStream == true) || ($0.type == "encoded" && config?.isEnableEncodedRecordedStream == true)
     }
-    guard !files.isEmpty else { alert("STREAMING の操作は準備中です。"); return }
+    guard !files.isEmpty else { alert("STREAMINGで再生できるファイルがありません。"); return }
     shell?.showPopup(anchor: streamingButton, entries: files.map { file in
-      NeoMenuEntry(title: file.name) { [weak self] in self?.alert("STREAMING の操作は準備中です。") }
+      NeoMenuEntry(title: file.name) { [weak self] in
+        guard let self else { return }
+        let qualities = config?.streamingQualities(file.type) ?? []
+        guard !qualities.isEmpty else { self.alert("配信の画質設定がありません。"); return }
+        let dialog = NeoStreamingDialog(file: file, qualities: qualities) { [weak self] mode in
+          guard let self else { return }
+          self.streamingButton.isEnabled = false; self.loading.startAnimating()
+          self.shell?.play(file, recording: self.item, streaming: mode) { [weak self] in
+            self?.streamingButton.isEnabled = true; self?.loading.stopAnimating()
+          }
+        }
+        self.present(dialog, animated: true)
+      }
     }, appearance: .files)
   }
   @objc private func showDropLog() {

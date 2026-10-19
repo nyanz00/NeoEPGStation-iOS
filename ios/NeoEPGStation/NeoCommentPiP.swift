@@ -110,6 +110,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   private var renderer: NeoDanmakuRenderer?
   private var state = CommentCompositionState(timeline: nil, version: -1, enabled: false, size: 1, opacity: 1)
   private var current: CapturedVideoFrame?
+  private var subtitleImage: CGImage?
   private var image: CGImage?
   private let videoConverter = PiPVideoConverter()
   private var outputSize = CGSize.zero
@@ -126,6 +127,10 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   @objc private(set) var possible = false
   @objc private(set) var status = "PiP · 映像待ち"
   @objc var onChange: (() -> Void)?
+  @objc func receiveSubtitleImage(_ image: UIImage?) {
+    let snapshot = image?.cgImage
+    work.async { [weak self] in self?.subtitleImage = snapshot; self?.dirty = true }
+  }
   @objc var timeProvider: (() -> Double)?
   @objc var lengthProvider: (() -> Double)?
   @objc var rateProvider: (() -> Double)?
@@ -270,7 +275,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   @objc func seekDiscontinuity(_ target: Double) {
     frameLock.lock(); frames.removeAll(); presentationTimes.removeAll(); lastPresentedHost = 0; lastDecodedHost = 0; frameLock.unlock()
     work.async { [weak self] in
-      self?.current = nil; self?.image = nil; self?.clock = CommentPresentationClock()
+      self?.current = nil; self?.image = nil; self?.subtitleImage = nil; self?.clock = CommentPresentationClock()
       self?.resumeGate = CommentSeekResumeGate()
       self?.seekTarget = max(0, target)
       self?.lastTime = -1; self?.dirty = true; self?.renderer?.seekWindow(); self?.displayLayer.flush()
@@ -311,7 +316,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     active = false; possible = false; onChange = nil
     work.async { [weak self] in
       self?.timer?.cancel(); self?.timer = nil; self?.composing = false
-      self?.current = nil; self?.image = nil; self?.pool = nil; self?.renderer?.reset()
+      self?.current = nil; self?.image = nil; self?.subtitleImage = nil; self?.pool = nil; self?.renderer?.reset()
       self?.displayLayer.flushAndRemoveImage()
     }
   }
@@ -361,7 +366,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
       if layer.status == .failed { layer.flush() }
       guard layer.isReadyForMoreMediaData else { return }
       guard let output = try Self.compose(image: image, size: outputSize, pool: pool, renderer: renderer,
-        state: composition, time: time, schedulingTime: clock.schedulingTime) else { return }
+        state: composition, time: time, schedulingTime: clock.schedulingTime, subtitle: subtitleImage) else { return }
       let sample = try Self.makeSample(output, hostTime: now)
       layer.enqueue(sample)
       frameLock.lock(); composed += 1; frameLock.unlock()
@@ -392,7 +397,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   }
 
   static func compose(image: CGImage, size: CGSize, pool: CVPixelBufferPool, renderer: NeoDanmakuRenderer,
-                      state: CommentCompositionState, time: Double, schedulingTime: Double? = nil) throws -> CVPixelBuffer? {
+                      state: CommentCompositionState, time: Double, schedulingTime: Double? = nil, subtitle: CGImage? = nil) throws -> CVPixelBuffer? {
     var output: CVPixelBuffer?
     let allocation = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(nil, pool,
       [kCVPixelBufferPoolAllocationThresholdKey: 6] as CFDictionary, &output)
@@ -405,6 +410,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
       bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else { throw CommentParseError.invalid("PiP合成") }
     context.interpolationQuality = .medium
     context.draw(image, in: CGRect(origin: .zero, size: size))
+    if let subtitle { context.draw(subtitle, in: CGRect(origin: .zero, size: size)) }
     if state.enabled, let timeline = state.timeline {
       let scale = max(Double(size.width) / timeline.width, Double(size.height) / timeline.height)
       // Rasterize at the displayed text size; enlarging comments must not just

@@ -13,6 +13,7 @@ NS_ASSUME_NONNULL_BEGIN
                   username:(NSString *)username password:(NSString *)password
             networkCaching:(NSInteger)networkCaching;
 #if TARGET_OS_SIMULATOR
+- (void)runStreamingProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runStreamingProbe(completion:));
 - (void)runTSResumeProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runTSResumeProbe(completion:));
 - (void)runARIBProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runARIBProbe(completion:));
 - (void)runNetworkProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runNetworkProbe(completion:));

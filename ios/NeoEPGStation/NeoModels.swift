@@ -40,6 +40,18 @@ struct NeoDropLog: Decodable {
   var hasErrors: Bool { dropCnt > 0 || errorCnt > 0 || scramblingCnt > 0 }
 }
 struct NeoServerConfig: Decodable {
+  struct StreamConfig: Decodable {
+    struct Recorded: Decodable {
+      struct Source: Decodable { let hls: [String]? }
+      let ts: Source?; let encoded: Source?
+    }
+    let recorded: Recorded?
+  }
+  var streamConfig: StreamConfig? = nil
+  func streamingQualities(_ type: String) -> [String] {
+    let values = type == "ts" ? streamConfig?.recorded?.ts?.hls : streamConfig?.recorded?.encoded?.hls
+    return values ?? []
+  }
   let encode: [String]; let developerMode: Bool?
   var isEnableTSRecordedStream: Bool? = nil
   var isEnableEncodedRecordedStream: Bool? = nil
@@ -47,7 +59,7 @@ struct NeoServerConfig: Decodable {
     self.encode = encode; self.developerMode = developerMode
     self.isEnableTSRecordedStream = isEnableTSRecordedStream; self.isEnableEncodedRecordedStream = isEnableEncodedRecordedStream
   }
-  private enum CodingKeys: String, CodingKey { case encode, developerMode, isEnableTSRecordedStream, isEnableEncodedRecordedStream }
+  private enum CodingKeys: String, CodingKey { case encode, developerMode, isEnableTSRecordedStream, isEnableEncodedRecordedStream, streamConfig }
   init(from decoder: Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
     // queries.ts normalizes missing/non-string encode modes independently of capabilities.
@@ -58,6 +70,7 @@ struct NeoServerConfig: Decodable {
         if let mode = try? value.decode(String.self), !mode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { modes.append(mode) }
       }
     }
+    streamConfig = try values.decodeIfPresent(StreamConfig.self, forKey: .streamConfig)
     encode = modes
     developerMode = try values.decodeIfPresent(Bool.self, forKey: .developerMode)
     isEnableTSRecordedStream = try values.decodeIfPresent(Bool.self, forKey: .isEnableTSRecordedStream)

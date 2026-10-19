@@ -3,7 +3,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 
-static char NeoARIBStateKey, NeoARIBPictureKey, NeoARIBTimerKey;
+static char NeoARIBStateKey, NeoARIBPictureKey, NeoARIBTimerKey, NeoSubtitleSinkKey;
 static void (*NeoOriginalSubtitleDraw)(id, SEL, id);
 @interface NeoStableSubtitleRegion : NSObject
 @property (nonatomic) CGRect backingFrame;
@@ -35,6 +35,14 @@ static id NeoFreezeSubtitle(id picture) {
   }
   NeoStableSubtitlePicture *copy = [NeoStableSubtitlePicture new]; copy.regions = copies; return copy;
 }
+// Copy VLC's already scheduled subpicture into the PiP composition. Its
+// backing coordinates use pixels with a bottom-left origin (the same transform
+// as VLCSampleBufferSubpictureView.drawRect), independently of video pixels.
+static void NeoDisplaySubtitle(UIView *view, SEL selector, id picture) {
+  NeoOriginalSubtitleDraw(view, selector, picture);
+  void (^sink)(id) = objc_getAssociatedObject(view, &NeoSubtitleSinkKey);
+  if (sink) { sink(picture); }
+}
 static void NeoDrawARIBSubtitle(id view, SEL selector, id picture) {
   NSInteger (^state)(void) = objc_getAssociatedObject(view, &NeoARIBStateKey);
   id snapshot = NeoFreezeSubtitle(picture);
@@ -42,17 +50,17 @@ static void NeoDrawARIBSubtitle(id view, SEL selector, id picture) {
     // Track selection and the app's first UI update are asynchronous. Keep the
     // image already on this view so binding after its first draw loses nothing.
     if (snapshot) { objc_setAssociatedObject(view, &NeoARIBPictureKey, snapshot, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
-    NeoOriginalSubtitleDraw(view, selector, picture); return;
+    NeoDisplaySubtitle(view, selector, picture); return;
   }
   NSInteger active = state();
   NSArray *regions = picture && [picture respondsToSelector:@selector(regions)] ?
     ((id (*)(id, SEL))objc_msgSend)(picture, @selector(regions)) : nil;
   if (regions.count > 0) {
     objc_setAssociatedObject(view, &NeoARIBPictureKey, snapshot ?: picture, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    NeoOriginalSubtitleDraw(view, selector, snapshot ?: picture);
+    NeoDisplaySubtitle(view, selector, snapshot ?: picture);
   } else {
     id retained = active > 0 ? objc_getAssociatedObject(view, &NeoARIBPictureKey) : nil;
-    NeoOriginalSubtitleDraw(view, selector, retained ?: picture);
+    NeoDisplaySubtitle(view, selector, retained ?: picture);
     if (!retained) { objc_setAssociatedObject(view, &NeoARIBPictureKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
     // A known broadcast clear must still clear a retained image, including
     // when VLC has stopped issuing callbacks after its premature expiration.
@@ -63,7 +71,7 @@ static void NeoDrawARIBSubtitle(id view, SEL selector, id picture) {
         NSInteger (^provider)(void) = target ? objc_getAssociatedObject(target, &NeoARIBStateKey) : nil;
         if (!provider || provider() <= 0) {
           if (target) {
-            NeoOriginalSubtitleDraw(target, selector, nil);
+            NeoDisplaySubtitle(target, selector, nil);
             objc_setAssociatedObject(target, &NeoARIBPictureKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             objc_setAssociatedObject(target, &NeoARIBTimerKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
           }
@@ -213,7 +221,7 @@ static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideo
     [(NSTimer *)objc_getAssociatedObject(view, &NeoARIBTimerKey) invalidate];
     objc_setAssociatedObject(view, &NeoARIBTimerKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(view, &NeoARIBPictureKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    NeoOriginalSubtitleDraw(view, NSSelectorFromString(@"drawSubpicture:"), nil);
+    NeoDisplaySubtitle(view, NSSelectorFromString(@"drawSubpicture:"), nil);
   }
   for (UIView *child in view.subviews) { [self clearARIBView:child]; }
 }
@@ -251,6 +259,26 @@ static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideo
   NSAssert(NSThread.isMainThread, @"Bind VLC views on the main thread");
   if ([view.layer isKindOfClass:NeoTappedVideoLayer.class]) {
     ((NeoTappedVideoLayer *)view.layer).frameSink = sink;
+  }
+  if ([NSStringFromClass(view.class) isEqualToString:@"VLCSampleBufferSubpictureView"]) {
+    __weak id<NeoVideoFrameSink> weakSink = sink; __weak UIView *weakView = view;
+    void (^handler)(id) = sink ? ^(id picture) {
+      id<NeoVideoFrameSink> target = weakSink; UIView *source = weakView;
+      if (!target.capturingForPiP || !source || source.bounds.size.width <= 0 || source.bounds.size.height <= 0) { return; }
+      id frozen = NeoFreezeSubtitle(picture);
+      if (!frozen) { [target receiveSubtitleImage:nil]; return; }
+      UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat]; format.scale = 1;
+      UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:source.bounds.size format:format];
+      UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *output) {
+        CGContextRef context = output.CGContext; CGContextTranslateCTM(context, 0, source.bounds.size.height);
+        CGFloat scale = 1/MAX(1, source.contentScaleFactor); CGContextScaleCTM(context, scale, -scale);
+        for (NeoStableSubtitleRegion *region in [frozen regions]) {
+          CGContextSetAlpha(context, region.alpha); CGContextDrawImage(context, region.backingFrame, region.image);
+        }
+      }];
+      [target receiveSubtitleImage:image];
+    } : nil;
+    objc_setAssociatedObject(view, &NeoSubtitleSinkKey, handler, OBJC_ASSOCIATION_COPY_NONATOMIC);
   }
   for (UIView *child in view.subviews) { [self bindView:child sink:sink]; }
 }

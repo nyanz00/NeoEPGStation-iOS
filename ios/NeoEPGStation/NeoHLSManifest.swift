@@ -1,0 +1,56 @@
+import Foundation
+
+// Server VOD HLS: encoded=4s, TS=180 frames at 30000/1001 fps.
+// Store segment counts, not rounded display seconds.
+enum NeoStreamBuffer {
+  static let aheadChoices = [1, 2, 3, 5, 10]
+  static let rewindChoices = [0, 1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 75]
+  static func interval(ts: Bool) -> Double { ts ? 6.006 : 4 }
+  static func key(ts: Bool, rewind: Bool) -> String { "player.streaming.\(ts ? "ts" : "encoded").\(rewind ? "rewind" : "ahead")" }
+  static func count(ts: Bool, rewind: Bool) -> Int {
+    let value = UserDefaults.standard.object(forKey: key(ts: ts, rewind: rewind)) as? Int
+    let choices = rewind ? rewindChoices : aheadChoices
+    return value.flatMap { choices.contains($0) ? $0 : nil } ?? (rewind ? (ts ? 10 : 15) : 2)
+  }
+  static func save(_ value: Int, ts: Bool, rewind: Bool) {
+    guard (rewind ? rewindChoices : aheadChoices).contains(value) else { return }
+    UserDefaults.standard.set(value, forKey: key(ts: ts, rewind: rewind))
+  }
+  static func label(_ count: Int, ts: Bool) -> String {
+    if count == 0 { return "オフ" }
+    return "\(ts ? "約" : "")\(Int((Double(count)*interval(ts: ts)).rounded()))秒"
+  }
+}
+
+struct NeoHLSManifest {
+  struct Segment { let url: URL; let start: Double; let duration: Double }
+  let lines: [String], segments: [Segment]
+  var duration: Double { segments.last.map { $0.start+$0.duration } ?? 0 }
+  init(text: String, source: URL) throws {
+    lines = text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    guard lines.first == "#EXTM3U", lines.contains("#EXT-X-ENDLIST") else { throw NeoError("録画用HLSを読み取れません。") }
+    var items: [Segment] = [], pending: Double?, position = 0.0
+    for line in lines {
+      // NeoEPGStation emits muxed MPEG-TS VOD; reject other formats rather
+      // than forwarding an unproxied key/init resource with lost credentials.
+      guard !line.hasPrefix("#EXT-X-KEY:"), !line.hasPrefix("#EXT-X-MAP:"), !line.hasPrefix("#EXT-X-BYTERANGE:") else { throw NeoError("このHLS形式には対応していません。") }
+      if line.hasPrefix("#EXTINF:") { pending = Double(line.dropFirst(8).split(separator: ",")[0]); continue }
+      if line.hasPrefix("#") { continue }
+      guard let duration = pending, duration > 0, duration.isFinite,
+        let url = URL(string: line, relativeTo: source)?.absoluteURL,
+        url.scheme == source.scheme, url.host == source.host, url.port == source.port,
+        url.user == nil, url.password == nil else { throw NeoError("HLSの区間情報が不正です。") }
+      items.append(Segment(url: url, start: position, duration: duration)); position += duration; pending = nil
+    }
+    guard !items.isEmpty, pending == nil else { throw NeoError("HLSの区間がありません。") }
+    segments = items
+  }
+  func index(at time: Double) -> Int { segments.lastIndex(where: { $0.start <= max(0, time) }) ?? 0 }
+  func localPlaylist(route: String) -> Data {
+    var index = 0
+    return Data((lines.map { line in
+      guard !line.hasPrefix("#") else { return line }
+      defer { index += 1 }; return "\(route)/segments/\(index).ts"
+    }.joined(separator: "\n")+"\n").utf8)
+  }
+}

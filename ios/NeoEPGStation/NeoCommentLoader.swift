@@ -78,6 +78,23 @@ final class NeoCommentLoader: NSObject, URLSessionTaskDelegate {
     }
   }
 
+  func ordinaryTracks(completion: @escaping (Result<[NativeCommentTrack], Error>) -> Void) {
+    request(source.appendingPathComponent("subtitles")) { result in
+      completion(result.flatMap { data in
+        do { return .success(try JSONDecoder().decode(CommentTrackList.self, from: data).items.filter { !$0.isComment && ["ass", "ssa", "subrip", "srt", "webvtt"].contains($0.codecName?.lowercased() ?? "") }) }
+        catch { return .failure(error) }
+      })
+    }
+  }
+  func ordinaryText(index: Int, completion: @escaping (Result<String, Error>) -> Void) {
+    request(source.appendingPathComponent("subtitles/\(index)/text")) { result in
+      completion(result.flatMap { data in
+        do { return .success(try JSONDecoder().decode(CommentTextResponse.self, from: data).subtitleText) }
+        catch { return .failure(error) }
+      })
+    }
+  }
+
   func text(track: NativeCommentTrack, range: (startAt: Double, duration: Double)? = nil, completion: @escaping (Result<CommentTimeline, Error>) -> Void) -> URLSessionDataTask? {
     if track.isJikkyo { return jikkyo(range: range, completion: completion) }
     var url = source.appendingPathComponent("subtitles").appendingPathComponent(String(track.subtitleIndex)).appendingPathComponent("text")

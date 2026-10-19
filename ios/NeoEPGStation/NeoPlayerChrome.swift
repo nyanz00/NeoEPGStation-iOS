@@ -665,6 +665,29 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
         let b = NeoStyle.button("\(rate)×") { [weak self] in self?.speed = rate; self?.onAction?("rate:\(rate)"); self?.renderPanel() }
         b.tintColor = rate == speed ? NeoStyle.accent : .white; b.titleLabel?.font = .systemFont(ofSize: 11); speeds.addArrangedSubview(b)
       }; speeds.heightAnchor.constraint(equalToConstant: 40).isActive = true; stack.addArrangedSubview(speeds)
+      if context["streaming"] as? Bool == true {
+        let ts = context["videoFileType"] as? String == "ts"
+        func selection(_ label: String, values: [Int], current: Int, text: (Int) -> String, action: @escaping (Int) -> Void) {
+          let button = UIButton(type: .system); button.setTitle(text(current)+" ▾", for: .normal)
+          button.tintColor = NeoStyle.accent; button.showsMenuAsPrimaryAction = true
+          button.heightAnchor.constraint(equalToConstant: 44).isActive = true
+          button.menu = UIMenu(children: values.map { value in UIAction(title: text(value), state: value == current ? .on : .off) { _ in action(value) } })
+          let row = UIStackView(arrangedSubviews: [NeoStyle.label(label, bold: true), button])
+          row.distribution = .equalSpacing; row.alignment = .center; row.spacing = 12; stack.addArrangedSubview(row)
+        }
+        let qualities = context["streamQualities"] as? [String] ?? []
+        selection("画質", values: Array(qualities.indices), current: context["streamMode"] as? Int ?? 0,
+          text: { qualities.indices.contains($0) ? qualities[$0] : "" }) { [weak self] value in
+            self?.context["streamMode"] = value; self?.onAction?("quality:\(value)"); self?.renderPanel()
+          }
+        for rewind in [false, true] {
+          selection(rewind ? "巻き戻し用キャッシュ" : "先読み", values: rewind ? NeoStreamBuffer.rewindChoices : NeoStreamBuffer.aheadChoices,
+            current: NeoStreamBuffer.count(ts: ts, rewind: rewind), text: { NeoStreamBuffer.label($0, ts: ts) }) { [weak self] value in
+              NeoStreamBuffer.save(value, ts: ts, rewind: rewind)
+              self?.onAction?("streambuffer"); self?.renderPanel()
+            }
+        }
+      } else {
       append("PLAYのネットワークキャッシュ：\(cacheSeconds) 秒", bold: true)
       let cache = UIStepper(); cache.minimumValue = 1; cache.maximumValue = 30; cache.value = Double(cacheSeconds)
       cache.addAction(UIAction { [weak self, weak cache] _ in guard let self, let cache else { return }; self.cacheSeconds = Int(cache.value); self.onAction?("cache:\(self.cacheSeconds)"); self.renderPanel() }, for: .valueChanged)
@@ -683,6 +706,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       let retentionRow = UIStackView(arrangedSubviews: [NeoStyle.label("巻き戻し用キャッシュ", bold: true), retention])
       retentionRow.distribution = .equalSpacing; retentionRow.alignment = .center; retentionRow.spacing = 12
       stack.addArrangedSubview(retentionRow)
+      }
       let row = UIStackView(); row.addArrangedSubview(NeoStyle.label("操作ボタンを自動で隠す")); let toggle = UISwitch(); toggle.isOn = autoHide; toggle.onTintColor = NeoStyle.accent
       toggle.addAction(UIAction { [weak self, weak toggle] _ in self?.autoHide = toggle?.isOn == true; self?.onAction?("interaction") }, for: .valueChanged); row.addArrangedSubview(toggle); stack.addArrangedSubview(row)
       let waitRow = UIStackView(arrangedSubviews: [NeoStyle.label("コメントの準備を待って再生"), UISwitch()]); waitRow.distribution = .equalSpacing
