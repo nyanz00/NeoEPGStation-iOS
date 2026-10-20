@@ -87,7 +87,8 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
     var url = URLComponents(url: api.appendingPathComponent("streams/recorded/\(id)/vodhls/playlist"), resolvingAgainstBaseURL: false)!
     url.queryItems = [URLQueryItem(name: "mode", value: String(mode)), URLQueryItem(name: "quality", value: quality),
       URLQueryItem(name: "ss", value: String(format: "%.3f", position)), URLQueryItem(name: "subtitleIndex", value: "-1"),
-      URLQueryItem(name: "startupBufferSegments", value: "1"), URLQueryItem(name: "vodSessionId", value: sessionID)]
+      URLQueryItem(name: "startupBufferSegments", value: "1"), URLQueryItem(name: "vodSessionId", value: sessionID),
+      URLQueryItem(name: "client", value: "ios")]
     let endpoint = url.url!, generation = epoch
     session.dataTask(with: request(endpoint)) { [weak self] data, response, error in
       guard let self else { return }; self.queue.async {

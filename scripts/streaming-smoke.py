@@ -79,6 +79,9 @@ for kind, segment, fps, gop in [('encoded', 4, '25', '100'), ('ts', 6.006, '3000
                 rows.append({'fault': True})
                 self.json({}); return
             if '/vodhls/' in path:
+                if query.get('client') != ['ios']:
+                    rows.append({'invalidClient': path, 'client': query.get('client')})
+                    self.respond(code=400); return
                 if time.monotonic() < fault_until[0]:
                     rows.append({'failed': path}); self.respond(code=503); return
                 if path.endswith('/playlist'):
@@ -87,14 +90,14 @@ for kind, segment, fps, gop in [('encoded', 4, '25', '100'), ('ts', 6.006, '3000
                     lines = ['#EXT-X-START:TIME-OFFSET='+query['ss'][0]+',PRECISE=YES']
                     for line in text.splitlines():
                         if not line.startswith('#'):
-                            line = 'segments/'+line+'?mode='+query['mode'][0]
+                            line = 'segments/'+line+'?mode='+query['mode'][0]+'&client='+query['client'][0]
                         lines.append(line)
                     # EXTM3U must be the first line.
                     lines[0], lines[1] = lines[1], lines[0]
                     self.respond(('\n'.join(lines)+'\n').encode(), mime='application/vnd.apple.mpegurl'); return
                 name = path.rsplit('/', 1)[-1]
                 if name.endswith('.ts') and (root / name).is_file():
-                    rows.append({'segment': int(name[:-3]), 'mode': query.get('mode')})
+                    rows.append({'segment': int(name[:-3]), 'mode': query.get('mode'), 'client': query.get('client')})
                     self.respond((root / name).read_bytes(), mime='video/mp2t'); return
             if path.endswith('/subtitles'):
                 self.json({'items': [dict(subtitleIndex=0, streamIndex=2, codecName='ass', displayName='実況comments', title='comments', language='jpn'),
@@ -142,6 +145,10 @@ for kind, segment, fps, gop in [('encoded', 4, '25', '100'), ('ts', 6.006, '3000
         playlists = [row['playlist'] for row in rows if 'playlist' in row]
         assert {p['mode'][0] for p in playlists} == {'0', '1'}, playlists
         assert all(p['subtitleIndex'] == ['-1'] for p in playlists), 'Burned subtitles requested'
+        assert all(p.get('client') == ['ios'] for p in playlists), 'Missing iOS HLS compatibility on playlist requests'
+        segments = [row for row in rows if 'segment' in row]
+        assert segments and all(row.get('client') == ['ios'] for row in segments), 'Lost iOS HLS compatibility on proxied segments'
+        assert not any('invalidClient' in row for row in rows), 'Request bypassed iOS HLS compatibility'
         sessions = {p['vodSessionId'][0] for p in playlists}
         released = {row['release'].rsplit('/', 1)[-1] for row in rows if 'release' in row}
         assert sessions <= released and len(sessions) == 2, (sessions, released)
