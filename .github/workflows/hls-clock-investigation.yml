@@ -1,0 +1,49 @@
+name: HLS clock investigation
+on:
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: Existing verified build whose VLCKit is used unchanged
+        default: '39318714143'
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  investigate:
+    runs-on: macos-26
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN: ${{ inputs.source_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reuse unchanged framework
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
+          gh run view "$SOURCE_RUN" --json number,headSha > source-run.json
+          number=$(python3 -c 'import json; print(json.load(open("source-run.json"))["number"])')
+          gh run download "$SOURCE_RUN" -n "NeoEPGStation-iOS-$number" -D reused
+          python3 - <<'PY'
+          import json,subprocess
+          info=json.load(open('reused/dist/build-info.json'))
+          assert info['commit']==json.load(open('source-run.json'))['headSha']
+          subprocess.run(['git','diff','--exit-code',info['commit'],'HEAD','--','ios'],check=True)
+          for name in ['encoded-streaming-smoke','ts-streaming-smoke','ts-resume-smoke','mpeg2-ts-resume-smoke']:
+              d=json.load(open('reused/dist/'+name+'.json')); assert d['success'] and all(d['checks'].values())
+          PY
+          mkdir -p build/simulator/Build/Products/Release-iphonesimulator
+          ditto -x -k reused/dist/simulator-app.zip build/simulator/Build/Products/Release-iphonesimulator
+      - name: Prepare simulator
+        run: python3 scripts/simulator-smoke.py --prepare
+      - name: Compare HLS timestamp origins and additional seeks
+        run: python3 -u scripts/hls-clock-investigation.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hls-clock-investigation-${{ github.run_number }}
+          path: dist/
