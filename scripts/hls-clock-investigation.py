@@ -6,6 +6,8 @@ import plistlib
 import shutil
 import subprocess
 import threading
+import hashlib
+import zipfile
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
@@ -19,9 +21,6 @@ dist = Path('dist')
 dist.mkdir(exist_ok=True)
 device = json.loads((dist / 'simulator-device.json').read_text())['udid']
 run(['xcrun', 'simctl', 'bootstatus', device, '-b'])
-if not shutil.which('ffmpeg'):
-    run(['brew', 'install', 'ffmpeg'], timeout=600,
-        env=dict(os.environ, HOMEBREW_NO_AUTO_UPDATE='1', HOMEBREW_NO_INSTALL_CLEANUP='1'))
 app = Path('build/HLSClockProbe.app')
 app.mkdir(parents=True, exist_ok=True)
 frameworks = app / 'Frameworks'
@@ -47,32 +46,14 @@ documents = container / 'Documents'
 documents.mkdir(exist_ok=True)
 root = dist / 'clock-fixtures'
 root.mkdir(exist_ok=True)
-ff = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y']
-movie = root / 'source.mp4'
-run(ff + ['-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=25', '-f', 'lavfi', '-i',
-          'sine=sample_rate=48000', '-t', '70', '-c:v', 'libx264', '-preset', 'ultrafast',
-          '-g', '100', '-c:a', 'aac', str(movie)])
-for name, start, offset in [('full', 0, 0), ('rebased-absolute', 48, 48), ('rebased-relative', 48, 0)]:
-    out = root / name
-    out.mkdir(exist_ok=True)
-    run(ff + ['-ss', str(start), '-i', str(movie), '-c:v', 'libx264', '-preset', 'ultrafast', '-g', '100',
-              '-force_key_frames', 'expr:gte(t,n_forced*4)', '-c:a', 'aac', '-muxdelay', '0', '-muxpreload', '0',
-              '-f', 'hls', '-hls_time', '4', '-hls_list_size', '0', '-hls_playlist_type', 'vod',
-              '-hls_segment_type', 'mpegts', '-hls_flags', 'independent_segments', '-start_number', str(start//4),
-              '-output_ts_offset', str(offset), '-hls_segment_filename', str(out / '%d.ts'), str(out / 'playlist.m3u8')])
-out = root / 'remux-absolute'
-out.mkdir(exist_ok=True)
-# TS STREAMING performs a second MPEG-TS -> HLS copy mux. Inspect whether this
-# mux preserves the original absolute recording timestamps without -copyts.
-run(ff + ['-i', str(root / 'rebased-absolute/playlist.m3u8'), '-map', '0', '-c', 'copy',
-          '-hls_time', '4', '-hls_list_size', '0', '-hls_playlist_type', 'vod', '-hls_segment_type', 'mpegts',
-          '-hls_flags', 'independent_segments', '-start_number', '12', '-hls_segment_filename', str(out / '%d.ts'),
-          str(out / 'playlist.m3u8')])
-probes = {}
-for name in ['full', 'rebased-absolute', 'rebased-relative', 'remux-absolute']:
-    index = 0 if name == 'full' else 12
-    probes[name] = json.loads(subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries',
-                    'format=start_time,duration', '-of', 'json', str(root/name/f'{index}.ts')], text=True))
+archive = Path('tests/hls-clock-probe/fixtures.zip')
+expected = archive.with_suffix('.sha256').read_text().split()[0]
+assert hashlib.sha256(archive.read_bytes()).hexdigest() == expected
+with zipfile.ZipFile(archive) as fixtures:
+    for name in fixtures.namelist():
+        assert not Path(name).is_absolute() and '..' not in Path(name).parts
+    fixtures.extractall(root)
+probes = json.loads((root / 'origins.json').read_text())
 (dist / 'hls-timestamp-origins.json').write_text(json.dumps(probes, indent=2))
 print('Timestamp origins:', json.dumps(probes), flush=True)
 requests = []
@@ -119,8 +100,12 @@ class Handler(BaseHTTPRequestHandler):
 
 server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
-cases = [(name, seek, False) for name in probes for seek in [False, True]]
-cases += [('rebased-relative', True, True)]
+cases = [('full-default-mux', False, False), ('full-default-mux', True, False),
+         ('nvenc-absolute', False, False), ('nvenc-absolute', True, False),
+         ('nvenc-default-mux', False, False), ('nvenc-default-mux', True, False),
+         ('x264-bframes-absolute', False, False), ('x264-bframes-default-mux', False, False),
+         ('remux-absolute', False, False), ('remux-copyts', False, False),
+         ('remux-copyts', True, False), ('remux-copyts-zero', False, False)]
 results = []
 try:
     for variant, seek, zero in cases:
@@ -144,7 +129,9 @@ try:
         data = json.loads(result_file.read_text()) if result_file.exists() else {'finished': False, 'rows': []}
         (dist / (label+'.json')).write_text(json.dumps(data, indent=2))
         samples = [r for r in data['rows'] if r['event'] == 'sample']
-        result = dict(case=label, finished=data['finished'], exitCode=code, samples=len(samples),
+        console = (dist / (label+'.log')).read_text(errors='replace')
+        result = dict(case=label, finished=data['finished'], exitCode=code,
+                      matchingAssertion='input_normal_time >= VLC_TICK_0' in console, samples=len(samples),
                       first=samples[0] if samples else None, last=samples[-1] if samples else None,
                       seeks=[r for r in data['rows'] if r['event']=='seek'])
         results.append(result)
