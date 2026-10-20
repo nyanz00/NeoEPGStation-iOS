@@ -11,8 +11,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 
-def run(args, **kwargs):
-    return subprocess.run(args, check=True, timeout=120, **kwargs)
+def run(args, timeout=120, **kwargs):
+    return subprocess.run(args, check=True, timeout=timeout, **kwargs)
 
 
 dist = Path('dist')
@@ -20,7 +20,8 @@ dist.mkdir(exist_ok=True)
 device = json.loads((dist / 'simulator-device.json').read_text())['udid']
 run(['xcrun', 'simctl', 'bootstatus', device, '-b'])
 if not shutil.which('ffmpeg'):
-    run(['brew', 'install', 'ffmpeg'])
+    run(['brew', 'install', 'ffmpeg'], timeout=600,
+        env=dict(os.environ, HOMEBREW_NO_AUTO_UPDATE='1', HOMEBREW_NO_INSTALL_CLEANUP='1'))
 app = Path('build/HLSClockProbe.app')
 app.mkdir(parents=True, exist_ok=True)
 frameworks = app / 'Frameworks'

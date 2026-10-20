@@ -28,7 +28,8 @@ extern int64_t libvlc_media_player_get_time(void *);
 @property(nonatomic, strong) UIWindow *window;
 @property(nonatomic, strong) VLCMediaPlayer *player;
 @property(nonatomic, strong) NSMutableArray *rows;
-@property(nonatomic) double began, readyAt;
+@property(nonatomic) double began;
+@property(nonatomic) double readyAt;
 @property(nonatomic) BOOL issued;
 @end
 @implementation ClockProbe
