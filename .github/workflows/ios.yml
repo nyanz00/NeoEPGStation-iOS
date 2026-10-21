@@ -174,7 +174,7 @@ jobs:
         run: python3 -u scripts/encoded-seek-smoke.py
       - name: Check VOD HLS streaming, cache, quality and recovery
         id: streaming-checks
-        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && (inputs.check_scope == 'streaming' || inputs.check_scope == 'encoded-seek') }}
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'streaming' }}
         run: |
           python3 -u scripts/streaming-smoke.py
           python3 -u scripts/ts-resume-smoke.py
@@ -242,7 +242,7 @@ jobs:
         if: always()
         env:
           CI_STEPS: ${{ toJSON(steps) }}
-          CI_SCOPE: ${{ inputs.check_scope == 'encoded-seek' && 'encoded PLAY cached seeks; HLS/TS positioning regression' || inputs.check_scope == 'streaming' && 'HLS streaming; segment cache; quality; recovery' || inputs.check_scope == 'recovery-ui' && 'tunnel recovery; reflow; zoom; comment selection' || inputs.check_scope == 'ts-comments' && 'TS resume/comments + zoom/haptic/font' || inputs.check_scope == 'zoom-font' && 'build; zoom/haptic/font only' || 'build; iPhone playback/UI; network' }}; codec=${{ inputs.network_codec || 'h264' }}; iPad=${{ inputs.check_ipad && 'yes' || 'no' }}
+          CI_SCOPE: ${{ inputs.check_scope == 'encoded-seek' && 'encoded PLAY cached seeks; resume; buffering boundaries' || inputs.check_scope == 'streaming' && 'HLS streaming; segment cache; quality; recovery' || inputs.check_scope == 'recovery-ui' && 'tunnel recovery; reflow; zoom; comment selection' || inputs.check_scope == 'ts-comments' && 'TS resume/comments + zoom/haptic/font' || inputs.check_scope == 'zoom-font' && 'build; zoom/haptic/font only' || 'build; iPhone playback/UI; network' }}; codec=${{ inputs.network_codec || 'h264' }}; iPad=${{ inputs.check_ipad && 'yes' || 'no' }}
         run: python3 scripts/ci-support.py summary
 
   ipad-ui:
@@ -335,5 +335,5 @@ jobs:
         if: always()
         env:
           CI_STEPS: ${{ toJSON(steps) }}
-          CI_SCOPE: ${{ inputs.check_scope == 'encoded-seek' && 'encoded PLAY cached seeks; HLS/TS positioning regression' || inputs.check_scope == 'streaming' && 'HLS streaming; segment cache; quality; recovery' || inputs.check_scope == 'recovery-ui' && 'tunnel recovery; reflow; zoom; comment selection' || inputs.check_scope == 'ts-comments' && 'TS resume/comments + zoom/haptic/font' || inputs.check_scope == 'zoom-font' && 'zoom/haptic/font only' || inputs.network_probe && 'network' || inputs.recheck_playback && 'playback + iPhone/iPad' || inputs.recheck_iphone && 'iPhone UI' || 'iPad UI' }}; stage=${{ inputs.ui_stage || 'all' }}; codec=${{ inputs.network_codec || 'h264' }}; extra-iPad=${{ inputs.check_ipad && 'yes' || 'no' }}
+          CI_SCOPE: ${{ inputs.check_scope == 'encoded-seek' && 'encoded PLAY cached seeks; resume; buffering boundaries' || inputs.check_scope == 'streaming' && 'HLS streaming; segment cache; quality; recovery' || inputs.check_scope == 'recovery-ui' && 'tunnel recovery; reflow; zoom; comment selection' || inputs.check_scope == 'ts-comments' && 'TS resume/comments + zoom/haptic/font' || inputs.check_scope == 'zoom-font' && 'zoom/haptic/font only' || inputs.network_probe && 'network' || inputs.recheck_playback && 'playback + iPhone/iPad' || inputs.recheck_iphone && 'iPhone UI' || 'iPad UI' }}; stage=${{ inputs.ui_stage || 'all' }}; codec=${{ inputs.network_codec || 'h264' }}; extra-iPad=${{ inputs.check_ipad && 'yes' || 'no' }}
         run: python3 scripts/ci-support.py summary

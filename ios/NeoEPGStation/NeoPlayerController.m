@@ -525,6 +525,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 - (BOOL)isStreaming { return [self.recordingContext[@"streaming"] boolValue]; }
 - (BOOL)wholeFileClock { return [self isStreaming] || [self.recordingContext[@"videoFileType"] isEqual:@"ts"]; }
+- (BOOL)positionNeedsPlaying { return [self isStreaming] || ![self wholeFileClock]; }
 - (void)prepareStreamingAt:(double)time completion:(void (^)(NSURL *, NSString *))completion {
   __weak typeof(self) weakSelf = self;
   BOOL fresh = self.streamingSession == nil;
@@ -1147,11 +1148,11 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if ([self isStreaming]) {
     [media addOption:[NSString stringWithFormat:@":adaptive-maxbuffer=%ld", (long)self.networkCaching]];
   }
-  // Initialise at the requested position, paused. Never play the beginning
-  // to prepare a later seek, including when the user wants playback resumed.
+  // Open file inputs paused. MP4/HLS need hidden, muted decoding to establish
+  // the target frame/clock; this preparation must not change playback intent.
   BOOL pausedStart = ![self isStreaming] && (self.reloading || self.tsPositionPending);
   if (pausedStart) { [media addOption:@":start-paused"]; }
-  if ([self isStreaming]) {
+  if ([self isStreaming] || (self.tsPositionPending && [self positionNeedsPlaying])) {
     if (!self.restoreMuted) { self.restorePreviousMute = self.player.audio.isMuted; self.restoreMuted = YES; }
     self.player.audio.muted = YES;
   }
@@ -1205,7 +1206,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     self.statusLabel.text = @"再生位置を復元できませんでした。再読み込みで再試行してください。";
     [self.chrome updateDiagnostics]; [self updateLoadingState]; [self showControls]; return;
   }
-  if ([self isStreaming]) {
+  if ([self positionNeedsPlaying]) {
     // set_time is synchronous at the wrapper boundary, whereas pause/play are
     // queued. Wait for an actual pause acknowledgement before priming a paused
     // seek, then for Playing before issuing it. A cached seek followed at once
@@ -1226,7 +1227,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if (!self.tsPositionIssued) {
     int64_t length = [self mediaLength];
     BOOL stateReady = self.player.state == VLCMediaPlayerStatePaused ||
-      (([self isStreaming] || self.seeking) && self.player.state == VLCMediaPlayerStatePlaying);
+      (([self positionNeedsPlaying] || self.seeking) && self.player.state == VLCMediaPlayerStatePlaying);
     if (!self.inputBufferReady || self.buffering || !stateReady || !self.player.isSeekable || length <= 0) { return; }
     BOOL bytes = ![self isStreaming] && !self.hasInputLength && self.player.media.length.value.longLongValue <= 0;
     if (bytes && !self.seeking) {
@@ -1288,7 +1289,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if (!self.awaitingSeekVideo) { [NeoVLCFrameTap bindFrameArrival:self.movieView handler:nil]; }
   [self armStreamingClockAt:self.tsPositionTarget];
   self.lastObservedTime = [self guardStreamingTime:native];
-  if ([self isStreaming]) {
+  if ([self positionNeedsPlaying]) {
     if (self.reloading || !self.wantsPlayback) { [self.player pause]; }
     else if (!self.videoReloadRecovery) { [self releaseRestoreMute]; }
   }

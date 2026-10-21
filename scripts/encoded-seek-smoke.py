@@ -20,8 +20,6 @@ run('xcrun', 'simctl', 'bootstatus', device, '-b', timeout=600)
 run('xcrun', 'simctl', 'install', device, 'build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app', timeout=300)
 documents = Path(run('xcrun', 'simctl', 'get_app_container', device, bundle, 'data')) / 'Documents'
 documents.mkdir(exist_ok=True)
-if not shutil.which('ffmpeg'):
-    subprocess.check_call(['brew', 'install', 'ffmpeg'], timeout=600)
 
 video = b''
 
@@ -59,18 +57,10 @@ server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 try:
     for container in ('mkv', 'mp4'):
-        fixture = documents / f'encoded-seek-fixture.{container}'
         # Deliberately sparse keyframes (24s), not an all-intra/short-GOP clip.
         # Exact targets between them must be retained; fast approximate seeking
         # could look faster while landing on a different picture.
-        subprocess.check_call(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
-            '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24',
-            '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '72',
-            '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-b:v', '200k',
-            '-g', '576', '-keyint_min', '576', '-sc_threshold', '0', '-bf', '3',
-            '-c:a', 'aac', '-b:a', '64k',
-            *(['-movflags', '+faststart'] if container == 'mp4' else []), str(fixture)], timeout=180)
-        video = fixture.read_bytes()
+        video = Path(f'tests/fixtures/encoded-seek.{container}').read_bytes()
         subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True)
         names = ['encoded-seek-smoke.json', 'encoded-seek-diagnostics.json']
         for name in names:
