@@ -281,8 +281,10 @@ jobs:
         id: reused-checks
         run: |
           if [ "$CHECK_SCOPE" = "encoded-seek" ]; then
+            python3 -u scripts/simulator-smoke.py --prepare
             python3 -u scripts/encoded-seek-smoke.py
           elif [ "$CHECK_SCOPE" = "streaming" ]; then
+            python3 -u scripts/simulator-smoke.py --prepare
             python3 -u scripts/streaming-smoke.py
             python3 -u scripts/ts-resume-smoke.py
             python3 -u scripts/ts-resume-smoke.py mpeg2
