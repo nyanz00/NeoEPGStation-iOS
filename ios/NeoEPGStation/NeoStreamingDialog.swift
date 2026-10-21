@@ -9,6 +9,7 @@ final class NeoStreamingDialog: UIViewController {
   private let subtitleStatus = NeoStyle.label(size: 12, muted: true)
   private let loader: NeoCommentLoader
   private var watchButton: UIButton?
+  private var fieldLabels: [ObjectIdentifier: UILabel] = [:]
   private var mode: Int, selectedSubtitle = -1, tracks: [NativeCommentTrack] = [], closed = false
   init(file: NeoVideoFile, qualities: [String], source: URL, start: @escaping (Int, Int) -> Void) {
     self.file = file; self.qualities = qualities; self.start = start
@@ -39,7 +40,7 @@ final class NeoStreamingDialog: UIViewController {
     fields.addArrangedSubview(row); updateQuality()
     if file.type == "encoded" {
       fields.addArrangedSubview(field("字幕", button: subtitle)); fields.addArrangedSubview(subtitleStatus)
-      subtitle.isEnabled = false; subtitle.setTitle("確認中…", for: .normal); loadSubtitles()
+      subtitle.isEnabled = false; showValue("確認中…", on: subtitle); loadSubtitles()
     }
     let content = padded(fields, top: 16, bottom: 16, horizontal: 24); content.backgroundColor = UIColor.white.withAlphaComponent(0.08)
     stack.addArrangedSubview(content); divider()
@@ -67,6 +68,14 @@ final class NeoStreamingDialog: UIViewController {
     button.contentHorizontalAlignment = .left; button.tintColor = .white; button.titleLabel?.font = .systemFont(ofSize: 18)
     button.titleLabel?.lineBreakMode = .byTruncatingTail; button.showsMenuAsPrimaryAction = true
     button.heightAnchor.constraint(equalToConstant: 38).isActive = true
+    // Keep the field value independent of UIButton's menu/configuration state,
+    // including the initial disabled -> ready transition during track lookup.
+    let value = NeoStyle.label(button.title(for: .normal) ?? "", size: 18)
+    value.isUserInteractionEnabled = false; value.translatesAutoresizingMaskIntoConstraints = false
+    fieldLabels[ObjectIdentifier(button)] = value; button.addSubview(value)
+    button.setTitleColor(.clear, for: .normal); button.setTitleColor(.clear, for: .disabled)
+    NSLayoutConstraint.activate([value.leadingAnchor.constraint(equalTo: button.leadingAnchor),
+      value.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -28), value.centerYAnchor.constraint(equalTo: button.centerYAnchor)])
     let arrow = NeoStyle.label("▾", size: 18); arrow.textAlignment = .right; arrow.isUserInteractionEnabled = false
     arrow.translatesAutoresizingMaskIntoConstraints = false; button.addSubview(arrow)
     NSLayoutConstraint.activate([arrow.trailingAnchor.constraint(equalTo: button.trailingAnchor), arrow.centerYAnchor.constraint(equalTo: button.centerYAnchor),
@@ -77,10 +86,15 @@ final class NeoStreamingDialog: UIViewController {
     return field
   }
   private func updateQuality() {
-    quality.setTitle(qualities[mode], for: .normal)
+    showValue(qualities[mode], on: quality)
     quality.menu = UIMenu(children: qualities.enumerated().filter { !$0.element.isEmpty }.map { index, name in
       UIAction(title: name, state: index == mode ? .on : .off) { [weak self] _ in self?.mode = index; self?.updateQuality() }
     })
+  }
+  private func showValue(_ text: String, on button: UIButton) {
+    fieldLabels[ObjectIdentifier(button)]?.text = text
+    button.accessibilityValue = text
+    button.setTitle(text, for: .normal)
   }
   private func loadSubtitles() {
     subtitleStatus.isHidden = true
@@ -97,7 +111,7 @@ final class NeoStreamingDialog: UIViewController {
     }
   }
   private func updateSubtitle() {
-    subtitle.setTitle(tracks.first { $0.subtitleIndex == selectedSubtitle }?.displayName ?? "字幕なし", for: .normal)
+    showValue(tracks.first { $0.subtitleIndex == selectedSubtitle }?.displayName ?? "字幕なし", on: subtitle)
     let items = [(-1, "字幕なし")]+tracks.map { ($0.subtitleIndex, $0.displayName) }
     subtitle.menu = UIMenu(children: items.map { index, name in
       UIAction(title: name, state: index == selectedSubtitle ? .on : .off) { [weak self] _ in self?.selectedSubtitle = index; self?.updateSubtitle() }
@@ -124,14 +138,16 @@ final class NeoStreamingDialog: UIViewController {
     let file = NeoVideoFile(id: 1, name: "Synthetic recording", type: "encoded", size: 1, filename: nil)
     let dialog = NeoStreamingDialog(file: file, qualities: ["1080p", "720p"], source: source) { _, _ in }
     dialog.loadViewIfNeeded(); dialog.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844); dialog.view.layoutIfNeeded()
-    dialog.subtitle.setTitle("字幕なし", for: .normal)
-    dialog.subtitle.isEnabled = true; dialog.watchButton?.isEnabled = true; dialog.subtitle.layoutIfNeeded()
+    dialog.updateSubtitle()
+    dialog.subtitle.isEnabled = true; dialog.watchButton?.isEnabled = true; dialog.view.setNeedsLayout(); dialog.view.layoutIfNeeded()
     let screenshot = UIGraphicsImageRenderer(size: dialog.view.bounds.size).image { context in dialog.view.layer.render(in: context.cgContext) }
     try? screenshot.pngData()?.write(to: NeoPiPSmoke.directory.appendingPathComponent("streaming-dialog.png"))
     let checks = ["streamingDialogCentered": abs(dialog.card.center.y-dialog.view.bounds.midY) < 1,
       "streamingDialogFitsContent": dialog.card.bounds.height > 200 && dialog.card.bounds.height < 400,
       "streamingDialogNotSystemSheet": dialog.modalPresentationStyle == .overFullScreen,
-      "streamingDialogSubtitleField": dialog.subtitle.superview != nil && dialog.quality.superview != dialog.subtitle.superview]
+      "streamingDialogSubtitleField": dialog.subtitle.superview != nil && dialog.quality.superview != dialog.subtitle.superview,
+      "streamingDialogSubtitleValueVisible": dialog.fieldLabels[ObjectIdentifier(dialog.subtitle)]?.text == "字幕なし" &&
+        (dialog.fieldLabels[ObjectIdentifier(dialog.subtitle)]?.bounds.width ?? 0) > 0]
     dialog.closed = true; dialog.loader.close(); return checks
   }
 #endif
