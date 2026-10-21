@@ -282,9 +282,6 @@ jobs:
         run: |
           if [ "$CHECK_SCOPE" = "encoded-seek" ]; then
             python3 -u scripts/encoded-seek-smoke.py
-            python3 -u scripts/streaming-smoke.py
-            python3 -u scripts/ts-resume-smoke.py
-            python3 -u scripts/ts-resume-smoke.py mpeg2
           elif [ "$CHECK_SCOPE" = "streaming" ]; then
             python3 -u scripts/streaming-smoke.py
             python3 -u scripts/ts-resume-smoke.py

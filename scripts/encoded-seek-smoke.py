@@ -17,7 +17,9 @@ dist = Path('dist')
 device = json.loads((dist / 'simulator-device.json').read_text())['udid']
 bundle = 'io.github.nyanz00.NeoEPGStation'
 run('xcrun', 'simctl', 'bootstatus', device, '-b', timeout=600)
+run('xcrun', 'simctl', 'install', device, 'build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app', timeout=300)
 documents = Path(run('xcrun', 'simctl', 'get_app_container', device, bundle, 'data')) / 'Documents'
+documents.mkdir(exist_ok=True)
 if not shutil.which('ffmpeg'):
     subprocess.check_call(['brew', 'install', 'ffmpeg'], timeout=600)
 
@@ -64,7 +66,7 @@ try:
         subprocess.check_call(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
             '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=24',
             '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000', '-t', '72',
-            '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-b:v', '900k',
+            '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-b:v', '200k',
             '-g', '576', '-keyint_min', '576', '-sc_threshold', '0', '-bf', '3',
             '-c:a', 'aac', '-b:a', '64k',
             *(['-movflags', '+faststart'] if container == 'mp4' else []), str(fixture)], timeout=180)
