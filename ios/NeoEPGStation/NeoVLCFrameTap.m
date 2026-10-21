@@ -86,6 +86,8 @@ static void NeoDrawARIBSubtitle(id view, SEL selector, id picture) {
 
 @interface NeoTappedVideoLayer : AVSampleBufferDisplayLayer
 @property (atomic, weak) id<NeoVideoFrameSink> frameSink;
+@property (atomic, copy) dispatch_block_t frameArrival;
+@property (atomic) BOOL arrivalQueued;
 @property (atomic) BOOL appBackground;
 @property (atomic) double monitorUntil;
 @property (atomic) double lastFingerprintHost;
@@ -191,6 +193,14 @@ static void NeoDrawARIBSubtitle(id view, SEL selector, id picture) {
   // Background audio also keeps VLC decoding without feeding an inactive
   // inline AV renderer. PiP, if active, receives the same decoded stream.
   if (!self.appBackground) { [super enqueueSampleBuffer:sampleBuffer]; }
+  dispatch_block_t arrival = self.frameArrival;
+  if (arrival && !self.arrivalQueued) {
+    self.arrivalQueued = YES;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      self.arrivalQueued = NO;
+      if (self.frameArrival == arrival) { arrival(); }
+    });
+  }
 }
 - (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
 @end
@@ -198,6 +208,12 @@ static void NeoDrawARIBSubtitle(id view, SEL selector, id picture) {
 static Class NeoVideoLayerClass(id object, SEL selector) { return NeoTappedVideoLayer.class; }
 
 @implementation NeoVLCFrameTap
++ (void)bindFrameArrival:(UIView *)view handler:(dispatch_block_t)handler {
+  if ([view.layer isKindOfClass:NeoTappedVideoLayer.class]) {
+    ((NeoTappedVideoLayer *)view.layer).frameArrival = handler;
+  }
+  for (UIView *child in view.subviews) { [self bindFrameArrival:child handler:handler]; }
+}
 + (void)bindARIBView:(UIView *)view state:(NSInteger (^)(void))state {
   static dispatch_once_t once;
   dispatch_once(&once, ^{

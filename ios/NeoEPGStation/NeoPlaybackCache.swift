@@ -35,6 +35,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   private var mediaTime = 0.0, highWater = 0.0, lastUse = ProcessInfo.processInfo.systemUptime
   private var seconds = NeoPlaybackCache.savedSeconds
   private var listener: NWListener?, session: URLSession!
+  private var byteStream: NeoHTTPByteStream!
   private var connections: [ObjectIdentifier: NWConnection] = [:]
   private var requests: [ObjectIdentifier: URLSessionDataTask] = [:]
   private var retries: [ObjectIdentifier: DispatchWorkItem] = [:]
@@ -115,6 +116,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     Self.cleanAbandoned()
     Self.activeLock.lock(); Self.activeDirectories.insert(directory); Self.activeLock.unlock()
     session = makeSession()
+    byteStream = NeoHTTPByteStream(origin: source, configuration: session.configuration, queue: queue)
   }
   private func makeSession() -> URLSession {
     let config = URLSessionConfiguration.ephemeral; config.urlCache = nil
@@ -128,6 +130,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
   }
   private func renewUpstreamSession() {
     let old = session; session = makeSession(); old?.finishTasksAndInvalidate()
+    byteStream?.renew()
   }
   // Recreate only the upstream HTTP pool; the local listener and VLC input stay.
   @objc func resumeFetching() {
@@ -337,7 +340,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
       metadataFragments.removeAll(); matroskaIndex = nil
       finishStart(nil, "再生を終了しました。")
       stopTransport()
-      session.invalidateAndCancel(); clearBlocks()
+      session.invalidateAndCancel(); byteStream.close(); clearBlocks()
       Self.activeLock.lock(); Self.activeDirectories.remove(directory); Self.activeLock.unlock()
     }
   }
@@ -535,7 +538,34 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     }
     NeoPlaybackDiagnostics.record("cache.miss", fields: ["delivery": deliveries[ObjectIdentifier(connection)]?.id ?? 0,
       "offset": aligned, "bytes": count, "requestedOffset": offset])
-    fetch(offset: aligned, count: count, connection: connection) { [weak self] result in
+    var delivered = 0
+    let relay = NeoByteRelay(skip: Int(offset-aligned), count: Int(min(Int64(count)-(offset-aligned), end-offset+1)),
+      waiting: { [weak self] in self?.markRead(connection, pending: $0) }, send: { [weak self] data, done in
+      guard let self, !self.closed, self.connections[ObjectIdentifier(connection)] != nil else { done(false); return }
+      self.markRead(connection, pending: false)
+      connection.send(content: data, completion: .contentProcessed { [weak self] error in
+        guard let self else { done(false); return }
+        if error == nil {
+          let key = ObjectIdentifier(connection)
+          if var entry = self.deliveries[key] {
+            if !entry.firstSent {
+              entry.firstSent = true
+              NeoPlaybackDiagnostics.record("range.firstProcessed", fields: ["delivery": entry.id, "originSeek": entry.seek,
+                "offset": offset, "bytes": data.count, "durationMs": (ProcessInfo.processInfo.systemUptime-entry.began)*1000])
+            }
+            entry.sentBytes += Int64(data.count); self.deliveries[key] = entry
+          }
+          delivered += data.count
+          self.flowLock.lock(); self.availableDelivery += 1; self.flowLock.unlock()
+        }
+        done(error == nil)
+      })
+    }, completion: { [weak self] success in
+      guard let self else { return }
+      if success { self.pump(connection, offset: offset+Int64(delivered), end: end) }
+      else { self.finishDelivery(connection, reason: 4); connection.cancel() }
+    })
+    fetch(offset: aligned, count: count, connection: connection, progress: { relay.append($0) }) { [weak self] result in
       guard let self, !self.closed, case .ready = connection.state else { return }
       switch result {
       case .success(let data):
@@ -562,16 +592,17 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
             self.report("巻き戻し用キャッシュを保存できません。空き容量を確認してください。", kind: "storage")
           }
         }
-        deliver(data)
+        relay.finish(true)
       case .failure:
         self.report("動画データを取得できません。再接続しています…", kind: "fetch")
-        self.finishDelivery(connection, reason: 4); connection.cancel()
+        relay.finish(false)
         DispatchQueue.main.async { [weak self] in self?.onTransportFailure?() }
       }
     }
   }
   private func fetch(offset: Int64, count: Int, connection: NWConnection? = nil,
-                     attempt: Int = 0, transferBegan: Double? = nil, completion: @escaping (Result<Data, Error>) -> Void) {
+                     attempt: Int = 0, transferBegan: Double? = nil, progress: ((Data) -> Void)? = nil,
+                     completion: @escaping (Result<Data, Error>) -> Void) {
     guard !closed, !suspended else { return }
     if let connection, connections[ObjectIdentifier(connection)] == nil { return }
     markRead(connection, pending: true)
@@ -585,7 +616,8 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
     request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
     if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
     if let validator, let validatorHeader { request.setValue(validator, forHTTPHeaderField: validatorHeader) }
-    let task = session.dataTask(with: request) { [weak self] data, response, error in
+    var streamedBytes = 0
+    let completed: (Data?, URLResponse?, Error?) -> Void = { [weak self] data, response, error in
       guard let self else { return }
       self.queue.async {
         guard !self.closed, !self.suspended, self.fetchEpoch == epoch else { return }
@@ -622,7 +654,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
         let httpTransient = [408,429,500,502,503,504].contains(http?.statusCode ?? 0)
         // Never retry a changed file, an invalid Range or authentication failure
         // into the existing stream. Already delivered bytes must remain valid.
-        if attempt < 2 && ProcessInfo.processInfo.systemUptime-original < 24 && (networkTransient || httpTransient) {
+        if streamedBytes == 0 && attempt < 2 && ProcessInfo.processInfo.systemUptime-original < 24 && (networkTransient || httpTransient) {
           self.renewUpstreamSession()
           if connection != nil { self.report("動画データの取得を再試行しています…", kind: "fetch") }
           NeoPlaybackDiagnostics.record("range.retry", fields: ["offset": offset, "bytes": count,
@@ -630,7 +662,7 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
           let action = { [weak self] in
             guard let self, !self.closed, !self.suspended, self.fetchEpoch == epoch else { return }
             self.fetch(offset: offset, count: count, connection: connection, attempt: attempt+1,
-              transferBegan: original, completion: completion)
+              transferBegan: original, progress: progress, completion: completion)
           }
           if let connection {
             let key = ObjectIdentifier(connection)
@@ -649,6 +681,21 @@ final class NeoPlaybackCache: NSObject, URLSessionTaskDelegate {
         completion(.failure(error ?? URLError(.badServerResponse)))
       }
     }
+    let task: URLSessionDataTask
+    if let progress {
+      task = byteStream.read(request, limit: count, validate: { [weak self] http in
+        guard let self, !self.closed, !self.suspended, self.fetchEpoch == epoch else { return false }
+        let range = http.value(forHTTPHeaderField: "Content-Range")
+        let total = range.flatMap { Int64($0.split(separator: "/").last ?? "") } ?? 0
+        let expected = min(count, Int(max(0, total-offset)))
+        return http.statusCode == 206 && expected > 0 && (self.length == 0 || self.length == total) &&
+          range == "bytes \(offset)-\(offset+Int64(expected)-1)/\(total)"
+      }, received: { [weak self] data in
+        guard let self, !self.closed, !self.suspended, self.fetchEpoch == epoch,
+          connection.map({ self.connections[ObjectIdentifier($0)] != nil }) ?? true else { return }
+        streamedBytes += data.count; progress(data)
+      }, completion: { completed($0, $1, $2) })
+    } else { task = session.dataTask(with: request, completionHandler: completed) }
     if let connection { requests[ObjectIdentifier(connection)] = task }; task.resume()
   }
   func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,

@@ -465,7 +465,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     historyReturnSnapshot = origin; historyReturnRevision = fromHistory ? api?.identityRevision : nil
     list.locate(id, page: position.page, userID: position.userId); list.view.setNeedsLayout()
   }
-  func play(_ file: NeoVideoFile, recording: NeoRecording, fromBeginning: Bool = false, streaming: Int? = nil, onPrepared: (() -> Void)? = nil) {
+  func play(_ file: NeoVideoFile, recording: NeoRecording, fromBeginning: Bool = false, streaming: Int? = nil, streamSubtitle: Int? = nil, onPrepared: (() -> Void)? = nil) {
     guard player == nil, !preparingPlay, let api else { onPrepared?(); return }
     guard api.accountReady else {
       (active?.topViewController as? NeoPage)?.alert("アクティブユーザーの確認が必要です。設定のアカウントで確認してください。")
@@ -482,16 +482,16 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         catch {
           guard self.api === api, api.identityRevision == revision, active?.topViewController === origin else { return }
           let alert = UIAlertController(title: "再生位置を取得できません", message: error.localizedDescription, preferredStyle: .alert)
-          alert.addAction(UIAlertAction(title: "再試行", style: .default) { [weak self] _ in self?.play(file, recording: recording, streaming: streaming) })
-          alert.addAction(UIAlertAction(title: "最初から再生", style: .default) { [weak self] _ in self?.play(file, recording: recording, fromBeginning: true, streaming: streaming) })
+          alert.addAction(UIAlertAction(title: "再試行", style: .default) { [weak self] _ in self?.play(file, recording: recording, streaming: streaming, streamSubtitle: streamSubtitle) })
+          alert.addAction(UIAlertAction(title: "最初から再生", style: .default) { [weak self] _ in self?.play(file, recording: recording, fromBeginning: true, streaming: streaming, streamSubtitle: streamSubtitle) })
           alert.addAction(UIAlertAction(title: "キャンセル", style: .cancel)); origin?.present(alert, animated: true); return
         }
       }
       guard self.api === api, api.accountReady, api.identityRevision == revision, active?.topViewController === origin, player == nil else { return }
-      presentPlayer(file, recording: recording, api: api, user: user, start: start, streaming: streaming)
+      presentPlayer(file, recording: recording, api: api, user: user, start: start, streaming: streaming, streamSubtitle: streamSubtitle)
     }
   }
-  private func presentPlayer(_ file: NeoVideoFile, recording: NeoRecording, api: NeoAPI, user: String, start: Double, streaming: Int?) {
+  private func presentPlayer(_ file: NeoVideoFile, recording: NeoRecording, api: NeoAPI, user: String, start: Double, streaming: Int?, streamSubtitle: Int?) {
     let controller = NeoPlayerController(url: api.url("/videos/\(file.id)"), title: recording.name, username: "", password: "", networkCaching: 5000)
     controller.initialPosition = start
     controller.recordingContext = ["baseURL": api.base.absoluteString, "id": recording.id, "user": user,
@@ -504,6 +504,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       guard qualities.indices.contains(mode), !qualities[mode].isEmpty else { return }
       var context = controller.recordingContext ?? [:]
       context["streaming"] = true; context["streamMode"] = mode; context["streamQualities"] = qualities
+      if file.type == "encoded", let streamSubtitle { context["streamSubtitleIndex"] = streamSubtitle }
       controller.recordingContext = context
     }
     controller.modalPresentationStyle = .fullScreen; player = controller

@@ -111,6 +111,8 @@ jobs:
           build/native-tests/ui
           swiftc ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoHLSManifest.swift tests/streaming/main.swift -o build/native-tests/hls
           build/native-tests/hls
+          swiftc ios/NeoEPGStation/NeoHTTPByteStream.swift tests/progressive/main.swift -o build/native-tests/progressive
+          build/native-tests/progressive
       - name: Native UI type checks
         id: type-checks
         run: |

@@ -317,7 +317,7 @@ final class NeoDanmakuRenderer {
   // a permanent density limit. The initial 1-second lookahead hides normal misses.
   func encode(timeline: CommentTimeline, time: Double, viewport: CGSize, videoRect: CGRect,
               sizeMultiplier: Double, opacity: Float, pixelScale: Double = 1, usesSourceOpacity: Bool = false,
-              schedulingTime: Double? = nil, encoder: MTLRenderCommandEncoder) -> Int {
+              schedulingTime: Double? = nil, sourceSize: CGSize? = nil, encoder: MTLRenderCommandEncoder) -> Int {
     let visible = movingComments(timeline, media: schedulingTime ?? time, motion: time,
       size: sizeMultiplier, scale: pixelScale*sizeMultiplier, opacity: usesSourceOpacity ? nil : opacity)
     guard viewport.width > 0, viewport.height > 0, videoRect.width > 0, videoRect.height > 0 else { return 0 }
@@ -333,7 +333,7 @@ final class NeoDanmakuRenderer {
     for (comment, image, top) in snapshot(visible, pixelScale: pixelScale*sizeMultiplier, opacity: usesSourceOpacity ? nil : opacity, size: sizeMultiplier) {
       guard let texture = image.texture else { continue }
       guard let rect = placement(comment, imageSize: image.size, timeline: timeline, time: time,
-        videoRect: videoRect, sizeMultiplier: sizeMultiplier, laneTop: top) else { continue }
+        videoRect: videoRect, sizeMultiplier: sizeMultiplier, laneTop: top, sourceSize: sourceSize) else { continue }
       if !rect.intersects(clip) { continue }
       let x = Double(rect.minX), y = Double(rect.minY), width = Double(rect.width), height = Double(rect.height)
       func point(_ x: Double, _ y: Double) -> SIMD2<Float> {
@@ -356,14 +356,18 @@ final class NeoDanmakuRenderer {
   }
 
   private func placement(_ comment: NativeComment, imageSize: CGSize, timeline: CommentTimeline,
-                         time: Double, videoRect: CGRect, sizeMultiplier: Double, laneTop: Double?) -> CGRect? {
+                         time: Double, videoRect: CGRect, sizeMultiplier: Double, laneTop: Double?, sourceSize: CGSize? = nil) -> CGRect? {
     let scaleX = Double(videoRect.width) / timeline.width, scaleY = Double(videoRect.height) / timeline.height
     let width = Double(imageSize.width) * comment.style.scaleX * sizeMultiplier * scaleX
     let height = Double(imageSize.height) * comment.style.scaleY * sizeMultiplier * scaleY
     let column = (comment.style.alignment - 1) % 3, row = (comment.style.alignment - 1) / 3
     let fallback = CommentPoint(x: column == 0 ? comment.style.marginL : column == 1 ? timeline.width / 2 : timeline.width - comment.style.marginR,
       y: row == 0 ? timeline.height - comment.style.marginV : row == 1 ? timeline.height / 2 : comment.style.marginV)
-    let anchor = comment.motion?.point(elapsed: time - comment.start) ?? comment.position ?? fallback
+    var anchor = comment.motion?.point(elapsed: time - comment.start) ?? comment.position ?? fallback
+    if let sourceSize, comment.usesDanmakuTiming, comment.motion == nil, comment.position != nil {
+      anchor = CommentPoint(x: anchor.x*timeline.width/max(1, Double(sourceSize.width)),
+        y: anchor.y*timeline.height/max(1, Double(sourceSize.height)))
+    }
     let x = Double(videoRect.minX) + (comment.scrollingX(viewportWidth: Double(videoRect.width),
       textWidth: width, elapsed: time - comment.start) ?? (anchor.x * scaleX - width * Double(column) / 2))
     var y = Double(videoRect.minY) + anchor.y * scaleY - height * Double(2 - row) / 2

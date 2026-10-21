@@ -11,6 +11,9 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
   private let route = "/"+UUID().uuidString
   private let sessionID = UUID().uuidString
   private var session: URLSession!, listener: NWListener?, heartbeat: DispatchSourceTimer?
+  private var byteStream: NeoHTTPByteStream!
+  private var partial: [Int: Data] = [:]
+  private var readers: [Int: [ObjectIdentifier: NeoByteRelay]] = [:]
   private var manifest: NeoHLSManifest?, playlistURL: URL?, localURL: URL?
   private var connections: [ObjectIdentifier: NWConnection] = [:]
   private var tasks: [Int: URLSessionDataTask] = [:]
@@ -44,6 +47,7 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
     config.httpCookieStorage = .shared; config.urlCredentialStorage = .shared
     config.timeoutIntervalForRequest = 15; config.timeoutIntervalForResource = 40
     session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+    byteStream = NeoHTTPByteStream(origin: source, configuration: config, queue: queue)
   }
   private var api: URL { source.deletingLastPathComponent().deletingLastPathComponent() }
   private var sessionURL: URL { api.appendingPathComponent("streams/recorded/vodhls/sessions/"+sessionID) }
@@ -143,6 +147,8 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
       guard !closed else { return }
       position = max(0, time); epoch += 1; refreshingSession = false
       tasks.values.forEach { $0.cancel() }; tasks.removeAll()
+      readers.values.flatMap { $0.values }.forEach { $0.finish(false) }; readers.removeAll(); partial.removeAll()
+      byteStream.renew()
       let previous = waiters.values.flatMap { $0 }; waiters.removeAll(); previous.forEach { $0(nil) }
       if localURL == nil { listener?.cancel(); start(at: time, completion: completion); return }
       loadPlaylist { [weak self] error in
@@ -196,7 +202,17 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
   private func download(_ index: Int, attempt: Int) {
     guard let manifest, !closed else { return }
     let generation = epoch, began = ProcessInfo.processInfo.systemUptime
-    let task = session.dataTask(with: request(manifest.segments[index].url)) { [weak self] data, response, error in
+    let task = byteStream.read(request(manifest.segments[index].url), limit: 128*1024*1024,
+      validate: { [weak self] http in
+        guard let self else { return false }; return !self.closed && generation == self.epoch && http.statusCode == 200
+      }, received: { [weak self] data in
+        guard let self, !self.closed, generation == self.epoch else { return }
+        if self.partial[index] == nil {
+          NeoPlaybackDiagnostics.record("hls.firstBytes", fields: ["index": index, "ms": (ProcessInfo.processInfo.systemUptime-began)*1000])
+        }
+        self.partial[index, default: Data()].append(data)
+        self.readers[index]?.values.forEach { $0.append(data) }
+      }) { [weak self] data, response, error in
       guard let self else { return }; self.queue.async {
         guard !self.closed, generation == self.epoch else { return }
         self.tasks.removeValue(forKey: index)
@@ -207,15 +223,19 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
             self.cacheBytes -= self.cache[index] ?? 0; self.cache[index] = data.count; self.cacheBytes += data.count
           } catch { /* Disk pressure may prevent retention; still deliver this segment. */ }
           NeoPlaybackDiagnostics.record("hls.segment", fields: ["index": index, "bytes": data.count, "ms": (ProcessInfo.processInfo.systemUptime-began)*1000])
+          self.partial.removeValue(forKey: index)
+          self.readers.removeValue(forKey: index)?.values.forEach { $0.finish(true) }
           self.publish(error: false); let callbacks = self.waiters.removeValue(forKey: index) ?? []
           callbacks.forEach { $0(data) }; self.evict(); self.prefetch()
-        } else if attempt < 2 {
+        } else if attempt < 2 && self.partial[index] == nil {
           // Preserve pending local reads during a short outage. A terminal
           // failure returns 503; the player recovery state retains its clock.
           self.queue.asyncAfter(deadline: .now()+Double(attempt+1)) { [weak self] in
             guard let self, !self.closed, self.epoch == generation else { return }; self.download(index, attempt: attempt+1)
           }
         } else {
+          self.partial.removeValue(forKey: index)
+          self.readers.removeValue(forKey: index)?.values.forEach { $0.finish(false) }
           NeoPlaybackDiagnostics.record("hls.segmentFailure", fields: ["index": index, "status": code, "attempt": attempt+1])
           let callbacks = self.waiters.removeValue(forKey: index) ?? []; callbacks.forEach { $0(nil) }; self.publish(error: true)
         }
@@ -249,7 +269,9 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
     connection.stateUpdateHandler = { [weak self, weak connection] state in
       guard let self, let connection else { return }
       switch state {
-      case .cancelled, .failed: self.connections.removeValue(forKey: key); self.mark(connection, waiting: false)
+      case .cancelled, .failed:
+        self.connections.removeValue(forKey: key); self.mark(connection, waiting: false)
+        for index in Array(self.readers.keys) { self.readers[index]?.removeValue(forKey: key) }
       default: break
       }
     }
@@ -273,12 +295,53 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
       guard path.hasPrefix(prefix), path.hasSuffix(".ts"), let index = Int(path.dropFirst(prefix.count).dropLast(3)),
         let manifest = self.manifest, manifest.segments.indices.contains(index) else { self.respond(connection, code: 404); return }
       self.mark(connection, waiting: true)
+      if self.cache[index] != nil, let data = try? Data(contentsOf: self.file(index)) {
+        self.mark(connection, waiting: false)
+        self.flowLock.lock(); self.delivered += Int64(data.count); self.flowLock.unlock()
+        self.respond(connection, data: data, type: "video/mp2t", head: head); return
+      }
+      if head {
+        self.fetch(index) { [weak self, weak connection] data in
+          guard let self, let connection else { return }; self.mark(connection, waiting: false)
+          self.respond(connection, code: data == nil ? 503 : 200, data: data ?? Data(), type: "video/mp2t", head: true)
+        }; return
+      }
+      let key = ObjectIdentifier(connection)
+      var headerSent = false
+      let relay = NeoByteRelay(waiting: { [weak self, weak connection] waiting in
+        if let connection { self?.mark(connection, waiting: waiting) }
+      }, send: { [weak self, weak connection] data, done in
+        guard let self, let connection, !self.closed, self.connections[key] != nil else { done(false); return }
+        var output = Data()
+        let first = !headerSent
+        if !headerSent {
+          headerSent = true
+          output.append(Data("HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nTransfer-Encoding: chunked\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".utf8))
+        }
+        output.append(Data("\(String(data.count, radix: 16))\r\n".utf8)); output.append(data); output.append(Data("\r\n".utf8))
+        connection.send(content: output, completion: .contentProcessed { [weak self] error in
+          if let self, error == nil {
+            if first { NeoPlaybackDiagnostics.record("hls.firstDelivered", fields: ["index": index, "bytes": data.count]) }
+            self.mark(connection, waiting: false)
+            self.flowLock.lock(); self.delivered += Int64(data.count); self.flowLock.unlock()
+          }
+          done(error == nil)
+        })
+      }, completion: { [weak self, weak connection] success in
+        guard let self, let connection else { return }; self.mark(connection, waiting: false)
+        if success {
+          connection.send(content: Data("0\r\n\r\n".utf8), completion: .contentProcessed { _ in connection.cancel() })
+        } else if !headerSent { self.respond(connection, code: 503) }
+        else { connection.cancel() }
+      })
+      self.readers[index, default: [:]][key] = relay
+      if let prefix = self.partial[index] { relay.append(prefix) }
       self.fetch(index) { [weak self, weak connection] data in
         guard let self, let connection else { return }
-        self.mark(connection, waiting: false)
-        guard let data else { self.respond(connection, code: 503); return }
-        self.flowLock.lock(); self.delivered += Int64(data.count); self.flowLock.unlock()
-        self.respond(connection, data: data, type: "video/mp2t", head: head)
+        if let reader = self.readers[index]?.removeValue(forKey: key) {
+          if let data { reader.append(data); reader.finish(true) } else { reader.finish(false) }
+        }
+        if data == nil { self.mark(connection, waiting: false) }
       }
     }
   }
@@ -296,6 +359,7 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
       guard !closed else { return }; closed = true; epoch += 1; heartbeat?.cancel(); heartbeat = nil
       listener?.cancel(); connections.values.forEach { $0.cancel() }; connections.removeAll()
       tasks.values.forEach { $0.cancel() }; tasks.removeAll(); waiters.removeAll()
+      readers.values.flatMap { $0.values }.forEach { $0.finish(false) }; readers.removeAll(); partial.removeAll(); byteStream.close()
       let session = self.session!
       session.dataTask(with: request(sessionURL, method: "DELETE")) { _, _, _ in session.finishTasksAndInvalidate() }.resume()
       try? FileManager.default.removeItem(at: directory)

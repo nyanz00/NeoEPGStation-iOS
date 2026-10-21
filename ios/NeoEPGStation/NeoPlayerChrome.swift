@@ -81,6 +81,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   @objc private(set) var videoZoom: CGFloat = 1
   @objc private(set) var videoOffset = CGPoint.zero
   @objc private(set) var normalVideoFrame = CGRect.zero
+  @objc let commentViewport = UIView()
+  private var playbackFrame: CGRect {
+    isWide ? CGRect(x: 0, y: 0, width: panelOpen ? panel.frame.minX : bounds.width, height: bounds.height) : normalVideoFrame
+  }
   @objc var videoAspectRatio: CGFloat = 16/9
   private var zoomDragging = false, zoomPanStart = CGPoint.zero
   @objc var onZoom: ((CGFloat) -> Void)?
@@ -157,7 +161,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     videoView.clipsToBounds = true
     self.title.text = title; self.title.lineBreakMode = .byTruncatingTail
     channel.textColor = NeoStyle.muted; logo.contentMode = .scaleAspectFit
-    [videoView, pipCover, videoDim, header, controls, centerControls, panel, loadingButton, displayedStatus, transientNotice, zoomBadge, drawerDim, drawer].forEach(addSubview)
+    commentViewport.isUserInteractionEnabled = false
+    [videoView, commentViewport, pipCover, videoDim, header, controls, centerControls, panel, loadingButton, displayedStatus, transientNotice, zoomBadge, drawerDim, drawer].forEach(addSubview)
     zoomBadge.backgroundColor = UIColor.black.withAlphaComponent(0.6)
     zoomBadge.textColor = .white; zoomBadge.textAlignment = .center
     zoomBadge.clipsToBounds = true
@@ -363,6 +368,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     videoView.frame = wide ? CGRect(x: safe.left, y: safe.top, width: max(0, videoWidth - safe.left - (panelOpen ? 0 : safe.right)), height: max(0, bounds.height - safe.top))
       : CGRect(x: 0, y: safe.top, width: videoWidth, height: videoWidth * 9 / 16)
     normalVideoFrame = videoView.frame
+    commentViewport.frame = wide ? CGRect(x: 0, y: 0, width: videoWidth, height: bounds.height) : normalVideoFrame
     if videoZoom > 1 { videoView.frame = bounds }
     videoDim.frame = videoView.frame; pipCover.frame = videoView.frame
     pipMessage.frame = pipCover.bounds.insetBy(dx: 20, dy: 20)
@@ -485,10 +491,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     jumpAt(gesture.location(in: self))
   }
   private func jumpAt(_ point: CGPoint) {
-    onAction?(point.x < videoView.frame.midX ? "jump:-10" : "jump:10")
+    onAction?(point.x < playbackFrame.midX ? "jump:-10" : "jump:10")
   }
-  private func acceptsVideoTap(_ point: CGPoint, target: UIView?) -> Bool {
-    guard videoView.frame.contains(point), !interactionOpen, let target else { return false }
+  private func acceptsVideoTap(_ point: CGPoint, target: UIView?, includeLetterbox: Bool = false) -> Bool {
+    guard (includeLetterbox ? playbackFrame : videoView.frame).contains(point), !interactionOpen, let target else { return false }
     var ancestor: UIView? = target
     while let view = ancestor, view !== self {
       if view is UIControl || view === panel || view === drawer { return false }
@@ -500,7 +506,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     if gesture === zoomPan { return videoZoom > 1 && !pipShowing && acceptsVideoTap(touch.location(in: self), target: touch.view) }
     if gesture === zoomPinch { return !pipShowing && acceptsVideoTap(touch.location(in: self), target: touch.view) }
     if gesture === videoTap || gesture === videoDoubleTap {
-      return !pipShowing && acceptsVideoTap(touch.location(in: self), target: touch.view)
+      return !pipShowing && acceptsVideoTap(touch.location(in: self), target: touch.view, includeLetterbox: true)
     }
     if gesture === orientationPan { return !pipShowing && acceptsVideoTap(touch.location(in: self), target: touch.view) }
     guard gesture === navigationPan else { return true }
@@ -927,7 +933,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
     gesture === navigationPan && other === navigationScroll?.panGestureRecognizer
   }
-  private var orientationViews: [UIView] { [videoView, pipCover, videoDim, header, controls, centerControls, loadingButton, displayedStatus, panel] }
+  private var orientationViews: [UIView] { [videoView, commentViewport, pipCover, videoDim, header, controls, centerControls, loadingButton, displayedStatus, panel] }
   private func orientationDirection(_ velocity: CGPoint) -> Bool {
     videoZoom == 1 && !interactionOpen && !pipShowing && abs(velocity.y) > abs(velocity.x)*1.2 && (isWide ? velocity.y > 0 : velocity.y < 0)
   }
@@ -1001,7 +1007,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     }
     if !orientationPreviewRaised {
       // The fixed information panel must not mask the expanding movie.
-      [videoView, pipCover, videoDim].forEach(bringSubviewToFront); orientationPreviewRaised = true
+      [videoView, commentViewport, pipCover, videoDim].forEach(bringSubviewToFront); orientationPreviewRaised = true
     }
     let scale = 1+min(1, orientationProgress)*(orientationScale-1)
     let transform = orientationWasWide ? CGAffineTransform(translationX: 0, y: orientationTranslation)
@@ -1010,7 +1016,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   }
   private func restoreOrientationOrder() {
     guard orientationPreviewRaised else { return }; orientationPreviewRaised = false
-    for (index, view) in [videoView, pipCover, videoDim].enumerated() { insertSubview(view, at: index) }
+    for (index, view) in [videoView, commentViewport, pipCover, videoDim].enumerated() { insertSubview(view, at: index) }
   }
   // Called inside the system rotation transaction, so the preview morphs into
   // the new fitted frame instead of snapping back before the screen rotates.
@@ -1407,10 +1413,27 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       jumpAt(CGPoint(x: videoView.frame.minX+videoView.frame.width*0.8, y: videoView.frame.midY))
     }
     let correct = actions == ["jump:-10", "jump:10", "jump:-10", "jump:10"]
+    let left = CGPoint(x: playbackFrame.minX+1, y: playbackFrame.midY)
+    let right = CGPoint(x: playbackFrame.maxX-1, y: playbackFrame.midY)
+    let letterbox = acceptsVideoTap(left, target: self, includeLetterbox: true) && acceptsVideoTap(right, target: self, includeLetterbox: true)
+    let excludesControls = !acceptsVideoTap(left, target: playButton, includeLetterbox: true)
     tapVideo(); let single = actions.last == "toggle-controls"
     onAction = saved; showControls(savedHUD)
-    return ["doubleTapLeftRightSeekTenSeconds": correct, "doubleTapDoesNotToggleControls": !actions.dropLast().contains("toggle-controls"),
+    return ["doubleTapLetterboxAccepted": letterbox, "doubleTapExcludesControls": excludesControls,
+      "doubleTapLeftRightSeekTenSeconds": correct, "doubleTapDoesNotToggleControls": !actions.dropLast().contains("toggle-controls"),
       "singleTapStillTogglesControls": single, "doubleTapRecognizerNeedsTwoTaps": videoDoubleTap.numberOfTapsRequired == 2 && videoDoubleTap.view === self]
+  }
+  @objc static func runSeekPresentationChecks() -> [String: Bool] {
+    let chrome = NeoPlayerChrome(title: "Synthetic player")
+    chrome.frame = CGRect(x: 0, y: 0, width: 844, height: 390)
+    chrome.holdRotationInsets(UIEdgeInsets(top: 0, left: 47, bottom: 21, right: 47)); chrome.layoutIfNeeded()
+    var checks = chrome.runDoubleTapChecks()
+    checks["landscapeCommentViewportIncludesBlackMargins"] = chrome.commentViewport.frame == chrome.bounds && chrome.normalVideoFrame.minX == 47
+    checks["blackMarginOutsideVideoAcceptsDoubleTap"] = !chrome.videoView.frame.contains(CGPoint(x: 1, y: 195)) &&
+      chrome.acceptsVideoTap(CGPoint(x: 1, y: 195), target: chrome, includeLetterbox: true)
+    chrome.frame = CGRect(x: 0, y: 0, width: 390, height: 844); chrome.releaseRotationInsets(); chrome.layoutIfNeeded()
+    checks["portraitCommentsStayInVideo"] = chrome.commentViewport.frame == chrome.normalVideoFrame
+    return checks
   }
   private func panelTabRowsAligned() -> Bool {
     tabButtons.forEach { $0.layoutIfNeeded() }

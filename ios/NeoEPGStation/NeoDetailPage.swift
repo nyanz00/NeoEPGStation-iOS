@@ -124,10 +124,11 @@ final class NeoDetailPage: NeoPage {
         guard let self else { return }
         let qualities = config?.streamingQualities(file.type) ?? []
         guard !qualities.isEmpty else { self.alert("配信の画質設定がありません。"); return }
-        let dialog = NeoStreamingDialog(file: file, qualities: qualities) { [weak self] mode in
+        guard let api = self.shell?.api else { return }
+        let dialog = NeoStreamingDialog(file: file, qualities: qualities, source: api.url("/videos/\(file.id)")) { [weak self] mode, subtitle in
           guard let self else { return }
           self.streamingButton.isEnabled = false; self.loading.startAnimating()
-          self.shell?.play(file, recording: self.item, streaming: mode) { [weak self] in
+          self.shell?.play(file, recording: self.item, streaming: mode, streamSubtitle: subtitle) { [weak self] in
             self?.streamingButton.isEnabled = true; self?.loading.stopAnimating()
           }
         }

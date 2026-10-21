@@ -205,6 +205,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 @property (nonatomic) NeoStreamingClock *streamClock;
 @property (nonatomic) NeoStreamingSubtitles *streamingSubtitles;
 @property (nonatomic) NSMutableSet<NSURL *> *attachedSubtitles;
+@property (nonatomic) BOOL streamSubtitleUserSelected;
 @property (nonatomic) NSURL *playbackURL;
 @property (nonatomic) NeoPlaybackHistory *history;
 @property (nonatomic) BOOL wantsPlayback;
@@ -401,7 +402,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   };
   self.comments.onChange = ^{ [weakSelf updateCommentState]; [weakSelf updateLoadingState]; };
   [self.chrome bindCommentSettings:self.comments];
-  [self.movieView addSubview:self.comments];
+  [self.chrome.commentViewport addSubview:self.comments];
   self.frameTapInstalled = [NeoVLCFrameTap install];
   if (self.frameTapInstalled) { self.comments.videoHostProvider = ^double { return weakSelf.commentPiP.videoActivityHostTime; }; }
   self.commentPiP = [NeoCommentPiP new];
@@ -504,7 +505,10 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if (!self.attachedSubtitles) { self.attachedSubtitles = [NSMutableSet new]; }
   for (NSURL *url in self.streamingSubtitles.files) {
     if ([self.attachedSubtitles containsObject:url]) { continue; }
-    if ([self.player addPlaybackSlave:url type:VLCMediaPlaybackSlaveTypeSubtitle enforce:NO] == 0) { [self.attachedSubtitles addObject:url]; }
+    NSNumber *chosen = self.recordingContext[@"streamSubtitleIndex"];
+    BOOL selected = !self.streamSubtitleUserSelected && chosen && chosen.integerValue >= 0 &&
+      [[url.lastPathComponent componentsSeparatedByString:@"-"].firstObject integerValue] == chosen.integerValue;
+    if ([self.player addPlaybackSlave:url type:VLCMediaPlaybackSlaveTypeSubtitle enforce:selected] == 0) { [self.attachedSubtitles addObject:url]; }
   }
 }
 - (void)armStreamingClockAt:(int64_t)time {
@@ -739,6 +743,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     [self reloadPlaybackAtTime:target completion:nil];
   }
   else if ([action hasPrefix:@"subtitle:"]) {
+    self.streamSubtitleUserSelected = YES;
     NSInteger index = [action substringFromIndex:9].integerValue;
     if (index < 0) {
       [NeoSubtitlePreference save:@""]; self.subtitleSignature = nil;
@@ -1163,11 +1168,36 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   __weak typeof(self) weakSelf = self;
   self.tsPositionTimer = [NSTimer timerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer) { [weakSelf advanceTSPosition]; }];
   [NSRunLoop.mainRunLoop addTimer:self.tsPositionTimer forMode:NSRunLoopCommonModes];
+  [self observeSeekFrames];
+  // The timer is a watchdog, not a 100ms debounce before sending the seek.
+  [self advanceTSPosition];
+}
+- (void)observeSeekFrames {
+  __weak typeof(self) weakSelf = self;
+  VLCMedia *media = self.player.media;
+  NSInteger generation = self.seekGeneration;
+  [NeoVLCFrameTap bindFrameArrival:self.movieView handler:^{
+    if (!weakSelf || weakSelf.closing || weakSelf.player.media != media || weakSelf.seekGeneration != generation) { return; }
+    if (weakSelf.tsPositionPending) { [weakSelf advanceTSPosition]; }
+    [weakSelf updateSeekVideoReady];
+  }];
+}
+- (void)updateSeekVideoReady {
+  if (self.awaitingSeekVideo && !self.seeking && !self.buffering && self.commentPiP.videoPresentationHostTime > self.seekStartedAt) {
+    self.awaitingSeekVideo = NO;
+    [NeoPlaybackDiagnostics record:@"seek.videoResume" fields:@{@"mediaMs": @([self mediaTime]),
+      @"durationMs": @((CACurrentMediaTime()-self.seekStartedAt)*1000)}];
+    [self updateLoadingState];
+  }
+  if (!self.awaitingSeekVideo && !self.tsPositionPending) { [NeoVLCFrameTap bindFrameArrival:self.movieView handler:nil]; }
 }
 - (void)advanceTSPosition {
-  if (!self.tsPositionPending || self.closing) { [self.tsPositionTimer invalidate]; self.tsPositionTimer = nil; return; }
+  if (!self.tsPositionPending || self.closing) {
+    [self.tsPositionTimer invalidate]; self.tsPositionTimer = nil; [NeoVLCFrameTap bindFrameArrival:self.movieView handler:nil]; return;
+  }
   if (CACurrentMediaTime() > self.tsPositionDeadline) {
     self.tsPositionPending = NO; [self.tsPositionTimer invalidate]; self.tsPositionTimer = nil;
+    [NeoVLCFrameTap bindFrameArrival:self.movieView handler:nil];
     [NeoPlaybackDiagnostics record:@"ts.positionFailed" fields:@{@"targetMs": @(self.tsPositionTarget),
       @"nativeMs": @(self.player.time.value.longLongValue), @"issued": @(self.tsPositionIssued)}];
     if (self.seeking) { [self completeSeek:self.seekGeneration failed:YES]; return; }
@@ -1178,7 +1208,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
   if (!self.tsPositionIssued) {
     int64_t length = [self mediaLength];
-    BOOL stateReady = self.player.state == VLCMediaPlayerStatePaused || ([self isStreaming] && self.player.state == VLCMediaPlayerStatePlaying);
+    BOOL stateReady = self.player.state == VLCMediaPlayerStatePaused ||
+      (([self isStreaming] || self.seeking) && self.player.state == VLCMediaPlayerStatePlaying);
     if (!self.inputBufferReady || self.buffering || !stateReady || !self.player.isSeekable || length <= 0) { return; }
     // Adaptive HLS does not output the target picture while start-paused.
     // Decode invisibly/muted at the requested time until a real due frame
@@ -1195,9 +1226,14 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     self.player.onSeekCompletion = ^{
       if (weakSelf.player.media != media || !weakSelf.tsPositionPending) { return; }
       weakSelf.tsPositionCallback = YES;
+      dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf advanceTSPosition]; });
     };
     BOOL bytes = ![self isStreaming] && !self.hasInputLength && self.player.media.length.value.longLongValue <= 0;
     [NeoPlaybackDiagnostics record:@"ts.positionRequested" fields:@{@"targetMs": @(self.tsPositionTarget), @"lengthMs": @(length), @"bytes": @(bytes)}];
+    if (self.seeking) {
+      [NeoPlaybackDiagnostics record:@"seek.issued" fields:@{@"targetMs": @(self.tsPositionTarget),
+        @"afterMs": @((CACurrentMediaTime()-self.seekStartedAt)*1000)}];
+    }
     if (bytes) { self.player.position = (double)self.tsPositionTarget/length; }
     else { self.player.time = [VLCTime timeWithInt:(int)self.tsPositionTarget]; }
     return;
@@ -1225,6 +1261,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     @"nativeClockConfirmed": @YES, @"newVideo": @YES, @"outputChanged": @(replacedOutput),
     @"newWatcherPoint": @([clock[@"sequence"] unsignedLongLongValue] > self.tsPositionSequence)}];
   self.tsPositionPending = NO; [self.tsPositionTimer invalidate]; self.tsPositionTimer = nil;
+  if (!self.awaitingSeekVideo) { [NeoVLCFrameTap bindFrameArrival:self.movieView handler:nil]; }
   [self armStreamingClockAt:self.tsPositionTarget];
   self.lastObservedTime = [self guardStreamingTime:native];
   if ([self isStreaming]) {
@@ -1359,6 +1396,13 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   return ![NeoCommentOverlay isCommentName:track.trackName ?: @""] && ![NeoCommentOverlay isCommentName:track.trackDescription ?: @""];
 }
 - (void)restoreSubtitlePreference {
+  NSNumber *streamChoice = self.recordingContext[@"streamSubtitleIndex"];
+  if ([self isStreaming] && streamChoice && !self.streamSubtitleUserSelected) {
+    if (streamChoice.integerValue < 0) {
+      for (VLCMediaPlayerTrack *track in self.player.textTracks) { if (track.isSelected) { track.selected = NO; } }
+    }
+    return;
+  }
   NSString *name = [NeoSubtitlePreference savedName];
   if (!name) { return; }
   NSMutableArray<VLCMediaPlayerTrack *> *tracks = [NSMutableArray new];
@@ -1546,11 +1590,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self updateCommentState];
   [self.chrome updateDiagnostics];
   NSTimeInterval now = CACurrentMediaTime();
-  if (self.awaitingSeekVideo && !self.seeking && !self.buffering && self.commentPiP.videoPresentationHostTime > self.seekStartedAt) {
-    self.awaitingSeekVideo = NO;
-    [NeoPlaybackDiagnostics record:@"seek.videoResume" fields:@{@"mediaMs": @([self mediaTime]),
-      @"durationMs": @((now - self.seekStartedAt) * 1000)}];
-  }
+  [self updateSeekVideoReady];
   if (now - self.lastDiagnosticSample >= 1) {
     self.lastDiagnosticSample = now;
     [NeoPlaybackDiagnostics record:@"video.sample" fields:[NeoVLCFrameTap snapshot:self.movieView]];
@@ -1832,11 +1872,12 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self.movieView addSubview:view];
   [self alignVideoOutput];
   [NeoVLCFrameTap bindView:view sink:self.commentPiP];
-  if (self.comments) { [self.movieView bringSubviewToFront:self.comments]; }
+  if (self.tsPositionPending || self.awaitingSeekVideo) { [self observeSeekFrames]; }
 }
 - (void)layoutVideoOutputIfNeeded {
-  CGRect normal = [self.chrome convertRect:self.chrome.normalVideoFrame toView:self.movieView];
-  self.comments.frame = normal;
+  self.comments.frame = self.chrome.commentViewport.bounds;
+  self.comments.referenceVideoSize = self.chrome.normalVideoFrame.size;
+  self.comments.expandsToViewport = self.landscape;
   VLCMediaVideoTrack *video = self.player.media.videoTracks.firstObject.video;
   if (video.width > 0 && video.height > 0) {
     CGFloat pixelRatio = video.sourceAspectRatio > 0 && video.sourceAspectRatioDenominator > 0
@@ -1886,7 +1927,10 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 #if TARGET_OS_SIMULATOR
 - (void)runStreamingProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
-  [self waitStreamingPhase:0 target:49000 attempt:0 checks:[NSMutableDictionary new] completion:completion];
+  NSMutableDictionary *checks = [[NeoPlayerChrome runSeekPresentationChecks] mutableCopy];
+  [checks addEntriesFromDictionary:[NeoStreamingDialog runLayoutChecksWithSource:self.sourceURL]];
+  [checks addEntriesFromDictionary:[NeoCommentOverlay runCanvasChecks]];
+  [self waitStreamingPhase:0 target:49000 attempt:0 checks:checks completion:completion];
 }
 - (void)waitStreamingPhase:(NSInteger)phase target:(int64_t)target attempt:(NSInteger)attempt
                    checks:(NSMutableDictionary *)checks completion:(void (^)(NSDictionary *))completion {
@@ -1946,7 +1990,19 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       [NeoPlaybackDiagnostics record:@"hls.probeSettled" fields:@{@"phase": @(phase), @"nativeMs": @(settled), @"appMs": @(app)}];
       [self setPlaybackIntent:NO];
       if (phase == 0) {
-        [self seekBy:20000-[self mediaTime] completion:^{ [self waitStreamingPhase:1 target:20000 attempt:0 checks:checks completion:completion]; }]; return;
+        BOOL cached = NO;
+        for (NSArray<NSNumber *> *range in self.streamingSession.downloadedRanges) {
+          if (range[0].doubleValue <= 50 && range[1].doubleValue > 50) { cached = YES; }
+        }
+        checks[@"cachedSeekTargetDownloaded"] = @(cached);
+        [self setPlaybackIntent:YES];
+        [self seekBy:50000-[self mediaTime] completion:^{
+          checks[@"cachedSeekVerifiedWithoutReload"] = @(!self.lastSeekFailed && self.reloadGeneration == 0);
+          [NeoPlaybackDiagnostics record:@"seek.cachedProbe" fields:@{@"durationMs": @((CACurrentMediaTime()-self.seekStartedAt)*1000),
+            @"targetMs": @50000, @"cached": @(cached)}];
+          [self setPlaybackIntent:NO];
+          [self seekBy:20000-[self mediaTime] completion:^{ [self waitStreamingPhase:1 target:20000 attempt:0 checks:checks completion:completion]; }];
+        }]; return;
       }
       BOOL passed = YES; for (NSNumber *value in checks.allValues) { passed &= value.boolValue; }
       [self closePlayer];
@@ -2873,6 +2929,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   NSInteger generation = ++self.seekGeneration;
   self.seekStartedAt = CACurrentMediaTime();
   self.awaitingSeekVideo = YES;
+  [self observeSeekFrames];
   [NeoPlaybackDiagnostics beginSeek:generation];
   [NeoPlaybackDiagnostics record:@"seek.start" fields:@{@"fromMs": @([self mediaTime]), @"targetMs": @(target),
     @"pip": @(self.pipActive), @"restoring": @(self.restoringReload)}];
@@ -2903,11 +2960,14 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if ([self wholeFileClock]) {
     self.tsPositionPending = YES; self.tsPositionTarget = target;
     self.tsPositionIssued = NO; self.tsPositionCallback = NO;
-    self.videoOutputView.hidden = YES;
-    if ([self isStreaming]) {
+    // A normal seek keeps the current picture and active input. Restoration
+    // alone needs hidden/muted priming; both paths still verify new due video.
+    BOOL priming = self.reloading || self.videoResumePriming || !self.wantsPlayback;
+    self.videoOutputView.hidden = priming;
+    if ([self isStreaming] && priming) {
       if (!self.restoreMuted) { self.restorePreviousMute = self.player.audio.isMuted; self.restoreMuted = YES; }
       self.player.audio.muted = YES; [self.player play];
-    } else { [self.player pause]; }
+    } else if (priming) { [self.player pause]; }
     [self armTSPosition]; [self updateLoadingState]; return;
   }
   BOOL accepted;
@@ -2929,6 +2989,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
   if (!accepted) { [self completeSeek:generation failed:YES]; }
   [NeoPlaybackDiagnostics record:@"seek.accepted" fields:@{@"accepted": @(accepted), @"bytePositionFallback": @(!self.hasInputLength && self.player.media.length.value.longLongValue <= 0 && length > 0)}];
+  [NeoPlaybackDiagnostics record:@"seek.issued" fields:@{@"targetMs": @(target), @"afterMs": @((CACurrentMediaTime()-self.seekStartedAt)*1000)}];
   [self.commentPiP invalidatePlaybackState]; [self scheduleControlsHide];
 }
 - (void)completeSeek:(NSInteger)generation failed:(BOOL)failed {
@@ -2936,6 +2997,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if (!failed && self.tsPositionPending) { return; }
   if (failed && self.tsPositionPending) {
     self.tsPositionPending = NO; [self.tsPositionTimer invalidate]; self.tsPositionTimer = nil;
+    [NeoVLCFrameTap bindFrameArrival:self.movieView handler:nil];
   }
   if (!failed && self.player.state == VLCMediaPlayerStatePaused) {
     int64_t position = [self wholeFileClock]
@@ -2947,6 +3009,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   // Even a short jump or a delayed completion must not become watched time.
   if (!self.closing) { [self sampleHistory]; }
   [self.seekTimer invalidate]; self.seekTimer = nil; self.seeking = NO; [self.comments endSeek];
+  if (failed) { self.awaitingSeekVideo = NO; }
+  [self updateSeekVideoReady];
   if (!failed && !self.playbackEnded) { [self rememberPlaybackTime]; }
   self.lastSeekFailed = failed;
   [NeoPlaybackDiagnostics record:@"seek.complete" fields:@{@"failed": @(failed), @"mediaMs": @([self mediaTime]),
@@ -3054,6 +3118,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 - (BOOL)isMediaPlaying { return self.player.isPlaying; }
 
 - (void)closePlayer {
+  [NeoVLCFrameTap bindFrameArrival:self.movieView handler:nil];
   [self beginPlayerDismissal:NO];
 }
 - (void)beginPlayerDismissal:(BOOL)interactive {

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+    BDEF00000000000000000031 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000031; };
     BDEF00000000000000000030 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000030; };
     BDEF00000000000000000029 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000029; };
     BDEF00000000000000000028 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000028; };
@@ -52,6 +53,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+    ADEF00000000000000000031 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoHTTPByteStream.swift; path = NeoEPGStation/NeoHTTPByteStream.swift; sourceTree = "<group>"; };
     ADEF00000000000000000030 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoStreamingSubtitles.swift; path = NeoEPGStation/NeoStreamingSubtitles.swift; sourceTree = "<group>"; };
     ADEF00000000000000000029 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoStreamingSession.swift; path = NeoEPGStation/NeoStreamingSession.swift; sourceTree = "<group>"; };
     ADEF00000000000000000028 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoStreamingDialog.swift; path = NeoEPGStation/NeoStreamingDialog.swift; sourceTree = "<group>"; };
@@ -120,6 +122,7 @@
 			children = (
         ADEF00000000000000000030,
         ADEF00000000000000000029,
+        ADEF00000000000000000031,
         ADEF00000000000000000028,
         ADEF00000000000000000027,
         ADEF00000000000000000025,
@@ -348,6 +351,7 @@
 			files = (
         BDEF00000000000000000030,
         BDEF00000000000000000029,
+        BDEF00000000000000000031,
         BDEF00000000000000000028,
         BDEF00000000000000000027,
         BDEF00000000000000000010,

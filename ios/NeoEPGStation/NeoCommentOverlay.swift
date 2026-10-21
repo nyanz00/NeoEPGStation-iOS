@@ -8,9 +8,17 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   @objc var runningProvider: (() -> Bool)?
   @objc var wantsPlaybackProvider: (() -> Bool)?
   @objc var videoHostProvider: (() -> Double)?
-  @objc var coveredByPiP = false { didSet { clock.reset(); renderer?.seekWindow(); refreshRendering() } }
+  @objc var coveredByPiP = false { didSet { if oldValue != coveredByPiP { clock.reset(); invalidateCanvas(); refreshRendering() } } }
   @objc var onChange: (() -> Void)?
-  @objc var videoSize: CGSize = .zero
+  @objc var videoSize: CGSize = .zero { didSet { if oldValue != videoSize { invalidateCanvas() } } }
+  @objc var referenceVideoSize: CGSize = .zero { didSet { if oldValue != referenceVideoSize { invalidateCanvas() } } }
+  @objc var expandsToViewport = false { didSet { if oldValue != expandsToViewport { invalidateCanvas() } } }
+  private var canvasGeneration = 0, lastCanvasSize = CGSize.zero
+  private func invalidateCanvas() { canvasGeneration += 1; lastDrawState = nil; renderer?.seekWindow() }
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    if lastCanvasSize != bounds.size { lastCanvasSize = bounds.size; invalidateCanvas() }
+  }
   @objc private(set) var status = "コメントを確認中…"
   @objc private(set) var ready = false
   @objc private(set) var renderedTime = 0.0
@@ -103,6 +111,20 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   @objc static func isCommentName(_ value: String) -> Bool { NeoASSComments.isCommentName(value) }
 
 #if targetEnvironment(simulator)
+  @objc static func runCanvasChecks() -> [String: Bool] {
+    let overlay = NeoCommentOverlay(frame: CGRect(x: 0, y: 0, width: 390, height: 219.375))
+    overlay.loadSmokeComments(); let source = overlay.compositionState.timeline!
+    overlay.referenceVideoSize = overlay.bounds.size; overlay.layoutIfNeeded()
+    let before = overlay.canvasGeneration
+    overlay.frame = CGRect(x: 0, y: 0, width: 844, height: 390); overlay.referenceVideoSize = CGSize(width: 750, height: 390)
+    overlay.expandsToViewport = true; overlay.layoutIfNeeded()
+    let expanded = overlay.displayTimeline(source), wideGeneration = overlay.canvasGeneration
+    overlay.coveredByPiP = true; overlay.coveredByPiP = false
+    let checks = ["canvasChangesInvalidateOldPreparation": wideGeneration > before && overlay.canvasGeneration > wideGeneration,
+      "landscapeLayoutDoesNotMutatePiPSource": overlay.compositionState.timeline?.width == source.width && expanded.width > source.width,
+      "landscapeLayoutRetainsCommentIdentity": expanded.identity == source.identity && expanded.comments.map(\.id) == source.comments.map(\.id)]
+    overlay.stop(); return checks
+  }
   static func runJikkyoSmoke(base: String) {
     Task { @MainActor in
       let overlay = NeoCommentOverlay(frame: CGRect(x: 0, y: 0, width: 640, height: 360))
@@ -344,11 +366,19 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     }
   }
 
-  private var renderScale: Double {
-    guard let timeline else { return 1 }
-    let ratio = videoSize.width > 0 && videoSize.height > 0 ? videoSize.width/videoSize.height : CGFloat(timeline.width/timeline.height)
-    let width = min(bounds.width, bounds.height*ratio)*UIScreen.main.scale
-    return max(0.25, Double(width)/timeline.width)
+  private func canvas(_ timeline: CommentTimeline) -> CommentCanvasGeometry {
+    let pixels = metal?.contentScaleFactor ?? UIScreen.main.scale
+    let viewport = CGSize(width: bounds.width*pixels, height: bounds.height*pixels)
+    let reference = CGSize(width: referenceVideoSize.width*pixels, height: referenceVideoSize.height*pixels)
+    return CommentCanvasGeometry(viewport: viewport, reference: reference, video: videoSize,
+      source: CGSize(width: timeline.width, height: timeline.height), expanded: expandsToViewport)
+  }
+  private var renderScale: Double { timeline.map { canvas($0).scale } ?? 1 }
+  private func displayTimeline(_ source: CommentTimeline) -> CommentTimeline {
+    var result = source
+    let geometry = canvas(source)
+    result.width = Double(geometry.logicalSize.width); result.height = Double(geometry.logicalSize.height)
+    return result
   }
   @objc func prepareBeforePlayback(_ completion: @escaping () -> Void) {
     preparationCompletion = completion
@@ -368,27 +398,28 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     guard preparationCompletion != nil, !closed, !warming else { return }
     if !enabled || (settled && timeline == nil) { completePreparation(); return }
     guard ready, let timeline, let renderer else { return }
-    warming = true; let request = version
-    renderer.warmWindow(timeline, time: max(0, timeProvider?() ?? 0), size: sizeMultiplier, pixelScale: renderScale,
+    warming = true; let request = version, layout = canvasGeneration
+    renderer.warmWindow(displayTimeline(timeline), time: max(0, timeProvider?() ?? 0), size: sizeMultiplier, pixelScale: renderScale,
       opacity: usesSourceOpacity ? nil : opacity) { [weak self] in
       guard let self, !self.closed else { return }
       self.warming = false
-      if self.version == request { self.completePreparation() } else { self.finishPreparationIfPossible() }
+      if self.version == request && self.canvasGeneration == layout { self.completePreparation() } else { self.finishPreparationIfPossible() }
     }
   }
   @objc func beginSeek(_ time: Double) {
     if !fullLoaded, let track = tracks.first(where: { $0.subtitleIndex == selectedIndex }),
        time < previewStart || time > previewStart+210 { loadWindow(track, at: time) }
     seeking = true; seekVersion += 1; seekTarget = max(0, time); resumeGate = CommentSeekResumeGate(); clock.reset(); renderer?.seekWindow(); refreshRendering()
-    if let timeline { renderer?.prepareAhead(timeline, time: time, pixelScale: renderScale*sizeMultiplier, opacity: usesSourceOpacity ? nil : opacity) }
+    if let timeline { renderer?.prepareAhead(displayTimeline(timeline), time: time, pixelScale: renderScale*sizeMultiplier, opacity: usesSourceOpacity ? nil : opacity) }
   }
   @objc func endSeek() {
     guard seeking else { return }
-    let request = seekVersion
+    let request = seekVersion, layout = canvasGeneration
     guard let timeline, let renderer, enabled else { seeking = false; clock.reset(); refreshRendering(); return }
-    renderer.warmWindow(timeline, time: seekTarget ?? max(0, timeProvider?() ?? 0), size: sizeMultiplier, pixelScale: renderScale,
+    renderer.warmWindow(displayTimeline(timeline), time: seekTarget ?? max(0, timeProvider?() ?? 0), size: sizeMultiplier, pixelScale: renderScale,
       opacity: usesSourceOpacity ? nil : opacity) { [weak self] in
       guard let self, !self.closed, self.seekVersion == request, self.seeking else { return }
+      guard self.canvasGeneration == layout else { self.endSeek(); return }
       NeoPlaybackDiagnostics.record("comments.seekClockReset", fields: ["media": self.seekTarget ?? 0])
       self.seeking = false; self.clock.reset(); self.refreshRendering()
     }
@@ -469,14 +500,12 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
       NeoPlaybackDiagnostics.record("comments.initialAnchor", fields: ["media": media, "motion": time])
     }
     renderedTime = time
-    let viewport = view.drawableSize
-    let ratio = videoSize.width > 0 && videoSize.height > 0 ? videoSize.width / videoSize.height : CGFloat(timeline.width / timeline.height)
-    let fittedWidth = min(viewport.width, viewport.height * ratio), fittedHeight = fittedWidth / ratio
-    let pixelScale = max(Double(fittedWidth) / timeline.width, Double(fittedHeight) / timeline.height)
+    let viewport = view.drawableSize, geometry = canvas(timeline)
+    let drawing = displayTimeline(timeline), pixelScale = geometry.scale
     canDraw = canDraw && (clock.ready || !(wantsPlaybackProvider?() ?? running))
-    renderer.prepareAhead(timeline, time: canDraw ? clock.schedulingTime : seekTarget ?? media, pixelScale: pixelScale*sizeMultiplier, opacity: usesSourceOpacity ? nil : opacity)
+    renderer.prepareAhead(drawing, time: canDraw ? clock.schedulingTime : seekTarget ?? media, pixelScale: pixelScale*sizeMultiplier, opacity: usesSourceOpacity ? nil : opacity)
     let state = DrawState(timeline: timeline.identity, motion: time, scheduling: clock.schedulingTime, viewport: viewport,
-      fittedVideo: CGSize(width: fittedWidth, height: fittedHeight),
+      fittedVideo: CGSize(width: timeline.width*pixelScale, height: timeline.height*pixelScale),
       size: sizeMultiplier, opacity: opacity, sourceOpacity: usesSourceOpacity, canDraw: canDraw, revision: renderer.visualRevision)
     // Preparation and explicit pause often yield identical frames. Keep the
     // last presented texture instead of blocking the main thread for another
@@ -486,10 +515,10 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     guard inFlight.wait(timeout: .now()) == .success else { gpuBackpressure += 1; return }
     guard let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
       let command = renderer.queue.makeCommandBuffer(), let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { inFlight.signal(); return }
-    drawn = canDraw ? renderer.encode(timeline: timeline, time: time, viewport: viewport,
-      videoRect: CGRect(x: (viewport.width - fittedWidth) / 2, y: (viewport.height - fittedHeight) / 2, width: fittedWidth, height: fittedHeight),
+    drawn = canDraw ? renderer.encode(timeline: drawing, time: time, viewport: viewport,
+      videoRect: geometry.rect,
       sizeMultiplier: sizeMultiplier, opacity: opacity, pixelScale: pixelScale, usesSourceOpacity: usesSourceOpacity,
-      schedulingTime: clock.schedulingTime, encoder: encoder) : 0
+      schedulingTime: clock.schedulingTime, sourceSize: CGSize(width: timeline.width, height: timeline.height), encoder: encoder) : 0
     let completion = inFlight
     command.addCompletedHandler { _ in completion.signal() }
     encoder.endEncoding(); command.present(drawable); command.commit()

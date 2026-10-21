@@ -433,3 +433,17 @@ check(NeoPlaybackHistory.observedMilliseconds(Date(timeIntervalSince1970: 170000
   "Playback observedAt is an integer millisecond value accepted by OpenAPI")
 check(NeoPlaybackHistory.errorMessage(URLError(.timedOut)).contains("接続できませんでした"), "Timeout gets connection message")
 check(NeoPlaybackHistory.errorMessage(nil) == "視聴履歴の送信中にエラーが発生しました。", "HTTP rejection gets generic message")
+
+let portraitCanvas = CommentCanvasGeometry(viewport: CGSize(width: 390, height: 219.375), reference: .zero,
+  video: CGSize(width: 1920, height: 1080), source: CGSize(width: 1280, height: 720), expanded: false)
+let wideCanvas = CommentCanvasGeometry(viewport: CGSize(width: 844, height: 390), reference: CGSize(width: 750, height: 390),
+  video: CGSize(width: 1920, height: 1080), source: CGSize(width: 1280, height: 720), expanded: true)
+let fittedCanvas = CommentCanvasGeometry(viewport: CGSize(width: 750, height: 390), reference: .zero,
+  video: CGSize(width: 1920, height: 1080), source: CGSize(width: 1280, height: 720), expanded: false)
+check(wideCanvas.rect == CGRect(x: 0, y: 0, width: 844, height: 390), "Landscape comments cover letterbox and safe-area margins")
+check(abs(wideCanvas.scale-fittedCanvas.scale) < 0.00001, "Expanding comment travel space does not enlarge glyphs")
+check(wideCanvas.logicalSize.width > 1280 && portraitCanvas.logicalSize.width == 1280, "Each display retains independent coordinates")
+let pipCanvas = CommentCanvasGeometry(viewport: CGSize(width: 640, height: 360), reference: .zero,
+  video: CGSize(width: 1920, height: 1080), source: CGSize(width: 1280, height: 720), expanded: false)
+check(pipCanvas.scale == 0.5 && pipCanvas.logicalSize == CGSize(width: 1280, height: 720), "PiP never inherits landscape coordinates")
+print("Comment viewport, independent PiP coordinates and stable glyph scale: passed")

@@ -98,7 +98,15 @@ for kind, segment, fps, gop in [('encoded', 4, '25', '100'), ('ts', 6.006, '3000
                 name = path.rsplit('/', 1)[-1]
                 if name.endswith('.ts') and (root / name).is_file():
                     rows.append({'segment': int(name[:-3]), 'mode': query.get('mode'), 'client': query.get('client')})
-                    self.respond((root / name).read_bytes(), mime='video/mp2t'); return
+                    body = (root / name).read_bytes()
+                    self.send_response(200); self.send_header('Content-Type', 'video/mp2t')
+                    self.send_header('Content-Length', str(len(body))); self.end_headers()
+                    try:
+                        split = max(188, len(body)//2)
+                        self.wfile.write(body[:split]); self.wfile.flush(); time.sleep(.2)
+                        self.wfile.write(body[split:]); self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError): pass
+                    return
             if path.endswith('/subtitles'):
                 self.json({'items': [dict(subtitleIndex=0, streamIndex=2, codecName='ass', displayName='実況comments', title='comments', language='jpn'),
                     dict(subtitleIndex=1, streamIndex=3, codecName='ass', displayName='日本語字幕', title='字幕', language='jpn')]}); return
@@ -136,6 +144,7 @@ for kind, segment, fps, gop in [('encoded', 4, '25', '100'), ('ts', 6.006, '3000
         time.sleep(.5)
         for name in names:
             if (documents / name).exists(): shutil.copyfile(documents / name, dist / f'{kind}-{name}')
+        if (documents / 'streaming-dialog.png').exists(): shutil.copyfile(documents / 'streaming-dialog.png', dist / 'streaming-dialog.png')
         (dist / f'{kind}-hls-requests.json').write_text(json.dumps(rows, indent=2))
         result = json.loads((documents / names[0]).read_text())
         assert result['success'] and all(result['checks'].values()), result
@@ -154,6 +163,8 @@ for kind, segment, fps, gop in [('encoded', 4, '25', '100'), ('ts', 6.006, '3000
         assert sessions <= released and len(sessions) == 2, (sessions, released)
         assert any('keep' in row for row in rows), 'No session heartbeat'
         events = json.loads((documents / names[1]).read_text())['events']
+        assert any(first['elapsed'] < complete['elapsed'] for first in events if first['event'] == 'hls.firstDelivered'
+                   for complete in events if complete['event'] == 'hls.segment' and complete.get('index') == first.get('index')), 'VLC received no segment bytes before upstream EOF'
         wait = next(e for e in events if e['event'] == 'hls.networkWaiting')
         restored = next(e for e in events if e['event'] == 'input.restoreReady' and e['elapsed'] > wait['elapsed'])
         assert restored['elapsed']-wait['elapsed'] < 20, 'HLS did not actually restore within 20 seconds of the 12-second outage'

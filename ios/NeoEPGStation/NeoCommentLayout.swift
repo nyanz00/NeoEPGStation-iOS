@@ -1,5 +1,19 @@
 import Foundation
 
+// Display coordinates are local to each destination. Expanding the viewport
+// changes travel/lane space, never the glyph scale or the shared source data.
+struct CommentCanvasGeometry {
+  let rect: CGRect, scale: Double, logicalSize: CGSize
+  init(viewport: CGSize, reference: CGSize, video: CGSize, source: CGSize, expanded: Bool) {
+    let ratio = video.width > 0 && video.height > 0 ? video.width/video.height : source.width/max(1, source.height)
+    let basis = expanded && reference.width > 0 && reference.height > 0 ? reference : viewport
+    let width = min(basis.width, basis.height*ratio), height = width/max(0.001, ratio)
+    scale = max(0.001, Double(width)/max(1, Double(source.width)))
+    rect = expanded ? CGRect(origin: .zero, size: viewport) : CGRect(x: (viewport.width-width)/2, y: (viewport.height-height)/2, width: width, height: height)
+    logicalSize = expanded ? CGSize(width: Double(viewport.width)/scale, height: Double(viewport.height)/scale) : source
+  }
+}
+
 struct CommentExtent { var width: Double; var height: Double }
 enum CommentLanePlan {
   // Work happens when a track/size changes, never for every video frame.
