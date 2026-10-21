@@ -87,6 +87,7 @@ final class NeoPlaybackDiagnostics: NSObject {
 final class NeoBufferingUpdates: NSObject {
   private let lock = NSLock()
   private var pending = false, latest: Float = 1
+  private var buffering = false
   private var count = 0, generation = 0
   private var lastDelivery = -Double.infinity
   @objc var onUpdate: ((Float, Int) -> Void)?
@@ -94,10 +95,16 @@ final class NeoBufferingUpdates: NSObject {
     guard progress.isFinite else { return }
     lock.lock()
     latest = min(1, max(0, progress)); count += 1
+    let nextBuffering = latest < 1
+    let boundary = nextBuffering != buffering
+    buffering = nextBuffering
+    // Progress percentages may be coalesced. Starting/completing buffering
+    // changes playback state: replace the pending percentage update now.
+    if boundary { generation += 1; pending = false }
     guard !pending else { lock.unlock(); return }
     pending = true
     let token = generation
-    let delay = max(0, 0.1 - (ProcessInfo.processInfo.systemUptime-lastDelivery))
+    let delay = boundary ? 0 : max(0, 0.1 - (ProcessInfo.processInfo.systemUptime-lastDelivery))
     lock.unlock()
     DispatchQueue.main.asyncAfter(deadline: .now()+delay) { [weak self] in
       guard let self else { return }
@@ -111,6 +118,6 @@ final class NeoBufferingUpdates: NSObject {
     }
   }
   @objc func reset() {
-    lock.lock(); generation += 1; pending = false; count = 0; lastDelivery = -Double.infinity; lock.unlock()
+    lock.lock(); generation += 1; pending = false; count = 0; buffering = false; lastDelivery = -Double.infinity; lock.unlock()
   }
 }

@@ -18,6 +18,25 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     let window = UIWindow(frame: UIScreen.main.bounds)
     window.rootViewController = NeoShell(); self.window = window; window.makeKeyAndVisible()
 #if targetEnvironment(simulator)
+    if let base = ProcessInfo.processInfo.environment["NEO_EPG_ENCODED_SEEK"], let url = URL(string: base+"/api/videos/1") {
+      UserDefaults.standard.set(60, forKey: NeoPlaybackCache.preference)
+      UserDefaults.standard.set(false, forKey: "player.comments.enabled")
+      DispatchQueue.main.asyncAfter(deadline: .now()+1) {
+        let player = NeoPlayerController(url: url, title: "Synthetic encoded seek", username: "", password: "", networkCaching: 5000)
+        player.initialPosition = 30
+        player.recordingContext = ["disableHistory": true, "videoFileType": "encoded"]
+        player.modalPresentationStyle = .fullScreen
+        window.rootViewController?.present(player, animated: false) {
+          player.runEncodedSeekProbe { result in
+            NeoPiPSmoke.save("encoded-seek-smoke", result)
+            if let source = NeoPlaybackDiagnostics.exportURL(), let data = try? Data(contentsOf: source) {
+              try? data.write(to: NeoPiPSmoke.directory.appendingPathComponent("encoded-seek-diagnostics.json"))
+            }
+          }
+        }
+      }
+      return true
+    }
     if ProcessInfo.processInfo.environment["NEO_EPG_REFLOW_ZOOM"] == "1" {
       DispatchQueue.main.asyncAfter(deadline: .now()+1) {
         var checks = NeoShell.reflowSmoke(in: window.rootViewController!.view)
