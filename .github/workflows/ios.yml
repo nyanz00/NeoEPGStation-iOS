@@ -110,6 +110,7 @@ jobs:
           swiftc ios/NeoEPGStation/NeoModels.swift tests/ui/main.swift -o build/native-tests/ui && build/native-tests/ui || task_checks_failed=1
           swiftc ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoHLSManifest.swift tests/streaming/main.swift -o build/native-tests/hls && build/native-tests/hls || task_checks_failed=1
           swiftc ios/NeoEPGStation/NeoHTTPByteStream.swift tests/progressive/main.swift -o build/native-tests/progressive && build/native-tests/progressive || task_checks_failed=1
+          swiftc ios/NeoEPGStation/NeoPlaybackDiagnostics.swift tests/buffering/main.swift -o build/native-tests/buffering && build/native-tests/buffering || task_checks_failed=1
           exit "$task_checks_failed"
       - name: Native UI type checks
         id: type-checks

@@ -2045,7 +2045,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
                  completion:(void (^)(NSDictionary<NSString *, id> *))completion {
   int64_t native = self.player.nativeTimeMs;
   BOOL ready = !self.tsPositionPending && !self.seeking && !self.awaitingSeekVideo && !self.reloading && !self.buffering &&
-    !self.playbackFailed && self.inputBufferReady && llabs(native-target) < 2500;
+    !self.playbackFailed && self.inputBufferReady && llabs(native-target) < (phase ? 500 : 2500);
   if (!ready && attempt < 200 && !self.playbackFailed) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.025*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
       [self waitEncodedSeekProbe:phase target:target attempt:attempt+1 input:input checks:checks rows:rows completion:completion];
@@ -2090,6 +2090,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
       checks[@"bufferCompletionBypassesThrottle"] = @(received >= sent && received-sent < 0.05);
       checks[@"noStaleBufferProgress"] = @(latest == 1);
+      // Retain the standalone probe until its weakly captured delivery fires.
+      [updates reset];
       int64_t origin = self.player.nativeTimeMs;
       uint64_t frames = self.player.media.statistics.decodedVideo;
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
