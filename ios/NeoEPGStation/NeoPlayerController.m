@@ -1232,6 +1232,15 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     BOOL stateReady = self.player.state == VLCMediaPlayerStatePaused ||
       (([self isStreaming] || self.seeking) && self.player.state == VLCMediaPlayerStatePlaying);
     if (!self.inputBufferReady || self.buffering || !stateReady || !self.player.isSeekable || length <= 0) { return; }
+    BOOL bytes = ![self isStreaming] && !self.hasInputLength && self.player.media.length.value.longLongValue <= 0;
+    if (bytes && !self.seeking) {
+      // Opening announces Paused before MPEG-2's first picture/PCR origin is
+      // established. A byte seek at that point can anchor several seconds off.
+      // Observe the first real sample, not an arbitrary startup delay. Normal
+      // seeks retain their already-established input and take the fast path.
+      NSDictionary *initial = [NeoVLCFrameTap snapshot:self.movieView];
+      if ([initial[@"samples"] unsignedIntegerValue] == 0) { return; }
+    }
     // Adaptive HLS does not output the target picture while start-paused.
     // Decode invisibly/muted at the requested time until a real due frame
     // arrives. Keep the user's playback intent separate from this preparation.
@@ -1248,7 +1257,6 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       weakSelf.tsPositionCallback = YES;
       dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf advanceTSPosition]; });
     };
-    BOOL bytes = ![self isStreaming] && !self.hasInputLength && self.player.media.length.value.longLongValue <= 0;
     [NeoPlaybackDiagnostics record:@"ts.positionRequested" fields:@{@"targetMs": @(self.tsPositionTarget), @"lengthMs": @(length), @"bytes": @(bytes)}];
     if (self.seeking) {
       [NeoPlaybackDiagnostics record:@"seek.issued" fields:@{@"targetMs": @(self.tsPositionTarget),
