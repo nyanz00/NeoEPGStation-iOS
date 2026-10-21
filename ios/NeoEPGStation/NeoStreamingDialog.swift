@@ -29,7 +29,7 @@ final class NeoStreamingDialog: UIViewController {
       stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor), stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
       stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor), stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor)])
     let title = NeoStyle.label(file.name+" - STREAMING", size: 22, bold: true); title.numberOfLines = 0
-    stack.addArrangedSubview(padded(title, top: 12, bottom: 12)); divider()
+    stack.addArrangedSubview(padded(title, top: 12, bottom: 12, horizontal: 16)); divider()
     let fields = UIStackView(); fields.axis = .vertical; fields.spacing = 12
     let row = UIStackView(); row.spacing = 12; row.distribution = .fillEqually
     let stream = UIButton(type: .system); let type = file.type == "ts" ? "HLS-TS" : "HLS"
@@ -41,7 +41,7 @@ final class NeoStreamingDialog: UIViewController {
       fields.addArrangedSubview(field("字幕", button: subtitle)); fields.addArrangedSubview(subtitleStatus)
       subtitle.isEnabled = false; subtitle.setTitle("確認中…", for: .normal); loadSubtitles()
     }
-    let content = padded(fields, top: 16, bottom: 16); content.backgroundColor = UIColor.white.withAlphaComponent(0.08)
+    let content = padded(fields, top: 16, bottom: 16, horizontal: 24); content.backgroundColor = UIColor.white.withAlphaComponent(0.08)
     stack.addArrangedSubview(content); divider()
     let actions = UIStackView(); actions.spacing = 16; actions.addArrangedSubview(UIView())
     let cancel = NeoStyle.button("キャンセル") { [weak self] in self?.cancel() }
@@ -50,13 +50,13 @@ final class NeoStreamingDialog: UIViewController {
     watchButton = watch; watch.isEnabled = file.type != "encoded"
     for button in [cancel, watch] { button.heightAnchor.constraint(equalToConstant: 42).isActive = true; actions.addArrangedSubview(button) }
     cancel.widthAnchor.constraint(equalToConstant: 116).isActive = true; watch.widthAnchor.constraint(equalToConstant: 74).isActive = true
-    stack.addArrangedSubview(padded(actions, top: 12, bottom: 12))
+    stack.addArrangedSubview(padded(actions, top: 12, bottom: 12, horizontal: 12))
     let tap = UITapGestureRecognizer(target: self, action: #selector(tappedBackground(_:))); tap.cancelsTouchesInView = false; view.addGestureRecognizer(tap)
   }
-  private func padded(_ child: UIView, top: CGFloat, bottom: CGFloat) -> UIView {
+  private func padded(_ child: UIView, top: CGFloat, bottom: CGFloat, horizontal: CGFloat) -> UIView {
     let box = UIView(); box.addSubview(child); child.translatesAutoresizingMaskIntoConstraints = false
-    NSLayoutConstraint.activate([child.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 20),
-      child.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -20), child.topAnchor.constraint(equalTo: box.topAnchor, constant: top),
+    NSLayoutConstraint.activate([child.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: horizontal),
+      child.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -horizontal), child.topAnchor.constraint(equalTo: box.topAnchor, constant: top),
       child.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -bottom)])
     return box
   }
@@ -125,6 +125,7 @@ final class NeoStreamingDialog: UIViewController {
     let dialog = NeoStreamingDialog(file: file, qualities: ["1080p", "720p"], source: source) { _, _ in }
     dialog.loadViewIfNeeded(); dialog.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844); dialog.view.layoutIfNeeded()
     dialog.subtitle.setTitle("字幕なし", for: .normal)
+    dialog.subtitle.isEnabled = true; dialog.watchButton?.isEnabled = true; dialog.subtitle.layoutIfNeeded()
     let screenshot = UIGraphicsImageRenderer(size: dialog.view.bounds.size).image { context in dialog.view.layer.render(in: context.cgContext) }
     try? screenshot.pngData()?.write(to: NeoPiPSmoke.directory.appendingPathComponent("streaming-dialog.png"))
     let checks = ["streamingDialogCentered": abs(dialog.card.center.y-dialog.view.bounds.midY) < 1,

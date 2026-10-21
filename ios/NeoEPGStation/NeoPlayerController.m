@@ -215,6 +215,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 @property (nonatomic) NSInteger seekGeneration;
 @property (nonatomic, copy) dispatch_block_t seekCompletion;
 @property (nonatomic) NSTimer *seekTimer;
+@property (nonatomic) BOOL tsPositionWaitForPause;
+@property (nonatomic) NSTimeInterval tsPositionResumeAt;
 @property (nonatomic) NSTimer *reloadTimer;
 @property (nonatomic) int64_t lastObservedTime;
 @property (nonatomic) int64_t lastObservedLength;
@@ -1121,6 +1123,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.tsPositionPending = (ts && target > 0) || [self isStreaming];
   self.videoOutputView.hidden = self.tsPositionPending;
   self.tsPositionIssued = NO; self.tsPositionCallback = NO; self.tsPositionTarget = target;
+  self.tsPositionWaitForPause = NO; self.tsPositionResumeAt = -100;
   self.initialPosition = 0;
   self.invalidClockReported = NO;
   self.inputClockGuardUntil = ts ? 0 : CACurrentMediaTime()+3;
@@ -1206,6 +1209,24 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     self.statusLabel.text = @"再生位置を復元できませんでした。再読み込みで再試行してください。";
     [self.chrome updateDiagnostics]; [self updateLoadingState]; [self showControls]; return;
   }
+  if ([self isStreaming]) {
+    // set_time is synchronous at the wrapper boundary, whereas pause/play are
+    // queued. Wait for an actual pause acknowledgement before priming a paused
+    // seek, then for Playing before issuing it. A cached seek followed at once
+    // by pause+seek must not let the earlier pause stop the new preparation.
+    if (self.tsPositionWaitForPause) {
+      if (self.player.state != VLCMediaPlayerStatePaused) { return; }
+      self.tsPositionWaitForPause = NO;
+    }
+    if (self.player.state == VLCMediaPlayerStatePaused) {
+      if (CACurrentMediaTime()-self.tsPositionResumeAt >= 0.25) {
+        self.tsPositionResumeAt = CACurrentMediaTime();
+        [NeoPlaybackDiagnostics record:@"ts.positionPrimeResume" fields:@{@"targetMs": @(self.tsPositionTarget)}];
+        [self.player play];
+      }
+      return;
+    }
+  }
   if (!self.tsPositionIssued) {
     int64_t length = [self mediaLength];
     BOOL stateReady = self.player.state == VLCMediaPlayerStatePaused ||
@@ -1214,7 +1235,6 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     // Adaptive HLS does not output the target picture while start-paused.
     // Decode invisibly/muted at the requested time until a real due frame
     // arrives. Keep the user's playback intent separate from this preparation.
-    if ([self isStreaming] && self.player.state == VLCMediaPlayerStatePaused) { [self.player play]; }
     self.tsPositionIssued = YES;
     self.tsPositionSequence = [self.player.observedClock[@"sequence"] unsignedLongLongValue];
     self.tsPositionDecoded = self.player.media.statistics.decodedVideo;
@@ -1686,7 +1706,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     }
 
     if ((state == VLCMediaPlayerStatePlaying || state == VLCMediaPlayerStatePaused) && self.player.state == state) {
-      [self applyPlaybackIntent];
+      if (self.tsPositionPending) { [self advanceTSPosition]; }
+      else { [self applyPlaybackIntent]; }
     }
     self.statusLabel.text = state == VLCMediaPlayerStateError || self.playbackFailed
       ? @"再生エラー · 接続・ファイル形式・認証を確認してください。"
@@ -2963,10 +2984,13 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     // A normal seek keeps the current picture and active input. Restoration
     // alone needs hidden/muted priming; both paths still verify new due video.
     BOOL priming = self.reloading || self.videoResumePriming || !self.wantsPlayback;
+    self.tsPositionWaitForPause = NO; self.tsPositionResumeAt = -100;
     self.videoOutputView.hidden = priming;
     if ([self isStreaming] && priming) {
       if (!self.restoreMuted) { self.restorePreviousMute = self.player.audio.isMuted; self.restoreMuted = YES; }
-      self.player.audio.muted = YES; [self.player play];
+      self.player.audio.muted = YES;
+      self.tsPositionWaitForPause = self.player.state != VLCMediaPlayerStatePaused;
+      [self.player pause];
     } else if (priming) { [self.player pause]; }
     [self armTSPosition]; [self updateLoadingState]; return;
   }
