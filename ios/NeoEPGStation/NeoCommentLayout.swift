@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 // Display coordinates are local to each destination. Expanding the viewport
 // changes travel/lane space, never the glyph scale or the shared source data.

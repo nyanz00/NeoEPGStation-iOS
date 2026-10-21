@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 var watch = NeoWatchClock()
 watch.sample(position: 0, duration: 120, running: true, seeking: false, rate: 1, now: 0)
