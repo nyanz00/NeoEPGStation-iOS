@@ -33,3 +33,24 @@ VideoToolboxという名前だけでハードウェア利用済みとは判定�
 GNU make 4.4のFIFO、ACLOCAL_PATHの明示で扱う。
 途中キャッシュに残る追加パッチの二重適用も再現試験を追加して修正した。
 取得済み・コンパイル済みの内容と検証済みフレームワークを保存し、以後の繰り返しを減らす。
+
+## 検証結果（Build 229）
+
+- ソース `28dfed82e06f9ffe7a8eceb5610df4655e2796b6`、
+  [Actions 39808827922](https://github.com/nyanz00/NeoEPGStation-iOS/actions/runs/39808827922)。
+  実機・シミュレーターのVLCKit、アプリの両ビルド、Foundation試験・型検査が成功。
+- AV1 Main 4:2:0の8/10bit、MKV/MP4の4条件で計192項目が成功。
+  途中開始、キーフレーム間への正確な連続シーク、キャッシュ再利用、停止中の音声ゲートを確認。
+  OSの対応判定はfalseで、各条件でdav1d/softwareを選択した。
+  通常シーク1～7でネイティブ選択をやり直さず、明示的な入力再作成時だけ再選択した。
+- 同じアプリを再利用した
+  [Actions 39812607221](https://github.com/nyanz00/NeoEPGStation-iOS/actions/runs/39812607221)
+  で、既存H.264のMKV/MP4の計96項目も成功。
+  VideoToolbox経路の再生・途中開始・精密シーク・一時停止中の復旧を確認した。
+- 配布IPAのSHA-256:
+  `582a8790fbf1d3e1d1c795ccfc5c49c8d77bef257cb7ebebf2978939b979f649`。
+  IPA内のVLCKitのSHA-256は実機用ビルド来歴と一致し、AV1選択マーカー、変更ソースとライセンスも同梱済み。
+- AV1対応実機でのVTセッション作成・実ハードウェア利用・シーク速度は未確認。
+  実機の診断ログで `vlc.av1Preflight.hardwareSupported`、`decoderDecisions`、
+  `decoders` を照合する。OS対応trueでも、構成やセッションが拒否された場合は
+  `fallback` とdav1d/softwareが残るので、対応判定だけで利用済みと判断しない。
