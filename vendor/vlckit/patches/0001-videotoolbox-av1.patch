@@ -3,11 +3,11 @@
 @@ -172,6 +172,8 @@
      return 0;
  }
- 
+
 +#include "av1.c.inc"
 +
  /* Codec Specific */
- 
+
  /** H26x Specific */
 @@ -918,6 +920,15 @@
  {
@@ -24,11 +24,11 @@
 +
          case VLC_CODEC_H264:
              return kCMVideoCodecType_H264;
- 
+
 @@ -1120,6 +1131,15 @@
                               kCFBooleanTrue);
  #endif
- 
+
 +    /* AV1 must never silently enter Apple's software implementation. The
 +     * existing decoder-module fallback selects dav1d if creation is rejected. */
 +    if (p_sys->codec == kCMVideoCodecType_AV1)
@@ -40,10 +40,10 @@
 +    }
      return decoderConfiguration;
  }
- 
+
 @@ -1214,8 +1234,31 @@
      CFRelease(destinationPixelBufferAttributes);
- 
+
      if (HandleVTStatus(p_dec, status, NULL) != VLC_SUCCESS)
 +    {
 +        if (p_sys->codec == kCMVideoCodecType_AV1)
@@ -72,10 +72,10 @@
 +        msg_Dbg(p_dec, "neo-av1-selection hardware=1");
 +    }
      return VLC_SUCCESS;
- 
+
  error:
 @@ -1385,6 +1428,18 @@
- 
+
      switch(codec)
      {
 +        case kCMVideoCodecType_AV1:
@@ -93,10 +93,27 @@
          case kCMVideoCodecType_H264:
              p_sys->pf_codec_init = InitH264;
              p_sys->pf_codec_clean = CleanH264;
-@@ -2257,6 +2312,8 @@
+@@ -1629,6 +1684,16 @@
+         .presentationTimeStamp = pts,
+         .decodeTimeStamp = CMTimeMake(p_block->i_dts, CLOCK_FREQ),
+     } };
++
++    if (p_sys->codec == kCMVideoCodecType_AV1)
++    {
++        /* VLC ticks are microseconds; unknown DTS is not an enormous negative
++         * CoreMedia timestamp. AV1 Matroska tracks legitimately have PTS only. */
++        timeInfoArray[0].duration = p_block->i_length > 0
++            ? CMTimeMake(p_block->i_length, CLOCK_FREQ) : kCMTimeInvalid;
++        if (p_block->i_dts == VLC_TICK_INVALID)
++            timeInfoArray[0].decodeTimeStamp = kCMTimeInvalid;
++    }
+
+     status = CMBlockBufferCreateWithMemoryBlock(kCFAllocatorDefault,// structureAllocator
+                                                 p_block->p_buffer,  // memoryBlock
+@@ -2257,6 +2322,8 @@
      set_capability("video decoder", 800)
      set_callbacks(OpenDecoder, CloseDecoder)
- 
+
 +    add_integer("videotoolbox-av1-hardware", -1, "AV1 hardware capability", "0 disables AV1 hardware; -1 or 1 checks the cached OS capability")
 +        change_integer_range(-1, 1)
      add_bool("videotoolbox-hw-decoder-only", true, VT_REQUIRE_HW_DEC, VT_REQUIRE_HW_DEC)
@@ -106,7 +123,7 @@
 +++ b/modules/codec/Makefile.am
 @@ -344,6 +344,8 @@
  codec_PLUGINS += $(LTLIBoggspots)
- 
+
  libvideotoolbox_plugin_la_SOURCES = codec/videotoolbox/decoder.c \
 +                                    codec/videotoolbox/av1.c.inc \
 +                                    packetizer/av1_obu.c packetizer/av1_obu.h \

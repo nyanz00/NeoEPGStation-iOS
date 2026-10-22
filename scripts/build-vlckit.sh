@@ -38,6 +38,7 @@ task_checkout() {
     test "$(git -C "$path" rev-parse HEAD)" = "$revision"
 }
 task_checkout "$task_wrapper" https://github.com/videolan/vlckit.git "$task_wrapper_rev"
+python3 "$task_root/scripts/prepare-vlckit-source.py" capture-times "$task_vlc" "$task_work/source-times.json"
 task_checkout "$task_vlc" https://github.com/videolan/vlc.git "$task_vlc_rev"
 python3 "$task_root/scripts/prepare-vlckit-source.py" "$task_vlc" "$task_wrapper/libvlc/patches"
 git -C "$task_vlc" apply --index "$task_root/vendor/vlckit/patches/0001-videotoolbox-av1.patch"
@@ -52,9 +53,10 @@ p.write_text(s)
 for relative in ('extras/tools/packages.mak', 'contrib/src/main.mak'):
     source = p.parents[3] / relative
     # The redirect service selected a mirror with an expired TLS certificate.
-    # Use GNU's canonical HTTPS host; keep every upstream SHA-512 check intact.
+    # Use a fixed HTTPS mirror; keep every upstream SHA-512 check intact.
     source.write_text(source.read_text().replace('https://ftpmirror.gnu.org/gnu', 'https://mirrors.kernel.org/gnu'))
 PY
+python3 "$task_root/scripts/prepare-vlckit-source.py" restore-times "$task_vlc" "$task_work/source-times.json"
 python3 "$task_root/scripts/fetch-vlckit-tools.py" "$task_vlc/extras/tools"
 mkdir -p "$task_vlc/build-$task_sdk-arm64"
 (
@@ -82,6 +84,7 @@ PY
     CONFIGURATION=Release
     SDK_MIN=18.0
     SDK=""
+    out="/dev/stdout"
     FARCH=aarch64
     if [ "$task_sdk" = iphoneos ]; then
         build_device_static_lib iphone

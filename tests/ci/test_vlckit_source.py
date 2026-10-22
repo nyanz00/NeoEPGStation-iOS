@@ -28,11 +28,23 @@ class SourcePreparationTests(unittest.TestCase):
             (patches / 'new.patch').write_text('diff --git a/added b/added\nnew file mode 100644\n--- /dev/null\n+++ b/added\n@@ -0,0 +1 @@\n+new\n', newline='\n')
             # Simulate an old failed build: new source is untracked; archive and
             # compiler outputs must survive both this migration and later resets.
-            (source / 'added').write_text('new\n')
+            (source / 'added').write_bytes(b'new\n')
             (source / 'compiled.a').write_bytes(b'keep')
             for _ in range(2):
                 git('reset', '--hard', 'HEAD')
                 prepare.apply(source, patches)
                 self.assertEqual((source / 'added').read_text(), 'new\n')
                 self.assertEqual((source / 'compiled.a').read_bytes(), b'keep')
+
+            snapshot = root / 'times.json'
+            stamp = (source / 'added').stat().st_mtime_ns
+            prepare.capture_times(source, snapshot)
+            (source / 'added').write_bytes(b'new\n')
+            prepare.restore_times(source, snapshot)
+            self.assertEqual((source / 'added').stat().st_mtime_ns, stamp)
+            # A real code change must stay newer and trigger compilation.
+            (source / 'added').write_text('changed\n')
+            modified = (source / 'added').stat().st_mtime_ns
+            prepare.restore_times(source, snapshot)
+            self.assertEqual((source / 'added').stat().st_mtime_ns, modified)
 
