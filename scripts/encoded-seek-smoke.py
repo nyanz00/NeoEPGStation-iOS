@@ -92,8 +92,9 @@ try:
         assert releases and all(e['paused'] for e in releases), releases
         starts = [e for e in events if e['event'] == 'seek.start']
         assert len(starts) == 8 and any(e['targetMs'] < 30000 for e in starts), starts
-        assert all(row['networkBytes'] == 0 for row in result['rows']), result['rows']
+        seeks = [row for row in result['rows'] if 'phase' in row]
+        assert all(row['networkBytes'] == 0 for row in seeks), seeks
         print(container, 'PASS', len(result['checks']), 'assertions; exact cached seek-to-video ms:',
-              [round(row['videoReadyMs']) for row in result['rows']], flush=True)
+              [round(row['videoReadyMs']) for row in seeks], flush=True)
 finally:
     server.shutdown()

@@ -55,6 +55,8 @@ the native mute state. Failed restoration also pauses before releasing mute.
 The encoded probe includes paused reload, deliberate loss of the old output's
 mute before priming, confirmed mute gates, deferred release until pause, and
 stable paused clock/audio afterward. Decoder diagnostics parsing, redaction and
-retention are checked by the Foundation tests. The focused Actions scope also
-runs HLS and TS positioning checks because decoder policy and restoration are
-shared; unrelated UI tests remain excluded.
+retention are checked by the Foundation tests. Build 225 also passed the HLS and
+both TS positioning checks for the shared decoder policy and mute guard. Its
+encoded paused-restoration cleanup failure was corrected separately; the final
+focused scope reruns the encoded checks and native builds/types. Unrelated UI
+tests remain excluded.

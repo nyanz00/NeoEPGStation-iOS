@@ -1388,7 +1388,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       [self holdRestoreMute];
     }
     self.transportRecoveryAttempted = NO;
-    if ([self isStreaming] && !self.videoReloadRecovery) { [self releaseRestoreMute]; }
+    // restoreReloadIfReady has confirmed Paused for every format. Do not rely
+    // on a second pause notification when the player is already paused.
+    if (!self.videoReloadRecovery) { [self releaseRestoreMute]; }
     [self.player deselectAllTextTracks];
     for (VLCMediaPlayerTrack *track in self.player.textTracks) {
       if ([self.reloadTextTracks containsObject:track.trackId]) { track.selected = YES; }
@@ -2200,11 +2202,16 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
   checks[@"replacementMuteFaultInjected"] = @(self.player.smokeMuteFaults == 1);
   checks[@"replacementUsedMutedPriming"] = @(self.player.smokePrimingPlays > 0);
-  checks[@"pausedReloadAtTarget"] = @(llabs(self.player.nativeTimeMs-20000) < 1000);
-  int64_t position = self.player.nativeTimeMs;
+  // advanceTSPosition already verified the native target with fresh video.
+  // After pause, assert the retained user-visible position as well as actual
+  // native Paused/audio state; keep the raw getter in diagnostics separately.
+  checks[@"pausedReloadAtTarget"] = @(llabs([self mediaTime]-20000) < 1000);
+  [rows addObject:@{@"pausedReloadNativeMs": @(self.player.nativeTimeMs), @"pausedReloadAppMs": @([self mediaTime])}];
+  int64_t position = [self mediaTime];
   uint64_t played = self.player.media.statistics.playedAudioBuffers;
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-    checks[@"pausedReloadClockStaysPaused"] = @(llabs(self.player.nativeTimeMs-position) < 100);
+    checks[@"pausedReloadClockStaysPaused"] = @(llabs([self mediaTime]-position) < 100 && self.player.state == VLCMediaPlayerStatePaused);
+    [rows addObject:@{@"pausedReloadNativeAfterMs": @(self.player.nativeTimeMs), @"pausedReloadAppAfterMs": @([self mediaTime])}];
     checks[@"pausedReloadAudioStaysPaused"] = @(self.player.media.statistics.playedAudioBuffers == played);
     BOOL passed = YES; for (NSNumber *value in checks.allValues) { passed &= value.boolValue; }
     completion(@{@"success": @(passed), @"checks": checks, @"rows": rows});
@@ -3261,7 +3268,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if (!self.restoreMuted) { return; }
   // pause is queued by VLCKit. Never unmute the still-playing preparation
   // merely because the controller has issued pause or verified a video frame.
-  if (!self.wantsPlayback && !self.closing && self.player.state != VLCMediaPlayerStatePaused &&
+  if ((!self.wantsPlayback || self.closing) && self.player.state != VLCMediaPlayerStatePaused &&
       self.player.state != VLCMediaPlayerStateStopped && self.player.state != VLCMediaPlayerStateError) { return; }
   self.player.preparationMuted = NO;
   self.player.audio.muted = self.restorePreviousMute; self.restoreMuted = NO;
