@@ -160,6 +160,14 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     [NeoPlaybackDiagnostics nativeError:kind level:level];
   }
   NSString *event = nil; long long first = 0, second = 0;
+  unsigned optimized = 0, prerollFrames = 0, noOutput = 0, pictures = 0;
+  long long queueWait = 0, prerollElapsed = 0;
+  if ([message hasPrefix:@"neo-preroll-ready "] &&
+      sscanf(message.UTF8String, "neo-preroll-ready optimized=%u frames=%u noOutput=%u pictures=%u waitUs=%lld elapsedUs=%lld",
+        &optimized, &prerollFrames, &noOutput, &pictures, &queueWait, &prerollElapsed) == 6) {
+    [NeoPlaybackDiagnostics record:@"vlc.prerollReady" fields:@{@"optimized": @(optimized != 0), @"frames": @(prerollFrames),
+      @"noOutput": @(noOutput), @"pictures": @(pictures), @"queueWaitMs": @(queueWait/1000.0), @"durationMs": @(prerollElapsed/1000.0)}];
+  }
   unsigned long long position = 0;
   if ([message hasPrefix:@"seek: preroll{ req: "] &&
       sscanf(message.UTF8String, "seek: preroll{ req: %lld, start-pts: %lld, start-fpos: %llu}", &first, &second, &position) == 3) {
@@ -1176,7 +1184,15 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [media addOption:@":videotoolbox-hw-decoder-only"];
   BOOL av1Hardware = NeoAV1HardwareSupported();
   [media addOption:av1Hardware ? @":videotoolbox-av1-hardware=1" : @":videotoolbox-av1-hardware=0"];
-  [NeoPlaybackDiagnostics record:@"vlc.av1Preflight" fields:@{@"hardwareSupported": @(av1Hardware), @"query": @"cachedOSCapability", @"patchVersion": @1}];
+  [NeoPlaybackDiagnostics record:@"vlc.av1Preflight" fields:@{@"hardwareSupported": @(av1Hardware), @"query": @"cachedOSCapability", @"patchVersion": @2}];
+  BOOL suppressPreroll = YES;
+#if TARGET_OS_SIMULATOR
+  // A/B uses the same signed simulator binary, codec, cache and exact targets.
+  // The diagnostic override is never offered as a playback setting.
+  suppressPreroll = ![NSProcessInfo.processInfo.environment[@"NEO_EPG_PREROLL_BASELINE"] isEqual:@"1"];
+#endif
+  [media addOption:suppressPreroll ? @":videotoolbox-skip-preroll-output" : @":no-videotoolbox-skip-preroll-output"];
+  [NeoPlaybackDiagnostics record:@"vlc.prerollPolicy" fields:@{@"optimized": @(suppressPreroll)}];
   [NeoPlaybackDiagnostics record:@"vlc.decoderPolicy" fields:@{@"order": @"videotoolbox,any", @"hardwareOnlyVideoToolbox": @YES}];
 #if TARGET_OS_SIMULATOR
   // Select the fixture's known track before the first PES, not by resetting

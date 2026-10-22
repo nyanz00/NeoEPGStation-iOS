@@ -185,7 +185,9 @@ jobs:
       - name: Check encoded PLAY cached seek latency
         id: encoded-seek-checks
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'encoded-seek' }}
-        run: python3 -u scripts/encoded-seek-smoke.py
+        run: |
+          python3 -u scripts/encoded-seek-smoke.py --compare-preroll
+          python3 -u scripts/encoded-seek-smoke.py --av1
       - name: Check AV1 selection, 8/10-bit playback and accurate cached seeks
         id: av1-checks
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'av1-decoder' }}
@@ -304,7 +306,8 @@ jobs:
             python3 -u scripts/encoded-seek-smoke.py --av1
           elif [ "$CHECK_SCOPE" = "encoded-seek" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
-            python3 -u scripts/encoded-seek-smoke.py
+            python3 -u scripts/encoded-seek-smoke.py --compare-preroll
+            python3 -u scripts/encoded-seek-smoke.py --av1
           elif [ "$CHECK_SCOPE" = "streaming" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
             python3 -u scripts/streaming-smoke.py

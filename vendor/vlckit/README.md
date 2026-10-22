@@ -8,7 +8,7 @@ VLCKit remains at `2e0868f5ed40fe59cd92f377645fdcc260c6e759`
 - https://github.com/videolan/vlckit/tree/2e0868f5ed40fe59cd92f377645fdcc260c6e759
 - https://github.com/videolan/vlc/tree/005e69e67a8730f128e44bde68437fbb048cf45f
 
-The additional LGPL-2.1-or-later patch and `av1.c.inc` in this directory add
+The additional LGPL-2.1-or-later patches and `av1.c.inc` in this directory add
 AV1 Main profile 4:2:0 8/10-bit support to the existing VideoToolbox decoder.
 They retain VLC's demuxer, audio clock, output, flush, PiP and precise seeking.
 The OS hardware capability is queried once, not tested by playing a video.
@@ -19,6 +19,21 @@ session initialization falls back before playback, without reopening the input.
 Seek flushes discard/wait for outstanding old frames using the existing VLC
 decoder lifecycle. An unrecoverable runtime VT failure uses VLC's existing
 one-way `videotoolbox-failed` fallback for that elementary stream.
+
+Patch version 2 also avoids output images for explicitly marked, dated,
+progressive preroll pictures before an accurate seek target. Reference decoding
+and POC/DPB metadata are retained. `DoNotOutputFrame` is a hint; even if VT returns
+an image, the decoder does not wrap it in a VLC output picture. An expected NULL
+output is not treated as decoder failure. Preroll submission is bounded to 16
+outstanding frames; normal output pacing and memory limits stay unchanged.
+Submission accounting precedes DecodeFrame and saves callback-owned scalars,
+including when the no-output callback occurs before DecodeFrame returns.
+The per-input `videotoolbox-skip-preroll-output` flag defaults to true; only the
+simulator diagnostic launcher exposes a same-binary baseline override. Numeric
+`neo-preroll-ready` diagnostics record the suppression, queue wait and duration.
+`encoded-seek` compares enabled/disabled runs on the same 1080p H.264 MKV/MP4,
+then checks AV1 fallback and seeks. Simulator results do not establish AV1
+hardware seek performance on a physical iPhone.
 
 `scripts/build-vlckit.sh` builds arm64 device and simulator slices separately.
 The upstream deployment target is raised to iOS 18, matching this app. GNU

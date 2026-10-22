@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import statistics
 import subprocess
 import sys
 import threading
@@ -58,25 +59,37 @@ server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 try:
     av1 = '--av1' in sys.argv
-    for container in (('av1-seek-8.mkv', 'av1-seek-10.mkv', 'av1-seek-8.mp4', 'av1-seek-10.mp4') if av1 else ('mkv', 'mp4')):
+    compare = '--compare-preroll' in sys.argv
+    comparisons = []
+    containers = ('av1-seek-8.mkv', 'av1-seek-10.mkv', 'av1-seek-8.mp4', 'av1-seek-10.mp4') if av1 else ('mkv', 'mp4')
+    cases = [(c, False, c) for c in containers]
+    if compare:
+        # Paired runs of the same 1080p/24fps, 24-second GOP input and targets.
+        # Reverse order for MP4 to avoid attributing process warm-up to the patch.
+        cases = [(f'encoded-seek-1080.{ext}', baseline, f'1080-{ext}-{label}')
+                 for ext, modes in [('mkv', [('baseline', True), ('optimized', False)]),
+                                    ('mp4', [('optimized', False), ('baseline', True)])]
+                 for label, baseline in modes]
+    for container, baseline, output_name in cases:
         # Deliberately sparse keyframes (24s), not an all-intra/short-GOP clip.
         # Exact targets between them must be retained; fast approximate seeking
         # could look faster while landing on a different picture.
-        video = Path(f'tests/fixtures/{container}' if av1 else f'tests/fixtures/encoded-seek.{container}').read_bytes()
+        video = Path(f'tests/fixtures/{container}' if av1 or compare else f'tests/fixtures/encoded-seek.{container}').read_bytes()
         subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True)
         names = ['encoded-seek-smoke.json', 'encoded-seek-diagnostics.json']
         for name in names:
             (documents / name).unlink(missing_ok=True)
         environment = dict(os.environ, SIMCTL_CHILD_NEO_EPG_ENCODED_SEEK=f'http://127.0.0.1:{server.server_port}')
+        environment['SIMCTL_CHILD_NEO_EPG_PREROLL_BASELINE'] = '1' if baseline else '0'
         subprocess.run(['xcrun', 'simctl', 'launch', device, bundle], env=environment, check=True, timeout=60)
         deadline = time.monotonic()+90
         while not all((documents / name).exists() for name in names) and time.monotonic() < deadline:
             time.sleep(.5)
         for name in names:
             if (documents / name).exists():
-                shutil.copyfile(documents / name, dist / f'{container}-{name}')
-        result = json.loads((dist / f'{container}-{names[0]}').read_text())
-        diagnostic = json.loads((dist / f'{container}-{names[1]}').read_text())
+                shutil.copyfile(documents / name, dist / f'{output_name}-{name}')
+        result = json.loads((dist / f'{output_name}-{names[0]}').read_text())
+        diagnostic = json.loads((dist / f'{output_name}-{names[1]}').read_text())
         assert result['success'] and all(result['checks'].values()), result
         events = diagnostic['events']
         assert not any(e['event'] in ('seek.timeout', 'ts.positionFailed') for e in events), events[-15:]
@@ -114,7 +127,32 @@ try:
         assert len(starts) == 8 and any(e['targetMs'] < 30000 for e in starts), starts
         seeks = [row for row in result['rows'] if 'phase' in row]
         assert all(row['networkBytes'] == 0 for row in seeks), seeks
-        print(container, 'PASS', len(result['checks']), 'assertions; exact cached seek-to-video ms:',
+        if compare:
+            preroll = [e for e in events if e['event'] == 'vlc.prerollReady' and 1 <= e['seek'] <= 8]
+            assert len(preroll) >= 6 and all(e['frames'] > 0 for e in preroll), preroll
+            assert all(e['optimized'] != baseline for e in preroll), preroll
+            if baseline:
+                assert all(e['noOutput'] == 0 for e in preroll) and sum(e['pictures'] for e in preroll) > 100, preroll
+            else:
+                assert all(e['noOutput'] > 0 and e['pictures'] == 0 for e in preroll), preroll
+            comparisons.append({'case': output_name, 'baseline': baseline,
+                                'seekToVideoMs': [row['videoReadyMs'] for row in seeks],
+                                'prerollMs': [e['durationMs'] for e in preroll],
+                                'suppressedImages': sum(e['noOutput'] for e in preroll),
+                                'wrappedImages': sum(e['pictures'] for e in preroll)})
+        print(output_name, 'PASS', len(result['checks']), 'assertions; exact cached seek-to-video ms:',
               [round(row['videoReadyMs']) for row in seeks], flush=True)
+    if compare:
+        summary = []
+        for ext in ('mkv', 'mp4'):
+            before = next(c for c in comparisons if c['case'] == f'1080-{ext}-baseline')
+            after = next(c for c in comparisons if c['case'] == f'1080-{ext}-optimized')
+            summary.append({'container': ext,
+                            'baselineMedianMs': statistics.median(before['seekToVideoMs']),
+                            'optimizedMedianMs': statistics.median(after['seekToVideoMs']),
+                            'baselinePrerollMedianMs': statistics.median(before['prerollMs']),
+                            'optimizedPrerollMedianMs': statistics.median(after['prerollMs'])})
+        (dist / 'preroll-comparison.json').write_text(json.dumps({'runs': comparisons, 'summary': summary}, indent=2))
+        print('Paired same-binary preroll comparison:', json.dumps(summary), flush=True)
 finally:
     server.shutdown()

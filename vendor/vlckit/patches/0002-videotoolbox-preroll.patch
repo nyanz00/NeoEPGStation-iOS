@@ -1,0 +1,181 @@
+--- a/modules/codec/videotoolbox/decoder.c
++++ b/modules/codec/videotoolbox/decoder.c
+@@ -128,6 +128,10 @@
+     struct dpb_s                dpb;
+
+     bool                        b_format_propagated;
++    bool                        b_skip_preroll_output;
++    bool                        b_preroll_stats_pending;
++    unsigned                    preroll_frames, preroll_no_output, preroll_pictures;
++    vlc_tick_t                  preroll_started, preroll_wait;
+
+     enum vtsession_status       vtsession_status;
+
+@@ -1379,6 +1383,7 @@
+     p_dec->p_sys = p_sys;
+     p_sys->session = NULL;
+     p_sys->codec = codec;
++    p_sys->b_skip_preroll_output = var_InheritBool(p_dec, "videotoolbox-skip-preroll-output");
+     p_sys->videoFormatDescription = NULL;
+     p_sys->dpb.i_max_pics = 4;
+     p_sys->dpb.i_fields_per_buffer = 1;
+@@ -1829,6 +1834,7 @@
+ {
+     decoder_sys_t *p_sys = p_dec->p_sys;
+     Drain(p_dec, true);
++    p_sys->b_preroll_stats_pending = false;
+     date_Set(&p_sys->pts, VLC_TICK_INVALID);
+     if(p_sys->pf_codec_flush)
+         p_sys->pf_codec_flush(p_dec);
+@@ -1853,6 +1859,29 @@
+     p_sys->b_discard_decoder_output = false;
+     p_sys->sync_state = p_sys->start_sync_state;
+     vlc_mutex_unlock(&p_sys->lock);
++}
++
++/* Only decoder-only preroll may use the deeper, bounded submission queue.
++ * VT retains its reference pictures but is asked not to allocate output images.
++ * Keep ordinary display pacing and the output-memory bound unchanged. */
++static void WaitPrerollSlot(struct pic_pacer *pacer)
++{
++    vlc_mutex_lock(&pacer->lock);
++    while (pacer->queued_fields_for_decode >= 16 * 2)
++        vlc_cond_wait(&pacer->wait, &pacer->lock);
++    vlc_mutex_unlock(&pacer->lock);
++}
++
++static void ReportPreroll(decoder_t *dec)
++{
++    decoder_sys_t *sys = dec->p_sys; /* Caller holds sys->lock. */
++    if (!sys->b_preroll_stats_pending)
++        return;
++    msg_Dbg(dec, "neo-preroll-ready optimized=%u frames=%u noOutput=%u pictures=%u waitUs=%"PRId64" elapsedUs=%"PRId64,
++        (unsigned)sys->b_skip_preroll_output, sys->preroll_frames,
++        sys->preroll_no_output, sys->preroll_pictures,
++        sys->preroll_wait, vlc_tick_now() - sys->preroll_started);
++    sys->b_preroll_stats_pending = false;
+ }
+
+ static int DecodeBlock(decoder_t *p_dec, block_t *p_block)
+@@ -2036,10 +2065,48 @@
+         goto skip;
+     }
+
+-    pic_pacer_WaitAllocatableSlot(p_sys->pic_pacer, p_info->b_field);
++    /* Trust explicit demux preroll only when a dated, progressive picture is
++     * known to precede the requested display position. Keep reorder metadata:
++     * H.264/HEVC still need POC/timing updates even without an output image. */
++    p_info->b_preroll = (p_block->i_flags & BLOCK_FLAG_PREROLL) &&
++                        p_block->i_pts != VLC_TICK_INVALID &&
++                        p_info->b_progressive && !p_info->b_field;
++    p_info->b_no_output = p_info->b_preroll && p_sys->b_skip_preroll_output;
++    if (p_info->b_preroll)
++    {
++        vlc_mutex_lock(&p_sys->lock);
++        if (!p_sys->b_preroll_stats_pending)
++        {
++            p_sys->b_preroll_stats_pending = true;
++            p_sys->preroll_started = vlc_tick_now();
++            p_sys->preroll_frames = p_sys->preroll_no_output = p_sys->preroll_pictures = 0;
++            p_sys->preroll_wait = 0;
++        }
++        p_sys->preroll_frames++;
++        vlc_mutex_unlock(&p_sys->lock);
++    }
++    const vlc_tick_t wait_started = vlc_tick_now();
++    if (p_info->b_no_output)
++        WaitPrerollSlot(p_sys->pic_pacer);
++    else
++        pic_pacer_WaitAllocatableSlot(p_sys->pic_pacer, p_info->b_field);
++    if (p_info->b_preroll)
++    {
++        vlc_mutex_lock(&p_sys->lock);
++        p_sys->preroll_wait += vlc_tick_now() - wait_started;
++        vlc_mutex_unlock(&p_sys->lock);
++    }
+
+     VTDecodeInfoFlags flagOut;
+     VTDecodeFrameFlags decoderFlags = kVTDecodeFrame_EnableAsynchronousDecompression;
++    if (p_info->b_no_output)
++        decoderFlags |= kVTDecodeFrame_DoNotOutputFrame;
++
++    /* A successful no-output decode can call back before DecodeFrame returns.
++     * Account first and save scalar fields: the callback owns/frees p_info. */
++    const bool b_field = p_info->b_field;
++    const vlc_tick_t frame_pts = p_info->pts;
++    pic_pacer_AccountScheduledDecode(p_sys->pic_pacer, b_field);
+
+     OSStatus status =
+         VTDecompressionSessionDecodeFrame(p_sys->session, sampleBuffer,
+@@ -2048,11 +2115,9 @@
+     enum vtsession_status vtsession_status;
+     if (HandleVTStatus(p_dec, status, &vtsession_status) == VLC_SUCCESS)
+     {
+-        pic_pacer_AccountScheduledDecode(p_sys->pic_pacer, p_info->b_field);
+-
+         if(p_sys->decoder_state != STATE_DECODER_STARTED)
+         {
+-            msg_Dbg(p_dec, "session accepted first frame %"PRId64, p_info->pts);
++            msg_Dbg(p_dec, "session accepted first frame %"PRId64, frame_pts);
+             p_sys->decoder_state = STATE_DECODER_STARTED;
+         }
+         if (p_block->i_flags & BLOCK_FLAG_END_OF_SEQUENCE)
+@@ -2060,7 +2125,10 @@
+     }
+     else
+     {
+-        msg_Dbg(p_dec, "session rejected frame %"PRId64" with status %d", p_info->pts, (int)status);
++        /* A failed submission has no callback to release its accounting. */
++        pic_pacer_AccountFinishedDecode(p_sys->pic_pacer, b_field);
++        free(p_info);
++        msg_Dbg(p_dec, "session rejected frame %"PRId64" with status %d", frame_pts, (int)status);
+         p_sys->sync_state = p_sys->start_sync_state;
+         vlc_mutex_lock(&p_sys->lock);
+         p_sys->vtsession_status = vtsession_status;
+@@ -2188,6 +2256,16 @@
+         goto end;
+     }
+
++    if (p_info->b_no_output)
++    {
++        /* NULL is expected for DoNotOutputFrame; it is not a decoder failure.
++         * Preserve DPB metadata without creating/attaching a VLC picture. */
++        p_sys->preroll_no_output++;
++        OnDecodedFrame(p_dec, p_info);
++        p_info = NULL;
++        goto end;
++    }
++
+     if (!imageBuffer)
+     {
+         if (unlikely((infoFlags & kVTDecodeInfo_FrameDropped) != kVTDecodeInfo_FrameDropped))
+@@ -2264,6 +2342,10 @@
+     else
+         p_info->p_picture = p_pic;
+
++    if (p_info->b_preroll)
++        p_sys->preroll_pictures += p_info->p_picture != NULL;
++    else
++        ReportPreroll(p_dec);
+     OnDecodedFrame( p_dec, p_info );
+     p_info = NULL;
+
+@@ -2322,6 +2404,7 @@
+     set_capability("video decoder", 800)
+     set_callbacks(OpenDecoder, CloseDecoder)
+
++    add_bool("videotoolbox-skip-preroll-output", true, "Skip preroll image output", "Decode reference frames without producing images before the seek target")
+     add_integer("videotoolbox-av1-hardware", -1, "AV1 hardware capability", "0 disables AV1 hardware; -1 or 1 checks the cached OS capability")
+         change_integer_range(-1, 1)
+     add_bool("videotoolbox-hw-decoder-only", true, VT_REQUIRE_HW_DEC, VT_REQUIRE_HW_DEC)
+--- a/modules/codec/videotoolbox/dpb.h
++++ b/modules/codec/videotoolbox/dpb.h
+@@ -42,6 +42,8 @@
+     bool b_keyframe;
+     bool b_leading;
+     bool b_field;
++    bool b_preroll;
++    bool b_no_output;
+     bool b_progressive;
+     bool b_top_field_first;
+     bool b_output_needed;

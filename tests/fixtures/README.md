@@ -11,6 +11,17 @@ ffmpeg -i av1-seek-8.mkv -map 0 -c copy -movflags +faststart av1-seek-8.mp4
 ffmpeg -i av1-seek-10.mkv -map 0 -c copy -movflags +faststart av1-seek-10.mp4
 ```
 
+`encoded-seek-1080.mkv` と `encoded-seek-1080.mp4` は72秒・1920×1080・24fps、
+H.264、3 Bフレーム、24秒間隔のキーフレームと440Hzの音声。
+同じバイナリでpreroll画像出力の有効・無効を比較する。
+MKVは無効→有効、MP4は有効→無効の順で、同じ正確なシーク位置・キャッシュを使用する。
+画像出力省略が実際に適用されたことも確認し、単なる試験成功を速度改善とは扱わない。
+
+```sh
+ffmpeg -f lavfi -i testsrc=size=1920x1080:rate=24 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 72 -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 32 -g 576 -keyint_min 576 -sc_threshold 0 -bf 3 -c:a aac -b:a 64k -movflags +faststart -map_metadata -1 encoded-seek-1080.mp4
+ffmpeg -i encoded-seek-1080.mp4 -map 0 -c copy -map_metadata -1 encoded-seek-1080.mkv
+```
+
 `encoded-seek.mkv` と `encoded-seek.mp4` は72秒・320×180・24fpsの合成映像と440Hzの音声。
 24秒間隔のキーフレームの間への正確なシークと、30秒の途中開始位置より前への戻しを検証する。
 実機アプリには同梱しない。CIで毎回FFmpegをインストール・生成する時間を省く。
