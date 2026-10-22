@@ -15,6 +15,11 @@ fi
 # macOS make 3.81 pipe descriptors are closed by them, which breaks Ninja.
 export MAKE="$(command -v gmake)"
 "$MAKE" --version
+task_brew_prefix=$(brew --prefix)
+test -f "$task_brew_prefix/share/aclocal/pkg.m4"
+# VLC builds its own automake. Its aclocal cannot discover Homebrew's pkg.m4
+# through its own installation prefix even though pkg-config is on PATH.
+export ACLOCAL_PATH="$task_brew_prefix/share/aclocal${ACLOCAL_PATH:+:$ACLOCAL_PATH}"
 read -r task_wrapper_rev task_vlc_rev < <(python3 -c 'import json; s=json.load(open("vendor/vlckit/source.json")); print(s["vlckit"], s["vlc"])')
 
 task_checkout() {
@@ -48,8 +53,9 @@ for relative in ('extras/tools/packages.mak', 'contrib/src/main.mak'):
     source = p.parents[3] / relative
     # The redirect service selected a mirror with an expired TLS certificate.
     # Use GNU's canonical HTTPS host; keep every upstream SHA-512 check intact.
-    source.write_text(source.read_text().replace('https://ftpmirror.gnu.org/gnu', 'https://ftp.gnu.org/gnu'))
+    source.write_text(source.read_text().replace('https://ftpmirror.gnu.org/gnu', 'https://mirrors.kernel.org/gnu'))
 PY
+python3 "$task_root/scripts/fetch-vlckit-tools.py" "$task_vlc/extras/tools"
 mkdir -p "$task_vlc/build-$task_sdk-arm64"
 (
     cd "$task_vlc/build-$task_sdk-arm64"

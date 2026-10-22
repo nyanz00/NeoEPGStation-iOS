@@ -35,6 +35,6 @@ if sdk == 'iphoneos':
                 if path.is_file() and ('.tar.' in path.name or path.suffix in ('.zip', '.tgz')):
                     archive.add(path, arcname='VLCKit/libvlc/vlc/' + str(path.relative_to(vlc)))
         archive.add(root / 'vendor/vlckit', arcname='NeoEPGStation/vendor/vlckit')
-        for script in ('build-vlckit.sh', 'prepare-vlckit-source.py', 'vlckit-provenance.py'):
+        for script in ('build-vlckit.sh', 'prepare-vlckit-source.py', 'fetch-vlckit-tools.py', 'vlckit-provenance.py'):
             archive.add(root / 'scripts' / script, arcname='NeoEPGStation/scripts/' + script)
     print('Preserved complete modified VLC/VLCKit sources and downloaded dependency sources')

@@ -22,8 +22,11 @@ one-way `videotoolbox-failed` fallback for that elementary stream.
 
 `scripts/build-vlckit.sh` builds arm64 device and simulator slices separately.
 The upstream deployment target is raised to iOS 18, matching this app. GNU
-source downloads use the canonical HTTPS host instead of a redirect that can
-select an expired mirror; upstream source checksums remain mandatory. No codec
+source downloads use an explicit HTTPS mirror instead of a redirect that can
+select an expired mirror; upstream source checksums remain mandatory. The m4
+archive missing from VideoLAN's mirror uses bounded, verified HTTPS fallbacks.
+GNU make 4.4's FIFO jobserver and the host pkg-config macros are exposed to the
+upstream build tools. No codec
 dependency version is changed. The wrapper's official archive functions are
 used with signing disabled for the framework and unused CPU slices omitted.
 
