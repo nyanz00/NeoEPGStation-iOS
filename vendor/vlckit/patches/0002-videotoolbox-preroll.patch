@@ -1,17 +1,28 @@
 --- a/modules/codec/videotoolbox/decoder.c
 +++ b/modules/codec/videotoolbox/decoder.c
-@@ -128,6 +128,10 @@
+@@ -128,6 +128,12 @@
      struct dpb_s                dpb;
 
      bool                        b_format_propagated;
 +    bool                        b_skip_preroll_output;
++    bool                        b_av1_references_only, b_av1_filter_unsupported;
++    unsigned                    preroll_dropped;
 +    bool                        b_preroll_stats_pending;
 +    unsigned                    preroll_frames, preroll_no_output, preroll_pictures;
 +    vlc_tick_t                  preroll_started, preroll_wait;
 
      enum vtsession_status       vtsession_status;
 
-@@ -1379,6 +1383,7 @@
+@@ -1232,6 +1238,8 @@
+                                           &decoderCallbackRecord, &p_sys->session);
+     CFRelease(decoderConfiguration);
+     CFRelease(destinationPixelBufferAttributes);
++    p_sys->b_av1_references_only = false;
++    p_sys->b_av1_filter_unsupported = false;
+
+     if (HandleVTStatus(p_dec, status, NULL) != VLC_SUCCESS)
+     {
+@@ -1379,6 +1387,7 @@
      p_dec->p_sys = p_sys;
      p_sys->session = NULL;
      p_sys->codec = codec;
@@ -19,7 +30,7 @@
      p_sys->videoFormatDescription = NULL;
      p_sys->dpb.i_max_pics = 4;
      p_sys->dpb.i_fields_per_buffer = 1;
-@@ -1829,6 +1834,7 @@
+@@ -1829,6 +1838,7 @@
  {
      decoder_sys_t *p_sys = p_dec->p_sys;
      Drain(p_dec, true);
@@ -27,7 +38,7 @@
      date_Set(&p_sys->pts, VLC_TICK_INVALID);
      if(p_sys->pf_codec_flush)
          p_sys->pf_codec_flush(p_dec);
-@@ -1853,6 +1859,29 @@
+@@ -1853,6 +1863,92 @@
      p_sys->b_discard_decoder_output = false;
      p_sys->sync_state = p_sys->start_sync_state;
      vlc_mutex_unlock(&p_sys->lock);
@@ -49,15 +60,78 @@
 +    decoder_sys_t *sys = dec->p_sys; /* Caller holds sys->lock. */
 +    if (!sys->b_preroll_stats_pending)
 +        return;
-+    msg_Dbg(dec, "neo-preroll-ready optimized=%u frames=%u noOutput=%u pictures=%u waitUs=%"PRId64" elapsedUs=%"PRId64,
++    msg_Dbg(dec, "neo-preroll-ready optimized=%u frames=%u noOutput=%u pictures=%u waitUs=%"PRId64" elapsedUs=%"PRId64" dropped=%u",
 +        (unsigned)sys->b_skip_preroll_output, sys->preroll_frames,
 +        sys->preroll_no_output, sys->preroll_pictures,
-+        sys->preroll_wait, vlc_tick_now() - sys->preroll_started);
++        sys->preroll_wait, vlc_tick_now() - sys->preroll_started, sys->preroll_dropped);
 +    sys->b_preroll_stats_pending = false;
++}
++
++/* Do not submit non-reference H.264 pictures that cannot be displayed.
++ * ProcessBlock/CreateReorderInfo have already consumed SPS/PPS/SEI and POC.
++ * Require every VCL NAL to be an ordinary non-reference slice; uncertain,
++ * partitioned, extension, IDR and mixed-reference access units stay intact. */
++static bool NonReferenceH264(decoder_t *dec, const block_t *block)
++{
++    decoder_sys_t *sys = dec->p_sys;
++    if (sys->codec != kCMVideoCodecType_H264)
++        return false;
++    struct vt_h264_context *ctx = sys->p_codec_context;
++    hxxx_iterator_ctx_t it;
++    hxxx_iterator_init(&it, block->p_buffer, block->i_buffer,
++                       ctx->hh.i_output_nal_length_size);
++    const uint8_t *nal; size_t size;
++    bool slice = false;
++    while (hxxx_iterate_next(&it, &nal, &size))
++    {
++        if (!size || (nal[0] & 0x80))
++            return false;
++        unsigned type = nal[0] & 0x1f;
++        if (type == H264_NAL_SLICE)
++        {
++            if (nal[0] & 0x60)
++                return false;
++            slice = true;
++        }
++        else if (type <= H264_NAL_SLICE_IDR || (type >= 19 && type <= 21))
++            return false;
++    }
++    return slice;
++}
++
++/* AV1 reference-slot refresh rules are owned by Apple's decoder. Ask it to
++ * skip only droppable frames during ordered AV1 preroll. Restore AllFrames
++ * before submitting the first displayable temporal unit. An unsupported
++ * optional property keeps the full, precise decode path. */
++static bool SetAV1PrerollFilter(decoder_t *dec, bool enabled)
++{
++    decoder_sys_t *sys = dec->p_sys;
++    if (sys->codec != kCMVideoCodecType_AV1 ||
++        sys->b_av1_references_only == enabled ||
++        (enabled && sys->b_av1_filter_unsupported))
++        return true;
++    OSStatus status = VTSessionSetProperty(sys->session,
++        kVTDecompressionPropertyKey_OnlyTheseFrames,
++        enabled ? kVTDecompressionProperty_OnlyTheseFrames_NonDroppableFrames
++                : kVTDecompressionProperty_OnlyTheseFrames_AllFrames);
++    msg_Dbg(dec, "neo-preroll-filter enabled=%u accepted=%u status=%d",
++        (unsigned)enabled, (unsigned)(status == noErr), (int)status);
++    if (status == noErr)
++        sys->b_av1_references_only = enabled;
++    else if (enabled)
++        sys->b_av1_filter_unsupported = true;
++    else
++    {
++        /* Never leave normal playback in a frame-dropping mode if restoring
++         * the optional property fails. Use the existing one-way fallback. */
++        var_Create(dec, "videotoolbox-failed", VLC_VAR_VOID);
++        return false;
++    }
++    return true;
  }
 
  static int DecodeBlock(decoder_t *p_dec, block_t *p_block)
-@@ -2036,10 +2065,48 @@
+@@ -2036,10 +2132,67 @@
          goto skip;
      }
 
@@ -67,7 +141,8 @@
 +     * H.264/HEVC still need POC/timing updates even without an output image. */
 +    p_info->b_preroll = (p_block->i_flags & BLOCK_FLAG_PREROLL) &&
 +                        p_block->i_pts != VLC_TICK_INVALID &&
-+                        p_info->b_progressive && !p_info->b_field;
++                        p_info->b_progressive && !p_info->b_field &&
++                        !(p_block->i_flags & BLOCK_FLAG_END_OF_SEQUENCE);
 +    p_info->b_no_output = p_info->b_preroll && p_sys->b_skip_preroll_output;
 +    if (p_info->b_preroll)
 +    {
@@ -78,9 +153,27 @@
 +            p_sys->preroll_started = vlc_tick_now();
 +            p_sys->preroll_frames = p_sys->preroll_no_output = p_sys->preroll_pictures = 0;
 +            p_sys->preroll_wait = 0;
++            p_sys->preroll_dropped = 0;
 +        }
 +        p_sys->preroll_frames++;
 +        vlc_mutex_unlock(&p_sys->lock);
++    }
++    if (!SetAV1PrerollFilter(p_dec, p_info->b_no_output))
++    {
++        CFRelease(sampleBuffer);
++        free(p_info);
++        /* VLCDEC_RELOAD returns the unchanged block to the decoder owner. */
++        return VLCDEC_RELOAD;
++    }
++    if (p_info->b_no_output && !b_config_changed && NonReferenceH264(p_dec, p_block))
++    {
++        vlc_mutex_lock(&p_sys->lock);
++        p_sys->preroll_no_output++;
++        p_sys->preroll_dropped++;
++        OnDecodedFrame(p_dec, p_info);
++        vlc_mutex_unlock(&p_sys->lock);
++        CFRelease(sampleBuffer);
++        goto skip;
 +    }
 +    const vlc_tick_t wait_started = vlc_tick_now();
 +    if (p_info->b_no_output)
@@ -107,7 +200,7 @@
 
      OSStatus status =
          VTDecompressionSessionDecodeFrame(p_sys->session, sampleBuffer,
-@@ -2048,11 +2115,9 @@
+@@ -2048,11 +2201,9 @@
      enum vtsession_status vtsession_status;
      if (HandleVTStatus(p_dec, status, &vtsession_status) == VLC_SUCCESS)
      {
@@ -120,7 +213,7 @@
              p_sys->decoder_state = STATE_DECODER_STARTED;
          }
          if (p_block->i_flags & BLOCK_FLAG_END_OF_SEQUENCE)
-@@ -2060,7 +2125,10 @@
+@@ -2060,7 +2211,10 @@
      }
      else
      {
@@ -132,7 +225,7 @@
          p_sys->sync_state = p_sys->start_sync_state;
          vlc_mutex_lock(&p_sys->lock);
          p_sys->vtsession_status = vtsession_status;
-@@ -2188,6 +2256,16 @@
+@@ -2188,6 +2342,16 @@
          goto end;
      }
 
@@ -149,7 +242,7 @@
      if (!imageBuffer)
      {
          if (unlikely((infoFlags & kVTDecodeInfo_FrameDropped) != kVTDecodeInfo_FrameDropped))
-@@ -2264,6 +2342,10 @@
+@@ -2264,6 +2428,10 @@
      else
          p_info->p_picture = p_pic;
 
@@ -160,7 +253,7 @@
      OnDecodedFrame( p_dec, p_info );
      p_info = NULL;
 
-@@ -2322,6 +2404,7 @@
+@@ -2322,6 +2490,7 @@
      set_capability("video decoder", 800)
      set_callbacks(OpenDecoder, CloseDecoder)
 

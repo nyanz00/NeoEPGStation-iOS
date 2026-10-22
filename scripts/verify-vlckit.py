@@ -22,6 +22,7 @@ try:
     assert b'neo-av1-selection hardware=1' in binary
     assert b'videotoolbox-av1-hardware' in binary
     assert b'neo-preroll-ready optimized=' in binary
+    assert b'neo-preroll-filter enabled=' in binary
     valid = True
 except (OSError, ValueError, AssertionError, KeyError):
     valid = False

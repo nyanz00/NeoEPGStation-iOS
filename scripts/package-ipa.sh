@@ -29,7 +29,7 @@ Path('dist/build-info.json').write_text(json.dumps({
     'commit': os.environ.get('GITHUB_SHA'), 'run': os.environ.get('GITHUB_RUN_ID'),
     'minimumOS': info['MinimumOSVersion'], 'bundleIdentifier': info['CFBundleIdentifier'],
     'version': info['CFBundleShortVersionString'], 'build': info['CFBundleVersion'],
-    'ui': 'Swift / UIKit', 'vlckit': '4.0.0a25 / Neo VideoToolbox v2',
+    'ui': 'Swift / UIKit', 'vlckit': '4.0.0a25 / Neo VideoToolbox v3',
     'vlckitSources': json.loads(Path('vendor/vlckit/source.json').read_text()),
     'signing': 'ad-hoc for LiveContainer'
 }, indent=2) + '\n')

@@ -1,6 +1,6 @@
 {
   "vlckit": "2e0868f5ed40fe59cd92f377645fdcc260c6e759",
   "vlc": "005e69e67a8730f128e44bde68437fbb048cf45f",
-  "patchVersion": 2,
+  "patchVersion": 3,
   "deploymentTarget": "18.0"
 }

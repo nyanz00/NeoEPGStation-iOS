@@ -135,6 +135,7 @@ try:
                 assert all(e['noOutput'] == 0 for e in preroll) and sum(e['pictures'] for e in preroll) > 100, preroll
             else:
                 assert all(e['noOutput'] > 0 and e['pictures'] == 0 for e in preroll), preroll
+                assert sum(e['droppedFrames'] for e in preroll) > 100, preroll
             comparisons.append({'case': output_name, 'baseline': baseline,
                                 'seekToVideoMs': [row['videoReadyMs'] for row in seeks],
                                 'prerollMs': [e['durationMs'] for e in preroll],

@@ -160,13 +160,19 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     [NeoPlaybackDiagnostics nativeError:kind level:level];
   }
   NSString *event = nil; long long first = 0, second = 0;
-  unsigned optimized = 0, prerollFrames = 0, noOutput = 0, pictures = 0;
+  unsigned optimized = 0, prerollFrames = 0, noOutput = 0, pictures = 0, droppedFrames = 0;
   long long queueWait = 0, prerollElapsed = 0;
   if ([message hasPrefix:@"neo-preroll-ready "] &&
-      sscanf(message.UTF8String, "neo-preroll-ready optimized=%u frames=%u noOutput=%u pictures=%u waitUs=%lld elapsedUs=%lld",
-        &optimized, &prerollFrames, &noOutput, &pictures, &queueWait, &prerollElapsed) == 6) {
+      sscanf(message.UTF8String, "neo-preroll-ready optimized=%u frames=%u noOutput=%u pictures=%u waitUs=%lld elapsedUs=%lld dropped=%u",
+        &optimized, &prerollFrames, &noOutput, &pictures, &queueWait, &prerollElapsed, &droppedFrames) == 7) {
     [NeoPlaybackDiagnostics record:@"vlc.prerollReady" fields:@{@"optimized": @(optimized != 0), @"frames": @(prerollFrames),
-      @"noOutput": @(noOutput), @"pictures": @(pictures), @"queueWaitMs": @(queueWait/1000.0), @"durationMs": @(prerollElapsed/1000.0)}];
+      @"noOutput": @(noOutput), @"pictures": @(pictures), @"droppedFrames": @(droppedFrames),
+      @"queueWaitMs": @(queueWait/1000.0), @"durationMs": @(prerollElapsed/1000.0)}];
+  }
+  int filterStatus = 0; unsigned filterEnabled = 0, filterAccepted = 0;
+  if ([message hasPrefix:@"neo-preroll-filter "] &&
+      sscanf(message.UTF8String, "neo-preroll-filter enabled=%u accepted=%u status=%d", &filterEnabled, &filterAccepted, &filterStatus) == 3) {
+    [NeoPlaybackDiagnostics record:@"vlc.prerollFilter" fields:@{@"enabled": @(filterEnabled != 0), @"accepted": @(filterAccepted != 0), @"status": @(filterStatus)}];
   }
   unsigned long long position = 0;
   if ([message hasPrefix:@"seek: preroll{ req: "] &&
@@ -1184,7 +1190,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [media addOption:@":videotoolbox-hw-decoder-only"];
   BOOL av1Hardware = NeoAV1HardwareSupported();
   [media addOption:av1Hardware ? @":videotoolbox-av1-hardware=1" : @":videotoolbox-av1-hardware=0"];
-  [NeoPlaybackDiagnostics record:@"vlc.av1Preflight" fields:@{@"hardwareSupported": @(av1Hardware), @"query": @"cachedOSCapability", @"patchVersion": @2}];
+  [NeoPlaybackDiagnostics record:@"vlc.av1Preflight" fields:@{@"hardwareSupported": @(av1Hardware), @"query": @"cachedOSCapability", @"patchVersion": @3}];
   BOOL suppressPreroll = YES;
 #if TARGET_OS_SIMULATOR
   // A/B uses the same signed simulator binary, codec, cache and exact targets.
@@ -2237,13 +2243,22 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   checks[@"pausedReloadAtTarget"] = @(llabs([self mediaTime]-20000) < 1000);
   [rows addObject:@{@"pausedReloadNativeMs": @(self.player.nativeTimeMs), @"pausedReloadAppMs": @([self mediaTime])}];
   int64_t position = [self mediaTime];
-  uint64_t played = self.player.media.statistics.playedAudioBuffers;
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-    checks[@"pausedReloadClockStaysPaused"] = @(llabs([self mediaTime]-position) < 100 && self.player.state == VLCMediaPlayerStatePaused);
-    [rows addObject:@{@"pausedReloadNativeAfterMs": @(self.player.nativeTimeMs), @"pausedReloadAppAfterMs": @([self mediaTime])}];
-    checks[@"pausedReloadAudioStaysPaused"] = @(self.player.media.statistics.playedAudioBuffers == played);
-    BOOL passed = YES; for (NSNumber *value in checks.allValues) { passed &= value.boolValue; }
-    completion(@{@"success": @(passed), @"checks": checks, @"rows": rows});
+  // libVLC publishes cached statistics every 250ms. A counter collected before
+  // pause may arrive after the Paused event, especially after a large preroll.
+  // Keep clock/state checks anchored at the acknowledgement; establish the
+  // audio counter after two report intervals, then require a full stable second.
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC/2), dispatch_get_main_queue(), ^{
+    uint64_t played = self.player.media.statistics.playedAudioBuffers;
+    [rows addObject:@{@"pausedAudioSettledBuffers": @(played)}];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      checks[@"pausedReloadClockStaysPaused"] = @(llabs([self mediaTime]-position) < 100 && self.player.state == VLCMediaPlayerStatePaused);
+      [rows addObject:@{@"pausedReloadNativeAfterMs": @(self.player.nativeTimeMs), @"pausedReloadAppAfterMs": @([self mediaTime])}];
+      uint64_t after = self.player.media.statistics.playedAudioBuffers;
+      [rows addObject:@{@"pausedAudioAfterBuffers": @(after)}];
+      checks[@"pausedReloadAudioStaysPaused"] = @(after == played && self.player.state == VLCMediaPlayerStatePaused && !self.wantsPlayback);
+      BOOL passed = YES; for (NSNumber *value in checks.allValues) { passed &= value.boolValue; }
+      completion(@{@"success": @(passed), @"checks": checks, @"rows": rows});
+    });
   });
 }
 - (void)runTSResumeProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
