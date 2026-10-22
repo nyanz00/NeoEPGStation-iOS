@@ -1,0 +1,115 @@
+--- a/modules/codec/videotoolbox/decoder.c
++++ b/modules/codec/videotoolbox/decoder.c
+@@ -172,6 +172,8 @@
+     return 0;
+ }
+ 
++#include "av1.c.inc"
++
+ /* Codec Specific */
+ 
+ /** H26x Specific */
+@@ -918,6 +920,15 @@
+ {
+     /* check for the codec we can and want to decode */
+     switch (p_dec->fmt_in->i_codec) {
++        case VLC_CODEC_AV1:
++            if (!DeviceSupportsAV1(p_dec))
++            {
++                msg_Dbg(p_dec, "neo-av1-selection capability=0");
++                return 0;
++            }
++            msg_Dbg(p_dec, "neo-av1-selection capability=1");
++            return kCMVideoCodecType_AV1;
++
+         case VLC_CODEC_H264:
+             return kCMVideoCodecType_H264;
+ 
+@@ -1120,6 +1131,15 @@
+                              kCFBooleanTrue);
+ #endif
+ 
++    /* AV1 must never silently enter Apple's software implementation. The
++     * existing decoder-module fallback selects dav1d if creation is rejected. */
++    if (p_sys->codec == kCMVideoCodecType_AV1)
++    {
++        CFDictionarySetValue(decoderConfiguration,
++            kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder, kCFBooleanTrue);
++        CFDictionarySetValue(decoderConfiguration,
++            kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder, kCFBooleanTrue);
++    }
+     return decoderConfiguration;
+ }
+ 
+@@ -1214,8 +1234,31 @@
+     CFRelease(destinationPixelBufferAttributes);
+ 
+     if (HandleVTStatus(p_dec, status, NULL) != VLC_SUCCESS)
++    {
++        if (p_sys->codec == kCMVideoCodecType_AV1)
++            msg_Dbg(p_dec, "neo-av1-selection fallback=2");
+         return VLC_EGENERIC;
+-
++    }
++
++    if (p_sys->codec == kCMVideoCodecType_AV1)
++    {
++        CFTypeRef hardware = NULL;
++        status = VTSessionCopyProperty(p_sys->session,
++            kVTDecompressionPropertyKey_UsingHardwareAcceleratedVideoDecoder,
++            kCFAllocatorDefault, &hardware);
++        bool using_hardware = status == noErr && hardware && CFEqual(hardware, kCFBooleanTrue);
++        if (hardware)
++            CFRelease(hardware);
++        if (!using_hardware)
++        {
++            msg_Dbg(p_dec, "neo-av1-selection fallback=3");
++            VTDecompressionSessionInvalidate(p_sys->session);
++            CFRelease(p_sys->session);
++            p_sys->session = NULL;
++            return VLC_EGENERIC;
++        }
++        msg_Dbg(p_dec, "neo-av1-selection hardware=1");
++    }
+     return VLC_SUCCESS;
+ 
+ error:
+@@ -1385,6 +1428,18 @@
+ 
+     switch(codec)
+     {
++        case kCMVideoCodecType_AV1:
++            p_sys->pf_codec_init = InitAV1;
++            p_sys->pf_codec_clean = CleanAV1;
++            p_sys->pf_process_block = ProcessBlockAV1;
++            p_sys->pf_need_restart = VideoToolboxNeedsToRestartAV1;
++            p_sys->pf_configure_vout = ConfigureVoutAV1;
++            p_sys->pf_copy_extradata = CopyDecoderExtradataAV1;
++            p_sys->pf_fill_reorder_info = FillReorderInfoAV1;
++            p_sys->dpb.b_strict_reorder = true;
++            p_sys->start_sync_state = STATE_BITSTREAM_WAITING_RAP;
++            break;
++
+         case kCMVideoCodecType_H264:
+             p_sys->pf_codec_init = InitH264;
+             p_sys->pf_codec_clean = CleanH264;
+@@ -2257,6 +2312,8 @@
+     set_capability("video decoder", 800)
+     set_callbacks(OpenDecoder, CloseDecoder)
+ 
++    add_integer("videotoolbox-av1-hardware", -1, "AV1 hardware capability", "0 disables AV1 hardware; -1 or 1 checks the cached OS capability")
++        change_integer_range(-1, 1)
+     add_bool("videotoolbox-hw-decoder-only", true, VT_REQUIRE_HW_DEC, VT_REQUIRE_HW_DEC)
+     add_string("videotoolbox-cvpx-chroma", "", VT_FORCE_CVPX_CHROMA, VT_FORCE_CVPX_CHROMA_LONG)
+         change_string_list(chroma_list_values, chroma_list_names)
+--- a/modules/codec/Makefile.am
++++ b/modules/codec/Makefile.am
+@@ -344,6 +344,8 @@
+ codec_PLUGINS += $(LTLIBoggspots)
+ 
+ libvideotoolbox_plugin_la_SOURCES = codec/videotoolbox/decoder.c \
++                                    codec/videotoolbox/av1.c.inc \
++                                    packetizer/av1_obu.c packetizer/av1_obu.h \
+                                     codec/videotoolbox/dpb.c \
+                                     codec/videotoolbox/dpb.h \
+                                     codec/videotoolbox/pacer.c \

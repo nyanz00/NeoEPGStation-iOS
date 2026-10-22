@@ -1,0 +1,62 @@
+name: Pinned VLCKit with AV1 hardware support
+on:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  library:
+    runs-on: macos-26
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: [iphoneos, iphonesimulator]
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore verified framework
+        id: framework
+        uses: actions/cache/restore@v4
+        with:
+          path: build/vlckit-output-${{ matrix.sdk }}
+          key: vlckit-v1-${{ matrix.sdk }}-xcode26.6-${{ hashFiles('vendor/vlckit/**', 'scripts/build-vlckit.sh', 'scripts/vlckit-provenance.py') }}
+      - name: Restore dependency compilation
+        if: steps.framework.outputs.cache-hit != 'true'
+        id: compilation
+        uses: actions/cache/restore@v4
+        with:
+          path: build/vlckit-${{ matrix.sdk }}
+          key: vlckit-compile-v1-${{ matrix.sdk }}-xcode26.6-${{ hashFiles('vendor/vlckit/**', 'scripts/build-vlckit.sh') }}
+          restore-keys: vlckit-compile-v1-${{ matrix.sdk }}-xcode26.6-
+      - name: Build modified VLC and wrapper
+        if: steps.framework.outputs.cache-hit != 'true'
+        run: bash scripts/build-vlckit.sh '${{ matrix.sdk }}'
+      - name: Retain incremental compilation after failure or success
+        if: ${{ !cancelled() && steps.framework.outputs.cache-hit != 'true' && steps.compilation.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: build/vlckit-${{ matrix.sdk }}
+          key: ${{ steps.compilation.outputs.cache-primary-key }}
+      - name: Save verified framework
+        if: ${{ success() && steps.framework.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: build/vlckit-output-${{ matrix.sdk }}
+          key: ${{ steps.framework.outputs.cache-primary-key }}
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: VLCKit-${{ matrix.sdk }}
+          path: build/vlckit-output-${{ matrix.sdk }}
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: VLCKit-build-${{ matrix.sdk }}
+          path: |
+            dist/vlckit-*.log
+            dist/VLCKit-corresponding-source.tar.gz
+          retention-days: 30
+          if-no-files-found: ignore
