@@ -30,7 +30,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: build/vlckit-output-${{ matrix.sdk }}
-          key: vlckit-v1-${{ matrix.sdk }}-xcode26.6-${{ hashFiles('vendor/vlckit/**', 'scripts/build-vlckit.sh', 'scripts/vlckit-provenance.py') }}
+          key: vlckit-v1-${{ matrix.sdk }}-xcode26.6-${{ hashFiles('vendor/vlckit/**', 'scripts/build-vlckit.sh', 'scripts/prepare-vlckit-source.py', 'scripts/vlckit-provenance.py') }}
           restore-keys: vlckit-v1-${{ matrix.sdk }}-xcode26.6-
       - name: Verify cached binary and source identity
         id: verify
@@ -41,7 +41,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: build/vlckit-${{ matrix.sdk }}
-          key: vlckit-compile-v1-${{ matrix.sdk }}-xcode26.6-${{ hashFiles('vendor/vlckit/**', 'scripts/build-vlckit.sh') }}
+          key: vlckit-compile-v1-${{ matrix.sdk }}-xcode26.6-${{ hashFiles('vendor/vlckit/**', 'scripts/build-vlckit.sh', 'scripts/prepare-vlckit-source.py') }}
           restore-keys: vlckit-compile-v1-${{ matrix.sdk }}-xcode26.6-
       - name: Build modified VLC and wrapper
         if: steps.verify.outputs.usable != 'true'

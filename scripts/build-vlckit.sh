@@ -8,6 +8,13 @@ task_work="$task_root/build/vlckit-$task_sdk"
 task_wrapper="$task_work/VLCKit"
 task_vlc="$task_wrapper/libvlc/vlc"
 mkdir -p "$task_work" "$task_root/dist"
+if ! command -v gmake >/dev/null; then
+    brew install make
+fi
+# Modern GNU make's FIFO jobserver survives CMake/Meson subprocesses. The
+# macOS make 3.81 pipe descriptors are closed by them, which breaks Ninja.
+export MAKE="$(command -v gmake)"
+"$MAKE" --version
 read -r task_wrapper_rev task_vlc_rev < <(python3 -c 'import json; s=json.load(open("vendor/vlckit/source.json")); print(s["vlckit"], s["vlc"])')
 
 task_checkout() {
@@ -27,8 +34,8 @@ task_checkout() {
 }
 task_checkout "$task_wrapper" https://github.com/videolan/vlckit.git "$task_wrapper_rev"
 task_checkout "$task_vlc" https://github.com/videolan/vlc.git "$task_vlc_rev"
-git -C "$task_vlc" apply "$task_wrapper"/libvlc/patches/*.patch
-git -C "$task_vlc" apply "$task_root/vendor/vlckit/patches/0001-videotoolbox-av1.patch"
+python3 "$task_root/scripts/prepare-vlckit-source.py" "$task_vlc" "$task_wrapper/libvlc/patches"
+git -C "$task_vlc" apply --index "$task_root/vendor/vlckit/patches/0001-videotoolbox-av1.patch"
 cp "$task_root/vendor/vlckit/av1.c.inc" "$task_vlc/modules/codec/videotoolbox/av1.c.inc"
 # The app supports iOS 18+, and the AV1 APIs are available throughout that range.
 python3 - "$task_vlc/extras/package/apple/build.conf" <<'PY'
