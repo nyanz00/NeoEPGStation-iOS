@@ -1,10 +1,18 @@
 #import "NeoPlayerController.h"
 #import <AVFoundation/AVFoundation.h>
 #import <AVKit/AVKit.h>
+#import <VideoToolbox/VideoToolbox.h>
 #import <VLCKit/VLCKit.h>
 #import "NeoEPGStation-Swift.h"
 #import "NeoVLCFrameTap.h"
 #import <stdio.h>
+
+static BOOL NeoAV1HardwareSupported(void) {
+  static BOOL supported;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{ supported = VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1); });
+  return supported;
+}
 
 // Pinned VLCKit 4.0.0a25 uses this block internally for jumpWithOffset.
 // Its public position setter has no completion overload. Guard the setter
@@ -130,8 +138,10 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 - (void)handleMessage:(NSString *)message logLevel:(VLCLogLevel)level context:(VLCLogContext *)context {
   if ([message hasPrefix:@"looking for video decoder module matching \"videotoolbox,any\""]) {
+    [NeoPlaybackDiagnostics nativeDecoderSearch];
     [NeoPlaybackDiagnostics record:@"vlc.decoderSearch" fields:@{@"order": @"videotoolbox,any"}];
   }
+  if ([message hasPrefix:@"neo-av1-selection "]) { [NeoPlaybackDiagnostics nativeAV1Decision:message]; }
   if ([message hasPrefix:@"using "] && [message containsString:@"decoder module \""]) {
     [NeoPlaybackDiagnostics nativeDecoder:message];
   }
@@ -1164,6 +1174,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   // `any` retains fallback for unsupported video, audio and subtitle codecs.
   [media addOption:@":codec=videotoolbox,any"];
   [media addOption:@":videotoolbox-hw-decoder-only"];
+  BOOL av1Hardware = NeoAV1HardwareSupported();
+  [media addOption:av1Hardware ? @":videotoolbox-av1-hardware=1" : @":videotoolbox-av1-hardware=0"];
+  [NeoPlaybackDiagnostics record:@"vlc.av1Preflight" fields:@{@"hardwareSupported": @(av1Hardware), @"query": @"cachedOSCapability", @"patchVersion": @1}];
   [NeoPlaybackDiagnostics record:@"vlc.decoderPolicy" fields:@{@"order": @"videotoolbox,any", @"hardwareOnlyVideoToolbox": @YES}];
 #if TARGET_OS_SIMULATOR
   // Select the fixture's known track before the first PES, not by resetting

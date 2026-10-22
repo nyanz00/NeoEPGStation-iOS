@@ -10,7 +10,11 @@ ditto "$app" dist/Payload/NeoEPGStation.app
 mkdir -p dist/notices
 cp THIRD_PARTY_NOTICES.md dist/notices/
 cp licenses/*.txt dist/notices/
-find ios/Pods/VLCKit -name 'COPYING*' -type f -exec cp {} dist/notices/ \;
+cp vendor/vlckit/COPYING dist/notices/VLCKit-COPYING.txt
+cp vendor/vlckit/source.json dist/notices/VLCKit-source.json
+cp vendor/vlckit/README.md dist/notices/VLCKit-modifications.md
+mkdir -p dist/notices/VLCKit-patches
+cp vendor/vlckit/patches/*.patch vendor/vlckit/av1.c.inc dist/notices/VLCKit-patches/
 ditto dist/notices dist/Payload/NeoEPGStation.app/ThirdPartyNotices
 # Ad-hoc signing is for LiveContainer import, not App Store distribution.
 codesign --force --deep --sign - dist/Payload/NeoEPGStation.app
@@ -25,7 +29,8 @@ Path('dist/build-info.json').write_text(json.dumps({
     'commit': os.environ.get('GITHUB_SHA'), 'run': os.environ.get('GITHUB_RUN_ID'),
     'minimumOS': info['MinimumOSVersion'], 'bundleIdentifier': info['CFBundleIdentifier'],
     'version': info['CFBundleShortVersionString'], 'build': info['CFBundleVersion'],
-    'ui': 'Swift / UIKit', 'vlckit': '4.0.0a25 / 20260929-1631',
+    'ui': 'Swift / UIKit', 'vlckit': '4.0.0a25 / Neo AV1 VideoToolbox v1',
+    'vlckitSources': json.loads(Path('vendor/vlckit/source.json').read_text()),
     'signing': 'ad-hoc for LiveContainer'
 }, indent=2) + '\n')
 PY

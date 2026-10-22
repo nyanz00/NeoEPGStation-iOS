@@ -2,15 +2,15 @@ PODS:
   - VLCKit (4.0.0a25)
 
 DEPENDENCIES:
-  - VLCKit (from `./VLCKit.podspec`)
+  - VLCKit (from `../vendor/vlckit`)
 
 EXTERNAL SOURCES:
   VLCKit:
-    :podspec: "./VLCKit.podspec"
+    :path: "../vendor/vlckit"
 
 SPEC CHECKSUMS:
-  VLCKit: cdd96015217da139628e201dc1c71c52376a47ad
+  VLCKit: 0a85e02b7505e59719bf1c8143c68b7d611f4010
 
-PODFILE CHECKSUM: 2c7f7265c21e9b53c14230f77b4be3f501da5935
+PODFILE CHECKSUM: 51afb24817797433dfab2d9ad2bffbe4c3be7be2
 
 COCOAPODS: 1.16.2

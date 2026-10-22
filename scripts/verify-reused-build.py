@@ -15,14 +15,14 @@ if info['bundleIdentifier'] != 'io.github.nyanz00.NeoEPGStation' or info['minimu
     raise RuntimeError('Unexpected application identity or deployment target')
 repository = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True, encoding='utf-8').strip()
 subprocess.run(['git', 'diff', '--exit-code', commit, 'HEAD', '--',
-                'App.tsx', 'src', 'ios', 'package.json', 'package-lock.json'], check=True, cwd=repository)
+                'App.tsx', 'src', 'ios', 'vendor/vlckit', 'package.json', 'package-lock.json'], check=True, cwd=repository)
 required = ['storage-smoke', 'danmaku-smoke', 'pip-composition-smoke', 'pip-player-smoke',
             'ui-iphone-recorded', 'ui-iphone-menu', 'ui-iphone-settings']
 if Path('ios/NeoEPGStation/NeoPlayerChrome.swift').exists():
     required += ['player-ui-smoke', 'player-playback-smoke']
 full_recheck = os.environ.get('RECHECK_PLAYBACK') == 'true'
 network_probe = os.environ.get('NETWORK_PROBE') == 'true'
-focused = os.environ.get('CHECK_SCOPE') in ('zoom-font', 'ts-comments', 'recovery-ui', 'streaming', 'encoded-seek')
+focused = os.environ.get('CHECK_SCOPE') in ('zoom-font', 'ts-comments', 'recovery-ui', 'streaming', 'encoded-seek', 'av1-decoder')
 for name in ([] if full_recheck or network_probe or focused else required):
     result = json.loads((artifact / f'{name}.json').read_text())
     if result.get('success') is not True:

@@ -1,5 +1,5 @@
 platform :ios, '18.0'
 
 target 'NeoEPGStation' do
-  pod 'VLCKit', :podspec => './VLCKit.podspec'
+  pod 'VLCKit', :path => '../vendor/vlckit'
 end

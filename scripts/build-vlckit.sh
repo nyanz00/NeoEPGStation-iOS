@@ -37,6 +37,11 @@ p=pathlib.Path(sys.argv[1]); s=p.read_text()
 s=s.replace('VLC_DEPLOYMENT_TARGET_IOS="9.0"', 'VLC_DEPLOYMENT_TARGET_IOS="18.0"')
 s=s.replace('VLC_DEPLOYMENT_TARGET_IOS_SIMULATOR="12.0"', 'VLC_DEPLOYMENT_TARGET_IOS_SIMULATOR="18.0"')
 p.write_text(s)
+for relative in ('extras/tools/packages.mak', 'contrib/src/main.mak'):
+    source = p.parents[3] / relative
+    # The redirect service selected a mirror with an expired TLS certificate.
+    # Use GNU's canonical HTTPS host; keep every upstream SHA-512 check intact.
+    source.write_text(source.read_text().replace('https://ftpmirror.gnu.org/gnu', 'https://ftp.gnu.org/gnu'))
 PY
 mkdir -p "$task_vlc/build-$task_sdk-arm64"
 (

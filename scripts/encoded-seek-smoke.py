@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -56,11 +57,12 @@ class Handler(BaseHTTPRequestHandler):
 server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 try:
-    for container in ('mkv', 'mp4'):
+    av1 = '--av1' in sys.argv
+    for container in (('av1-seek-8.mkv', 'av1-seek-10.mkv', 'av1-seek-8.mp4', 'av1-seek-10.mp4') if av1 else ('mkv', 'mp4')):
         # Deliberately sparse keyframes (24s), not an all-intra/short-GOP clip.
         # Exact targets between them must be retained; fast approximate seeking
         # could look faster while landing on a different picture.
-        video = Path(f'tests/fixtures/encoded-seek.{container}').read_bytes()
+        video = Path(f'tests/fixtures/{container}' if av1 else f'tests/fixtures/encoded-seek.{container}').read_bytes()
         subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True)
         names = ['encoded-seek-smoke.json', 'encoded-seek-diagnostics.json']
         for name in names:
@@ -86,6 +88,24 @@ try:
         assert policies and all(e['order'] == 'videotoolbox,any' and e['hardwareOnlyVideoToolbox'] for e in policies), policies
         assert any(e['event'] == 'vlc.decoderSearch' for e in events), 'VLC did not apply the requested decoder order'
         assert any(e['kind'] == 'video decoder' and e['module'] != 'other' for e in diagnostic['decoders']), diagnostic['decoders']
+        if av1:
+            # The real OS result controls the expected path. On simulator this
+            # normally proves dav1d fallback, not AV1 hardware performance.
+            capability = [e for e in events if e['event'] == 'vlc.av1Preflight']
+            assert capability and all(e['hardwareSupported'] == capability[0]['hardwareSupported'] for e in capability)
+            decisions = diagnostic['decoderDecisions']
+            assert decisions, 'The bundled native decoder extension was not reached'
+            videos = [e for e in diagnostic['decoders'] if e['kind'] == 'video decoder']
+            if not capability[0]['hardwareSupported']:
+                assert all(e['module'] == 'dav1d' and e['acceleration'] == 'software' for e in videos), videos
+                assert all(e['decision'] == 'capability' and e['value'] == 0 for e in decisions), decisions
+            else:
+                assert all(e['module'] in ('videotoolbox', 'dav1d') for e in videos), videos
+                assert any(e['decision'] == 'hardware' or e['decision'] == 'fallback' for e in decisions), decisions
+                assert all(e['acceleration'] == 'hardware' for e in videos if e['module'] == 'videotoolbox'), videos
+            # Module/session selection is per input, never per cached seek.
+            assert not any(1 <= e['seek'] <= 7 for e in decisions), decisions
+            print(container, 'OS AV1 hardware:', capability[0]['hardwareSupported'], 'actual:', videos, flush=True)
         gates = [e for e in events if e['event'] == 'audio.primeGate']
         assert gates and all(e['actualMute'] == 1 for e in gates), gates
         releases = [e for e in events if e['event'] == 'audio.primeReleased' and not e['wantsPlayback']]

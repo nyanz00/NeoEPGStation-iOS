@@ -1,5 +1,16 @@
 # PLAYタップ検証用TS
 
+`av1-seek-8.*`、`av1-seek-10.*` は下記と同じ72秒・320×180・24fpsの
+合成映像と音声。AV1 Main profileの8bit/10bitをMKV/MP4で検証する。
+24秒間隔のキーフレームを含み、実機アプリには同梱しない。
+
+```sh
+ffmpeg -f lavfi -i testsrc2=size=320x180:rate=24 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 72 -c:v libaom-av1 -cpu-used 8 -row-mt 1 -threads 4 -crf 45 -b:v 0 -g 576 -pix_fmt yuv420p -c:a aac -b:a 48k av1-seek-8.mkv
+# 10bit: change yuv420p to yuv420p10le and output to av1-seek-10.mkv.
+ffmpeg -i av1-seek-8.mkv -map 0 -c copy -movflags +faststart av1-seek-8.mp4
+ffmpeg -i av1-seek-10.mkv -map 0 -c copy -movflags +faststart av1-seek-10.mp4
+```
+
 `encoded-seek.mkv` と `encoded-seek.mp4` は72秒・320×180・24fpsの合成映像と440Hzの音声。
 24秒間隔のキーフレームの間への正確なシークと、30秒の途中開始位置より前への戻しを検証する。
 実機アプリには同梱しない。CIで毎回FFmpegをインストール・生成する時間を省く。

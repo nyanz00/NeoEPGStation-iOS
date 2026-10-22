@@ -9,6 +9,8 @@ final class NeoPlaybackDiagnostics: NSObject {
   private static var commentFonts: [[String: Any]] = []
   private static var fontKeys = Set<String>()
   private static var decoders: [[String: Any]] = []
+  private static var decoderDecisions: [[String: Any]] = []
+  private static var confirmedVideoToolboxHardware = false
   private static var started = ProcessInfo.processInfo.systemUptime
   private static var currentSeek = 0
   private static var awaitingVideo = false
@@ -18,12 +20,33 @@ final class NeoPlaybackDiagnostics: NSObject {
   @objc static func begin() {
     lock.lock(); events.removeAll(); started = ProcessInfo.processInfo.systemUptime; currentSeek = 0; awaitingVideo = false
     nativeErrors.removeAll(); nativeErrorPending = false; nativeErrorGeneration += 1
-    commentFonts.removeAll(); fontKeys.removeAll(); decoders.removeAll(); lock.unlock()
+    commentFonts.removeAll(); fontKeys.removeAll(); decoders.removeAll(); decoderDecisions.removeAll()
+    confirmedVideoToolboxHardware = false; lock.unlock()
     record("session.start", fields: ["rewindSeconds": NeoPlaybackCache.savedSeconds,
       "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"])
   }
   // Requested policy is not proof of actual hardware use. Retain only module
   // selection messages and fixed names, never raw native messages or URLs.
+  @objc static func nativeDecoderSearch() {
+    lock.lock(); confirmedVideoToolboxHardware = false; lock.unlock()
+  }
+  @objc(nativeAV1Decision:) static func nativeAV1Decision(_ message: String) {
+    let prefix = "neo-av1-selection "
+    guard message.hasPrefix(prefix) else { return }
+    let pair = message.dropFirst(prefix.count).split(separator: "=", omittingEmptySubsequences: false)
+    guard pair.count == 2, let value = Int(pair[1]),
+          (pair[0] == "capability" && (0...1).contains(value)) ||
+          (pair[0] == "hardware" && value == 1) ||
+          (pair[0] == "fallback" && (1...3).contains(value)) else { return }
+    lock.lock()
+    if pair[0] == "hardware" { confirmedVideoToolboxHardware = true }
+    if pair[0] != "hardware" { confirmedVideoToolboxHardware = false }
+    let row: [String: Any] = ["decision": String(pair[0]), "value": value,
+      "elapsed": ProcessInfo.processInfo.systemUptime-started, "seek": currentSeek]
+    if decoderDecisions.count < 64 { decoderDecisions.append(row) }
+    lock.unlock()
+    record("vlc.av1Decision", fields: row)
+  }
   @objc(nativeDecoder:) static func nativeDecoder(_ message: String) {
     let kinds = ["video decoder", "audio decoder", "spu decoder", "decoder", "hw decoder"]
     guard let kind = kinds.first(where: { message.hasPrefix("using \($0) module \"") }),
@@ -33,10 +56,9 @@ final class NeoPlaybackDiagnostics: NSObject {
       "faad", "a52", "mpg123", "mpeg_audio", "flac", "vorbis", "opus", "aribsub", "aribcaption",
       "subsdec", "libass", "spudec", "dvbsub", "dummy"]
     let module = software.contains(name) || ["videotoolbox", "avcodec"].contains(name) ? name : "other"
-    // avcodec can use an accelerator, so its module name is inconclusive.
-    // VideoToolbox is configured hardware-only by the controller.
-    let acceleration = module == "videotoolbox" ? "hardware" : software.contains(module) ? "software" : "unknown"
     lock.lock()
+    // A requested preference or module name alone isn't session evidence.
+    let acceleration = module == "videotoolbox" && confirmedVideoToolboxHardware ? "hardware" : software.contains(module) ? "software" : "unknown"
     let row: [String: Any] = ["kind": kind, "module": module, "acceleration": acceleration,
       "elapsed": ProcessInfo.processInfo.systemUptime-started, "seek": currentSeek]
     if decoders.count < 64 { decoders.append(row) }
@@ -92,12 +114,12 @@ final class NeoPlaybackDiagnostics: NSObject {
     }
   }
   @objc static func exportURL() -> URL? {
-    lock.lock(); let snapshot = events, fonts = commentFonts, selections = decoders; lock.unlock()
+    lock.lock(); let snapshot = events, fonts = commentFonts, selections = decoders, decisions = decoderDecisions; lock.unlock()
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("NeoPlaybackDiagnostics", isDirectory: true)
     let url = directory.appendingPathComponent("playback-diagnostics.json")
     do {
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-      let data = try JSONSerialization.data(withJSONObject: ["schema": 1, "events": snapshot, "commentFonts": fonts, "decoders": selections], options: [.prettyPrinted, .sortedKeys])
+      let data = try JSONSerialization.data(withJSONObject: ["schema": 1, "events": snapshot, "commentFonts": fonts, "decoders": selections, "decoderDecisions": decisions], options: [.prettyPrinted, .sortedKeys])
       try data.write(to: url, options: .atomic); return url
     } catch { return nil }
   }

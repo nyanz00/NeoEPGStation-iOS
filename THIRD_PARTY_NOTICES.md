@@ -22,7 +22,7 @@ Pictogrammers contributors under Apache-2.0. License texts are preserved in
 
 VLCKit and libVLC are VideoLAN projects distributed under LGPL-2.1-or-later;
 the bundled framework and its components have their own notices and licenses.
-The initial unmodified framework is downloaded from:
+The original unmodified framework was downloaded from:
 
 https://download.videolan.org/cocoapods/unstable/VLCKit-4.0-20260929-1631.zip
 
@@ -30,9 +30,15 @@ Wrapper source and packaging recipe:
 
 https://github.com/videolan/vlckit/tree/2e0868f5ed40fe59cd92f377645fdcc260c6e759
 
-VLC source:
+The current framework is rebuilt from the pinned wrapper and VLC base:
 
-https://code.videolan.org/videolan/vlc
+https://github.com/videolan/vlc/tree/005e69e67a8730f128e44bde68437fbb048cf45f
+
+The wrapper's upstream patches and the additional AV1 VideoToolbox patch are
+applied before building. Source revisions, additional source/patches, LGPL text
+and build/distribution instructions are in `vendor/vlckit/` and included in the
+app's `ThirdPartyNotices`. The library build artifact also contains the complete
+modified library and downloaded dependency sources.
 
 Keep the archive's COPYING notices with distributed artifacts. Any modified
 VideoLAN components must be accompanied by the corresponding source and patches.

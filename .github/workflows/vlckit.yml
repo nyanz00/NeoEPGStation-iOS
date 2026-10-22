@@ -1,7 +1,16 @@
 name: Pinned VLCKit with AV1 hardware support
 on:
   workflow_call:
+    inputs:
+      sdk:
+        type: string
+        default: all
   workflow_dispatch:
+    inputs:
+      sdk:
+        type: choice
+        default: all
+        options: [all, iphoneos, iphonesimulator]
 permissions:
   contents: read
 jobs:
@@ -11,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sdk: [iphoneos, iphonesimulator]
+        sdk: ${{ inputs.sdk != 'all' && fromJSON(format('["{0}"]', inputs.sdk)) || fromJSON('["iphoneos","iphonesimulator"]') }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
@@ -22,8 +31,12 @@ jobs:
         with:
           path: build/vlckit-output-${{ matrix.sdk }}
           key: vlckit-v1-${{ matrix.sdk }}-xcode26.6-${{ hashFiles('vendor/vlckit/**', 'scripts/build-vlckit.sh', 'scripts/vlckit-provenance.py') }}
+          restore-keys: vlckit-v1-${{ matrix.sdk }}-xcode26.6-
+      - name: Verify cached binary and source identity
+        id: verify
+        run: python3 scripts/verify-vlckit.py '${{ matrix.sdk }}'
       - name: Restore dependency compilation
-        if: steps.framework.outputs.cache-hit != 'true'
+        if: steps.verify.outputs.usable != 'true'
         id: compilation
         uses: actions/cache/restore@v4
         with:
@@ -31,10 +44,10 @@ jobs:
           key: vlckit-compile-v1-${{ matrix.sdk }}-xcode26.6-${{ hashFiles('vendor/vlckit/**', 'scripts/build-vlckit.sh') }}
           restore-keys: vlckit-compile-v1-${{ matrix.sdk }}-xcode26.6-
       - name: Build modified VLC and wrapper
-        if: steps.framework.outputs.cache-hit != 'true'
+        if: steps.verify.outputs.usable != 'true'
         run: bash scripts/build-vlckit.sh '${{ matrix.sdk }}'
       - name: Retain incremental compilation after failure or success
-        if: ${{ !cancelled() && steps.framework.outputs.cache-hit != 'true' && steps.compilation.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && steps.verify.outputs.usable != 'true' && steps.compilation.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: build/vlckit-${{ matrix.sdk }}
