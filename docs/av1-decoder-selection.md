@@ -54,3 +54,6 @@ GNU make 4.4のFIFO、ACLOCAL_PATHの明示で扱う。
   実機の診断ログで `vlc.av1Preflight.hardwareSupported`、`decoderDecisions`、
   `decoders` を照合する。OS対応trueでも、構成やセッションが拒否された場合は
   `fallback` とdav1d/softwareが残るので、対応判定だけで利用済みと判断しない。
+
+Build 232のシーク前処理の追加最適化と比較結果は
+[キャッシュ内シークの映像再開時間](preroll-seek-optimization.md)を参照。
