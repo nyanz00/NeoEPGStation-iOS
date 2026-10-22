@@ -24,3 +24,37 @@ keyframes, continued video/clock progress, no input reopen/upstream data fetch, 
 terminal buffering delivery. The shared zero-origin/buffering changes also passed
 TS positioning and HLS checks in build 223. Simulator timings are diagnostics, not device performance
 guarantees.
+
+## Decoder selection and output readiness
+
+Every input explicitly requests `codec=videotoolbox,any` and
+`videotoolbox-hw-decoder-only`. VideoToolbox is attempted first; unsupported
+formats retain automatic fallback. This does not add codecs missing from the
+pinned VLC build. The shared library/logger is retained.
+
+The diagnostics separate `vlc.decoderPolicy` from `vlc.decoderSelected` and keep
+a bounded `decoders` list outside the event ring. Only fixed module names are
+exported. `avcodec` alone is reported as unknown acceleration, since the module
+can use either hardware or software. A policy request is not a successful
+hardware selection or proof of improved device performance.
+
+An encoded seek can release its loading overlay when the native clock is near
+the precise target and a new due output sample is confirmed, without waiting for
+a delayed buffering notification. Future-dated target pictures arm one coalesced
+presentation-time check rather than waiting for the 0.5-second UI timer. Input
+and seek generation checks invalidate obsolete callbacks. TS/HLS retain their
+additional position verification. Decoder preroll is still required; these
+changes do not claim that the whole measured decoder wait can be eliminated.
+
+Muted preparation is reapplied after media replacement and before each internal
+play. The native mute getter must confirm mute before priming may start. A
+pause command alone cannot release the guard: paused user intent requires an
+actual Paused acknowledgement. State transitions and periodic samples include
+the native mute state. Failed restoration also pauses before releasing mute.
+
+The encoded probe includes paused reload, deliberate loss of the old output's
+mute before priming, confirmed mute gates, deferred release until pause, and
+stable paused clock/audio afterward. Decoder diagnostics parsing, redaction and
+retention are checked by the Foundation tests. The focused Actions scope also
+runs HLS and TS positioning checks because decoder policy and restoration are
+shared; unrelated UI tests remain excluded.

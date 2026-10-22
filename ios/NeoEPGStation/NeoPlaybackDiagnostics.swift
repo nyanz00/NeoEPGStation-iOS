@@ -8,6 +8,7 @@ final class NeoPlaybackDiagnostics: NSObject {
   private static var events: [[String: Any]] = []
   private static var commentFonts: [[String: Any]] = []
   private static var fontKeys = Set<String>()
+  private static var decoders: [[String: Any]] = []
   private static var started = ProcessInfo.processInfo.systemUptime
   private static var currentSeek = 0
   private static var awaitingVideo = false
@@ -17,9 +18,30 @@ final class NeoPlaybackDiagnostics: NSObject {
   @objc static func begin() {
     lock.lock(); events.removeAll(); started = ProcessInfo.processInfo.systemUptime; currentSeek = 0; awaitingVideo = false
     nativeErrors.removeAll(); nativeErrorPending = false; nativeErrorGeneration += 1
-    commentFonts.removeAll(); fontKeys.removeAll(); lock.unlock()
+    commentFonts.removeAll(); fontKeys.removeAll(); decoders.removeAll(); lock.unlock()
     record("session.start", fields: ["rewindSeconds": NeoPlaybackCache.savedSeconds,
       "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"])
+  }
+  // Requested policy is not proof of actual hardware use. Retain only module
+  // selection messages and fixed names, never raw native messages or URLs.
+  @objc(nativeDecoder:) static func nativeDecoder(_ message: String) {
+    let kinds = ["video decoder", "audio decoder", "spu decoder", "decoder", "hw decoder"]
+    guard let kind = kinds.first(where: { message.hasPrefix("using \($0) module \"") }),
+          message.hasSuffix("\"") else { return }
+    let name = String(message.dropFirst("using \(kind) module \"".count).dropLast())
+    let software: Set<String> = ["dav1d", "aom", "vpx", "libmpeg2", "mpeg2", "theora", "rawvideo",
+      "faad", "a52", "mpg123", "mpeg_audio", "flac", "vorbis", "opus", "aribsub", "aribcaption",
+      "subsdec", "libass", "spudec", "dvbsub", "dummy"]
+    let module = software.contains(name) || ["videotoolbox", "avcodec"].contains(name) ? name : "other"
+    // avcodec can use an accelerator, so its module name is inconclusive.
+    // VideoToolbox is configured hardware-only by the controller.
+    let acceleration = module == "videotoolbox" ? "hardware" : software.contains(module) ? "software" : "unknown"
+    lock.lock()
+    let row: [String: Any] = ["kind": kind, "module": module, "acceleration": acceleration,
+      "elapsed": ProcessInfo.processInfo.systemUptime-started, "seek": currentSeek]
+    if decoders.count < 64 { decoders.append(row) }
+    lock.unlock()
+    record("vlc.decoderSelected", fields: row)
   }
   @objc static func beginSeek(_ identifier: Int) {
     lock.lock(); currentSeek = identifier; awaitingVideo = true; lock.unlock()
@@ -70,12 +92,12 @@ final class NeoPlaybackDiagnostics: NSObject {
     }
   }
   @objc static func exportURL() -> URL? {
-    lock.lock(); let snapshot = events, fonts = commentFonts; lock.unlock()
+    lock.lock(); let snapshot = events, fonts = commentFonts, selections = decoders; lock.unlock()
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("NeoPlaybackDiagnostics", isDirectory: true)
     let url = directory.appendingPathComponent("playback-diagnostics.json")
     do {
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-      let data = try JSONSerialization.data(withJSONObject: ["schema": 1, "events": snapshot, "commentFonts": fonts], options: [.prettyPrinted, .sortedKeys])
+      let data = try JSONSerialization.data(withJSONObject: ["schema": 1, "events": snapshot, "commentFonts": fonts, "decoders": selections], options: [.prettyPrinted, .sortedKeys])
       try data.write(to: url, options: .atomic); return url
     } catch { return nil }
   }

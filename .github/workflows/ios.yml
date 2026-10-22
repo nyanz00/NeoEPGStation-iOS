@@ -174,7 +174,7 @@ jobs:
         run: python3 -u scripts/encoded-seek-smoke.py
       - name: Check VOD HLS streaming, cache, quality and recovery
         id: streaming-checks
-        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'streaming' }}
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && (inputs.check_scope == 'streaming' || inputs.check_scope == 'encoded-seek') }}
         run: |
           python3 -u scripts/streaming-smoke.py
           python3 -u scripts/ts-resume-smoke.py

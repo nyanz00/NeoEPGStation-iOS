@@ -77,7 +77,19 @@ try:
         diagnostic = json.loads((dist / f'{container}-{names[1]}').read_text())
         assert result['success'] and all(result['checks'].values()), result
         events = diagnostic['events']
-        assert not any(e['event'] in ('input.reloadRequested', 'seek.timeout', 'ts.positionFailed') for e in events), events[-15:]
+        assert not any(e['event'] in ('seek.timeout', 'ts.positionFailed') for e in events), events[-15:]
+        # Only the explicit paused-recovery probe may reopen after the eight
+        # ordinary cached seeks have completed without a new input.
+        reloads = [e for e in events if e['event'] == 'input.reloadRequested']
+        assert len(reloads) == 1 and reloads[0]['seek'] == 8, reloads
+        policies = [e for e in events if e['event'] == 'vlc.decoderPolicy']
+        assert policies and all(e['order'] == 'videotoolbox,any' and e['hardwareOnlyVideoToolbox'] for e in policies), policies
+        assert any(e['event'] == 'vlc.decoderSearch' for e in events), 'VLC did not apply the requested decoder order'
+        assert any(e['kind'] == 'video decoder' and e['module'] != 'other' for e in diagnostic['decoders']), diagnostic['decoders']
+        gates = [e for e in events if e['event'] == 'audio.primeGate']
+        assert gates and all(e['actualMute'] == 1 for e in gates), gates
+        releases = [e for e in events if e['event'] == 'audio.primeReleased' and not e['wantsPlayback']]
+        assert releases and all(e['paused'] for e in releases), releases
         starts = [e for e in events if e['event'] == 'seek.start']
         assert len(starts) == 8 and any(e['targetMs'] < 30000 for e in starts), starts
         assert all(row['networkBytes'] == 0 for row in result['rows']), result['rows']
