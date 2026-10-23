@@ -278,14 +278,22 @@ jobs:
         if: always() && hashFiles('build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app/Info.plist') != ''
         run: |
           ditto -c -k --keepParent build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app dist/simulator-app.zip
-      - name: Upload IPA and diagnostics
+      - name: Upload installable IPA
+        id: upload-ipa
+        if: ${{ !cancelled() && steps.package-ipa.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/NeoEPGStation.ipa
+          archive: false
+          retention-days: 7
+          if-no-files-found: error
+      - name: Upload diagnostics and simulator application
         id: upload
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: NeoEPGStation-iOS-${{ github.run_number }}
           path: |
-            dist/*.ipa
             dist/*.sha256
             dist/*.json
             dist/*.log
