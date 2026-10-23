@@ -132,13 +132,24 @@ try:
         seeks = [row for row in result['rows'] if 'phase' in row]
         assert all(row['networkBytes'] == 0 for row in seeks), seeks
         if compare:
+            videos = [e for e in diagnostic['decoders'] if e['kind'] == 'video decoder']
+            native_preroll = all(e['module'] == 'videotoolbox' for e in videos)
+            # The simulator may reject HEVC hardware decoding and select
+            # avcodec. That remains a playback regression check, never a
+            # performance result for our VideoToolbox patch.
+            if hevc and not native_preroll:
+                assert all(e['module'] == 'avcodec' for e in videos), videos
             preroll = [e for e in events if e['event'] == 'vlc.prerollReady' and 1 <= e['seek'] <= 8]
-            assert len(preroll) >= 6 and all(e['frames'] > 0 for e in preroll), preroll
+            if not hevc or native_preroll:
+                assert len(preroll) >= 6 and all(e['frames'] > 0 for e in preroll), preroll
+            else:
+                assert not preroll, preroll
             assert all(e['optimized'] == (hevc or not baseline) for e in preroll), preroll
-            if hevc:
+            if hevc and native_preroll:
                 assert all(e['noOutput'] > 0 and e['pictures'] == 0 for e in preroll), preroll
                 dropped = sum(e['droppedFrames'] for e in preroll)
                 assert dropped == 0 if baseline else dropped > 100, preroll
+            if hevc:
                 policy = [e for e in events if e['event'] == 'vlc.prerollPolicy']
                 assert policy and all(e['referenceSkip'] != baseline for e in policy), policy
             elif baseline:
@@ -147,6 +158,8 @@ try:
                 assert all(e['noOutput'] > 0 and e['pictures'] == 0 for e in preroll), preroll
                 assert sum(e['droppedFrames'] for e in preroll) > 100, preroll
             comparisons.append({'case': output_name, 'baseline': baseline,
+                                'nativePrerollAvailable': native_preroll,
+                                'videoDecoderModules': sorted(set(e['module'] for e in videos)),
                                 'seekToVideoMs': [row['videoReadyMs'] for row in seeks],
                                 'prerollMs': [e['durationMs'] for e in preroll],
                                 'skippedDecodes': sum(e['droppedFrames'] for e in preroll),
@@ -159,15 +172,21 @@ try:
         for ext in ('mkv', 'mp4'):
             before = next(c for c in comparisons if c['case'] == f'{prefix}-{ext}-baseline')
             after = next(c for c in comparisons if c['case'] == f'{prefix}-{ext}-optimized')
+            assert before['nativePrerollAvailable'] == after['nativePrerollAvailable'], (before, after)
+            measured = before['nativePrerollAvailable'] and after['nativePrerollAvailable']
             summary.append({'container': ext,
+                            'nativePerformanceMeasured': measured,
+                            'performanceUnavailableReason': None if measured else 'Simulator selected avcodec instead of VideoToolbox',
                             'baselineMedianMs': statistics.median(before['seekToVideoMs']),
                             'optimizedMedianMs': statistics.median(after['seekToVideoMs']),
-                            'baselinePrerollMedianMs': statistics.median(before['prerollMs']),
-                            'optimizedPrerollMedianMs': statistics.median(after['prerollMs'])})
+                            'baselinePrerollMedianMs': statistics.median(before['prerollMs']) if measured else None,
+                            'optimizedPrerollMedianMs': statistics.median(after['prerollMs']) if measured else None})
         (dist / ('hevc-preroll-comparison.json' if hevc else 'preroll-comparison.json')).write_text(json.dumps({'runs': comparisons, 'summary': summary}, indent=2))
         print('Paired same-binary preroll comparison:', json.dumps(summary), flush=True)
         if hevc:
-            assert all(s['optimizedMedianMs'] < s['baselineMedianMs'] * .8 for s in summary), \
+            assert all(s['optimizedMedianMs'] < s['baselineMedianMs'] * .8 for s in summary if s['nativePerformanceMeasured']), \
                 ('HEVC did not improve its measured median by at least 20%', summary)
+            if not all(s['nativePerformanceMeasured'] for s in summary):
+                print('HEVC VideoToolbox performance UNVERIFIED: simulator used software decoding; playback checks only.', flush=True)
 finally:
     server.shutdown()
