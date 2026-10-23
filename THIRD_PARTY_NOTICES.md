@@ -1,5 +1,17 @@
 # Third-party software
 
+The optional encoded-PLAY comparison screen uses AetherEngine 7.46.0,
+revision `40193cefa7244c097519d219f84af1b9028c181c`, under LGPL-3.0 with its
+Apple Store / DRM Exception. Source: https://github.com/superuser404notfound/AetherEngine/tree/40193cefa7244c097519d219f84af1b9028c181c
+The engine is unmodified. FFmpegBuild supplies dynamically embedded FFmpeg,
+dav1d, zimg and zvbi libraries with their own licenses; LibDovi supplies the
+Dolby Vision parser under its upstream MIT option. Exact resolved source pins,
+component license texts and upstream source/build recipes are retained in
+`ThirdPartyNotices/AetherEngine` inside the app and the build artifact's
+`AetherEngine-source-recipes.tar.gz`. FFmpegBuild's pinned build recipe names
+the upstream source revisions and the applied patches. These components do not
+inherit AetherEngine's store exception.
+
 The initial application skeleton comes from the MIT-licensed
 [React Native Community Template](https://github.com/react-native-community/template).
 Its notice is preserved in `licenses/ReactNativeTemplate-MIT.txt`.

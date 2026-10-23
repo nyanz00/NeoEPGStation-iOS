@@ -92,6 +92,7 @@ final class NeoSettingsCategoryPage: NeoPage {
     guard let shell, let api = shell.api else { return }
     switch category {
     case .app:
+      toggle("試験用AetherEngineを使用", explanation: "エンコード済みPLAYだけを比較用プレイヤーで開きます。コメント・字幕・PiP・視聴履歴の保存には未対応です。次の再生から適用します。", on: NeoPlaybackExperiment.enabled) { NeoPlaybackExperiment.enabled = $0 }
       button("接続先を変更") { [weak self, weak shell] in
         guard let shell else { return }; self?.navigationController?.pushViewController(NeoConnectionPage(shell: shell), animated: true)
       }

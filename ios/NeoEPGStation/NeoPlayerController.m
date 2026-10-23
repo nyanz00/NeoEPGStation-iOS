@@ -390,6 +390,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.initialPosition = isfinite(self.initialPosition) ? MAX(0, self.initialPosition) : 0;
   self.lastObservedTime = (int64_t)llround(self.initialPosition * 1000);
   [NeoPlaybackDiagnostics begin];
+  [NeoPlaybackDiagnostics record:@"player.engine" fields:@{@"engine": @"vlc"}];
   [NeoPlaybackDiagnostics record:@"player.start" fields:@{@"networkCachingMs": @(self.networkCaching)}];
   self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
   self.chrome = [[NeoPlayerChrome alloc] initWithTitle:self.mediaTitle];

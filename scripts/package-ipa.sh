@@ -8,6 +8,7 @@ test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app/Info.plist")"
 mkdir -p dist/Payload
 ditto "$app" dist/Payload/NeoEPGStation.app
 mkdir -p dist/notices
+python3 scripts/aether-provenance.py
 cp THIRD_PARTY_NOTICES.md dist/notices/
 cp licenses/*.txt dist/notices/
 cp vendor/vlckit/COPYING dist/notices/VLCKit-COPYING.txt

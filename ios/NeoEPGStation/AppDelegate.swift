@@ -10,6 +10,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     var controller = (window ?? self.window)?.rootViewController
     while let current = controller {
       if let player = current as? NeoPlayerController { return player.supportedInterfaceOrientations }
+      if let player = current as? NeoAetherPlayer { return player.supportedInterfaceOrientations }
       controller = current.presentedViewController
     }
     return (window ?? self.window)?.traitCollection.userInterfaceIdiom == .pad ? .all : .portrait
@@ -17,6 +18,15 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
   func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
     let window = UIWindow(frame: UIScreen.main.bounds)
     window.rootViewController = NeoShell(); self.window = window; window.makeKeyAndVisible()
+#if targetEnvironment(simulator)
+    if let base = ProcessInfo.processInfo.environment["NEO_EPG_AETHER_COMPARE"], let url = URL(string: base+"/api/videos/1") {
+      DispatchQueue.main.asyncAfter(deadline: .now()+1) {
+        let player = NeoAetherPlayer(url: url, title: "Synthetic engine comparison", initialPosition: 30)
+        window.rootViewController?.present(player, animated: false) { player.runComparisonProbe() }
+      }
+      return true
+    }
+#endif
 #if targetEnvironment(simulator)
     if let base = ProcessInfo.processInfo.environment["NEO_EPG_ENCODED_SEEK"], let url = URL(string: base+"/api/videos/1") {
       UserDefaults.standard.set(60, forKey: NeoPlaybackCache.preference)

@@ -283,7 +283,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private var popInteraction: UIPercentDrivenInteractiveTransition?
   private var panStart: CGFloat = 0
   private var menuDragging = false
-  private var player: NeoPlayerController?
+  private var player: UIViewController?
   var tablet: Bool { traitCollection.userInterfaceIdiom == .pad }
   var smokeStage: String {
 #if targetEnvironment(simulator)
@@ -492,6 +492,13 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     }
   }
   private func presentPlayer(_ file: NeoVideoFile, recording: NeoRecording, api: NeoAPI, user: String, start: Double, streaming: Int?, streamSubtitle: Int?) {
+    if NeoPlaybackExperiment.usesAether(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
+      let controller = NeoAetherPlayer(url: api.url("/videos/\(file.id)"), title: recording.name, initialPosition: start)
+      player = controller
+      controller.onClose = { [weak self] in self?.player = nil }
+      present(controller, animated: true)
+      return
+    }
     let controller = NeoPlayerController(url: api.url("/videos/\(file.id)"), title: recording.name, username: "", password: "", networkCaching: 5000)
     controller.initialPosition = start
     controller.recordingContext = ["baseURL": api.base.absoluteString, "id": recording.id, "user": user,
