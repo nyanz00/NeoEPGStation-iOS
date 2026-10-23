@@ -1411,7 +1411,10 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
   BOOL replacedOutput = [video[@"outputID"] unsignedIntegerValue] != self.tsPositionOutputID;
   BOOL newSample = replacedOutput ? [video[@"samples"] unsignedIntegerValue] > 0 : [video[@"samples"] unsignedIntegerValue] > self.tsPositionSamples;
-  int64_t tolerance = self.initialPositionInput && ![self wholeFileClock] ? 500 : 2000;
+  // Adaptive HLS may report successful positioning at the segment's start.
+  // Do not accept that up to two seconds early as the requested initial frame.
+  // A strict initial check falls through to the existing exact seek instead.
+  int64_t tolerance = self.initialPositionInput ? 500 : 2000;
   if (self.initialPositionInput) {
     if (!self.inputBufferReady || self.buffering) { return; }
     // A demuxer may need an initial PCR/frame before it can seek. Preserve the

@@ -209,9 +209,13 @@ jobs:
         id: streaming-checks
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && (inputs.check_scope == 'streaming' || inputs.check_scope == 'startup-preroll') }}
         run: |
-          python3 -u scripts/streaming-smoke.py
-          python3 -u scripts/ts-resume-smoke.py
-          python3 -u scripts/ts-resume-smoke.py mpeg2
+          hls_result=0
+          python3 -u scripts/streaming-smoke.py || hls_result=$?
+          ts_result=0
+          python3 -u scripts/ts-resume-smoke.py || ts_result=$?
+          mpeg_result=0
+          python3 -u scripts/ts-resume-smoke.py mpeg2 || mpeg_result=$?
+          test "$hls_result" = 0 && test "$ts_result" = 0 && test "$mpeg_result" = 0
       - name: Check native playback and iPhone UI
         id: iphone-checks
         if: ${{ inputs.check_scope != 'zoom-font' && inputs.check_scope != 'ts-comments' && inputs.check_scope != 'recovery-ui' && inputs.check_scope != 'streaming' && inputs.check_scope != 'encoded-seek' && inputs.check_scope != 'av1-decoder' && inputs.check_scope != 'startup-preroll' }}

@@ -61,3 +61,13 @@ setup allowance; the measured repeated-seek allowance stays at 5s.
 
 No AV1 speedup amount is assumed. Record measured results and remaining
 hardware-only verification limits after the build completes.
+
+The first build (239) passed all six indexed-file startup/cached-seek cases:
+baseline had two buffer cycles and each optimized case had one, with full
+rewind range and paused recovery retained. HLS exposed an early-position
+validation issue: a successful request at 70s could start at its 68s segment
+boundary, within the old 2s acceptance window. Initial verification now requires
+500ms for every route and falls back to the existing exact seek on larger
+offsets. The later ordinary TS/HLS restoration tolerance is unchanged. Native
+sources are unchanged for this correction, so the verified v5 libraries are
+reused. Independent HLS/TS probes retain each result even if one fails.
