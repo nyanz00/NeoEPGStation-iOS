@@ -71,3 +71,47 @@ boundary, within the old 2s acceptance window. Initial verification now requires
 offsets. The later ordinary TS/HLS restoration tolerance is unchanged. Native
 sources are unchanged for this correction, so the verified v5 libraries are
 reused. Independent HLS/TS probes retain each result even if one fails.
+
+## Final result: build 240
+
+Actions run `39953704447`, application source `59053b3`, succeeded. Both native
+libraries reused the exact verified v5 inputs from run `39950215381`. Native
+type checks and application builds passed for device and simulator.
+
+All 423 focused functional checks passed: 288 across the six startup/cached-seek
+cases, 44 encoded HLS, 43 TS HLS, and 24 each for H.264/MPEG-2 raw TS resume.
+The indexed PLAY cases retained the full recording range, verified output at
+30s, rewound before that position, and restored paused playback correctly.
+
+| Simulator startup case | Buffer cycles | Ready time (ms) |
+| --- | ---: | ---: |
+| H.264 MKV, previous startup | 2 | 3810 |
+| H.264 MKV, initial positioning | 1 | 1390 |
+| H.264 MP4 | 1 | 839 |
+| HEVC 10bit MKV | 1 | 1530 |
+| AV1 8bit MKV | 1 | 658 |
+| AV1 10bit MKV | 1 | 764 |
+
+These are synthetic simulator samples, not iPhone hardware speed measurements.
+HLS and raw TS retain the verified exact-position fallback when early seeking
+is unavailable or lands at a segment boundary; a universal single-buffer
+startup is not claimed. Controlled HLS outage/recovery, clock progression,
+quality switching and session teardown also passed.
+
+The production portable classifier passed its guards with compiler warnings
+treated as errors. All 1008 pictures from the target onward matched baseline
+for each of AV1 8bit, AV1 10bit and HEVC 10bit. The corresponding preroll skips
+were 358, 358 and 359. CI helper tests passed all 10 cases.
+
+The actual simulator VideoToolbox H.264 path emitted 20 cost batches: 1464
+sample wrappers created and 1464 frames dropped before wrapper creation, with
+the count/timing invariants satisfied. AV1 used dav1d software decoding in the
+simulator. AV1 hardware seek latency and the new cost breakdown therefore
+still require the actual iPhone VideoToolbox path; no hardware speedup is
+inferred from these simulator results.
+
+Delivered `dist/NeoEPGStation.ipa` is build 240, SHA-256
+`c26cddc2460e018860f448b397e5a9a194e065fdaff5018bea667e918bf6bf6e`.
+The embedded framework hash, v5 markers, all four bundled patches, AV1 source
+includes and complete corresponding-source archive were checked against the
+verified native provenance and current source files.
