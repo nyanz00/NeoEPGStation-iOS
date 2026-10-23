@@ -72,10 +72,21 @@ try:
         for name in names:
             (documents/name).unlink(missing_ok=True)
         environment = dict(os.environ, SIMCTL_CHILD_NEO_EPG_AETHER_COMPARE=f'http://127.0.0.1:{server.server_port}')
-        subprocess.run(['xcrun', 'simctl', 'launch', device, bundle], env=environment, check=True, timeout=60)
-        deadline = time.monotonic()+100
-        while not all((documents/name).exists() for name in names) and time.monotonic()<deadline:
-            time.sleep(.5)
+        # Synthetic sources only: collect the engine's release-visible routing and
+        # renderer diagnostics. No real server URL or credentials enter this log.
+        with Path('dist', fixture+'-aether-engine.log').open('w') as log:
+            observer = subprocess.Popen(['xcrun', 'simctl', 'spawn', device, 'log', 'stream',
+                '--style', 'compact', '--level', 'info', '--predicate',
+                'subsystem == "de.superuser404.AetherEngine"'], stdout=log, stderr=log)
+            try:
+                subprocess.run(['xcrun', 'simctl', 'launch', device, bundle], env=environment, check=True, timeout=60)
+                deadline = time.monotonic()+100
+                while not all((documents/name).exists() for name in names) and time.monotonic()<deadline:
+                    time.sleep(.5)
+            finally:
+                observer.terminate()
+                try: observer.wait(timeout=5)
+                except subprocess.TimeoutExpired: observer.kill(); observer.wait()
         for name in names:
             if (documents/name).exists():
                 shutil.copyfile(documents/name, Path('dist', fixture+'-'+name))
