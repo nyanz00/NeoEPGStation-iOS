@@ -184,12 +184,15 @@ def main():
         lib.test_hevc.argtypes = [C.POINTER(C.c_uint8), C.c_size_t, C.c_uint]
         lib.test_av1.restype = lib.test_hevc.restype = C.c_bool
         guards(lib)
-        results = [av1_check(lib, ROOT / f'tests/fixtures/av1-seek-{depth}.mkv', tmp) for depth in (8, 10)]
-        results.append(hevc_check(lib, ROOT / 'tests/fixtures/hevc-seek-10.mkv', tmp))
-        print(json.dumps({'guards': 'passed', 'results': results}, indent=2))
+        guards_only = '--guards-only' in sys.argv
+        results = [] if guards_only else [av1_check(lib, ROOT / f'tests/fixtures/av1-seek-{depth}.mkv', tmp) for depth in (8, 10)]
+        if not guards_only:
+            results.append(hevc_check(lib, ROOT / 'tests/fixtures/hevc-seek-10.mkv', tmp))
+        report = {'guards': 'passed', 'guardsOnly': guards_only, 'results': results}
+        print(json.dumps(report, indent=2))
         if 'GITHUB_ACTIONS' in os.environ:
             (ROOT / 'dist').mkdir(exist_ok=True)
-            (ROOT / 'dist/preroll-reference-test.json').write_text(json.dumps(results, indent=2))
+            (ROOT / 'dist/preroll-reference-test.json').write_text(json.dumps(report, indent=2))
         if sys.platform == 'win32':
             import _ctypes
             _ctypes.FreeLibrary(lib._handle)
