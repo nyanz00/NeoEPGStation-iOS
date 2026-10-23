@@ -7,6 +7,7 @@ import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http_byte_range import byte_range
 
 
 def run(*args, timeout=120):
@@ -38,12 +39,10 @@ class Handler(BaseHTTPRequestHandler):
         global transferred, requests
         if self.path != '/api/videos/1':
             self.send_error(404); return
-        begin, end = 0, len(video)-1
         ranged = self.headers.get('Range')
-        if ranged:
-            first, last = ranged.removeprefix('bytes=').split('-')
-            begin, end = int(first), min(int(last) if last else end, end)
-        if begin > end or begin >= len(video):
+        try:
+            begin, end = byte_range(ranged, len(video))
+        except ValueError:
             self.send_response(416); self.send_header('Content-Range', f'bytes */{len(video)}'); self.end_headers(); return
         self.send_response(206 if ranged else 200)
         self.send_header('Content-Type', 'video/x-matroska')
