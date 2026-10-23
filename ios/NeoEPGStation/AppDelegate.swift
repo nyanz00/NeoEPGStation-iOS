@@ -21,7 +21,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
 #if targetEnvironment(simulator)
     if let base = ProcessInfo.processInfo.environment["NEO_EPG_AETHER_COMPARE"], let url = URL(string: base+"/api/videos/1") {
       DispatchQueue.main.asyncAfter(deadline: .now()+1) {
-        let player = NeoAetherPlayer(url: url, title: "Synthetic engine comparison", initialPosition: 30)
+        let player = NeoAetherPlayer(url: url, title: "Synthetic engine comparison", initialPosition: 0)
         window.rootViewController?.present(player, animated: false) { player.runComparisonProbe() }
       }
       return true

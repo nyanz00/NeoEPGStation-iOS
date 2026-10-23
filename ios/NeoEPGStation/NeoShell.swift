@@ -493,7 +493,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
   private func presentPlayer(_ file: NeoVideoFile, recording: NeoRecording, api: NeoAPI, user: String, start: Double, streaming: Int?, streamSubtitle: Int?) {
     if NeoPlaybackExperiment.usesAether(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
-      let controller = NeoAetherPlayer(url: api.url("/videos/\(file.id)"), title: recording.name, initialPosition: start)
+      let controller = NeoAetherPlayer(url: api.url("/videos/\(file.id)"), title: recording.name, initialPosition: 0)
       player = controller
       controller.onClose = { [weak self] in self?.player = nil }
       present(controller, animated: true)

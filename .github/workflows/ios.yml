@@ -292,6 +292,7 @@ jobs:
             dist/*.txt
             dist/*.png
             dist/simulator-app.zip
+              dist/AetherEngine-source-recipes.tar.gz
             ios/Podfile.lock
             Gemfile.lock
           retention-days: 7

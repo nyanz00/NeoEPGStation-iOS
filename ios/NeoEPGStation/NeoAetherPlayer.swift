@@ -279,7 +279,7 @@ final class NeoAetherPlayer: UIViewController {
         try? await Task.sleep(for: .milliseconds(100))
       }
       var checks: [String: Bool] = ["startupVideo": startupReady, "seekable": engine?.canSeek == true,
-        "resumePosition": abs((engine?.currentTime ?? 0)-30) < 3]
+        "initialPosition": abs((engine?.currentTime ?? 0)-initialPosition) < 3]
       for (index, target) in [20.0, 40.0, 30.0, 20.0].enumerated() {
         guard !closed else { break }
         let count = landedCount; seek(to: target)
