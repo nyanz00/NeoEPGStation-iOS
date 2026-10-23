@@ -3,7 +3,10 @@
 The optional encoded-PLAY comparison screen uses AetherEngine 7.46.0,
 revision `40193cefa7244c097519d219f84af1b9028c181c`, under LGPL-3.0 with its
 Apple Store / DRM Exception. Source: https://github.com/superuser404notfound/AetherEngine/tree/40193cefa7244c097519d219f84af1b9028c181c
-The engine is unmodified. FFmpegBuild supplies dynamically embedded FFmpeg,
+The engine carries a small Swift 6.2 compatibility patch: evaluate the hardware
+capability synchronously and capture only the Boolean verdict in a routing
+closure. Its source, SHA-256 and patch are retained in the notices and source
+archive. FFmpegBuild supplies dynamically embedded FFmpeg,
 dav1d, zimg and zvbi libraries with their own licenses; LibDovi supplies the
 Dolby Vision parser under its upstream MIT option. Exact resolved source pins,
 component license texts and upstream source/build recipes are retained in

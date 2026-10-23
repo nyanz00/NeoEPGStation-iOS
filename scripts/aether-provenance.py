@@ -17,6 +17,18 @@ expected = {
 assert {p['identity']: p['state']['revision'] for p in pins} == expected, 'Unexpected dependency resolution'
 root = Path('build/SourcePackages/checkouts')
 notice = Path('dist/notices/AetherEngine'); notice.mkdir(parents=True, exist_ok=True)
+recipe = json.loads(Path('vendor/aether/source.json').read_text())
+patch = Path('vendor/aether/0001-swift62-codec-verdict.patch')
+assert hashlib.sha256(patch.read_bytes()).hexdigest() == recipe['patchSHA256']
+engine = next(p for p in root.iterdir() if p.name.lower() == 'aetherengine')
+source = engine/'Sources/AetherEngine/AetherEngine.swift'
+digest = hashlib.sha256(source.read_bytes()).hexdigest()
+if digest == recipe['upstreamSHA256']:
+    subprocess.run(['git', '-C', str(engine), 'apply', '--check', str(patch.resolve())], check=True)
+    subprocess.run(['git', '-C', str(engine), 'apply', str(patch.resolve())], check=True)
+assert hashlib.sha256(source.read_bytes()).hexdigest() == recipe['patchedSHA256'], 'Unexpected engine modifications'
+shutil.copyfile(patch, notice/patch.name)
+shutil.copyfile('vendor/aether/source.json', notice/'modifications.json')
 rows = []
 with tarfile.open('dist/AetherEngine-source-recipes.tar.gz', 'w:gz') as archive:
     for pin in pins:
@@ -38,6 +50,7 @@ with tarfile.open('dist/AetherEngine-source-recipes.tar.gz', 'w:gz') as archive:
                 destination.parent.mkdir(parents=True, exist_ok=True); shutil.copyfile(path, destination); count += 1
         assert count, 'No license notices for '+directory.name
 report = {'success': True, 'aetherVersion': '7.46.0', 'dependencies': rows,
+          'modifications': recipe,
           'sourceRecipeArchiveSHA256': hashlib.sha256(Path('dist/AetherEngine-source-recipes.tar.gz').read_bytes()).hexdigest()}
 (notice/'source-pins.json').write_text(json.dumps(report, indent=2)+'\n')
 Path('dist/aether-provenance.json').write_text(json.dumps(report, indent=2)+'\n')

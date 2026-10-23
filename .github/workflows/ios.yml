@@ -163,7 +163,8 @@ jobs:
         working-directory: ios
         run: bundle exec pod install --deployment
       - name: Cache pinned Swift packages
-        uses: actions/cache@v4
+        id: spm-cache
+        uses: actions/cache/restore@v4
         with:
           path: build/SourcePackages
           key: aether-spm-xcode26.6-${{ hashFiles('ios/NeoEPGStation.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
@@ -173,6 +174,12 @@ jobs:
           xcodebuild -resolvePackageDependencies -workspace ios/NeoEPGStation.xcworkspace \
             -scheme NeoEPGStation -clonedSourcePackagesDirPath build/SourcePackages
           python3 scripts/aether-provenance.py
+      - name: Retain resolved dependencies before compiling the application
+        if: ${{ success() && steps.spm-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: build/SourcePackages
+          key: ${{ steps.spm-cache.outputs.cache-primary-key }}
       - name: Build device application
         id: device-build
         run: |

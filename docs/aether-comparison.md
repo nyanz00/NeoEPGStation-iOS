@@ -11,7 +11,9 @@ subtitle, PiP or history-write integration. The server history may supply the
 initial resume position, but trial playback does not overwrite it.
 
 AetherEngine 7.46.0 is pinned by revision along with its transitive package
-lock. The upstream engine is unmodified. The packaging step verifies checkout
+lock. One Swift 6.2 compatibility patch passes a Boolean capability verdict to
+the routing closure instead of capturing a task-isolated C pointer; the same
+profile exemption and post-panel retry remain. The packaging step verifies checkout
 identity and collects dependency license texts, exact source links and source
 build recipes. FFmpeg components remain dynamically embedded beside VLCKit.
 

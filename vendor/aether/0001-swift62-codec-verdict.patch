@@ -1,0 +1,36 @@
+--- a/Sources/AetherEngine/AetherEngine.swift
++++ b/Sources/AetherEngine/AetherEngine.swift
+@@ -5332,23 +5332,20 @@
+            let vStream = probe.stream(at: probe.videoStreamIndex),
+            let codecpar = vStream.pointee.codecpar {
+             let dvProfile = Self.dvProfile(stream: vStream)
+-            let forcesSoftware = {
++            let effectiveDVProfile = presentsDolbyVisionBaseLayer ? nil : (correctedDVProfile ?? dvProfile)
++            let skipsProbe = detectedCodecID == AV_CODEC_ID_HEVC && effectiveDVProfile == 5
++            // Swift 6.2: capture a Sendable verdict in the policy closure, not
++            // the demuxer's task-isolated codec-parameter pointer. Keep the
++            // same lazy P5 exemption and repeat the probe after panel settling.
++            let forcesSoftware = { (hardware: Bool) in
+                 VideoRoutingPolicy.forcesSoftwareForUndecodableFormat(
+-                   codecID: detectedCodecID,
+-                   // A Profile 5 record served as its base layer plays as plain HEVC, which is what
+-                   // the raw-hvcC probe judges; the exemption is for the dvh1 route it is not on.
+-                   // AE#532: a record the RPU corrected is not on that route either, and its base layer
+-                   // is standard Main10, so the gate judges it the way it judges any Profile 7 / 8.
+-                   dvProfile: presentsDolbyVisionBaseLayer ? nil : (correctedDVProfile ?? dvProfile),
+-                   canHardwareDecode: { VTCapabilityProbe.canHardwareDecode(codecpar: codecpar) })
++                    codecID: detectedCodecID, dvProfile: effectiveDVProfile,
++                    canHardwareDecode: { hardware })
+             }
+-            var routesSoftware = forcesSoftware()
+-            // AE#348: with the pre-flight gate beside the load, this probe's throwaway session can open while
+-            // the panel switches, which the serial order never did. Only a refusal changes the route, so a
+-            // refusal taken then is asked again once the panel has settled, where the serial order asked it.
++            var routesSoftware = forcesSoftware(skipsProbe || VTCapabilityProbe.canHardwareDecode(codecpar: codecpar))
+             if routesSoftware, !panelRoutingSettled {
+                 try await settlePanelRouting(ownsProbe: true)
+-                routesSoftware = forcesSoftware()
++                routesSoftware = forcesSoftware(skipsProbe || VTCapabilityProbe.canHardwareDecode(codecpar: codecpar))
+             }
+             if routesSoftware {
+                 useSoftwarePath = true
