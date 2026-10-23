@@ -209,8 +209,10 @@ jobs:
         id: aether-checks
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'aether-compare' }}
         run: |
-          python3 -u scripts/aether-comparison-smoke.py
-          python3 -u scripts/encoded-seek-smoke.py --startup
+          comparison_failed=0
+          python3 -u scripts/aether-comparison-smoke.py || comparison_failed=1
+          python3 -u scripts/encoded-seek-smoke.py --startup || comparison_failed=1
+          exit "$comparison_failed"
       - name: Check encoded PLAY cached seek latency
         id: encoded-seek-checks
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'encoded-seek' }}
@@ -359,8 +361,10 @@ jobs:
             python3 -u scripts/ts-resume-smoke.py mpeg2
           elif [ "$CHECK_SCOPE" = "aether-compare" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
-            python3 -u scripts/aether-comparison-smoke.py
-            python3 -u scripts/encoded-seek-smoke.py --startup
+            comparison_failed=0
+            python3 -u scripts/aether-comparison-smoke.py || comparison_failed=1
+            python3 -u scripts/encoded-seek-smoke.py --startup || comparison_failed=1
+            exit "$comparison_failed"
           elif [ "$CHECK_SCOPE" = "encoded-seek" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
             python3 -u scripts/encoded-seek-smoke.py --compare-preroll

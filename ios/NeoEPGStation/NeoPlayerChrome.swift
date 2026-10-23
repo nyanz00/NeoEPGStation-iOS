@@ -133,6 +133,27 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private let drawer = NeoSidebar(), drawerDim = UIButton(type: .custom)
   private var drawerOpen = false, drawerDragging = false, drawerStart: CGFloat = 0
   private var diagnostic = "", commentDiagnostic = ""
+  private var comparisonMode = false
+#if targetEnvironment(simulator)
+  func comparisonControlsSealed() -> Bool {
+    comparisonMode && [menuButton, pipButton, subtitleButton, commentButton, ruleButton, reloadButton].allSatisfy { !$0.isEnabled }
+      && playButton.isEnabled && backButton.isEnabled && rotationButton.isEnabled
+      && !zoomPinch.isEnabled && !orientationPan.isEnabled && !navigationPan.isEnabled
+  }
+#endif
+  // Keep the production chrome; only connections outside the engine experiment
+  // are disabled. Ordinary VLC playback never enables this mode.
+  func configureEngineComparison() {
+    comparisonMode = true
+    for button in [menuButton, pipButton, subtitleButton, commentButton, ruleButton, reloadButton] {
+      button.isEnabled = false; button.alpha = 0.35
+    }
+    for button in tabButtons.dropFirst().dropLast() { button.isEnabled = false; button.alpha = 0.35 }
+    for button in categoryButtons.dropFirst() { button.isEnabled = false; button.alpha = 0.35 }
+    navigationPan.isEnabled = false; orientationPan.isEnabled = false
+    zoomPinch.isEnabled = false; zoomPan.isEnabled = false
+    renderPanel()
+  }
 #if targetEnvironment(simulator)
   @objc var transientNoticeVisible: Bool { !transientNotice.isHidden }
   @objc func smokePressRotation() { rotationButton.sendActions(for: .touchUpInside) }
@@ -326,6 +347,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     }.withRenderingMode(.alwaysTemplate)
   }
   private func perform(_ action: String) {
+    if comparisonMode && ["menu", "pip", "subtitles", "comments-settings", "rules", "reload"].contains(action) { return }
     onAction?("interaction")
     switch action {
     case "program", "rules": selectPanel(action, toggle: true)
@@ -727,11 +749,21 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
         stack.addArrangedSubview(NeoStyle.button(text) { [weak self] in self?.onAction?("orientation:\(id)") })
       }
       append(diagnostic, size: 12, muted: true); append(commentDiagnostic, size: 12, muted: true)
-      stack.addArrangedSubview(NeoStyle.button("再生診断ログを共有") { [weak self] in self?.onAction?("export-diagnostics") })
+      let export = NeoStyle.button("再生診断ログを共有") { [weak self] in self?.onAction?("export-diagnostics") }
+      export.accessibilityIdentifier = "player-export-diagnostics"; stack.addArrangedSubview(export)
       let reload = NeoStyle.button("再読み込み") { [weak self] in self?.onAction?("reload") }
       reload.accessibilityIdentifier = "player-settings-reload"; stack.addArrangedSubview(reload)
     default: break
-    }; setNeedsLayout()
+    }
+    if comparisonMode && tab == "settings" {
+      func disableExperimentalConnections(_ view: UIView) {
+        if view.accessibilityIdentifier == "player-export-diagnostics" { return }
+        if let control = view as? UIControl { control.isEnabled = false; control.alpha = 0.35 }
+        view.subviews.forEach(disableExperimentalConnections)
+      }
+      stack.arrangedSubviews.forEach(disableExperimentalConnections)
+    }
+    setNeedsLayout()
   }
   private func loadRelated() {
     guard !rulesLoaded, relatedTask == nil, let api else { return }

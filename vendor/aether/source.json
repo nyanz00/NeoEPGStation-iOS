@@ -3,5 +3,29 @@
   "revision": "40193cefa7244c097519d219f84af1b9028c181c",
   "upstreamSHA256": "94720bd63af3f391fb8603409ada8d210ce24c5165b24d5bbed7e32ed506c859",
   "patchedSHA256": "93832ef060cb56a80ed5787d39f142b82003494daad74929e6344451f1378195",
-  "patchSHA256": "b52cf75d5ebfa412c15f2ee5c49eb742380679717613e360b9f95cc0a4c92639"
+  "patchSHA256": "b52cf75d5ebfa412c15f2ee5c49eb742380679717613e360b9f95cc0a4c92639",
+  "additionalPatches": [
+    {
+      "file": "0002-software-av1-and-picture-evidence.patch",
+      "sha256": "01220b07599fbf85ff8953124af169cffac5d97a977cfb3f3e2dc0bc81524283",
+      "sources": [
+        {
+          "path": "Sources/AetherEngine/Decoder/SoftwareVideoDecoder.swift",
+          "upstreamSHA256": "2eee12fd634de7ba73be0e6ce7d917252400eb35f0fea07100570d2d5f49e9a8",
+          "patchedSHA256": "3da19d1ba8fc42ce7cc803fedf31de1dbc7cc107fdb0680004a42b30371c9e05"
+        },
+        {
+          "path": "Sources/AetherEngine/Renderer/SampleBufferRenderer.swift",
+          "upstreamSHA256": "f4003c197ffde4ae09a65faff28964d49a53e0c41fc00d1aee1b15ef92d68df4",
+          "patchedSHA256": "fbcdf3e7e541104e90aed2c4dba8c62c4b47ed6e026d5bc5ee7a70723ff79993"
+        }
+      ]
+    }
+  ],
+  "ffmpegCodecHeader": {
+    "file": "0003-ffmpeg-codec-id-abi.patch",
+    "sha256": "2769898a5920387d6840e36aaec11a01feb4cc39ce4381c657d8fecf20d3e5e5",
+    "upstreamSHA256": "0e4f73c111601ff36bc7013f0ed03bee0756049137c4a31abf9649d438b7c07d",
+    "patchedSHA256": "463d4025959595d653bb407b28bb78b2f080d621965b4686c652566d177e8256"
+  }
 }

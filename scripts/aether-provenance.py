@@ -27,6 +27,29 @@ if digest == recipe['upstreamSHA256']:
     subprocess.run(['git', '-C', str(engine), 'apply', '--check', str(patch.resolve())], check=True)
     subprocess.run(['git', '-C', str(engine), 'apply', str(patch.resolve())], check=True)
 assert hashlib.sha256(source.read_bytes()).hexdigest() == recipe['patchedSHA256'], 'Unexpected engine modifications'
+# Every local change is hash checked, idempotent on dependency-cache restores,
+# and shipped with the source recipe archive. No unverified package edits.
+for change in recipe.get('additionalPatches', []):
+    extra = Path('vendor/aether')/change['file']
+    assert hashlib.sha256(extra.read_bytes()).hexdigest() == change['sha256']
+    before = [hashlib.sha256((engine/f['path']).read_bytes()).hexdigest() for f in change['sources']]
+    if before == [f['upstreamSHA256'] for f in change['sources']]:
+        subprocess.run(['git', '-C', str(engine), 'apply', '--check', str(extra.resolve())], check=True)
+        subprocess.run(['git', '-C', str(engine), 'apply', str(extra.resolve())], check=True)
+    assert [hashlib.sha256((engine/f['path']).read_bytes()).hexdigest() for f in change['sources']] == [f['patchedSHA256'] for f in change['sources']]
+    shutil.copyfile(extra, notice/extra.name)
+header = recipe['ffmpegCodecHeader']
+extra = Path('vendor/aether')/header['file']
+assert hashlib.sha256(extra.read_bytes()).hexdigest() == header['sha256']
+ffmpeg = next(p for p in root.iterdir() if p.name.lower() == 'ffmpegbuild')
+headers = list(ffmpeg.glob('Sources/AetherLibavcodec.xcframework/**/Headers/codec_id.h'))
+assert headers, 'Missing FFmpeg codec headers'
+for path in headers:
+    if hashlib.sha256(path.read_bytes()).hexdigest() == header['upstreamSHA256']:
+        directory = str(path.parent.relative_to(ffmpeg))
+        subprocess.run(['git', '-C', str(ffmpeg), 'apply', '--directory='+directory, str(extra.resolve())], check=True)
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == header['patchedSHA256'], str(path)
+shutil.copyfile(extra, notice/extra.name)
 shutil.copyfile(patch, notice/patch.name)
 shutil.copyfile('vendor/aether/source.json', notice/'modifications.json')
 rows = []

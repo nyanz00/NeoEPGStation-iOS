@@ -8,10 +8,10 @@ releases the engine; switching off restores normal PLAY on the next opening.
 The trial has video/audio, startup from the beginning, pause/play, ±10s, a seek slider,
 double tap, orientation and diagnostic export. It deliberately has no comment,
 subtitle, PiP or history-write integration. Trial playback starts at zero and
-does not overwrite history. Software AV1 failed to display an initial picture
-in the simulator both at 30s and at zero; subsequent target seeks succeeded.
-Starting at zero isolates the comparison from resume integration; it does not
-fix that AV1 software issue.
+does not overwrite history. It reuses NeoPlayerChrome. Menu, subtitle/comment,
+PiP, reload, zoom/drag and settings that have no comparison-engine connection
+are disabled; diagnostic export remains available. Starting at zero isolates
+the comparison from resume integration.
 
 AetherEngine 7.46.0 is pinned by revision along with its transitive package
 lock. One Swift 6.2 compatibility patch passes a Boolean capability verdict to
@@ -21,14 +21,15 @@ identity and collects dependency license texts, exact source links and source
 build recipes. FFmpeg components remain dynamically embedded beside VLCKit.
 
 Measure `seek.start` to `seek.videoResume`; keep `aether.seekLanded` separate.
-Native output additionally requires an AVPlayerItemVideoOutput pixel buffer
-whose item timestamp matches the current item clock after the engine's target
-landing. Software output uses the engine's picture-following clock and labels
-that evidence `engineRenderedClock`; do not conflate it with the pixel-buffer
-check. Keep timeout/rejection/superseded outcomes rather than reporting a fast
-seek from an optimistic clock. `aether.telemetry` contains periodic source-byte
-and cache/restart counters; their update interval does not establish an exact
-per-seek cache hit. No raw engine log lines, URLs, headers or titles are exported.
+A software result requires the pixel buffer actually displayed by the sample
+buffer renderer, tagged with source PTS and flush generation; a prior generation
+cannot satisfy a new seek. Native output requires a display-ready AVPlayerLayer
+and a pixel buffer whose item PTS maps through PresentationAxisMap to the target.
+The generic sourceTimeFollowsPicture flag is not picture evidence. Startup also
+requires actual output, not just the engine ready flag. Synthetic tests retain a
+rendered picture and reject flat/black output. `aether.telemetry` contains periodic
+byte/cache counters, not exact per-seek cache hits. Exported decisions are fixed
+tokens plus numeric/Boolean fields; no raw logs, URLs, headers or titles.
 
 Acceptance: both platform builds link both engines. A real synthetic HTTP Range
 origin serves H.264, HEVC 10bit and AV1 10bit MKV; each trial starts at zero,
@@ -56,3 +57,20 @@ The opt-in IPA is suitable for an explicit engine comparison with these known
 limits, not a replacement for the default VLC path. Use the comparison screen's
 diagnostic export on a device to identify the selected route and measured seek
 outcomes. Do not present these simulator timings as device performance.
+
+Build 245 diagnostic recheck reused the exact Build 244 binary. It reproduced
+AV1 software decode failure: generic FFmpeg `av1` selected hardware formats
+(Vulkan) without a hardware device; audio continued and no frames were produced.
+The old five "successful" software seeks were false positives from the clock
+flag and are superseded, not evidence of displayed video.
+
+The pinned FFmpegBuild 3.9.0 codec_id.h includes deprecated V410/V308/V408 enum
+members: header HEVC=173 / AV1=225, while linked runtime diagnostics identify
+HEVC=172 / AV1=222. This bypasses the AV1 capability gate. Local patch 0003 removes
+those obsolete header members for all slices; startup checks the runtime codec
+descriptors and dav1d against imported IDs, failing closed on a future mismatch.
+Patch 0002 explicitly opens libdav1d for software AV1 and rejects all hardware
+pixel formats there. Both patches are hash verified and retained with the exact
+source recipes. No device hardware support is inferred from simulator results.
+
+The next device/simulator build and scoped playback verification are pending.

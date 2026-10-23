@@ -1,0 +1,56 @@
+--- a/Sources/AetherEngine/Decoder/SoftwareVideoDecoder.swift
++++ b/Sources/AetherEngine/Decoder/SoftwareVideoDecoder.swift
+@@ -191,7 +191,12 @@
+             container: stream.pointee.sample_aspect_ratio
+         )
+ 
+-        guard let codec = avcodec_find_decoder(codecpar.pointee.codec_id) else {
++        // FFmpeg's generic AV1 decoder is hardware-only on these builds. The
++        // software route must open dav1d, never retry the hardware decoder.
++        let selectedCodec = codecpar.pointee.codec_id == AV_CODEC_ID_AV1
++            ? avcodec_find_decoder_by_name("libdav1d")
++            : avcodec_find_decoder(codecpar.pointee.codec_id)
++        guard let codec = selectedCodec else {
+             throw VideoDecoderError.unsupportedCodec(id: codecpar.pointee.codec_id.rawValue)
+         }
+ 
+@@ -204,17 +209,18 @@
+             throw VideoDecoderError.noCodecParameters
+         }
+ 
+-        // Reject VideoToolbox pixel format to force pure software decode (some decoders ignore this).
++        // Reject every hardware pixel format (including Vulkan), not only VideoToolbox.
+         ctx.pointee.get_format = { _, fmts in
+             guard let fmts = fmts else { return AV_PIX_FMT_NONE }
+             var i = 0
+             while fmts[i] != AV_PIX_FMT_NONE {
+-                if fmts[i] != AV_PIX_FMT_VIDEOTOOLBOX {
++                if let descriptor = av_pix_fmt_desc_get(fmts[i]),
++                   descriptor.pointee.flags & UInt64(AV_PIX_FMT_FLAG_HWACCEL) == 0 {
+                     return fmts[i]
+                 }
+                 i += 1
+             }
+-            return AV_PIX_FMT_YUV420P
++            return AV_PIX_FMT_NONE
+         }
+ 
+         if decodesSingleThreaded {
+--- a/Sources/AetherEngine/Renderer/SampleBufferRenderer.swift
++++ b/Sources/AetherEngine/Renderer/SampleBufferRenderer.swift
+@@ -764,6 +764,15 @@
+             loggedNotReady = true
+             EngineLog.emit("[Renderer] isReadyForMoreMediaData=false at enqueue #\(enqueueCount + 1) status=\(statusName)", category: .swPlayback)
+         }
++        // Host diagnostics read the picture actually held by the display layer,
++        // not the decode/queue clock. Do not propagate these private tags to exports.
++        reorderLock.lock()
++        let pictureGeneration = _flushGeneration
++        reorderLock.unlock()
++        CVBufferSetAttachment(outputBuffer, "NeoAetherSourcePTS" as CFString,
++                              NSNumber(value: pts.seconds), .shouldNotPropagate)
++        CVBufferSetAttachment(outputBuffer, "NeoAetherPictureGeneration" as CFString,
++                              NSNumber(value: pictureGeneration), .shouldNotPropagate)
+         target.enqueue(sampleBuffer)
+         reorderLock.lock()
+         _lastEnqueuedFrame = pixelBuffer

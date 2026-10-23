@@ -2,6 +2,34 @@ import UIKit
 import AVFoundation
 import Combine
 import AetherEngine
+import AetherLibavcodec
+import AetherLibavutil
+import VideoToolbox
+import CoreImage
+
+// Fixed tokens only: no URLs, subtitles, titles or raw engine error strings.
+private final class NeoAetherLogCapture: @unchecked Sendable {
+  private let lock = NSLock()
+  private var seen = Set<String>()
+  func receive(_ line: String) {
+    var token: String?
+    for (match, value) in [
+      ("[VTProbe] codec=av01 hwSupported=true", "av1-hardware-supported"),
+      ("[VTProbe] codec=av01 hwSupported=false", "av1-hardware-unavailable"),
+      ("codec=libdav1d,", "decoder-libdav1d"),
+      ("dispatch: codec=222 → software", "av1-software-route"),
+      ("dispatch: codec=222 → native", "av1-native-route"),
+      ("[SWDecoder] send_packet returned", "video-decode-error"),
+      ("[Renderer] queue target failed", "video-render-error"),
+      ("Failed to get pixel format", "video-pixel-format-error"),
+      ("source is forward-only", "source-unseekable")
+    ] { if line.contains(match) { token = value; break } }
+    guard let token else { return }
+    lock.lock(); let first = seen.insert(token).inserted; lock.unlock()
+    if first { NeoPlaybackDiagnostics.record("aether.engineDecision", fields: ["decision": token]) }
+  }
+}
+
 
 // Opt-in comparison only. Normal PLAY, TS and STREAMING keep their VLC path.
 enum NeoPlaybackExperiment {
@@ -20,12 +48,12 @@ final class NeoAetherPlayer: UIViewController {
   private let source: URL, recordingTitle: String, initialPosition: Double
   private var engine: AetherEngine?
   private let surface = AetherPlayerView(frame: .zero)
-  private let heading = NeoStyle.label("", size: 16, bold: true)
-  private let status = NeoStyle.label("準備中…", size: 15)
-  private let clockLabel = NeoStyle.label("0:00 / 0:00", size: 14)
-  private let experimentLabel = NeoStyle.label("AetherEngine・比較用（コメント／字幕／PiPなし）", size: 12, muted: true)
-  private let slider = UISlider()
-  private let transport = UIStackView()
+  private lazy var chrome = NeoPlayerChrome(title: recordingTitle)
+  private var status: UILabel { chrome.statusLabel }
+  private var slider: UISlider { chrome.timeline }
+  private var playButton: UIButton { chrome.playButton }
+  private let context: [String: Any]
+  private var hideControls: DispatchWorkItem?
   private var subscriptions = Set<AnyCancellable>()
   private var loading: Task<Void, Never>?, seekTask: Task<Void, Never>?, probeTask: Task<Void, Never>?
   private var timer: Timer?, videoOutput: AVPlayerItemVideoOutput?
@@ -35,16 +63,18 @@ final class NeoAetherPlayer: UIViewController {
   private var openedAt = 0.0, sequence = 0, telemetryAt = -Double.infinity
   private var pending: PendingSeek?
   private var landedCount = 0, failedCount = 0
+  private var lastPictureGeneration: UInt64?
+  private var rendererFailureReported = false
+  private let engineLog = NeoAetherLogCapture()
+  private struct Picture { let time: Double; let generation: UInt64?; let verification: String; let buffer: CVPixelBuffer }
+
   private struct PendingSeek {
     let id: Int, target: Double, started: Double
     var engineID: UInt64?, landedTime: Double?
+    var previousPictureGeneration: UInt64?
   }
-  private lazy var closeButton = NeoStyle.iconButton("ArrowBackOutlined", label: "戻る") { [weak self] in self?.close() }
-  private lazy var playButton = NeoStyle.button("一時停止") { [weak self] in self?.togglePlayback() }
-  private lazy var exportButton = NeoStyle.button("診断ログ") { [weak self] in self?.exportLog() }
-  private lazy var rotateButton = NeoStyle.button("横画面") { [weak self] in self?.rotate() }
-
-  init(url: URL, title: String, initialPosition: Double) {
+  init(url: URL, title: String, initialPosition: Double, context: [String: Any] = [:]) {
+    self.context = context
     source = url; recordingTitle = title
     self.initialPosition = initialPosition.isFinite ? max(0, initialPosition) : 0
     super.init(nibName: nil, bundle: nil)
@@ -54,33 +84,37 @@ final class NeoAetherPlayer: UIViewController {
   override var supportedInterfaceOrientations: UIInterfaceOrientationMask { landscape ? .landscape : .portrait }
   override var prefersHomeIndicatorAutoHidden: Bool { true }
   override func viewDidLoad() {
-    super.viewDidLoad(); view.backgroundColor = .black; heading.text = recordingTitle
-    status.textAlignment = .center; status.numberOfLines = 0
-    [surface, heading, experimentLabel, status, clockLabel, slider, closeButton, exportButton, rotateButton, transport].forEach(view.addSubview)
-    transport.axis = .horizontal; transport.spacing = 24; transport.distribution = .fillEqually
-    transport.addArrangedSubview(NeoStyle.button("−10秒") { [weak self] in self?.skip(-10) })
-    transport.addArrangedSubview(playButton)
-    transport.addArrangedSubview(NeoStyle.button("＋10秒") { [weak self] in self?.skip(10) })
-    slider.minimumValue = 0; slider.maximumValue = 1; slider.tintColor = NeoStyle.accent
-    slider.accessibilityLabel = "再生位置"
-    slider.addTarget(self, action: #selector(scrubBegan), for: .touchDown)
-    slider.addTarget(self, action: #selector(scrubEnded), for: [.touchUpInside, .touchUpOutside])
-    slider.addTarget(self, action: #selector(scrubCancelled), for: .touchCancel)
-    let doubleTap = UITapGestureRecognizer(target: self, action: #selector(doubleTapped(_:)))
-    doubleTap.numberOfTapsRequired = 2; surface.addGestureRecognizer(doubleTap); surface.isUserInteractionEnabled = true
+    super.viewDidLoad(); view.backgroundColor = .black
+    chrome.frame = view.bounds; chrome.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    view.addSubview(chrome); chrome.configure(context); chrome.configureEngineComparison()
+    chrome.videoView.addSubview(surface)
+    surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    chrome.onVideoLayout = { [weak self] in
+      guard let self else { return }; self.surface.frame = self.chrome.videoView.bounds
+    }
+    chrome.onAction = { [weak self] action in self?.perform(action) }
+    chrome.updateLoading("準備中…"); chrome.showControls(true)
     NotificationCenter.default.addObserver(self, selector: #selector(background), name: UIApplication.didEnterBackgroundNotification, object: nil)
     NotificationCenter.default.addObserver(self, selector: #selector(foreground), name: UIApplication.willEnterForegroundNotification, object: nil)
     NeoPlaybackDiagnostics.begin(); openedAt = CACurrentMediaTime()
     NeoPlaybackDiagnostics.record("player.engine", fields: ["engine": "aether", "version": "7.46.0", "initialMs": initialPosition*1000])
     do {
+      // Verify imported enum values against the actual linked binary before it
+      // can misclassify AV1/HEVC. A version string alone does not establish ABI.
+      let av1 = avcodec_descriptor_get_by_name("av1")?.pointee.id
+      let hevc = avcodec_descriptor_get_by_name("hevc")?.pointee.id
+      let dav1d = avcodec_find_decoder_by_name("libdav1d")
+      let compatible = av1 == AV_CODEC_ID_AV1 && hevc == AV_CODEC_ID_HEVC && dav1d?.pointee.id == av1
+      NeoPlaybackDiagnostics.record("aether.binaryABI", fields: ["compatible": compatible,
+        "headerAV1": AV_CODEC_ID_AV1.rawValue, "runtimeAV1": av1?.rawValue ?? 0,
+        "headerHEVC": AV_CODEC_ID_HEVC.rawValue, "runtimeHEVC": hevc?.rawValue ?? 0,
+        "dav1dAvailable": dav1d != nil, "avcodecVersion": avcodec_version()])
+      guard compatible else { throw NSError(domain: "NeoAetherBinaryABI", code: 1) }
+      NeoPlaybackDiagnostics.record("aether.hardware", fields: ["av1": VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1)])
+      EngineLog.handler = { [capture = engineLog] line in capture.receive(line) }
       let engine = try AetherEngine(); self.engine = engine
       engine.backgroundPlaybackEnabled = false; engine.bind(view: surface)
       engine.$state.sink { [weak self] state in self?.stateChanged(state) }.store(in: &subscriptions)
-      engine.$hasFirstFrameReadyForDisplay.sink { [weak self] ready in
-        guard let self, ready, !self.startupReady, !self.closed else { return }
-        self.startupReady = true
-        NeoPlaybackDiagnostics.record("aether.startupReady", fields: ["durationMs": (CACurrentMediaTime()-self.openedAt)*1000])
-      }.store(in: &subscriptions)
       engine.$currentAVPlayerItem.sink { [weak self] item in self?.attachOutput(item) }.store(in: &subscriptions)
       engine.seekEvents.sink { [weak self] event in self?.seekEvent(event) }.store(in: &subscriptions)
       engine.$videoRoute.removeDuplicates().sink { route in
@@ -100,6 +134,7 @@ final class NeoAetherPlayer: UIViewController {
           _ = try await engine.load(url: self.source, startPosition: self.initialPosition,
             options: LoadOptions(preferredSubtitleLanguages: [], autoplay: true))
           guard !Task.isCancelled, !self.closed else { return }
+          if let size = engine.softwareDisplaySize, size.height > 0 { self.chrome.videoAspectRatio = size.width/size.height }
           if !self.wantsPlayback { engine.pause() }
         } catch {
           guard !Task.isCancelled, !self.closed else { return }; self.showFailure(error)
@@ -112,34 +147,43 @@ final class NeoAetherPlayer: UIViewController {
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
-    let safe = view.safeAreaInsets, width = view.bounds.width-safe.left-safe.right
-    let top = safe.top, left = safe.left, bottom = view.bounds.height-safe.bottom
-    closeButton.frame = CGRect(x: left+8, y: top+4, width: 44, height: 44)
-    exportButton.frame = CGRect(x: left+width-100, y: top+4, width: 92, height: 44)
-    heading.frame = CGRect(x: left+60, y: top+4, width: max(0, width-168), height: 28)
-    experimentLabel.frame = CGRect(x: left+16, y: top+49, width: width-32, height: 24)
-    let controlsTop = bottom-132
-    let room = max(0, controlsTop-(top+78))
-    let height = min(room, width*9/16)
-    surface.frame = CGRect(x: left, y: top+78+max(0, (room-height)/2), width: width, height: height)
-    status.frame = CGRect(x: left+20, y: surface.frame.midY-30, width: width-40, height: 60)
-    clockLabel.frame = CGRect(x: left+16, y: controlsTop, width: width-128, height: 24)
-    rotateButton.frame = CGRect(x: left+width-104, y: controlsTop-6, width: 96, height: 36)
-    slider.frame = CGRect(x: left+16, y: controlsTop+28, width: width-32, height: 34)
-    transport.frame = CGRect(x: left+16, y: controlsTop+72, width: width-32, height: 48)
+    chrome.frame = view.bounds; chrome.layoutIfNeeded(); surface.frame = chrome.videoView.bounds
+  }
+  private func perform(_ action: String) {
+    switch action {
+    case "back": close()
+    case "play": togglePlayback()
+    case "rotate": rotate()
+    case "toggle-controls": chrome.showControls(!chrome.controlsVisible); scheduleHide()
+    case "interaction": chrome.showControls(true); scheduleHide()
+    case "scrub-begin": scrubBegan()
+    case "scrub-end": scrubEnded()
+    case "scrub-cancel": scrubCancelled()
+    case "export-diagnostics": exportLog()
+    default:
+      if action.hasPrefix("jump:"), let seconds = Double(action.dropFirst(5)) { skip(seconds) }
+    }
+  }
+  private func scheduleHide() {
+    hideControls?.cancel()
+    let task = DispatchWorkItem { [weak self] in
+      guard let self, self.wantsPlayback, self.pending == nil, !self.chrome.interactionOpen else { return }
+      self.chrome.showControls(false)
+    }
+    hideControls = task; DispatchQueue.main.asyncAfter(deadline: .now()+3, execute: task)
   }
   private func stateChanged(_ state: PlaybackState) {
     guard !closed else { return }
     switch state {
-    case .loading: status.text = "準備中…"
-    case .error: status.text = "再生中にエラーが発生しました。"; failedCount += 1
-    case .ended: status.text = "再生終了"; wantsPlayback = false
-    default: status.text = nil
+    case .loading: chrome.updateLoading("準備中…")
+    case .error: chrome.updateLoading(nil); status.text = "再生中にエラーが発生しました。"; failedCount += 1
+    case .ended: chrome.updateLoading(nil); status.text = "再生終了"; wantsPlayback = false
+    default: break
     }
     if case .error = state { NeoPlaybackDiagnostics.record("aether.failure", fields: ["stage": "playback"]) }
   }
   private func showFailure(_ error: Error) {
-    failedCount += 1; status.text = "再生を開始できませんでした。"
+    failedCount += 1; chrome.updateLoading(nil); status.text = "再生を開始できませんでした。"
     let value = error as NSError
     NeoPlaybackDiagnostics.record("aether.failure", fields: ["stage": "load", "code": value.code])
   }
@@ -154,30 +198,61 @@ final class NeoAetherPlayer: UIViewController {
   }
   private func tick() {
     guard !closed, let engine else { return }
-    let duration = engine.duration, position = engine.currentTime
-    if duration.isFinite, duration > 0 { slider.maximumValue = Float(duration) }
-    if !scrubbing { slider.value = Float(position.isFinite ? max(0, position) : 0) }
-    clockLabel.text = "\(Self.time(scrubbing ? Double(slider.value) : position)) / \(Self.time(duration))"
-    playButton.setTitle(wantsPlayback ? "一時停止" : "再生", for: .normal)
-    slider.isEnabled = engine.canSeek && duration.isFinite && duration > 0
-    if let pending, let rendered = pending.landedTime {
-      if engine.videoRoute == .software {
-        if engine.clock.sourceTimeFollowsPicture { finishSeek(rendered: rendered, verification: "engineRenderedClock") }
-      } else if let output = videoOutput, let item = outputItem {
-        let time = item.currentTime()
-        var displayed = CMTime.invalid
-        if output.hasNewPixelBuffer(forItemTime: time),
-          let _ = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: &displayed),
-          displayed.isNumeric, abs(CMTimeGetSeconds(displayed-time)) < 0.5 {
-          finishSeek(rendered: rendered, verification: "pixelBuffer")
-        }
+    let duration = engine.duration.isFinite ? max(0, engine.duration) : 0
+    let position = engine.currentTime.isFinite ? max(0, engine.currentTime) : 0
+    if !scrubbing { slider.value = duration > 0 ? Float(position/duration) : 0 }
+    chrome.updatePlayback(wantsPlayback, current: Int64(position), duration: Int64(duration))
+    slider.isEnabled = engine.canSeek && duration > 0
+    chrome.updateDiagnostics()
+    if !startupReady || pending != nil, let picture = displayedPicture() {
+      if !startupReady {
+        startupReady = true; chrome.updateLoading(nil); status.text = nil; scheduleHide()
+#if targetEnvironment(simulator)
+        saveComparisonPicture(picture.buffer)
+#endif
+        NeoPlaybackDiagnostics.record("aether.startupReady", fields: ["durationMs": (CACurrentMediaTime()-openedAt)*1000,
+          "pictureMs": picture.time*1000, "verification": picture.verification])
       }
+      if let pending, pending.landedTime != nil, abs(picture.time-pending.target) < 0.5,
+         picture.generation == nil || picture.generation != pending.previousPictureGeneration {
+        finishSeek(rendered: picture.time, verification: picture.verification)
+      }
+      lastPictureGeneration = picture.generation
+    }
+    if !startupReady && CACurrentMediaTime()-openedAt > 30 && !rendererFailureReported {
+      rendererFailureReported = true; failedCount += 1; engine.pause(); wantsPlayback = false
+      chrome.updateLoading(nil); status.text = "映像を表示できませんでした。"
+      NeoPlaybackDiagnostics.record("aether.failure", fields: ["stage": "first-picture-timeout", "route": engine.videoRoute.rawValue])
     }
     if let pending, CACurrentMediaTime()-pending.started > 12 {
       failedCount += 1
       NeoPlaybackDiagnostics.record("seek.timeout", fields: ["targetMs": pending.target*1000, "engine": "aether"])
-      self.pending = nil; status.text = "シーク先の映像を確認できませんでした。"
+      self.pending = nil; chrome.finishSeekPreview(); status.text = "シーク先の映像を確認できませんでした。"
     }
+  }
+  private func layers(in layer: CALayer) -> [CALayer] {
+    [layer] + (layer.sublayers ?? []).flatMap { layers(in: $0) }
+  }
+  private func displayedPicture() -> Picture? {
+    guard let engine, !surface.bounds.isEmpty else { return nil }
+    let active = layers(in: surface.layer)
+    if engine.videoRoute == .software {
+      guard let layer = active.compactMap({ $0 as? AVSampleBufferDisplayLayer }).first,
+            layer.isReadyForDisplay, layer.sampleBufferRenderer.status != .failed,
+            let buffer = layer.sampleBufferRenderer.displayedPixelBuffer(),
+            let pts = CVBufferCopyAttachment(buffer, "NeoAetherSourcePTS" as CFString, nil) as? NSNumber,
+            let generation = CVBufferCopyAttachment(buffer, "NeoAetherPictureGeneration" as CFString, nil) as? NSNumber,
+            pts.doubleValue.isFinite else { return nil }
+      return Picture(time: pts.doubleValue, generation: generation.uint64Value, verification: "displayedPixelBuffer", buffer: buffer)
+    }
+    guard active.compactMap({ $0 as? AVPlayerLayer }).contains(where: { $0.isReadyForDisplay }),
+          let output = videoOutput, let item = outputItem else { return nil }
+    let time = item.currentTime(); var displayed = CMTime.invalid
+    guard output.hasNewPixelBuffer(forItemTime: time),
+          let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: &displayed),
+          displayed.isNumeric, let source = engine.presentationAxisMap.sourceSeconds(forItemSeconds: displayed.seconds),
+          source.isFinite else { return nil }
+    return Picture(time: source, generation: nil, verification: "nativePixelBuffer", buffer: buffer)
   }
   private func seekEvent(_ event: SeekEvent) {
     guard !closed, var pending else { return }
@@ -205,7 +280,7 @@ final class NeoAetherPlayer: UIViewController {
       "targetMs": pending.target*1000, "durationMs": (CACurrentMediaTime()-pending.started)*1000,
       "verification": verification, "telemetryAgeMs": telemetryAt.isFinite ? (CACurrentMediaTime()-telemetryAt)*1000 : -1,
       "route": engine.videoRoute.rawValue])
-    self.pending = nil
+    self.pending = nil; chrome.finishSeekPreview(); scheduleHide()
   }
   func seek(to target: Double) {
     guard !closed, let engine, engine.canSeek, target.isFinite else { return }
@@ -214,8 +289,9 @@ final class NeoAetherPlayer: UIViewController {
     let target = min(end, max(0, target)), previous = engine.currentTime
     if let pending { NeoPlaybackDiagnostics.record("aether.seekSuperseded", fields: ["targetMs": pending.target*1000]) }
     seekTask?.cancel(); sequence += 1; NeoPlaybackDiagnostics.beginSeek(sequence)
-    pending = PendingSeek(id: sequence, target: target, started: CACurrentMediaTime())
-    status.text = nil
+    pending = PendingSeek(id: sequence, target: target, started: CACurrentMediaTime(),
+      previousPictureGeneration: displayedPicture()?.generation ?? lastPictureGeneration)
+    status.text = nil; chrome.previewSeek(Int64(target)); chrome.showControls(true)
     NeoPlaybackDiagnostics.record("seek.start", fields: ["fromMs": previous*1000, "targetMs": target*1000, "engine": "aether"])
     seekTask = Task { await engine.seek(to: target) }
   }
@@ -225,14 +301,10 @@ final class NeoAetherPlayer: UIViewController {
     if wantsPlayback { engine.play() } else { engine.pause() }
   }
   @objc private func scrubBegan() { scrubbing = true }
-  @objc private func scrubEnded() { scrubbing = false; seek(to: Double(slider.value)) }
+  @objc private func scrubEnded() { scrubbing = false; seek(to: Double(slider.value)*(engine?.duration ?? 0)) }
   @objc private func scrubCancelled() { scrubbing = false }
-  @objc private func doubleTapped(_ gesture: UITapGestureRecognizer) {
-    skip(gesture.location(in: surface).x < surface.bounds.midX ? -10 : 10)
-  }
   private func rotate() {
     landscape.toggle(); setNeedsUpdateOfSupportedInterfaceOrientations()
-    rotateButton.setTitle(landscape ? "縦画面" : "横画面", for: .normal)
     view.window?.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: supportedInterfaceOrientations))
   }
   @objc private func background() {
@@ -244,15 +316,15 @@ final class NeoAetherPlayer: UIViewController {
   private func exportLog() {
     guard let url = NeoPlaybackDiagnostics.exportURL() else { return }
     let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-    share.popoverPresentationController?.sourceView = exportButton
-    share.popoverPresentationController?.sourceRect = exportButton.bounds
+    share.popoverPresentationController?.sourceView = chrome
+    share.popoverPresentationController?.sourceRect = CGRect(x: chrome.bounds.midX, y: chrome.bounds.midY, width: 1, height: 1)
     present(share, animated: true)
   }
   private func shutdown() {
     guard !closed else { return }; closed = true
     loading?.cancel(); seekTask?.cancel(); probeTask?.cancel(); timer?.invalidate(); timer = nil
     if let output = videoOutput { outputItem?.remove(output) }; outputItem = nil; videoOutput = nil
-    subscriptions.removeAll(); engine?.stop(); engine = nil
+    hideControls?.cancel(); subscriptions.removeAll(); engine?.stop(); engine = nil; EngineLog.handler = nil
     NotificationCenter.default.removeObserver(self)
     NeoPlaybackDiagnostics.record("aether.closed", fields: [:])
   }
@@ -271,6 +343,11 @@ final class NeoAetherPlayer: UIViewController {
   }
 
 #if targetEnvironment(simulator)
+  private func saveComparisonPicture(_ buffer: CVPixelBuffer) {
+    guard let image = CIContext().createCGImage(CIImage(cvPixelBuffer: buffer), from: CIImage(cvPixelBuffer: buffer).extent),
+          let data = UIImage(cgImage: image).pngData() else { return }
+    try? data.write(to: NeoPiPSmoke.directory.appendingPathComponent("aether-comparison-picture.png"))
+  }
   func runComparisonProbe() {
     probeTask = Task { [weak self] in
       guard let self else { return }
@@ -279,6 +356,7 @@ final class NeoAetherPlayer: UIViewController {
         try? await Task.sleep(for: .milliseconds(100))
       }
       var checks: [String: Bool] = ["startupVideo": startupReady, "seekable": engine?.canSeek == true,
+        "productionChrome": chrome.comparisonControlsSealed(),
         "initialPosition": abs((engine?.currentTime ?? 0)-initialPosition) < 3]
       for (index, target) in [20.0, 40.0, 30.0, 20.0].enumerated() {
         guard !closed else { break }

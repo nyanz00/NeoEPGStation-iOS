@@ -69,6 +69,7 @@ try:
         video = Path('tests/fixtures', fixture).read_bytes(); transferred = requests = 0
         subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True)
         names = ['aether-comparison-smoke.json', 'aether-comparison-diagnostics.json']
+        (documents/'aether-comparison-picture.png').unlink(missing_ok=True)
         for name in names:
             (documents/name).unlink(missing_ok=True)
         environment = dict(os.environ, SIMCTL_CHILD_NEO_EPG_AETHER_COMPARE=f'http://127.0.0.1:{server.server_port}')
@@ -90,10 +91,22 @@ try:
         for name in names:
             if (documents/name).exists():
                 shutil.copyfile(documents/name, Path('dist', fixture+'-'+name))
+        picture = documents/'aether-comparison-picture.png'
+        if picture.exists(): shutil.copyfile(picture, Path('dist', fixture+'-aether-picture.png'))
+        from PIL import Image, ImageStat
+        assert picture.exists(), 'No actual output picture for '+fixture
+        stats = ImageStat.Stat(Image.open(picture).convert('RGB'))
+        assert max(stats.stddev) > 10 and max(stats.mean) > 10, 'Black/flat picture for '+fixture
         result = json.loads((documents/names[0]).read_text())
         events = json.loads((documents/names[1]).read_text())['events']
         resumes = [e for e in events if e['event'] == 'seek.videoResume']
+        assert any(e['event']=='aether.binaryABI' and e['compatible'] for e in events), 'FFmpeg header/binary ABI'
+        assert all(e['verification'] in ('displayedPixelBuffer', 'nativePixelBuffer') for e in resumes)
         assert len(resumes) == 5 and all(abs(e['mediaMs']-e['targetMs'])<500 for e in resumes), resumes
+        if fixture.startswith('av1'):
+            decisions = [e.get('decision') for e in events if e['event']=='aether.engineDecision']
+            hardware = next(e['av1'] for e in events if e['event']=='aether.hardware')
+            assert ('av1-native-route' if hardware else 'decoder-libdav1d') in decisions, decisions
         assert result['success'] and all(result['checks'].values()), result
         assert not any(e['event'] in ('aether.failure', 'aether.seekFailed', 'seek.timeout') for e in events), events[-10:]
         results.append({'fixture': fixture, 'success': True, 'checks': result['checks'],
