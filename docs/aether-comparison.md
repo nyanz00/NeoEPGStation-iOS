@@ -67,7 +67,7 @@ flag and are superseded, not evidence of displayed video.
 The pinned FFmpegBuild 3.9.0 codec_id.h includes deprecated V410/V308/V408 enum
 members: header HEVC=173 / AV1=225, while linked runtime diagnostics identify
 HEVC=172 / AV1=222. This bypasses the AV1 capability gate. Local patch 0003 removes
-those obsolete header members for all slices; startup checks the runtime codec
+those obsolete header members for both iOS slices; startup checks the runtime codec
 descriptors and dav1d against imported IDs, failing closed on a future mismatch.
 Patch 0002 explicitly opens libdav1d for software AV1 and rejects all hardware
 pixel formats there. Both patches are hash verified and retained with the exact

@@ -42,7 +42,8 @@ header = recipe['ffmpegCodecHeader']
 extra = Path('vendor/aether')/header['file']
 assert hashlib.sha256(extra.read_bytes()).hexdigest() == header['sha256']
 ffmpeg = next(p for p in root.iterdir() if p.name.lower() == 'ffmpegbuild')
-headers = list(ffmpeg.glob('Sources/AetherLibavcodec.xcframework/**/Headers/codec_id.h'))
+# Only iOS/device+simulator headers are compiled into this application.
+headers = list(ffmpeg.glob('Sources/AetherLibavcodec.xcframework/ios-*/AetherLibavcodec.framework/Headers/codec_id.h'))
 assert headers, 'Missing FFmpeg codec headers'
 for path in headers:
     if hashlib.sha256(path.read_bytes()).hexdigest() == header['upstreamSHA256']:
