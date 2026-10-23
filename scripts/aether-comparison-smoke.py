@@ -93,10 +93,9 @@ try:
                 shutil.copyfile(documents/name, Path('dist', fixture+'-'+name))
         picture = documents/'aether-comparison-picture.png'
         if picture.exists(): shutil.copyfile(picture, Path('dist', fixture+'-aether-picture.png'))
-        from PIL import Image, ImageStat
         assert picture.exists(), 'No actual output picture for '+fixture
-        stats = ImageStat.Stat(Image.open(picture).convert('RGB'))
-        assert max(stats.stddev) > 10 and max(stats.mean) > 10, 'Black/flat picture for '+fixture
+        stats = json.loads(run('swift', 'scripts/check-aether-picture.swift', str(picture)))
+        assert stats['nonBlack'], 'Black/flat picture for '+fixture
         result = json.loads((documents/names[0]).read_text())
         events = json.loads((documents/names[1]).read_text())['events']
         resumes = [e for e in events if e['event'] == 'seek.videoResume']

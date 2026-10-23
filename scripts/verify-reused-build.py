@@ -15,7 +15,7 @@ if info['bundleIdentifier'] != 'io.github.nyanz00.NeoEPGStation' or info['minimu
     raise RuntimeError('Unexpected application identity or deployment target')
 repository = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True, encoding='utf-8').strip()
 subprocess.run(['git', 'diff', '--exit-code', commit, 'HEAD', '--',
-                'App.tsx', 'src', 'ios', 'vendor/vlckit', 'package.json', 'package-lock.json'], check=True, cwd=repository)
+                'App.tsx', 'src', 'ios', 'vendor/vlckit', 'vendor/aether', 'package.json', 'package-lock.json'], check=True, cwd=repository)
 required = ['storage-smoke', 'danmaku-smoke', 'pip-composition-smoke', 'pip-player-smoke',
             'ui-iphone-recorded', 'ui-iphone-menu', 'ui-iphone-settings']
 if Path('ios/NeoEPGStation/NeoPlayerChrome.swift').exists():
