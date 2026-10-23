@@ -1,0 +1,216 @@
+--- a/src/input/input.c
++++ b/src/input/input.c
+@@ -76,6 +76,7 @@
+ static bool       ControlIsSeekRequest( int i_type );
+ static bool       Control( input_thread_t *, int, input_control_param_t );
+ static void       ControlPause(input_thread_t *, vlc_tick_t, bool);
++static int        ControlSetTime(input_thread_t *, vlc_tick_t, bool);
+ 
+ static int  UpdateTitleSeekpointFromDemux( input_thread_t * );
+ static void UpdateGenericFromDemux( input_thread_t * );
+@@ -1395,6 +1396,26 @@
+     msg_Dbg( p_input, "`%s' successfully opened",
+              input_priv(p_input)->p_item->psz_uri );
+ 
++    /* One-shot positioning is independent of start-time's clipped timeline.
++     * Demux/index/program discovery is ready, but no ordinary media buffering
++     * has run yet. Preserve i_start == 0 for all later absolute seeks.
++     * Unsupported early positioning falls back to the caller's verified seek.
++     * The ES clock/decoder reset follows the normal SET_TIME ordering. */
++    double initial = var_InheritFloat(p_input, "neo-initial-time");
++    if (priv->type == INPUT_TYPE_PLAYBACK && priv->i_start == 0 &&
++        initial > 0 && initial < (double)INT64_MAX / CLOCK_FREQ)
++    {
++        vlc_tick_t target = llroundl(initial * CLOCK_FREQ);
++        int result = VLC_EGENERIC;
++        if (master->b_can_seek)
++        {
++            es_out_Control(&priv->p_es_out->out, ES_OUT_RESET_PCR);
++            result = ControlSetTime(p_input, target, false);
++        }
++        msg_Dbg(p_input, "neo-initial-position targetUs=%"PRId64" status=%d rangeStartUs=%"PRId64,
++                target, result, priv->i_start);
++    }
++
+     /* initialization is complete */
+     input_ChangeState( p_input, PLAYING_S, vlc_tick_now() );
+ 
+--- a/src/libvlc-module.c
++++ b/src/libvlc-module.c
+@@ -1887,6 +1887,9 @@
+         change_safe ()
+     add_float( "start-time", 0,
+                START_TIME_TEXT, START_TIME_LONGTEXT )
++        change_safe ()
++    add_float( "neo-initial-time", 0, "One-shot initial position",
++               "Position before the first demux without changing the timeline or seek range" )
+         change_safe ()
+     add_float( "stop-time", 0,
+                STOP_TIME_TEXT, STOP_TIME_LONGTEXT )
+--- a/modules/codec/videotoolbox/decoder.c
++++ b/modules/codec/videotoolbox/decoder.c
+@@ -135,6 +135,10 @@
+     bool                        b_preroll_stats_pending;
+     unsigned                    preroll_frames, preroll_no_output, preroll_pictures;
+     vlc_tick_t                  preroll_started, preroll_wait;
++    vlc_tick_t                  preroll_prepare, preroll_sample, preroll_submit, preroll_callback;
++    vlc_tick_t                  preroll_last_submit, preroll_last_callback;
++    unsigned                    preroll_submitted, preroll_samples;
++    unsigned                    preroll_existing, preroll_inter;
+ 
+     enum vtsession_status       vtsession_status;
+ 
+@@ -1388,7 +1392,7 @@
+     p_dec->p_sys = p_sys;
+     p_sys->session = NULL;
+     p_sys->codec = codec;
+-    msg_Dbg(p_dec, "neo-preroll-reference version=4");
++    msg_Dbg(p_dec, "neo-preroll-reference version=5");
+     p_sys->b_skip_preroll_output = var_InheritBool(p_dec, "videotoolbox-skip-preroll-output");
+     p_sys->b_skip_reference_preroll = var_InheritBool(p_dec, "videotoolbox-skip-reference-preroll");
+     p_sys->videoFormatDescription = NULL;
+@@ -1890,6 +1894,14 @@
+         sys->preroll_no_output, sys->preroll_pictures,
+         sys->preroll_wait, vlc_tick_now() - sys->preroll_started, sys->preroll_dropped);
+     sys->b_preroll_stats_pending = false;
++    /* Preparation/API totals are serial host costs. Callback latency is a
++     * SUM of overlapping intervals, not a separate wall-clock decode time.
++     * Tail is the wait after the last submission returned. No per-frame logs. */
++    msg_Dbg(dec, "neo-preroll-cost codec=%u prepareUs=%"PRId64" sampleUs=%"PRId64" submitUs=%"PRId64" callbackSumUs=%"PRId64" tailUs=%"PRId64" submitted=%u samples=%u skippedExisting=%u skippedInter=%u",
++        sys->codec == kCMVideoCodecType_AV1 ? 1u : sys->codec == kCMVideoCodecType_HEVC ? 2u : 3u,
++        sys->preroll_prepare, sys->preroll_sample, sys->preroll_submit, sys->preroll_callback,
++        sys->preroll_last_submit > 0 ? __MAX(0, sys->preroll_last_callback-sys->preroll_last_submit) : 0,
++        sys->preroll_submitted, sys->preroll_samples, sys->preroll_existing, sys->preroll_inter);
+ }
+ 
+ /* Do not submit non-reference H.264 pictures that cannot be displayed.
+@@ -2111,6 +2123,7 @@
+         goto skip;
+     }
+ 
++    const vlc_tick_t prepare_started = vlc_tick_now();
+     bool b_config_changed = false;
+     if (p_sys->pf_process_block)
+     {
+@@ -2174,14 +2187,6 @@
+             goto skip;
+         }
+         p_sys->sync_state = STATE_BITSTREAM_SYNCED;
+-    }
+-
+-    CMSampleBufferRef sampleBuffer =
+-        VTSampleBufferCreate(p_dec, p_sys->videoFormatDescription, p_block);
+-    if (unlikely(!sampleBuffer))
+-    {
+-        free(p_info);
+-        goto skip;
+     }
+ 
+     /* Trust explicit demux preroll only when a dated, progressive picture is
+@@ -2202,13 +2207,16 @@
+             p_sys->preroll_frames = p_sys->preroll_no_output = p_sys->preroll_pictures = 0;
+             p_sys->preroll_wait = 0;
+             p_sys->preroll_dropped = 0;
++            p_sys->preroll_prepare = p_sys->preroll_sample = p_sys->preroll_submit = p_sys->preroll_callback = 0;
++            p_sys->preroll_last_submit = p_sys->preroll_last_callback = 0;
++            p_sys->preroll_submitted = p_sys->preroll_samples = 0;
++            p_sys->preroll_existing = p_sys->preroll_inter = 0;
+         }
+         p_sys->preroll_frames++;
+         vlc_mutex_unlock(&p_sys->lock);
+     }
+     if (!SetAV1PrerollFilter(p_dec, p_info->b_no_output))
+     {
+-        CFRelease(sampleBuffer);
+         free(p_info);
+         /* VLCDEC_RELOAD returns the unchanged block to the decoder owner. */
+         return VLCDEC_RELOAD;
+@@ -2218,10 +2226,34 @@
+         vlc_mutex_lock(&p_sys->lock);
+         p_sys->preroll_no_output++;
+         p_sys->preroll_dropped++;
++        p_sys->preroll_prepare += vlc_tick_now()-prepare_started;
++        if (p_sys->codec == kCMVideoCodecType_AV1)
++        {
++            struct vt_av1_context *ctx = p_sys->p_codec_context;
++            if (ctx->frame.existing) p_sys->preroll_existing++;
++            else p_sys->preroll_inter++;
++        }
+         OnDecodedFrame(p_dec, p_info);
+         vlc_mutex_unlock(&p_sys->lock);
+-        CFRelease(sampleBuffer);
+         goto skip;
++    }
++    /* A skipped access unit never needs an OS sample wrapper. Preserve all
++     * parser, reference-slot and DPB bookkeeping above before dropping it. */
++    const vlc_tick_t sample_started = vlc_tick_now();
++    CMSampleBufferRef sampleBuffer =
++        VTSampleBufferCreate(p_dec, p_sys->videoFormatDescription, p_block);
++    if (unlikely(!sampleBuffer))
++    {
++        free(p_info);
++        goto skip;
++    }
++    if (p_info->b_preroll)
++    {
++        vlc_mutex_lock(&p_sys->lock);
++        p_sys->preroll_prepare += vlc_tick_now()-prepare_started;
++        p_sys->preroll_sample += vlc_tick_now()-sample_started;
++        p_sys->preroll_samples++;
++        vlc_mutex_unlock(&p_sys->lock);
+     }
+     const vlc_tick_t wait_started = vlc_tick_now();
+     if (p_info->b_no_output)
+@@ -2244,11 +2276,28 @@
+      * Account first and save scalar fields: the callback owns/frees p_info. */
+     const bool b_field = p_info->b_field;
+     const vlc_tick_t frame_pts = p_info->pts;
++    const bool tracked_preroll = p_info->b_preroll;
+     pic_pacer_AccountScheduledDecode(p_sys->pic_pacer, b_field);
++    const vlc_tick_t submitted_at = vlc_tick_now();
++    p_info->neo_submitted_at = submitted_at;
++    if (tracked_preroll)
++    {
++        vlc_mutex_lock(&p_sys->lock);
++        p_sys->preroll_submitted++;
++        vlc_mutex_unlock(&p_sys->lock);
++    }
+ 
+     OSStatus status =
+         VTDecompressionSessionDecodeFrame(p_sys->session, sampleBuffer,
+                                           decoderFlags, p_info, &flagOut);
++    if (tracked_preroll)
++    {
++        const vlc_tick_t returned_at = vlc_tick_now();
++        vlc_mutex_lock(&p_sys->lock);
++        p_sys->preroll_submit += returned_at-submitted_at;
++        p_sys->preroll_last_submit = returned_at;
++        vlc_mutex_unlock(&p_sys->lock);
++    }
+ 
+     enum vtsession_status vtsession_status;
+     if (HandleVTStatus(p_dec, status, &vtsession_status) == VLC_SUCCESS)
+@@ -2382,7 +2431,13 @@
+     frame_info_t *p_info = (frame_info_t *) sourceFrameRefCon;
+     const bool b_field = p_info->b_field;
+ 
++    const vlc_tick_t callback_at = vlc_tick_now();
+     vlc_mutex_lock(&p_sys->lock);
++    if (p_info->b_preroll && p_info->neo_submitted_at > 0)
++    {
++        p_sys->preroll_callback += callback_at-p_info->neo_submitted_at;
++        p_sys->preroll_last_callback = __MAX(p_sys->preroll_last_callback, callback_at);
++    }
+     if (p_sys->b_discard_decoder_output)
+         goto end;
+ 
+--- a/modules/codec/videotoolbox/dpb.h
++++ b/modules/codec/videotoolbox/dpb.h
+@@ -44,6 +44,7 @@
+     bool b_field;
+     bool b_preroll;
+     bool b_no_output;
++    vlc_tick_t neo_submitted_at;
+     bool b_progressive;
+     bool b_top_field_first;
+     bool b_output_needed;

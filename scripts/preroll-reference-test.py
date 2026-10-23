@@ -142,6 +142,10 @@ def guards(lib):
     def av1(data, c=config, state=None):
         return lib.test_av1(bytes_arg(data), len(data), C.byref(c), C.byref(state or State()))
     assert av1(good)
+    def analyzed(data, state=None):
+        return lib.test_av1_analyze(bytes_arg(data), len(data), C.byref(config), C.byref(state or State()))
+    assert analyzed(good) == 1 | 2 | (1 << 3), 'shared INTER header/classifier result'
+    assert not (analyzed(good + b'\xff') & 2), 'malformed tail invalidates shared header'
     bad = [b'', good[:-1], good + good, good + bytes([0x2a, 0]),
            bytes([0x36, 1, 4, 0x30, 0, 0, 0]),
            bytes([0x32, 1, 0x80]),  # show-existing: not a new non-reference frame
@@ -154,6 +158,7 @@ def guards(lib):
         assert not av1(good, clone), field
     existing = bytes([0x32, 1, 0x80])  # slot 0
     state = State(); state.known = 1; state.types[0] = 1
+    assert analyzed(existing, state) & 7 == 7, 'shared show-existing header is valid, existing and droppable'
     assert av1(existing, state=state), 'known INTER show-existing should not require decoding'
     state.types[0] = 0
     assert not av1(existing, state=state), 'KEY show-existing updates every reference slot'
@@ -182,6 +187,8 @@ def main():
         lib = C.CDLL(str(library))
         lib.test_av1.argtypes = [C.POINTER(C.c_uint8), C.c_size_t, C.POINTER(Config), C.POINTER(State)]
         lib.test_hevc.argtypes = [C.POINTER(C.c_uint8), C.c_size_t, C.c_uint]
+        lib.test_av1_analyze.argtypes = lib.test_av1.argtypes
+        lib.test_av1_analyze.restype = C.c_uint
         lib.test_av1.restype = lib.test_hevc.restype = C.c_bool
         guards(lib)
         guards_only = '--guards-only' in sys.argv

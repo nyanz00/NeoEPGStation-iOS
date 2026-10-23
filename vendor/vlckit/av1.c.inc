@@ -13,6 +13,7 @@ struct vt_av1_context
     size_t config_size;
     neo_av1_preroll_state preroll_state;
     bool preroll_droppable;
+    neo_av1_preroll_frame frame;
 };
 
 static pthread_once_t av1_support_once = PTHREAD_ONCE_INIT;
@@ -162,8 +163,9 @@ static block_t *ProcessBlockAV1(decoder_t *dec, block_t *block, bool *changed)
         break;
     }
     neo_av1_preroll_config config;
+    ctx->frame = (neo_av1_preroll_frame){0};
     ctx->preroll_droppable = AV1_get_preroll_config(ctx->sequence, &config) &&
-        neo_av1_preroll_droppable(block->p_buffer, block->i_buffer, &config, &ctx->preroll_state);
+        neo_av1_preroll_analyze(block->p_buffer, block->i_buffer, &config, &ctx->preroll_state, &ctx->frame);
     return block;
 }
 
@@ -172,6 +174,7 @@ static void FlushAV1(decoder_t *dec)
     struct vt_av1_context *ctx = ((decoder_sys_t *)dec->p_sys)->p_codec_context;
     ctx->preroll_state.known = 0;
     ctx->preroll_droppable = false;
+    ctx->frame = (neo_av1_preroll_frame){0};
 }
 
 static bool VideoToolboxNeedsToRestartAV1(decoder_t *dec, VTDecompressionSessionRef session)
@@ -184,27 +187,11 @@ static bool FillReorderInfoAV1(decoder_t *dec, const block_t *block, frame_info_
 {
     struct vt_av1_context *ctx = ((decoder_sys_t *)dec->p_sys)->p_codec_context;
     info->b_keyframe = (block->i_flags & BLOCK_FLAG_TYPE_I) != 0;
-    AV1_OBU_iterator_ctx_t iterator;
-    AV1_OBU_iterator_init(&iterator, block->p_buffer, block->i_buffer);
-    const uint8_t *obu; size_t length;
-    while (AV1_OBU_iterate_next(&iterator, &obu, &length))
-    {
-        if (AV1_OBUGetType(obu) != AV1_OBU_FRAME && AV1_OBUGetType(obu) != AV1_OBU_FRAME_HEADER)
-            continue;
-        /* show_existing_frame has no frame_type bits. Do not interpret its
-         * padding as KEY and unnecessarily flush the reorder queue. */
-        neo_av1_preroll_config config;
-        const uint8_t *payload = obu;
-        size_t payload_size = length;
-        if (AV1_get_preroll_config(ctx->sequence, &config) &&
-            AV1_OBUSkipHeader(&payload, &payload_size))
-        {
-            neo_av1_preroll_frame frame = neo_av1_preroll_header(payload, payload_size, &config);
-            if (frame.valid)
-                info->b_keyframe = !frame.existing && frame.type == AV1_FRAME_TYPE_KEY;
-        }
-        break;
-    }
+    /* ProcessBlock already parsed the first frame header while maintaining
+     * the reference map. Share that result instead of walking/parsing again.
+     * show_existing_frame has no frame_type bits; it must not become KEY. */
+    if (ctx->frame.valid)
+        info->b_keyframe = !ctx->frame.existing && ctx->frame.type == AV1_FRAME_TYPE_KEY;
     info->b_flush = info->b_keyframe;
     info->b_progressive = true;
     info->i_num_ts = 2;

@@ -103,3 +103,8 @@ sparse keyframes, repeated accurate seeks and paused recovery. A simulator's
 successful software fallback does not establish AV1 hardware playback speed on
 an iPhone/iPad. Verify native `hardware=1` plus the selected `videotoolbox`
 module on a supported physical device before reporting hardware performance.
+
+Patch version 5 adds one-shot `neo-initial-time` without clipping the seek range,
+shared AV1 header results, early disposal before CoreMedia sample creation and
+aggregate preroll cost diagnostics. See `docs/initial-position-preroll-v5.md` in
+the application repository for the targeted startup/recovery acceptance checks.

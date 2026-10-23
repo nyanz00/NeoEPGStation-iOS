@@ -23,7 +23,9 @@ try:
     assert b'videotoolbox-av1-hardware' in binary
     assert b'neo-preroll-ready optimized=' in binary
     assert b'neo-preroll-filter enabled=' in binary
-    assert b'neo-preroll-reference version=4' in binary
+    assert b'neo-preroll-reference version=5' in binary
+    assert b'neo-preroll-cost codec=' in binary
+    assert b'neo-initial-position targetUs=' in binary
     valid = True
 except (OSError, ValueError, AssertionError, KeyError):
     valid = False

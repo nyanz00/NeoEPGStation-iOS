@@ -98,19 +98,28 @@ static inline bool neo_av1_preroll_update(neo_av1_preroll_state *state,
 
 /* One complete temporal unit only. Preserve all metadata and mixed-frame
  * units. Even a unit we cannot skip must update reference-slot bookkeeping. */
-static inline bool neo_av1_preroll_droppable(const uint8_t *data, size_t size,
-                                            const neo_av1_preroll_config *c,
-                                            neo_av1_preroll_state *state)
+static inline bool neo_av1_preroll_invalid(neo_av1_preroll_state *state,
+                                         neo_av1_preroll_frame *first)
 {
+    state->known = 0;
+    if (first) first->valid = false;
+    return false;
+}
+static inline bool neo_av1_preroll_analyze(const uint8_t *data, size_t size,
+                                            const neo_av1_preroll_config *c,
+                                            neo_av1_preroll_state *state,
+                                            neo_av1_preroll_frame *first)
+{
+    if (first) *first = (neo_av1_preroll_frame){0};
     unsigned frames = 0;
     bool droppable = false, safe_unit = true;
     while (size) {
         uint8_t header = *data++; size--;
-        if (header & 0x81) { state->known = 0; return false; }
+        if (header & 0x81) return neo_av1_preroll_invalid(state, first);
         unsigned type = (header >> 3) & 15;
         bool base_layer = true;
         if (header & 4) {
-            if (!size) { state->known = 0; return false; }
+            if (!size) return neo_av1_preroll_invalid(state, first);
             base_layer = *data++ == 0; size--;
         }
         uint64_t length = size;
@@ -119,17 +128,18 @@ static inline bool neo_av1_preroll_droppable(const uint8_t *data, size_t size,
             unsigned shift = 0;
             uint8_t byte;
             do {
-                if (!size || shift == 56) { state->known = 0; return false; }
+                if (!size || shift == 56) return neo_av1_preroll_invalid(state, first);
                 byte = *data++; size--;
                 length |= (uint64_t)(byte & 127) << shift;
                 shift += 7;
             } while (byte & 128);
         }
-        if (length > size || !base_layer) { state->known = 0; return false; }
+        if (length > size || !base_layer) return neo_av1_preroll_invalid(state, first);
         if (type == 3 || type == 6) {
             frames++;
-            bool can_skip = neo_av1_preroll_update(state,
-                neo_av1_preroll_header(data, (size_t)length, c));
+            neo_av1_preroll_frame frame = neo_av1_preroll_header(data, (size_t)length, c);
+            if (first && frames == 1) *first = frame;
+            bool can_skip = neo_av1_preroll_update(state, frame);
             droppable = frames == 1 && can_skip;
         } else if (type == 4) {
             if (!frames) { safe_unit = false; state->known = 0; }
@@ -143,6 +153,13 @@ static inline bool neo_av1_preroll_droppable(const uint8_t *data, size_t size,
         size -= (size_t)length;
     }
     return safe_unit && frames == 1 && droppable;
+}
+
+static inline bool neo_av1_preroll_droppable(const uint8_t *data, size_t size,
+                                            const neo_av1_preroll_config *c,
+                                            neo_av1_preroll_state *state)
+{
+    return neo_av1_preroll_analyze(data, size, c, state, NULL);
 }
 
 /* HEVC 7.4.2.2: _N is non-reference within its temporal sublayer. Restrict

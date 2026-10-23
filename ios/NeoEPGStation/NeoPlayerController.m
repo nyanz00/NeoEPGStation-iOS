@@ -160,6 +160,21 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     [NeoPlaybackDiagnostics nativeError:kind level:level];
   }
   NSString *event = nil; long long first = 0, second = 0;
+  long long initialTarget = 0, rangeStart = 0; int initialStatus = 0;
+  if ([message hasPrefix:@"neo-initial-position "] &&
+      sscanf(message.UTF8String, "neo-initial-position targetUs=%lld status=%d rangeStartUs=%lld", &initialTarget, &initialStatus, &rangeStart) == 3) {
+    [NeoPlaybackDiagnostics record:@"vlc.initialPosition" fields:@{@"targetMs": @(initialTarget/1000), @"status": @(initialStatus), @"rangeStartMs": @(rangeStart/1000)}];
+  }
+  unsigned costCodec = 0, submitted = 0, sampleBuffers = 0, skippedExisting = 0, skippedInter = 0;
+  long long prepareCost = 0, sampleCost = 0, submitCost = 0, callbackSum = 0, tailCost = 0;
+  if ([message hasPrefix:@"neo-preroll-cost "] &&
+      sscanf(message.UTF8String, "neo-preroll-cost codec=%u prepareUs=%lld sampleUs=%lld submitUs=%lld callbackSumUs=%lld tailUs=%lld submitted=%u samples=%u skippedExisting=%u skippedInter=%u",
+        &costCodec, &prepareCost, &sampleCost, &submitCost, &callbackSum, &tailCost, &submitted, &sampleBuffers, &skippedExisting, &skippedInter) == 10) {
+    [NeoPlaybackDiagnostics record:@"vlc.prerollCost" fields:@{@"codec": @(costCodec), @"prepareMs": @(prepareCost/1000.0),
+      @"sampleMs": @(sampleCost/1000.0), @"submitCallMs": @(submitCost/1000.0), @"callbackLatencySumMs": @(callbackSum/1000.0),
+      @"completionTailMs": @(tailCost/1000.0), @"submittedFrames": @(submitted), @"sampleBuffers": @(sampleBuffers),
+      @"skippedExisting": @(skippedExisting), @"skippedInter": @(skippedInter)}];
+  }
   unsigned optimized = 0, prerollFrames = 0, noOutput = 0, pictures = 0, droppedFrames = 0;
   long long queueWait = 0, prerollElapsed = 0;
   if ([message hasPrefix:@"neo-preroll-ready "] &&
@@ -214,6 +229,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 @property (nonatomic) NeoBufferingUpdates *bufferingUpdates;
 @property (nonatomic) NeoNowPlaying *nowPlaying;
 @property (nonatomic) BOOL inputBufferReady;
+@property (nonatomic) BOOL initialPositionInput;
 @property (nonatomic) NSTimeInterval lastIntentCommandAt;
 @property (nonatomic) BOOL lastIssuedIntent;
 @property (nonatomic) UILabel *statusLabel;
@@ -1167,16 +1183,25 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [NeoPlaybackDiagnostics record:@"input.restart" fields:@{@"restoring": @(self.reloading), @"targetMs": @(self.reloadTime)}];
   self.subtitleSignature = nil; self.attachedSubtitles = nil;
   int64_t target = self.reloading ? self.reloadTime : (int64_t)llround(self.initialPosition * 1000);
-  // Keep the entire recording addressable after resume/recovery. LibVLC adds
-  // start-time to every subsequent seek and clamps negative relative times;
-  // setting it would force a reopen to rewind before the initial position.
-  // Open paused at origin zero and position the retained input instead.
+  // Keep the entire recording addressable. The pinned native one-shot option
+  // positions BEFORE initial buffering while retaining the zero-based range;
+  // start-time would instead clip every later seek and the reported duration.
   BOOL ts = [self wholeFileClock];
   self.inputStartTime = 0;
   [self.tsPositionTimer invalidate]; self.tsPositionTimer = nil;
   self.tsPositionPending = target > 0 || [self isStreaming];
   self.videoOutputView.hidden = self.tsPositionPending;
-  self.tsPositionIssued = NO; self.tsPositionCallback = NO; self.tsPositionTarget = target;
+  self.initialPositionInput = target > 0;
+#if TARGET_OS_SIMULATOR
+  self.initialPositionInput &= ![NSProcessInfo.processInfo.environment[@"NEO_EPG_INITIAL_BASELINE"] isEqual:@"1"];
+#endif
+  self.tsPositionIssued = self.initialPositionInput;
+  self.tsPositionCallback = self.initialPositionInput;
+  self.tsPositionTarget = target;
+  self.tsPositionSequence = 0; self.tsPositionDecoded = 0;
+  NSDictionary *initialOutput = [NeoVLCFrameTap snapshot:self.movieView];
+  self.tsPositionSamples = [initialOutput[@"samples"] unsignedIntegerValue];
+  self.tsPositionOutputID = [initialOutput[@"outputID"] unsignedIntegerValue];
   self.tsPositionWaitForPause = NO; self.tsPositionResumeAt = -100;
   self.initialPosition = 0;
   self.invalidClockReported = NO;
@@ -1190,7 +1215,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [media addOption:@":videotoolbox-hw-decoder-only"];
   BOOL av1Hardware = NeoAV1HardwareSupported();
   [media addOption:av1Hardware ? @":videotoolbox-av1-hardware=1" : @":videotoolbox-av1-hardware=0"];
-  [NeoPlaybackDiagnostics record:@"vlc.av1Preflight" fields:@{@"hardwareSupported": @(av1Hardware), @"query": @"cachedOSCapability", @"patchVersion": @4}];
+  [NeoPlaybackDiagnostics record:@"vlc.av1Preflight" fields:@{@"hardwareSupported": @(av1Hardware), @"query": @"cachedOSCapability", @"patchVersion": @5}];
   BOOL suppressPreroll = YES;
   BOOL skipReferencePreroll = YES;
 #if TARGET_OS_SIMULATOR
@@ -1217,6 +1242,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       @"expectedOffset": @([self.rewindCache matroskaSeekOffset:target/1000.0])}];
   }
   [media addOption:[NSString stringWithFormat:@":network-caching=%ld", (long)self.networkCaching]];
+  if (self.initialPositionInput) {
+    [media addOption:[NSString stringWithFormat:@":neo-initial-time=%.6f", target/1000.0]];
+  }
   if ([self isStreaming]) {
     [media addOption:[NSString stringWithFormat:@":adaptive-maxbuffer=%ld", (long)self.networkCaching]];
   }
@@ -1383,14 +1411,34 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
   BOOL replacedOutput = [video[@"outputID"] unsignedIntegerValue] != self.tsPositionOutputID;
   BOOL newSample = replacedOutput ? [video[@"samples"] unsignedIntegerValue] > 0 : [video[@"samples"] unsignedIntegerValue] > self.tsPositionSamples;
+  int64_t tolerance = self.initialPositionInput && ![self wholeFileClock] ? 500 : 2000;
+  if (self.initialPositionInput) {
+    if (!self.inputBufferReady || self.buffering) { return; }
+    // A demuxer may need an initial PCR/frame before it can seek. Preserve the
+    // existing exact-position fallback, only after real origin output proves
+    // that the early request did not take effect. A synthetic clock is not proof.
+    NSNumber *observed = clock[@"positionMs"];
+    if (newSample && observed && native >= 0 &&
+        llabs(native-self.tsPositionTarget) > tolerance &&
+        llabs(observed.longLongValue-self.tsPositionTarget) > tolerance) {
+      [NeoPlaybackDiagnostics record:@"input.initialPositionFallback" fields:@{@"targetMs": @(self.tsPositionTarget), @"nativeMs": @(native)}];
+      self.initialPositionInput = NO;
+      self.tsPositionIssued = NO; self.tsPositionCallback = NO;
+      [self advanceTSPosition]; return;
+    }
+  }
   if (!self.tsPositionCallback || self.player.isSeeking ||
       self.player.media.statistics.decodedVideo <= self.tsPositionDecoded || !newSample ||
-      native < 0 || llabs(native-self.tsPositionTarget) > 2000 ||
+      native < 0 || llabs(native-self.tsPositionTarget) > tolerance ||
       [video[@"scheduledInMs"] doubleValue] < -500 || [video[@"scheduledInMs"] doubleValue] > 100 ||
       [video[@"layerStatus"] integerValue] == AVQueuedSampleBufferRenderingStatusFailed) { return; }
   [NeoPlaybackDiagnostics record:@"ts.positionReady" fields:@{@"targetMs": @(self.tsPositionTarget), @"nativeMs": @(native),
     @"nativeClockConfirmed": @YES, @"newVideo": @YES, @"outputChanged": @(replacedOutput),
     @"newWatcherPoint": @([clock[@"sequence"] unsignedLongLongValue] > self.tsPositionSequence)}];
+  if (self.initialPositionInput) {
+    [NeoPlaybackDiagnostics record:@"input.initialPositionVerified" fields:@{@"targetMs": @(self.tsPositionTarget), @"nativeMs": @(native)}];
+  }
+  self.initialPositionInput = NO;
   self.tsPositionPending = NO; [self.tsPositionTimer invalidate]; self.tsPositionTimer = nil;
   if (!self.awaitingSeekVideo) { [NeoVLCFrameTap bindFrameArrival:self.movieView handler:nil]; }
   [self armStreamingClockAt:self.tsPositionTarget];
@@ -2159,7 +2207,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   int64_t native = self.player.nativeTimeMs;
   BOOL ready = !self.tsPositionPending && !self.seeking && !self.awaitingSeekVideo && !self.reloading && !self.buffering &&
     !self.playbackFailed && self.inputBufferReady && llabs(native-target) < (phase ? 500 : 2500);
-  if (!ready && attempt < 200 && !self.playbackFailed) {
+  // A cold simulator may take more than five seconds to establish its first
+  // localhost connection. Keep measured seeks bounded independently of setup.
+  if (!ready && attempt < (phase ? 200 : 800) && !self.playbackFailed) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.025*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
       [self waitEncodedSeekProbe:phase target:target attempt:attempt+1 input:input checks:checks rows:rows completion:completion];
     }); return;

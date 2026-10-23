@@ -59,6 +59,7 @@ server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 try:
     av1 = '--av1' in sys.argv
+    startup = '--startup' in sys.argv
     hevc = '--compare-hevc' in sys.argv
     compare = '--compare-preroll' in sys.argv or hevc
     comparisons = []
@@ -73,18 +74,27 @@ try:
                  for ext, modes in [('mkv', [('baseline', True), ('optimized', False)]),
                                     ('mp4', [('optimized', False), ('baseline', True)])]
                  for label, baseline in modes]
+    if startup:
+        cases = [('encoded-seek-1080.mkv', True, 'startup-h264-mkv-baseline'),
+                 ('encoded-seek-1080.mkv', False, 'startup-h264-mkv'),
+                 ('encoded-seek-1080.mp4', False, 'startup-h264-mp4'),
+                 ('hevc-seek-10.mkv', False, 'startup-hevc10-mkv'),
+                 ('av1-seek-8.mkv', False, 'startup-av1-8-mkv'),
+                 ('av1-seek-10.mkv', False, 'startup-av1-10-mkv')]
+    startup_results = []
     for container, baseline, output_name in cases:
         # Deliberately sparse keyframes (24s), not an all-intra/short-GOP clip.
         # Exact targets between them must be retained; fast approximate seeking
         # could look faster while landing on a different picture.
-        video = Path(f'tests/fixtures/{container}' if av1 or compare else f'tests/fixtures/encoded-seek.{container}').read_bytes()
+        video = Path(f'tests/fixtures/{container}' if av1 or compare or startup else f'tests/fixtures/encoded-seek.{container}').read_bytes()
         subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True)
         names = ['encoded-seek-smoke.json', 'encoded-seek-diagnostics.json']
         for name in names:
             (documents / name).unlink(missing_ok=True)
         environment = dict(os.environ, SIMCTL_CHILD_NEO_EPG_ENCODED_SEEK=f'http://127.0.0.1:{server.server_port}')
-        environment['SIMCTL_CHILD_NEO_EPG_PREROLL_BASELINE'] = '1' if baseline and not hevc else '0'
+        environment['SIMCTL_CHILD_NEO_EPG_PREROLL_BASELINE'] = '1' if compare and baseline and not hevc else '0'
         environment['SIMCTL_CHILD_NEO_EPG_REFERENCE_BASELINE'] = '1' if baseline and hevc else '0'
+        environment['SIMCTL_CHILD_NEO_EPG_INITIAL_BASELINE'] = '1' if startup and baseline else '0'
         subprocess.run(['xcrun', 'simctl', 'launch', device, bundle], env=environment, check=True, timeout=60)
         deadline = time.monotonic()+90
         while not all((documents / name).exists() for name in names) and time.monotonic() < deadline:
@@ -105,7 +115,7 @@ try:
         assert policies and all(e['order'] == 'videotoolbox,any' and e['hardwareOnlyVideoToolbox'] for e in policies), policies
         assert any(e['event'] == 'vlc.decoderSearch' for e in events), 'VLC did not apply the requested decoder order'
         assert any(e['kind'] == 'video decoder' and e['module'] != 'other' for e in diagnostic['decoders']), diagnostic['decoders']
-        if av1:
+        if av1 or (startup and container.startswith('av1-')):
             # The real OS result controls the expected path. On simulator this
             # normally proves dav1d fallback, not AV1 hardware performance.
             capability = [e for e in events if e['event'] == 'vlc.av1Preflight']
@@ -129,6 +139,33 @@ try:
         assert releases and all(e['paused'] for e in releases), releases
         starts = [e for e in events if e['event'] == 'seek.start']
         assert len(starts) == 8 and any(e['targetMs'] < 30000 for e in starts), starts
+        if startup:
+            opening = [e for e in events if e['elapsed'] < starts[0]['elapsed']]
+            buffers = [e for e in opening if e['event'] == 'vlc.bufferReady']
+            initial = [e for e in opening if e['event'] == 'vlc.initialPosition']
+            if baseline:
+                assert len(buffers) >= 2 and not initial, opening
+            else:
+                assert len(initial) == 1 and initial[0]['status'] == 0 and initial[0]['rangeStartMs'] == 0, initial
+                assert abs(initial[0]['targetMs']-30000) < 2, initial
+                assert len(buffers) == 1 and initial[0]['elapsed'] < buffers[0]['elapsed'], buffers
+                assert not any(e['event'] in ('input.initialPositionFallback', 'ts.positionRequested') for e in opening), opening
+                assert any(e['event'] == 'input.initialPositionVerified' for e in opening), opening
+            ready = next(e for e in opening if e['event'] == 'ts.positionReady')
+            startup_results.append({'case': output_name, 'baseline': baseline, 'bufferCycles': len(buffers),
+                                    'readyMs': ready['elapsed']*1000, 'nativeInitial': initial})
+            costs = [e for e in events if e['event'] == 'vlc.prerollCost']
+            prerolls = [e for e in events if e['event'] == 'vlc.prerollReady']
+            assert len(costs) == len(prerolls), (costs, prerolls)
+            for cost, preroll in zip(costs, prerolls):
+                assert cost['submittedFrames'] == cost['sampleBuffers'], cost
+                assert cost['sampleBuffers'] + preroll['droppedFrames'] == preroll['frames'], (cost, preroll)
+                assert cost['prepareMs'] >= cost['sampleMs'] >= 0 and cost['submitCallMs'] >= 0, cost
+                assert cost['callbackLatencySumMs'] >= 0 and cost['completionTailMs'] >= 0, cost
+                if cost['codec'] == 1:
+                    assert cost['skippedExisting'] + cost['skippedInter'] == preroll['droppedFrames'], (cost, preroll)
+            if any(e['module'] == 'videotoolbox' and e['kind'] == 'video decoder' for e in diagnostic['decoders']):
+                assert costs and sum(p['droppedFrames'] for p in prerolls) > 0, 'native cost/drop path was not exercised'
         seeks = [row for row in result['rows'] if 'phase' in row]
         assert all(row['networkBytes'] == 0 for row in seeks), seeks
         if compare:
@@ -167,6 +204,9 @@ try:
                                 'wrappedImages': sum(e['pictures'] for e in preroll)})
         print(output_name, 'PASS', len(result['checks']), 'assertions; exact cached seek-to-video ms:',
               [round(row['videoReadyMs']) for row in seeks], flush=True)
+    if startup:
+        (dist / 'initial-position-comparison.json').write_text(json.dumps(startup_results, indent=2))
+        print('Initial positioning (one-shot preserves full seek range):', json.dumps(startup_results), flush=True)
     if compare:
         summary = []
         for ext in ('mkv', 'mp4'):
