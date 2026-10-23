@@ -2206,10 +2206,16 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       // Retain the standalone probe until its weakly captured delivery fires.
       [updates reset];
       int64_t origin = self.player.nativeTimeMs;
-      uint64_t frames = self.player.media.statistics.decodedVideo;
+      // The cached libVLC statistics can lag after a large preroll. Count the
+      // actual output samples, rather than mistaking a delayed statistic for
+      // a frozen picture. The clock must independently advance below.
+      NSInteger frames = self.commentPiP.capturedFrameCount;
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         checks[@"clockContinuesAfterRepeatedSeeks"] = @(self.player.nativeTimeMs > origin+500 && self.player.nativeTimeMs < origin+2000);
-        checks[@"videoContinuesAfterRepeatedSeeks"] = @(self.player.media.statistics.decodedVideo > frames+10);
+        NSInteger delivered = self.commentPiP.capturedFrameCount;
+        checks[@"videoContinuesAfterRepeatedSeeks"] = @(delivered > frames+10);
+        [rows addObject:@{@"continuationFramesBefore": @(frames), @"continuationFramesAfter": @(delivered),
+          @"continuationClockBeforeMs": @(origin), @"continuationClockAfterMs": @(self.player.nativeTimeMs)}];
         // Exercise the actual paused restoration path, including an output
         // whose old mute was lost. A queued pause is not a mute-release ack.
         [self holdRestoreMute]; self.wantsPlayback = NO;
