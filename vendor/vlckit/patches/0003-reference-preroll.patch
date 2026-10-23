@@ -1,0 +1,172 @@
+--- a/modules/codec/videotoolbox/decoder.c
++++ b/modules/codec/videotoolbox/decoder.c
+@@ -129,6 +129,7 @@
+ 
+     bool                        b_format_propagated;
+     bool                        b_skip_preroll_output;
++    bool                        b_skip_reference_preroll;
+     bool                        b_av1_references_only, b_av1_filter_unsupported;
+     unsigned                    preroll_dropped;
+     bool                        b_preroll_stats_pending;
+@@ -1387,7 +1388,9 @@
+     p_dec->p_sys = p_sys;
+     p_sys->session = NULL;
+     p_sys->codec = codec;
++    msg_Dbg(p_dec, "neo-preroll-reference version=4");
+     p_sys->b_skip_preroll_output = var_InheritBool(p_dec, "videotoolbox-skip-preroll-output");
++    p_sys->b_skip_reference_preroll = var_InheritBool(p_dec, "videotoolbox-skip-reference-preroll");
+     p_sys->videoFormatDescription = NULL;
+     p_sys->dpb.i_max_pics = 4;
+     p_sys->dpb.i_fields_per_buffer = 1;
+@@ -1440,6 +1443,7 @@
+         case kCMVideoCodecType_AV1:
+             p_sys->pf_codec_init = InitAV1;
+             p_sys->pf_codec_clean = CleanAV1;
++            p_sys->pf_codec_flush = FlushAV1;
+             p_sys->pf_process_block = ProcessBlockAV1;
+             p_sys->pf_need_restart = VideoToolboxNeedsToRestartAV1;
+             p_sys->pf_configure_vout = ConfigureVoutAV1;
+@@ -1689,9 +1693,9 @@
+         pts = CMTimeMake(p_block->i_pts, CLOCK_FREQ);
+ 
+     CMSampleTimingInfo timeInfoArray[1] = { {
+-        .duration = CMTimeMake(p_block->i_length, 1),
++        .duration = p_block->i_length > 0 ? CMTimeMake(p_block->i_length, CLOCK_FREQ) : kCMTimeInvalid,
+         .presentationTimeStamp = pts,
+-        .decodeTimeStamp = CMTimeMake(p_block->i_dts, CLOCK_FREQ),
++        .decodeTimeStamp = p_block->i_dts == VLC_TICK_INVALID ? kCMTimeInvalid : CMTimeMake(p_block->i_dts, CLOCK_FREQ),
+     } };
+ 
+     if (p_sys->codec == kCMVideoCodecType_AV1)
+@@ -1920,6 +1924,54 @@
+     return slice;
+ }
+ 
++/* Only omit HEVC _N access units at the highest active SPS temporal layer.
++ * FillReorderInfo has consumed POC/SEI; inspect ALL slices before dropping. */
++static bool NonReferenceHEVC(decoder_t *dec, const block_t *block)
++{
++    struct vt_hevc_context *ctx = ((decoder_sys_t *)dec->p_sys)->p_codec_context;
++    hxxx_iterator_ctx_t it;
++    hxxx_iterator_init(&it, block->p_buffer, block->i_buffer, ctx->hh.i_output_nal_length_size);
++    const uint8_t *nal; size_t size;
++    bool slice = false;
++    while (it.p_head < it.p_tail)
++    {
++        if (!hxxx_iterate_next(&it, &nal, &size))
++            return false;
++        if (size < 2 || (nal[0] & 0x80) || hevc_getNALLayer(nal) != 0)
++            return false;
++        if (hevc_getNALType(nal) >= 32)
++            continue;
++        hevc_slice_segment_header_t *sl = hevc_decode_slice_header(nal, size, true, GetxPSHEVC, ctx);
++        if (!sl) return false;
++        hevc_picture_parameter_set_t *pps = NULL;
++        hevc_sequence_parameter_set_t *sps = NULL;
++        hevc_video_parameter_set_t *vps = NULL;
++        GetxPSHEVC(hevc_get_slice_pps_id(sl), ctx, &pps, &sps, &vps);
++        bool safe = neo_hevc_preroll_nal(nal, size, hevc_get_highest_temporal_id(sps));
++        hevc_rbsp_release_slice_header(sl);
++        if (!safe) return false;
++        slice = true;
++    }
++    return slice;
++}
++
++static bool NonReferencePreroll(decoder_t *dec, const block_t *block)
++{
++    decoder_sys_t *sys = dec->p_sys;
++    if (sys->codec == kCMVideoCodecType_H264)
++        return NonReferenceH264(dec, block);
++    if (!sys->b_skip_reference_preroll)
++        return false;
++    if (sys->codec == kCMVideoCodecType_HEVC)
++        return NonReferenceHEVC(dec, block);
++    if (sys->codec == kCMVideoCodecType_AV1)
++    {
++        struct vt_av1_context *ctx = sys->p_codec_context;
++        return ctx->preroll_droppable;
++    }
++    return false;
++}
++
+ /* AV1 reference-slot refresh rules are owned by Apple's decoder. Ask it to
+  * skip only droppable frames during ordered AV1 preroll. Restore AllFrames
+  * before submitting the first displayable temporal unit. An unsupported
+@@ -2161,7 +2213,7 @@
+         /* VLCDEC_RELOAD returns the unchanged block to the decoder owner. */
+         return VLCDEC_RELOAD;
+     }
+-    if (p_info->b_no_output && !b_config_changed && NonReferenceH264(p_dec, p_block))
++    if (p_info->b_no_output && !b_config_changed && NonReferencePreroll(p_dec, p_block))
+     {
+         vlc_mutex_lock(&p_sys->lock);
+         p_sys->preroll_no_output++;
+@@ -2490,6 +2542,7 @@
+     set_capability("video decoder", 800)
+     set_callbacks(OpenDecoder, CloseDecoder)
+ 
++    add_bool("videotoolbox-skip-reference-preroll", true, "Skip disposable HEVC/AV1 preroll", "Preserve every reference picture while omitting decoder-only disposable pictures")
+     add_bool("videotoolbox-skip-preroll-output", true, "Skip preroll image output", "Decode reference frames without producing images before the seek target")
+     add_integer("videotoolbox-av1-hardware", -1, "AV1 hardware capability", "0 disables AV1 hardware; -1 or 1 checks the cached OS capability")
+         change_integer_range(-1, 1)
+--- a/modules/packetizer/av1_obu.c
++++ b/modules/packetizer/av1_obu.c
+@@ -297,6 +297,21 @@
+     struct av1_color_config_s color_config;
+     obu_u1_t film_grain_params_present;
+ };
++
++bool AV1_get_preroll_config(const av1_OBU_sequence_header_t *s, neo_av1_preroll_config *c)
++{
++    if (!s || !c) return false;
++    *c = (neo_av1_preroll_config) {
++        .reduced_still = s->reduced_still_picture_header,
++        .decoder_model = s->decoder_model_info_present_flag,
++        .frame_ids = s->frame_id_numbers_present_flag,
++        .operating_points_minus1 = s->operating_points_cnt_minus_1,
++        .screen_tools = s->seq_force_screen_content_tools,
++        .integer_mv = s->seq_force_integer_mv,
++        .order_hint_bits = s->enable_order_hint ? 1 + s->order_hint_bits_minus_1 : 0,
++    };
++    return true;
++}
+ 
+ void AV1_release_sequence_header(av1_OBU_sequence_header_t *p_seq)
+ {
+--- a/modules/packetizer/av1_obu.h
++++ b/modules/packetizer/av1_obu.h
+@@ -174,6 +174,9 @@
+ 
+ 
+ 
++#include "neo_preroll.h"
++bool AV1_get_preroll_config(const av1_OBU_sequence_header_t *, neo_av1_preroll_config *);
++
+ /* FRAME_HEADER properties */
+ typedef struct av1_OBU_frame_header_t av1_OBU_frame_header_t;
+ enum av1_frame_type_e
+--- a/modules/packetizer/hevc_nal.c
++++ b/modules/packetizer/hevc_nal.c
+@@ -1077,6 +1077,11 @@
+                                   p_ox, p_oy, p_w, p_h, p_vw, p_vh );
+ }
+ 
++unsigned hevc_get_highest_temporal_id(const hevc_sequence_parameter_set_t *sps)
++{
++    return sps ? sps->sps_max_sub_layers_minus1 : 7;
++}
++
+ void hevc_get_dpb_values( const hevc_sequence_parameter_set_t *p_sps, uint8_t *max_num_reorder_pics,
+                           uint8_t *max_latency_pics, uint8_t *max_dec_pic_buffering )
+ {
+--- a/modules/packetizer/hevc_nal.h
++++ b/modules/packetizer/hevc_nal.h
+@@ -303,6 +303,7 @@
+                            video_transfer_func_t *p_transfer,
+                            video_color_space_t *p_colorspace,
+                            video_color_range_t *p_full_range );
++unsigned hevc_get_highest_temporal_id(const hevc_sequence_parameter_set_t *);
+ void hevc_get_dpb_values( const hevc_sequence_parameter_set_t *, uint8_t *num_reorder_pics,
+                           uint8_t *max_latency_pics, uint8_t *max_dec_pic_buffering );
+ bool hevc_get_slice_type( const hevc_slice_segment_header_t *, enum hevc_slice_type_e * );

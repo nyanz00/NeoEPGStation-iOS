@@ -13,6 +13,7 @@ def capture_times(vlc, snapshot):
     if (vlc / '.git').is_dir():
         names = subprocess.check_output(['git', '-C', str(vlc), 'diff', '--name-only', '-z', 'HEAD']).decode().split('\0')
     names.append('modules/codec/videotoolbox/av1.c.inc')
+    names.append('modules/packetizer/neo_preroll.h')
     saved = {}
     for name in filter(None, names):
         path = vlc / name

@@ -11,6 +11,8 @@ struct vt_av1_context
     av1_OBU_sequence_header_t *sequence;
     uint8_t *config;
     size_t config_size;
+    neo_av1_preroll_state preroll_state;
+    bool preroll_droppable;
 };
 
 static pthread_once_t av1_support_once = PTHREAD_ONCE_INIT;
@@ -159,7 +161,17 @@ static block_t *ProcessBlockAV1(decoder_t *dec, block_t *block, bool *changed)
             AV1_release_sequence_header(sequence);
         break;
     }
+    neo_av1_preroll_config config;
+    ctx->preroll_droppable = AV1_get_preroll_config(ctx->sequence, &config) &&
+        neo_av1_preroll_droppable(block->p_buffer, block->i_buffer, &config, &ctx->preroll_state);
     return block;
+}
+
+static void FlushAV1(decoder_t *dec)
+{
+    struct vt_av1_context *ctx = ((decoder_sys_t *)dec->p_sys)->p_codec_context;
+    ctx->preroll_state.known = 0;
+    ctx->preroll_droppable = false;
 }
 
 static bool VideoToolboxNeedsToRestartAV1(decoder_t *dec, VTDecompressionSessionRef session)
@@ -179,11 +191,17 @@ static bool FillReorderInfoAV1(decoder_t *dec, const block_t *block, frame_info_
     {
         if (AV1_OBUGetType(obu) != AV1_OBU_FRAME && AV1_OBUGetType(obu) != AV1_OBU_FRAME_HEADER)
             continue;
-        av1_OBU_frame_header_t *frame = AV1_OBU_parse_frame_header(obu, length, ctx->sequence);
-        if (frame)
+        /* show_existing_frame has no frame_type bits. Do not interpret its
+         * padding as KEY and unnecessarily flush the reorder queue. */
+        neo_av1_preroll_config config;
+        const uint8_t *payload = obu;
+        size_t payload_size = length;
+        if (AV1_get_preroll_config(ctx->sequence, &config) &&
+            AV1_OBUSkipHeader(&payload, &payload_size))
         {
-            info->b_keyframe = AV1_get_frame_type(frame) == AV1_FRAME_TYPE_KEY;
-            AV1_release_frame_header(frame);
+            neo_av1_preroll_frame frame = neo_av1_preroll_header(payload, payload_size, &config);
+            if (frame.valid)
+                info->b_keyframe = !frame.existing && frame.type == AV1_FRAME_TYPE_KEY;
         }
         break;
     }

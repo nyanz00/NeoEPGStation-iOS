@@ -1190,15 +1190,18 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [media addOption:@":videotoolbox-hw-decoder-only"];
   BOOL av1Hardware = NeoAV1HardwareSupported();
   [media addOption:av1Hardware ? @":videotoolbox-av1-hardware=1" : @":videotoolbox-av1-hardware=0"];
-  [NeoPlaybackDiagnostics record:@"vlc.av1Preflight" fields:@{@"hardwareSupported": @(av1Hardware), @"query": @"cachedOSCapability", @"patchVersion": @3}];
+  [NeoPlaybackDiagnostics record:@"vlc.av1Preflight" fields:@{@"hardwareSupported": @(av1Hardware), @"query": @"cachedOSCapability", @"patchVersion": @4}];
   BOOL suppressPreroll = YES;
+  BOOL skipReferencePreroll = YES;
 #if TARGET_OS_SIMULATOR
   // A/B uses the same signed simulator binary, codec, cache and exact targets.
   // The diagnostic override is never offered as a playback setting.
   suppressPreroll = ![NSProcessInfo.processInfo.environment[@"NEO_EPG_PREROLL_BASELINE"] isEqual:@"1"];
+  skipReferencePreroll = ![NSProcessInfo.processInfo.environment[@"NEO_EPG_REFERENCE_BASELINE"] isEqual:@"1"];
 #endif
   [media addOption:suppressPreroll ? @":videotoolbox-skip-preroll-output" : @":no-videotoolbox-skip-preroll-output"];
-  [NeoPlaybackDiagnostics record:@"vlc.prerollPolicy" fields:@{@"optimized": @(suppressPreroll)}];
+  [media addOption:skipReferencePreroll ? @":videotoolbox-skip-reference-preroll" : @":no-videotoolbox-skip-reference-preroll"];
+  [NeoPlaybackDiagnostics record:@"vlc.prerollPolicy" fields:@{@"optimized": @(suppressPreroll), @"referenceSkip": @(skipReferencePreroll)}];
   [NeoPlaybackDiagnostics record:@"vlc.decoderPolicy" fields:@{@"order": @"videotoolbox,any", @"hardwareOnlyVideoToolbox": @YES}];
 #if TARGET_OS_SIMULATOR
   // Select the fixture's known track before the first PES, not by resetting

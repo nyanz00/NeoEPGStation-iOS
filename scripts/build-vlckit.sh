@@ -45,6 +45,7 @@ for task_patch in "$task_root"/vendor/vlckit/patches/*.patch; do
     git -C "$task_vlc" apply --index "$task_patch"
 done
 cp "$task_root/vendor/vlckit/av1.c.inc" "$task_vlc/modules/codec/videotoolbox/av1.c.inc"
+cp "$task_root/vendor/vlckit/neo_preroll.h" "$task_vlc/modules/packetizer/neo_preroll.h"
 # The app supports iOS 18+, and the AV1 APIs are available throughout that range.
 python3 - "$task_vlc/extras/package/apple/build.conf" <<'PY'
 import pathlib, sys
@@ -106,4 +107,5 @@ grep -q 'neo-av1-selection hardware=1' "$task_work/strings.txt"
 grep -q 'videotoolbox-av1-hardware' "$task_work/strings.txt"
 grep -q 'neo-preroll-ready optimized=' "$task_work/strings.txt"
 grep -q 'neo-preroll-filter enabled=' "$task_work/strings.txt"
+grep -q 'neo-preroll-reference version=4' "$task_work/strings.txt"
 python3 "$task_root/scripts/vlckit-provenance.py" "$task_sdk"

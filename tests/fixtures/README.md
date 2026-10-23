@@ -1,5 +1,15 @@
 # PLAYタップ検証用TS
 
+`hevc-seek-10.mkv` / `.mp4` は72秒・1920×1080・24fps・HEVC Main 10、
+24秒間隔のGOP・3 Bフレーム・440Hz音声の合成動画。
+HEVCの同じ入力・同じシーク位置で、画像出力省略を両側とも有効にしたまま、
+非参照フレームの復号省略のみを切り替える。H.264の結果で代用しない。
+
+```sh
+ffmpeg -f lavfi -i testsrc=size=1920x1080:rate=24 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 72 -c:v libx265 -pix_fmt yuv420p10le -preset ultrafast -crf 38 -x265-params keyint=576:min-keyint=576:scenecut=0:bframes=3:open-gop=0:pools=4:frame-threads=2 -c:a aac -b:a 64k -map_metadata -1 hevc-seek-10.mkv
+ffmpeg -i hevc-seek-10.mkv -map 0 -c copy -tag:v hvc1 -movflags +faststart -map_metadata -1 hevc-seek-10.mp4
+```
+
 `av1-seek-8.*`、`av1-seek-10.*` は下記と同じ72秒・320×180・24fpsの
 合成映像と音声。AV1 Main profileの8bit/10bitをMKV/MP4で検証する。
 24秒間隔のキーフレームを含み、実機アプリには同梱しない。

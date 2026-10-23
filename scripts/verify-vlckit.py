@@ -14,7 +14,7 @@ try:
     expected = json.loads((root / 'vendor/vlckit/source.json').read_text())
     assert all(value[k] == v for k, v in expected.items())
     assert value['sdk'] == sdk and 'Xcode 26.6' in value['xcode']
-    for path in [root / 'vendor/vlckit/source.json', root / 'vendor/vlckit/av1.c.inc',
+    for path in [root / 'vendor/vlckit/source.json', root / 'vendor/vlckit/av1.c.inc', root / 'vendor/vlckit/neo_preroll.h',
                  *sorted((root / 'vendor/vlckit/patches').glob('*.patch'))]:
         assert value['patches'][str(path.relative_to(root))] == hashlib.sha256(path.read_bytes()).hexdigest()
     binary = (output / 'VLCKit.framework/VLCKit').read_bytes()
@@ -23,6 +23,7 @@ try:
     assert b'videotoolbox-av1-hardware' in binary
     assert b'neo-preroll-ready optimized=' in binary
     assert b'neo-preroll-filter enabled=' in binary
+    assert b'neo-preroll-reference version=4' in binary
     valid = True
 except (OSError, ValueError, AssertionError, KeyError):
     valid = False

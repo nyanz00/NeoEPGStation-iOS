@@ -4,6 +4,42 @@
 AV1ハードウェア利用済みでも、目的位置より前の復号と出力管理は残る。
 機能試験の成功だけを、実機での速度改善の証明には使わない。
 
+## パッチ適用版4
+
+HEVCとAV1の処理量を減らす。画像出力を省くことと、復号への投入自体を
+省くことは分ける。OSのOnlyTheseFramesが非対応でも後者を利用できる。
+
+- HEVCは全VCL NALが有効なlayer 0の_Nで、各スライスのアクティブSPSの
+  最高TemporalIdに一致する場合だけ省略する。_Nは同一時間階層での非参照で
+  あり、低い階層の_Nを一律に削除しない。POC/SEI/DPBの時刻情報は維持する。
+- AV1は参照スロットを更新しない表示INTERフレームと、既知の非KEY参照の
+  show-existingだけを対象とする。show-existing KEYは全参照スロットを
+  更新するため残す。参照画像の種類だけを通常再生時から追跡し、flushと
+  sequence変更でリセットする。未知の参照、隠れた画像、複数画像のTU、
+  メタデータ更新、frame ID、decoder model、複数operating pointは省略しない。
+- show-existingの後にはframe_typeがない。AV1の出力順情報で、その後の
+  paddingをKEYと誤読してDPBをflushしない。
+- CoreMediaのサンプルdurationをVLCのマイクロ秒単位から変換し、未知DTSを
+  kCMTimeInvalidにする。従来AV1だけに適用していた補正をHEVC等にも適用する。
+
+判定部分は `vendor/vlckit/neo_preroll.h`。AV1の参照情報は
+[AV1仕様のrefresh_frame_flags / show_existing_frame](https://aomediacodec.github.io/av1-spec/)
+に従い、HEVCはH.265のsub-layer non-reference pictureの制約に従う。
+不明な場合は元の復号へ通し、目的位置やキーフレームを丸めない。
+
+`scripts/preroll-reference-test.py` は実際のCコードをコンパイルし、FFmpegで
+解析した合成AV1 8/10bit、HEVC 10bitから30秒以前の対象だけを取り除く。
+元と除去後の復号画像のうち30秒以降の42秒・1008枚がすべて同一であることを要求する。
+隠れたフレーム等を含む元のビットストリームで参照の保持を検証する。
+手元の結果はそれぞれ358 / 358 / 359フレームを省略、各1008枚一致。
+この試験をiPhone実機での速度向上の証明には使わない。
+
+`--compare-hevc` は同一バイナリ・同一HEVC 10bit・同一8シーク先の比較。
+baselineもpreroll画像出力省略は有効（適用版3相当）で、新しいHEVC/AV1の
+復号省略だけを `NEO_EPG_REFERENCE_BASELINE=1` で無効にする。
+通常配布アプリでは常に有効。H.264の既存省略とAV1の非対応機種での
+dav1dへの切り替えも退行確認する。実機の速度改善は別途実測が必要。
+
 ## パッチ適用版3
 
 VLCが明示的にPREROLLとした、PTSがあるプログレッシブフレームについて、

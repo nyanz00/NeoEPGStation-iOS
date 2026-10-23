@@ -30,6 +30,7 @@ if sdk == 'iphoneos':
                 if path.is_file():
                     archive.add(path, arcname=f'{prefix}/{name}', recursive=False)
         archive.add(vlc / 'modules/codec/videotoolbox/av1.c.inc', arcname='VLCKit/libvlc/vlc/modules/codec/videotoolbox/av1.c.inc')
+        archive.add(vlc / 'modules/packetizer/neo_preroll.h', arcname='VLCKit/libvlc/vlc/modules/packetizer/neo_preroll.h')
         for directory in (vlc / 'contrib/tarballs', vlc / 'extras/tools'):
             for path in directory.iterdir():
                 if path.is_file() and ('.tar.' in path.name or path.suffix in ('.zip', '.tgz')):

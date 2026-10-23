@@ -76,6 +76,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate CI helpers
         run: python3 -m unittest discover -s tests/ci -v
+      - name: Verify HEVC and AV1 reference preservation
+        run: python3 scripts/preroll-reference-test.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Preroll-reference-correctness
+          path: dist/preroll-reference-test.json
       - name: Avoid duplicate successful verification
         id: guard
         env:
@@ -187,6 +193,7 @@ jobs:
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'encoded-seek' }}
         run: |
           python3 -u scripts/encoded-seek-smoke.py --compare-preroll
+          python3 -u scripts/encoded-seek-smoke.py --compare-hevc
           python3 -u scripts/encoded-seek-smoke.py --av1
       - name: Check AV1 selection, 8/10-bit playback and accurate cached seeks
         id: av1-checks
@@ -307,6 +314,7 @@ jobs:
           elif [ "$CHECK_SCOPE" = "encoded-seek" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
             python3 -u scripts/encoded-seek-smoke.py --compare-preroll
+            python3 -u scripts/encoded-seek-smoke.py --compare-hevc
             python3 -u scripts/encoded-seek-smoke.py --av1
           elif [ "$CHECK_SCOPE" = "streaming" ]; then
             python3 -u scripts/simulator-smoke.py --prepare

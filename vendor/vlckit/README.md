@@ -43,6 +43,25 @@ uses the existing one-way module fallback rather than dropping normal frames.
 then checks AV1 fallback and seeks. Simulator results do not establish AV1
 hardware seek performance on a physical iPhone.
 
+Patch version 4 adds conservative HEVC/AV1 decoder-only reference skipping
+in `neo_preroll.h`, independently of Apple's optional frame filter. HEVC _N
+slices must all belong to layer 0 and the active SPS's highest temporal layer.
+AV1 tracks reference-slot types across every temporal unit, resetting on flush
+and sequence changes. Only no-refresh displayed INTER pictures and known
+non-KEY show-existing units are omitted. Hidden/reference pictures, KEY
+show-existing (which refreshes all slots), mixed/unknown units and unsupported
+frame-ID/timing/scalability configurations retain full decoding. The AV1 reorder
+parser no longer reads padding after show-existing as a KEY frame. CoreMedia
+duration/DTS units are corrected for HEVC as well as AV1.
+
+`scripts/preroll-reference-test.py` compiles the production C classifiers and
+compares the complete 42 seconds after the seek target (1008 decoded picture
+hashes per synthetic 8/10-bit AV1 and 10-bit HEVC fixture). `--compare-hevc`
+compares the same binary/input/targets with image suppression enabled on BOTH
+sides; only new reference skipping is disabled in its baseline. AV1 simulator
+fallback tests and reference correctness do not establish physical AV1 hardware
+speed. Device performance must be measured separately.
+
 `scripts/build-vlckit.sh` builds arm64 device and simulator slices separately.
 The upstream deployment target is raised to iOS 18, matching this app. GNU
 source downloads use an explicit HTTPS mirror instead of a redirect that can

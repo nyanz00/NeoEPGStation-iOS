@@ -59,14 +59,17 @@ server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 try:
     av1 = '--av1' in sys.argv
-    compare = '--compare-preroll' in sys.argv
+    hevc = '--compare-hevc' in sys.argv
+    compare = '--compare-preroll' in sys.argv or hevc
     comparisons = []
     containers = ('av1-seek-8.mkv', 'av1-seek-10.mkv', 'av1-seek-8.mp4', 'av1-seek-10.mp4') if av1 else ('mkv', 'mp4')
     cases = [(c, False, c) for c in containers]
     if compare:
         # Paired runs of the same 1080p/24fps, 24-second GOP input and targets.
         # Reverse order for MP4 to avoid attributing process warm-up to the patch.
-        cases = [(f'encoded-seek-1080.{ext}', baseline, f'1080-{ext}-{label}')
+        fixture = 'hevc-seek-10' if hevc else 'encoded-seek-1080'
+        prefix = 'hevc10' if hevc else '1080'
+        cases = [(f'{fixture}.{ext}', baseline, f'{prefix}-{ext}-{label}')
                  for ext, modes in [('mkv', [('baseline', True), ('optimized', False)]),
                                     ('mp4', [('optimized', False), ('baseline', True)])]
                  for label, baseline in modes]
@@ -80,7 +83,8 @@ try:
         for name in names:
             (documents / name).unlink(missing_ok=True)
         environment = dict(os.environ, SIMCTL_CHILD_NEO_EPG_ENCODED_SEEK=f'http://127.0.0.1:{server.server_port}')
-        environment['SIMCTL_CHILD_NEO_EPG_PREROLL_BASELINE'] = '1' if baseline else '0'
+        environment['SIMCTL_CHILD_NEO_EPG_PREROLL_BASELINE'] = '1' if baseline and not hevc else '0'
+        environment['SIMCTL_CHILD_NEO_EPG_REFERENCE_BASELINE'] = '1' if baseline and hevc else '0'
         subprocess.run(['xcrun', 'simctl', 'launch', device, bundle], env=environment, check=True, timeout=60)
         deadline = time.monotonic()+90
         while not all((documents / name).exists() for name in names) and time.monotonic() < deadline:
@@ -130,8 +134,14 @@ try:
         if compare:
             preroll = [e for e in events if e['event'] == 'vlc.prerollReady' and 1 <= e['seek'] <= 8]
             assert len(preroll) >= 6 and all(e['frames'] > 0 for e in preroll), preroll
-            assert all(e['optimized'] != baseline for e in preroll), preroll
-            if baseline:
+            assert all(e['optimized'] == (hevc or not baseline) for e in preroll), preroll
+            if hevc:
+                assert all(e['noOutput'] > 0 and e['pictures'] == 0 for e in preroll), preroll
+                dropped = sum(e['droppedFrames'] for e in preroll)
+                assert dropped == 0 if baseline else dropped > 100, preroll
+                policy = [e for e in events if e['event'] == 'vlc.prerollPolicy']
+                assert policy and all(e['referenceSkip'] != baseline for e in policy), policy
+            elif baseline:
                 assert all(e['noOutput'] == 0 for e in preroll) and sum(e['pictures'] for e in preroll) > 100, preroll
             else:
                 assert all(e['noOutput'] > 0 and e['pictures'] == 0 for e in preroll), preroll
@@ -139,6 +149,7 @@ try:
             comparisons.append({'case': output_name, 'baseline': baseline,
                                 'seekToVideoMs': [row['videoReadyMs'] for row in seeks],
                                 'prerollMs': [e['durationMs'] for e in preroll],
+                                'skippedDecodes': sum(e['droppedFrames'] for e in preroll),
                                 'suppressedImages': sum(e['noOutput'] for e in preroll),
                                 'wrappedImages': sum(e['pictures'] for e in preroll)})
         print(output_name, 'PASS', len(result['checks']), 'assertions; exact cached seek-to-video ms:',
@@ -146,14 +157,17 @@ try:
     if compare:
         summary = []
         for ext in ('mkv', 'mp4'):
-            before = next(c for c in comparisons if c['case'] == f'1080-{ext}-baseline')
-            after = next(c for c in comparisons if c['case'] == f'1080-{ext}-optimized')
+            before = next(c for c in comparisons if c['case'] == f'{prefix}-{ext}-baseline')
+            after = next(c for c in comparisons if c['case'] == f'{prefix}-{ext}-optimized')
             summary.append({'container': ext,
                             'baselineMedianMs': statistics.median(before['seekToVideoMs']),
                             'optimizedMedianMs': statistics.median(after['seekToVideoMs']),
                             'baselinePrerollMedianMs': statistics.median(before['prerollMs']),
                             'optimizedPrerollMedianMs': statistics.median(after['prerollMs'])})
-        (dist / 'preroll-comparison.json').write_text(json.dumps({'runs': comparisons, 'summary': summary}, indent=2))
+        (dist / ('hevc-preroll-comparison.json' if hevc else 'preroll-comparison.json')).write_text(json.dumps({'runs': comparisons, 'summary': summary}, indent=2))
         print('Paired same-binary preroll comparison:', json.dumps(summary), flush=True)
+        if hevc:
+            assert all(s['optimizedMedianMs'] < s['baselineMedianMs'] * .8 for s in summary), \
+                ('HEVC did not improve its measured median by at least 20%', summary)
 finally:
     server.shutdown()
