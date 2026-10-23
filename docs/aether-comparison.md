@@ -7,10 +7,11 @@ releases the engine; switching off restores normal PLAY on the next opening.
 
 The trial has video/audio, startup from the beginning, pause/play, ±10s, a seek slider,
 double tap, orientation and diagnostic export. It deliberately has no comment,
-subtitle, PiP or history-write integration. Trial playback starts at zero and does not overwrite history. Software AV1
-resume startup at 30s failed to display an initial picture in the simulator;
-subsequent target seeks succeeded. Resume integration is deferred for this
-minimal comparison rather than treating the failing startup as accepted.
+subtitle, PiP or history-write integration. Trial playback starts at zero and
+does not overwrite history. Software AV1 failed to display an initial picture
+in the simulator both at 30s and at zero; subsequent target seeks succeeded.
+Starting at zero isolates the comparison from resume integration; it does not
+fix that AV1 software issue.
 
 AetherEngine 7.46.0 is pinned by revision along with its transitive package
 lock. One Swift 6.2 compatibility patch passes a Boolean capability verdict to
@@ -35,3 +36,23 @@ seeks to 20/40/30/20s, seeks while paused and closes cleanly. The same
 binary must pass existing indexed VLC startup/rewind probes. Simulator AV1
 software results do not predict iPhone hardware seek latency. Real performance,
 audio, device rotation and LiveContainer behavior remain device checks.
+
+Build 244 verification (commit `662839271a405c004f0b75833120d334bde394fd`):
+
+- Device and simulator application builds, IPA signing verification, dependency
+  provenance and the Foundation parser/clock checks passed.
+- H.264 and HEVC 10bit MKV each passed all 10 comparison assertions, including
+  startup, four transport seeks, a paused seek and teardown.
+- AV1 10bit software startup failed: no first display-ready edge within 30s,
+  and the initial clock no longer matched the starting position. All five
+  subsequent seeks passed the software picture-clock assertion. This remains
+  unresolved; no hardware AV1 performance claim follows from these tests.
+- The Actions run is failed, not fully verified. The retained VLC startup
+  script was not reached because the AV1 assertion failed first.
+- A prior synthetic-origin suffix Range parsing error was fixed and locally
+  tested. Correcting that test-server error did not fix AV1 startup.
+
+The opt-in IPA is suitable for an explicit engine comparison with these known
+limits, not a replacement for the default VLC path. Use the comparison screen's
+diagnostic export on a device to identify the selected route and measured seek
+outcomes. Do not present these simulator timings as device performance.
