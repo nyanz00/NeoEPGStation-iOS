@@ -76,17 +76,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate CI helpers
         run: python3 -m unittest discover -s tests/ci -v
-      - name: Verify HEVC and AV1 reference preservation
-        run: python3 scripts/preroll-reference-test.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Preroll-reference-correctness
-          path: dist/preroll-reference-test.json
       - name: Avoid duplicate successful verification
         id: guard
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci-support.py guard
+      - name: Prepare reference-test media tools
+        if: ${{ steps.guard.outputs.proceed == 'true' && !inputs.reuse_run && contains(fromJSON('["encoded-seek","av1-decoder"]'), inputs.check_scope) }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Verify HEVC and AV1 reference preservation
+        if: ${{ steps.guard.outputs.proceed == 'true' && !inputs.reuse_run && contains(fromJSON('["encoded-seek","av1-decoder"]'), inputs.check_scope) }}
+        run: python3 scripts/preroll-reference-test.py
+      - uses: actions/upload-artifact@v4
+        if: ${{ steps.guard.outputs.proceed == 'true' && !inputs.reuse_run && contains(fromJSON('["encoded-seek","av1-decoder"]'), inputs.check_scope) }}
+        with:
+          name: Preroll-reference-correctness
+          path: dist/preroll-reference-test.json
 
   native-library:
     needs: preflight
