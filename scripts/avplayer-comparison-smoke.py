@@ -65,10 +65,20 @@ try:
     for fixture in fixtures:
         try:
             video = Path('tests/fixtures', fixture).read_bytes(); transferred = requests = 0; paths.clear()
-            reference = fixture.replace('.mp4', '.mkv')
-            assert hashlib.sha256(Path('tests/fixtures', reference).read_bytes()).hexdigest() == references[reference]['sha256']
-            for target, digest in references[reference]['references'].items():
-                assert hashlib.sha256((reference_root/(reference+'-'+target+'.png')).read_bytes()).hexdigest() == digest
+            if fixture.startswith('hevc'):
+                # This remux retains AAC's 21 ms lead: at exact integer item
+                # times AVPlayer presents the preceding source frame. Compare
+                # against MP4-time references, not MKV's zero-origin counter.
+                reference_root = Path('tests/fixtures/avplayer-seek-reference'); reference = fixture
+                manifest = json.loads((reference_root/'manifest.json').read_text())
+                assert hashlib.sha256(video).hexdigest() == manifest['sha256']
+                for target, row in manifest['references'].items():
+                    assert hashlib.sha256((reference_root/(reference+'-'+target+'.png')).read_bytes()).hexdigest() == row['sha256']
+            else:
+                reference_root = Path('tests/fixtures/aether-seek-reference'); reference = fixture.replace('.mp4', '.mkv')
+                assert hashlib.sha256(Path('tests/fixtures', reference).read_bytes()).hexdigest() == references[reference]['sha256']
+                for target, digest in references[reference]['references'].items():
+                    assert hashlib.sha256((reference_root/(reference+'-'+target+'.png')).read_bytes()).hexdigest() == digest
             subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True)
             names = ['avplayer-comparison-smoke.json', 'avplayer-comparison-diagnostics.json', 'avplayer-startup.png']
             names += [f'avplayer-seek-{i}.png' for i in range(5)]

@@ -39,3 +39,10 @@ endpoint fails. Existing source-hashed image references verify the media target;
 image conversion happens after latency measurements. AV1 hardware decoding and
 relative seek speed require a physical device; simulator timing is not a speed
 claim. The default VLC engine and Aether pipeline have no playback changes.
+
+The HEVC MP4 fixture has video start 0.021 s and AAC start 0 s, unlike the
+zero-origin MKV reference. Integer item-time seeks show the preceding video
+frame (for example 19.979 at 20 s). Direct comparison uses separate source-
+hashed MP4-time references for those frames. Target identities must still beat
+all wrong targets with the original strict threshold; no matcher tolerance was
+relaxed. The H.264 MP4 and original MKV references already share the same origin.

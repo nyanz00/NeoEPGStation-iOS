@@ -1,0 +1,19 @@
+{
+  "fixture": "hevc-seek-10.mp4",
+  "sha256": "a9cfa578d512cb55729da481f8b72d6e94afe154c180308f02c699f86083ef89",
+  "videoStart": 0.021,
+  "references": {
+    "20": {
+      "pts": 19.979,
+      "sha256": "6fce5214a2ed2b7f385ec88cd99b28f42883b13cbe43dd04834f32c93e0813e8"
+    },
+    "30": {
+      "pts": 29.979,
+      "sha256": "7c4da192bd1af9d2a75ab3e033ced419b57375a4e092887cc681f9a706751e97"
+    },
+    "40": {
+      "pts": 39.979,
+      "sha256": "568ca6683f20ac836315a931677bcff2f47f31f7e0e6d5dc152262d947a51e5b"
+    }
+  }
+}
