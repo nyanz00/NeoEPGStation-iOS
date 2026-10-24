@@ -1,7 +1,7 @@
 diff --git a/Sources/AetherEngine/AetherEngine+Diagnostics.swift b/Sources/AetherEngine/AetherEngine+Diagnostics.swift
 --- a/Sources/AetherEngine/AetherEngine+Diagnostics.swift
 +++ b/Sources/AetherEngine/AetherEngine+Diagnostics.swift
-@@ -691,3 +691,338 @@
+@@ -691,3 +691,340 @@
          nativeVideoSession?.lastAVGapMs ?? 0
      }
  }
@@ -102,12 +102,14 @@ diff --git a/Sources/AetherEngine/AetherEngine+Diagnostics.swift b/Sources/Aethe
 +    }
 +    private func writeClip(to url: URL) throws {
 +        var context: UnsafeMutablePointer<AVFormatContext>?
-+        guard avformat_alloc_output_context2(&context, nil, "matroska", url.path) >= 0,
++        guard avformat_alloc_output_context2(&context, nil, "mp4", url.path) >= 0,
 +              let ctx = context else { throw failure(7) }
 +        defer { if ctx.pointee.pb != nil { avio_closep(&ctx.pointee.pb) }; avformat_free_context(ctx) }
 +        guard let stream = avformat_new_stream(ctx, nil), let dst = stream.pointee.codecpar,
 +              let par = parameters, avcodec_parameters_copy(dst, par) >= 0 else { throw failure(8) }
 +        stream.pointee.time_base = timeBase
++        dst.pointee.codec_tag = 0
++        ctx.pointee.strict_std_compliance = -2
 +        ctx.pointee.avoid_negative_ts = 0
 +        guard avio_open(&ctx.pointee.pb, url.path, AVIO_FLAG_WRITE) >= 0,
 +              avformat_write_header(ctx, nil) >= 0 else { throw failure(9) }

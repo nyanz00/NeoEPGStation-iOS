@@ -10,9 +10,10 @@ packets (96 MiB, 3,000 video packets, 65 media seconds, 90 seconds wall budget;
 individual remote reads retain the still-extractor's finite timeout). Packet PTS
 must be present. Unsupported inputs fail explicitly. The lab never downloads a
 whole recording intentionally. Prepared packets are immutable and resident in
-memory before any measurements. It also writes a disposable video-only MKV
+memory before any measurements. It also writes a disposable video-only MP4
 with those same packets for the Aether baseline; this is stream copy, not a
-re-encode. The temporary clip is removed after the run.
+re-encode. The bundled FFmpeg registers MP4/mov/HLS muxers, not a Matroska muxer.
+The temporary clip is removed after the run.
 
 Targets are 10%, 50% and 90% of the first actual GOP, repeated twice. Aether's
 existing target-frame observation runs against the local clip, with no audio.

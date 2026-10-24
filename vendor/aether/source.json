@@ -60,12 +60,12 @@
     },
     {
       "file": "0006-decode-trial.patch",
-      "sha256": "d93991404f6d84e19b2c4bc1d1539da25bdea65a476b795919802304140faf52",
+      "sha256": "f493f52ff88d319e6a5c867ff679ce28233a95660a64cf7cbf2f6d7d810157f8",
       "sources": [
         {
           "path": "Sources/AetherEngine/AetherEngine+Diagnostics.swift",
           "upstreamSHA256": "5b50c3821450907175a713908e93bbdc810bef9f6ff4a5fcebfd0d19aed134d3",
-          "patchedSHA256": "da809a552c614c08962dd26930bf7857724d1f9c50a5ecaac8e6cdfc36087f4a"
+          "patchedSHA256": "9c7b2725c69eecb40caba62748d7969ee5976807aedc2a8b425bc35cf0e1a63f"
         }
       ]
     }

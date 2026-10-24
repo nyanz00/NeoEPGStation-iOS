@@ -49,7 +49,7 @@ final class NeoDecodeTrialController: UIViewController {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("neo-decode-trial-"+UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         directory = folder
-        let clip = folder.appendingPathComponent("sample.mkv")
+        let clip = folder.appendingPathComponent("sample.mp4")
         report = ["schema": 1, "status": "preparing", "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
           "os": UIDevice.current.systemVersion, "cpuCount": ProcessInfo.processInfo.activeProcessorCount,
           "timing": "fresh-decoder-feed-to-target-output; initialization-separate; luma-check-after-timer",
