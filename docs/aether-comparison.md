@@ -91,7 +91,7 @@ explicitly opens libdav1d and rejects hardware-only pixel formats. Actual displa
 picture PTS/generation gates still replace the old clock-only seek assertion.
 All active source patches are hash verified and retained with source recipes.
 
-The corrected device/simulator build and scoped playback verification are pending.
+The corrected build and verification results are recorded below.
 
 Build 249 passed all 145 FFmpeg import bindings on both architectures, and the
 runtime descriptors/dav1d agreed with the original headers. A displayed synthetic
@@ -120,3 +120,29 @@ did not establish a failure to decode or display. The following build separates
 untimed displayed images from target-decode evidence and verifies all three
 formats using the burned-in target counter. Device hardware latency remains an
 explicit device comparison, not a simulator claim.
+
+Final verification: Build 259, application commit
+`59a3fdb9ea174f690f042f76c11d94b9119965ff`.
+
+- Run 40075321803: device + simulator builds, signing/package checks, both
+  145-symbol FFmpeg import checks and source provenance passed. H.264 + HEVC
+  each passed 12 functional checks and five displayed-target image comparisons.
+  All six retained VLC cases passed 48 assertions each.
+- That run failed the AV1 image matcher at the 40s target even though the saved
+  display image reads 00:00:40.000 and all 12 app checks passed. Its yellow text's
+  green channel changes in P010-to-BGRA/sRGB conversion. The test now compares
+  its stable red-channel glyph mask, keeping the same mismatch threshold and
+  rejecting the wrong counter references.
+- Run 40086474536 reused the exact same compiled application and passed AV1's
+  12 checks and all five target images (including paused seek). The already
+  verified VLC results were reused only after checking identical source, test
+  fixtures, test code and six explicit success results. No app rebuild or timing
+  threshold relaxation was used for the image-matcher correction.
+- Together these checks verify 15 displayed seek targets across H.264/HEVC/AV1.
+  The test-only renderer injection is absent from this application and final
+  verification. H.264 software display timing is available; ten-bit software
+  results are explicitly decode-ready observations, not display-latency claims.
+- IPA SHA-256: `59d691c1a07034f79dc9df8e9ac151c9ff512d0d58dcdd069c611f6c0acf9b35`.
+
+Actual iPhone AV1 hardware routing, AVPlayer latency, audio and device rotation
+still need device comparison. The opt-in engine is not enabled by default.

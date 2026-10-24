@@ -374,7 +374,7 @@ jobs:
           elif [ "$CHECK_SCOPE" = "aether-compare" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
             comparison_failed=0
-            AETHER_FIXTURE=av1-seek-10.mkv python3 -u scripts/aether-comparison-smoke.py || comparison_failed=1
+            python3 -u scripts/aether-comparison-smoke.py || comparison_failed=1
             if [ ! -f dist/reused-vlc-startup.json ]; then
               python3 -u scripts/encoded-seek-smoke.py --startup || comparison_failed=1
             fi
