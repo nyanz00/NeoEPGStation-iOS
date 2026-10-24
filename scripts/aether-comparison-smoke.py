@@ -73,7 +73,7 @@ if inspect:
         '-framework', 'CoreGraphics', '-framework', 'CoreFoundation', '-framework', 'QuartzCore', '-framework', 'Foundation', '-framework', 'IOSurface')
     run('codesign', '--force', '--sign', '-', 'dist/aether-renderer-inspect.dylib')
 try:
-    for fixture in ('encoded-seek-1080.mkv', 'hevc-seek-10.mkv', 'av1-seek-10.mkv'):
+    for fixture in (('hevc-seek-10.mkv',) if inspect else ('encoded-seek-1080.mkv', 'hevc-seek-10.mkv', 'av1-seek-10.mkv')):
         video = Path('tests/fixtures', fixture).read_bytes(); transferred = requests = 0
         subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True)
         names = ['aether-comparison-smoke.json', 'aether-comparison-diagnostics.json']

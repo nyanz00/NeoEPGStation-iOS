@@ -16,6 +16,14 @@ static void TaggedAttachment(CVBufferRef buffer, CFStringRef key, CFTypeRef valu
         mode = kCVAttachmentMode_ShouldPropagate;
         IOSurfaceRef surface = CVPixelBufferGetIOSurface(buffer);
         if (surface) IOSurfaceSetValue(surface, key, value);
+        CFTypeRef existing = CVBufferCopyAttachment(buffer, kCVBufferMovieTimeKey, NULL);
+        NSMutableDictionary *movie = existing ? [(__bridge NSDictionary *)existing mutableCopy] : [NSMutableDictionary dictionary];
+        if (existing) CFRelease(existing);
+        if (CFEqual(key, CFSTR("NeoAetherSourcePTS"))) {
+            movie[(__bridge NSString *)kCVBufferTimeValueKey] = @((int64_t)([(__bridge NSNumber *)value doubleValue]*90000));
+            movie[(__bridge NSString *)kCVBufferTimeScaleKey] = @90000;
+        } else { movie[@"NeoAetherPictureGeneration"] = (__bridge id)value; }
+        CVBufferSetAttachment(buffer, kCVBufferMovieTimeKey, (__bridge CFDictionaryRef)movie, kCVAttachmentMode_ShouldPropagate);
     }
     CVBufferSetAttachment(buffer, key, value, mode);
 }
@@ -32,7 +40,8 @@ static void InspectLayer(CALayer *layer, NSMutableArray *rows, NSURL *directory)
         IOSurfaceRef backing = pixel ? CVPixelBufferGetIOSurface(pixel) : NULL;
         CFTypeRef surfacePTS = backing ? IOSurfaceCopyValue(backing, CFSTR("NeoAetherSourcePTS")) : NULL;
         CFTypeRef surfaceGen = backing ? IOSurfaceCopyValue(backing, CFSTR("NeoAetherPictureGeneration")) : NULL;
-        [rows addObject:@{@"surfacePTS":@(surfacePTS != NULL), @"surfaceGeneration":@(surfaceGen != NULL), @"tagWrites":@(atomic_load(&tagWrites)), @"kind":@"sample", @"ready":@(display.isReadyForDisplay),
+        CFTypeRef movieTime = pixel ? CVBufferCopyAttachment(pixel, kCVBufferMovieTimeKey, NULL) : NULL;
+        [rows addObject:@{@"movieTime":movieTime ? (__bridge NSDictionary *)movieTime : @{}, @"format":pixel ? @(CVPixelBufferGetPixelFormatType(pixel)) : @0, @"surfacePTS":@(surfacePTS != NULL), @"surfaceGeneration":@(surfaceGen != NULL), @"tagWrites":@(atomic_load(&tagWrites)), @"kind":@"sample", @"ready":@(display.isReadyForDisplay),
             @"status":@(renderer.status), @"pixel":@(pixel != NULL), @"pts":@(pts != NULL), @"generation":@(gen != NULL),
             @"width":@(layer.bounds.size.width), @"height":@(layer.bounds.size.height)}];
         if (pixel) {
@@ -42,7 +51,7 @@ static void InspectLayer(CALayer *layer, NSMutableArray *rows, NSURL *directory)
             CFRelease(pixel);
         }
         if (pts) CFRelease(pts); if (gen) CFRelease(gen);
-        if (surfacePTS) CFRelease(surfacePTS); if (surfaceGen) CFRelease(surfaceGen);
+        if (surfacePTS) CFRelease(surfacePTS); if (surfaceGen) CFRelease(surfaceGen); if (movieTime) CFRelease(movieTime);
     }
     if ([layer isKindOfClass:AVPlayerLayer.class]) {
         [rows addObject:@{@"kind":@"native", @"ready":@(((AVPlayerLayer *)layer).readyForDisplay)}];
