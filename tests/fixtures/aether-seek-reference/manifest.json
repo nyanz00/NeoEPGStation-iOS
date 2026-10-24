@@ -1,0 +1,30 @@
+{
+  "generator": "FFmpeg 7.1.1; -ss <seconds> -i <fixture> -frames:v 1 -pix_fmt rgb24 <output.png>",
+  "purpose": "Compare burned-in tens-of-seconds digits after 20/40/30/20/30 seeks, not a latency clock.",
+  "fixtures": {
+    "encoded-seek-1080.mkv": {
+      "sha256": "cb164f0ef517bd83eed73d103a1a55452300da9205ba8b7b6d5ffa0906359f9e",
+      "references": {
+        "20": "87404d17455b1adc1df22c133fd7cb4ba4be526aff4b844457fe12e24c8b1aef",
+        "30": "8011656120cbce8958fb38486a0f9daed0152c0b0727e8bcf93909d3b226378d",
+        "40": "1b7f3aea298d7a9eeef398dd8dc4412270b7ec3c03eabdaf6d92518451299bda"
+      }
+    },
+    "hevc-seek-10.mkv": {
+      "sha256": "79e12ecfeb51141623fc03476b29cfd6033cab7ab0ba126f2ad786f13e4b6509",
+      "references": {
+        "20": "ffb6b7badad82cfa1b37d2c1bf1645ae3d3f7bf8228edb12b8d667a84f932e63",
+        "30": "9f78fee293597b1720ac8592a60e5ea60e6f9bbd0b55e7279629bf1833a6ddde",
+        "40": "ad02ab609d8a50c9a90e59a0b5751a53792d35e50b5b50ec0def7c98ea95a4d5"
+      }
+    },
+    "av1-seek-10.mkv": {
+      "sha256": "c2512dfd14b2fb6956acf5df2df3acd90c8d54712fae77d6ff787a2f043773ba",
+      "references": {
+        "20": "6e617f69f16a6b62a2c9b408f6a59b1c048b42176f19354ae404f85689e6cd1d",
+        "30": "f8d30bd625a8a21824553f8c22703a102f9be72f4c8bdb0eeff3daabcab44c92",
+        "40": "f103a8326884f43ca20eedb5bcfcd99f829a6cbc26f79130e8dfa64ed57323bc"
+      }
+    }
+  }
+}

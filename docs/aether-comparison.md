@@ -21,15 +21,25 @@ identity and collects dependency license texts, exact source links and source
 build recipes. FFmpeg components remain dynamically embedded beside VLCKit.
 
 Measure `seek.start` to `seek.videoResume`; keep `aether.seekLanded` separate.
-A software result requires the pixel buffer actually displayed by the sample
-buffer renderer, identified by source PTS and flush generation on its IOSurface; a prior generation
-cannot satisfy a new seek. Native output requires a display-ready AVPlayerLayer
-and a pixel buffer whose item PTS maps through PresentationAxisMap to the target.
-The generic sourceTimeFollowsPicture flag is not picture evidence. Startup also
-requires actual output, not just the engine ready flag. Synthetic tests retain a
-rendered picture and reject flat/black output. `aether.telemetry` contains periodic
-byte/cache counters, not exact per-seek cache hits. Exported decisions are fixed
-tokens plus numeric/Boolean fields; no raw logs, URLs, headers or titles.
+A software startup requires a real displayed pixel buffer. When its IOSurface
+preserves source PTS/generation, only the actual target picture can emit
+`seek.videoResume`. P010 may instead be copied by the OS into a new BGRA surface
+that strips both custom and standard movie-time attachments (calibration 258).
+That case uses a fresh post-seek decoded-target callback plus an available display
+image to release the UI. It emits `aether.seekDecodedTarget` with `decodeReadyMs`
+and `displayTimeVerified=false`, never a seek-to-display duration. It must not be
+presented as equivalent to measured visible latency. Native output uses actual
+AVPlayer pixel timestamps mapped through PresentationAxisMap.
+
+Synthetic acceptance separately captures the displayed target image after every
+20/40/30/20/30s jump, including the paused jump, and compares the burned-in counter
+against source-hashed reference PNGs. Every successive target has a different tens
+digit, so retaining the previous picture fails. This verifies visual positioning
+without relying on optional OS timestamp metadata. PNG conversion runs after all
+latency measurements; simulator Core Image shader compilation previously blocked
+the main actor and inflated the recorded startup time. Byte/cache telemetry is
+periodic, not an exact per-seek cache hit. Logs retain fixed tokens and numeric/
+Boolean fields; no raw URLs, headers, subtitles or titles are exported.
 
 Acceptance: both platform builds link both engines. A real synthetic HTTP Range
 origin serves H.264, HEVC 10bit and AV1 10bit MKV; each trial starts at zero,
@@ -101,3 +111,12 @@ comparison probe requires an actual displayed target picture for that case too.
 A retained VLC cost assertion now permits one admitted producer frame between
 sample preparation/submission and the asynchronous stats callback; larger gaps,
 inversions and accounting errors remain failures.
+
+Build 257 verified the shared chrome, startup, all five H.264 target pictures by
+source timestamp, paused-target production, both 145-symbol import checks and all
+six retained VLC startup/rewind cases (48 assertions each). The HEVC test exposed
+the P010-to-BGRA copy and correctly failed its timestamp-dependent observer; it
+did not establish a failure to decode or display. The following build separates
+untimed displayed images from target-decode evidence and verifies all three
+formats using the burned-in target counter. Device hardware latency remains an
+explicit device comparison, not a simulator claim.

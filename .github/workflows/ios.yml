@@ -115,6 +115,14 @@ jobs:
         run: |
           xcodebuild -version
           bundle exec pod --version
+      - name: Prepare synthetic picture verification
+        if: ${{ inputs.check_scope == 'aether-compare' }}
+        run: |
+          mkdir -p dist
+          xcrun swiftc scripts/check-aether-picture.swift -o dist/aether-picture-check
+          dist/aether-picture-check tests/fixtures/aether-seek-reference/av1-seek-10.mkv-20.png tests/fixtures/aether-seek-reference av1-seek-10.mkv 20 > dist/aether-picture-positive.json
+          dist/aether-picture-check tests/fixtures/aether-seek-reference/av1-seek-10.mkv-20.png tests/fixtures/aether-seek-reference av1-seek-10.mkv 30 > dist/aether-picture-negative.json
+          python3 -c "import json; assert json.load(open('dist/aether-picture-positive.json'))['targetMatches']; assert not json.load(open('dist/aether-picture-negative.json'))['targetMatches']"
       - name: Native ASS parser and playback clock tests
         id: native-tests
         run: |
@@ -353,8 +361,6 @@ jobs:
           codesign --verify --deep --strict build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app
       - name: Check reused application UI
         id: reused-checks
-        env:
-          AETHER_INSPECT_RENDERER: ${{ inputs.check_scope == 'aether-compare' && '1' || '0' }}
         run: |
           if [ "$CHECK_SCOPE" = "av1-decoder" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
@@ -369,9 +375,7 @@ jobs:
             python3 -u scripts/simulator-smoke.py --prepare
             comparison_failed=0
             python3 -u scripts/aether-comparison-smoke.py || comparison_failed=1
-            if [ "$AETHER_INSPECT_RENDERER" != "1" ]; then
-              python3 -u scripts/encoded-seek-smoke.py --startup || comparison_failed=1
-            fi
+            python3 -u scripts/encoded-seek-smoke.py --startup || comparison_failed=1
             exit "$comparison_failed"
           elif [ "$CHECK_SCOPE" = "encoded-seek" ]; then
             python3 -u scripts/simulator-smoke.py --prepare

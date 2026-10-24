@@ -32,6 +32,20 @@ private final class NeoAetherLogCapture: @unchecked Sendable {
 }
 
 
+// The software callback proves a freshly decoded target, not physical display.
+// Keep that evidence separate when the OS returns an untimed 10-bit image copy.
+private final class NeoAetherDecodedFrames: @unchecked Sendable {
+  struct Frame { let time: Double; let generation: UInt64 }
+  private let lock = NSLock()
+  private var frame: Frame?
+  func accept(_ value: SoftwareVideoFrameTime) {
+    let seconds = value.presentation.seconds
+    guard seconds.isFinite else { return }
+    lock.lock(); frame = Frame(time: seconds, generation: value.generation); lock.unlock()
+  }
+  func latest() -> Frame? { lock.lock(); defer { lock.unlock() }; return frame }
+}
+
 // Opt-in comparison only. Normal PLAY, TS and STREAMING keep their VLC path.
 enum NeoPlaybackExperiment {
   static var enabled: Bool {
@@ -66,14 +80,21 @@ final class NeoAetherPlayer: UIViewController {
   private var landedCount = 0, failedCount = 0
   private var lastPictureGeneration: UInt64?
   private var observedPicture: Picture?
+#if targetEnvironment(simulator)
+  private var startupPicture: CVPixelBuffer?
+  private var probePicture: CVPixelBuffer?
+  private var seekPictures: [(CVPixelBuffer, String)] = []
+#endif
   private var rendererFailureReported = false
   private let engineLog = NeoAetherLogCapture()
-  private struct Picture { let time: Double; let generation: UInt64?; let verification: String; let buffer: CVPixelBuffer }
+  private let decodedFrames = NeoAetherDecodedFrames()
+  private struct Picture { let time: Double?; let generation: UInt64?; let verification: String; let buffer: CVPixelBuffer }
 
   private struct PendingSeek {
     let id: Int, target: Double, started: Double
     var engineID: UInt64?, landedTime: Double?
     var previousPictureGeneration: UInt64?
+    var previousDecodedGeneration: UInt64?
   }
   init(url: URL, title: String, initialPosition: Double, context: [String: Any] = [:]) {
     self.context = context
@@ -116,6 +137,7 @@ final class NeoAetherPlayer: UIViewController {
       EngineLog.handler = { [capture = engineLog] line in capture.receive(line) }
       let engine = try AetherEngine(); self.engine = engine
       engine.backgroundPlaybackEnabled = false; engine.bind(view: surface)
+      engine.setSoftwareVideoFrameTimeObserver { [frames = decodedFrames] in frames.accept($0) }
       engine.$state.sink { [weak self] state in self?.stateChanged(state) }.store(in: &subscriptions)
       engine.$currentAVPlayerItem.sink { [weak self] item in self?.attachOutput(item) }.store(in: &subscriptions)
       engine.seekEvents.sink { [weak self] event in self?.seekEvent(event) }.store(in: &subscriptions)
@@ -210,18 +232,32 @@ final class NeoAetherPlayer: UIViewController {
       if !startupReady {
         startupReady = true; chrome.updateLoading(nil); status.text = nil; scheduleHide()
 #if targetEnvironment(simulator)
-        saveComparisonPicture(picture.buffer)
+        // Retain only; image conversion runs after latency measurements so
+        // simulator shader compilation cannot block startup or seek timing.
+        startupPicture = picture.buffer
 #endif
         NeoPlaybackDiagnostics.record("aether.startupReady", fields: ["durationMs": (CACurrentMediaTime()-openedAt)*1000,
-          "pictureMs": picture.time*1000, "verification": picture.verification])
+          "pictureMs": picture.time.map { $0*1000 } ?? -1, "verification": picture.verification,
+          "displayTimingAvailable": picture.time != nil])
       }
+#if targetEnvironment(simulator)
+      probePicture = picture.buffer
+#endif
       if pending != nil { observedPicture = picture }
       lastPictureGeneration = picture.generation
     }
-    if let pending, pending.landedTime != nil, let picture = observedPicture,
-       abs(picture.time-pending.target) < 0.5,
-       picture.generation == nil || picture.generation != pending.previousPictureGeneration {
-      finishSeek(rendered: picture.time, verification: picture.verification)
+    if let pending, pending.landedTime != nil, let picture = observedPicture {
+      if let time = picture.time, abs(time-pending.target) < 0.5,
+         picture.generation == nil || picture.generation != pending.previousPictureGeneration {
+        finishSeek(position: time, verification: picture.verification, displayed: true)
+      } else if picture.time == nil, let decoded = decodedFrames.latest(),
+                decoded.generation != pending.previousDecodedGeneration,
+                abs(decoded.time-pending.target) < 0.5 {
+        // P010 output may be copied to BGRA with all timestamp attachments
+        // removed. Unblock the UI from real target decode + a displayed image,
+        // but NEVER report this as measured seek-to-display latency.
+        finishSeek(position: decoded.time, verification: "decodedTargetAndPicture", displayed: false)
+      }
     }
     if !startupReady && CACurrentMediaTime()-openedAt > 30 && !rendererFailureReported {
       rendererFailureReported = true; failedCount += 1; engine.pause(); wantsPlayback = false
@@ -243,13 +279,14 @@ final class NeoAetherPlayer: UIViewController {
     if engine.videoRoute == .software {
       for layer in active.compactMap({ $0 as? AVSampleBufferDisplayLayer }) {
         guard layer.isReadyForDisplay, layer.sampleBufferRenderer.status != .failed,
-              let buffer = layer.sampleBufferRenderer.displayedPixelBuffer(),
-              let backing = CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue(),
-              let pts = IOSurfaceCopyValue(backing, "NeoAetherSourcePTS" as CFString) as? NSNumber,
-              let generation = IOSurfaceCopyValue(backing, "NeoAetherPictureGeneration" as CFString) as? NSNumber,
-              pts.doubleValue.isFinite else { continue }
-        return Picture(time: pts.doubleValue, generation: generation.uint64Value,
-          verification: "displayedPixelBuffer", buffer: buffer)
+              let buffer = layer.sampleBufferRenderer.displayedPixelBuffer() else { continue }
+        var pts: Double?, generation: UInt64?
+        if let backing = CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue() {
+          pts = (IOSurfaceCopyValue(backing, "NeoAetherSourcePTS" as CFString) as? NSNumber)?.doubleValue
+          generation = (IOSurfaceCopyValue(backing, "NeoAetherPictureGeneration" as CFString) as? NSNumber)?.uint64Value
+        }
+        return Picture(time: pts?.isFinite == true ? pts : nil, generation: generation,
+          verification: pts == nil ? "displayedPixelBufferUntimed" : "displayedPixelBuffer", buffer: buffer)
       }
       return nil
     }
@@ -281,13 +318,19 @@ final class NeoAetherPlayer: UIViewController {
     case .superseded: break
     }
   }
-  private func finishSeek(rendered: Double, verification: String) {
+  private func finishSeek(position: Double, verification: String, displayed: Bool) {
     guard let pending, let engine else { return }
     landedCount += 1
-    NeoPlaybackDiagnostics.record("seek.videoResume", fields: ["engine": "aether", "mediaMs": rendered*1000,
-      "targetMs": pending.target*1000, "durationMs": (CACurrentMediaTime()-pending.started)*1000,
-      "verification": verification, "telemetryAgeMs": telemetryAt.isFinite ? (CACurrentMediaTime()-telemetryAt)*1000 : -1,
-      "route": engine.videoRoute.rawValue])
+    if displayed {
+      NeoPlaybackDiagnostics.record("seek.videoResume", fields: ["engine": "aether", "mediaMs": position*1000,
+        "targetMs": pending.target*1000, "durationMs": (CACurrentMediaTime()-pending.started)*1000,
+        "verification": verification, "telemetryAgeMs": telemetryAt.isFinite ? (CACurrentMediaTime()-telemetryAt)*1000 : -1,
+        "route": engine.videoRoute.rawValue])
+    } else {
+      NeoPlaybackDiagnostics.record("aether.seekDecodedTarget", fields: ["targetMs": pending.target*1000,
+        "decodedMs": position*1000, "decodeReadyMs": (CACurrentMediaTime()-pending.started)*1000,
+        "displayTimeVerified": false, "verification": verification, "route": engine.videoRoute.rawValue])
+    }
     self.pending = nil; observedPicture = nil; chrome.finishSeekPreview(); scheduleHide()
   }
   func seek(to target: Double) {
@@ -299,7 +342,8 @@ final class NeoAetherPlayer: UIViewController {
     seekTask?.cancel(); sequence += 1; NeoPlaybackDiagnostics.beginSeek(sequence)
     observedPicture = nil
     pending = PendingSeek(id: sequence, target: target, started: CACurrentMediaTime(),
-      previousPictureGeneration: displayedPicture()?.generation ?? lastPictureGeneration)
+      previousPictureGeneration: displayedPicture()?.generation ?? lastPictureGeneration,
+      previousDecodedGeneration: decodedFrames.latest()?.generation)
     status.text = nil; chrome.previewSeek(Int64(target)); chrome.showControls(true)
     NeoPlaybackDiagnostics.record("seek.start", fields: ["fromMs": previous*1000, "targetMs": target*1000, "engine": "aether"])
     seekTask = Task { await engine.seek(to: target) }
@@ -352,10 +396,19 @@ final class NeoAetherPlayer: UIViewController {
   }
 
 #if targetEnvironment(simulator)
-  private func saveComparisonPicture(_ buffer: CVPixelBuffer) {
+  private func saveComparisonPicture(_ buffer: CVPixelBuffer, name: String = "aether-comparison-picture.png") {
     guard let image = CIContext().createCGImage(CIImage(cvPixelBuffer: buffer), from: CIImage(cvPixelBuffer: buffer).extent),
           let data = UIImage(cgImage: image).pngData() else { return }
-    try? data.write(to: NeoPiPSmoke.directory.appendingPathComponent("aether-comparison-picture.png"))
+    try? data.write(to: NeoPiPSmoke.directory.appendingPathComponent(name))
+  }
+  private func captureSeekPicture(_ index: Int) async {
+    // Let the renderer present; this is a functional image check, not a latency
+    // timer. Captured buffers are converted only after all measured seeks.
+    try? await Task.sleep(for: .milliseconds(80))
+    if wantsPlayback { engine?.pause() }
+    if let current = displayedPicture() { probePicture = current.buffer }
+    if let image = probePicture { seekPictures.append((image, "aether-seek-\(index).png")) }
+    if wantsPlayback { engine?.play() }
   }
   func runComparisonProbe() {
     probeTask = Task { [weak self] in
@@ -373,6 +426,7 @@ final class NeoAetherPlayer: UIViewController {
         let end = CACurrentMediaTime()+13
         while pending != nil && CACurrentMediaTime()<end { try? await Task.sleep(for: .milliseconds(50)) }
         checks["target\(index)"] = landedCount == count+1
+        await captureSeekPicture(index)
         try? await Task.sleep(for: .milliseconds(200))
       }
       wantsPlayback = false; engine?.pause()
@@ -380,7 +434,11 @@ final class NeoAetherPlayer: UIViewController {
       let pausedDeadline = CACurrentMediaTime()+13
       while pending != nil && CACurrentMediaTime()<pausedDeadline { try? await Task.sleep(for: .milliseconds(50)) }
       checks["pausedSeek"] = landedCount == pausedCount+1 && engine?.state == .paused
+      await captureSeekPicture(4)
       checks["noFailures"] = failedCount == 0
+      checks["targetPictures"] = seekPictures.count == 5
+      for (picture, name) in seekPictures { saveComparisonPicture(picture, name: name) }; seekPictures.removeAll()
+      if let picture = startupPicture { saveComparisonPicture(picture) }; startupPicture = nil
       shutdown(); checks["closed"] = engine == nil && timer == nil
       NeoPiPSmoke.save("aether-comparison-smoke", ["success": checks.values.allSatisfy { $0 }, "checks": checks])
       if let url = NeoPlaybackDiagnostics.exportURL(), let data = try? Data(contentsOf: url) {
