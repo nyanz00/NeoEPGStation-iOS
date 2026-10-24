@@ -50,3 +50,27 @@ with long-GOP AV1 8/10-bit fixtures, checks decoded target PTS and repeated luma
 fingerprints, bounded preparation, result export and explicit hardware absence.
 Simulator timings do not establish iPhone hardware performance. Device results
 must be collected on the target phone before choosing a production change.
+
+## Build 268 verification
+
+Source `edcc50f99cc1a3911c07e81a702d7c6a76d4df9d`,
+[Actions 40130827168](https://github.com/nyanz00/NeoEPGStation-iOS/actions/runs/40130827168):
+device/simulator builds, FFmpeg import isolation, source provenance and the
+focused diagnostic-screen test passed. Both 8/10-bit fixtures have a real
+24-second initial GOP. The lab completed six Aether observations and six dav1d
+target outputs per fixture. Twelve hardware rows explicitly report unavailable
+on this simulator; none is counted as a hardware performance result.
+
+Independent FFmpeg extraction confirmed all twelve dav1d luma fingerprints.
+The 24-fps fixtures use exact frame indices 58, 288 and 519 for the three targets,
+with `extractplanes=y` and `-fps_mode passthrough`. Default output frame-rate
+synchronization can select a neighboring image and is unsuitable as this oracle.
+The 8-bit Aether observations have verified displayed pixel-buffer timestamps;
+10-bit simulator observations retain the existing decoded-target-plus-untimed-
+picture distinction and must not be described as measured on-screen latency.
+
+The IPA ZIP CRC, embedded build number and complete engine patch manifest match
+the verified source recipe. Artifact: `NeoEPGStation-build268.ipa`, SHA-256
+`f8c2141c397f630a2a3759f732bd53756131855c535b0bc42c055cf8248b3644`.
+Hardware-required VideoToolbox timing and picture matching on an AV1-capable
+iPhone remain a device measurement, not a simulator-build claim.
