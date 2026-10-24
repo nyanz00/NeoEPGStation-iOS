@@ -1,0 +1,156 @@
+diff --git a/Sources/AetherEngine/AetherEngine+Diagnostics.swift b/Sources/AetherEngine/AetherEngine+Diagnostics.swift
+index 7d793dc..c687600 100644
+--- a/Sources/AetherEngine/AetherEngine+Diagnostics.swift
++++ b/Sources/AetherEngine/AetherEngine+Diagnostics.swift
+@@ -2,8 +2,81 @@ import Foundation
+ import Darwin.Mach
+ import AVFoundation
+ 
++// A timed-out getter may still be inside mediaserverd. Keep its admission
++// until the actual worker returns, not merely until the caller's deadline.
++private final class NeoSeekDiagnosticReadGate: @unchecked Sendable {
++    static let shared = NeoSeekDiagnosticReadGate()
++    private let lock = NSLock()
++    private var busy = false
++    func claim() -> Bool {
++        lock.lock(); defer { lock.unlock() }
++        guard !busy else { return false }; busy = true; return true
++    }
++    func finish() { lock.lock(); busy = false; lock.unlock() }
++}
++
+ extension AetherEngine {
+ 
++    /// Neo comparison: bounded, read-only measurements. A process-wide single-worker
++    /// gate survives timeouts; a wedged media server cannot accumulate read threads.
++    /// No URLs, headers or log strings leave the engine.
++    public func neoSeekDiagnostics(atDisplayTime target: Double) async -> [String: Double] {
++        guard target.isFinite else { return [:] }
++        let sourceTarget = PresentationAxis.source(displayTime: target, origin: sourcePresentationOrigin)
++        let itemTarget = presentationAxisMap.itemSeconds(forSourceSeconds: sourceTarget)
++            ?? (sourceTarget - playlistShiftSeconds)
++        var fields: [String: Double] = ["targetMs": target * 1000, "itemTargetMs": itemTarget * 1000,
++            "sourceOriginMs": sourcePresentationOrigin * 1000, "playlistShiftMs": playlistShiftSeconds * 1000]
++        if let session = nativeVideoSession {
++            fields.merge(session.neoSeekCacheDiagnostics(at: itemTarget)) { _, new in new }
++        }
++        guard let host = nativeHost, let item = currentAVPlayerItem else {
++            fields["avSampleAvailable"] = 0; return fields
++        }
++        let gate = NeoSeekDiagnosticReadGate.shared
++        guard gate.claim() else {
++            fields["avSampleAvailable"] = 0; fields["avReadBusy"] = 1; return fields
++        }
++        let player = host.avPlayer
++        let before = ProcessInfo.processInfo.systemUptime
++        let reading: [String: Double]? = await AVFoundationOffMain.read((player, item), timeout: 0.15) { refs in
++            defer { gate.finish() }
++            let (player, item) = refs
++            let now = CMTimeGetSeconds(item.currentTime())
++            var ahead: Double = 0
++            var targetAhead: Double = -1
++            for value in item.loadedTimeRanges {
++                let range: CMTimeRange = value.timeRangeValue
++                let start: Double = CMTimeGetSeconds(range.start)
++                let end: Double = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
++                guard start.isFinite, end.isFinite else { continue }
++                if start <= now + 0.05 && end >= now && end - now > ahead { ahead = end - now }
++                if start <= itemTarget + 0.05 && end >= itemTarget && end - itemTarget > targetAhead {
++                    targetAhead = end - itemTarget
++                }
++            }
++            let reason = player.reasonForWaitingToPlay
++            var code: Double = 0
++            if reason == .toMinimizeStalls { code = 1 }
++            else if reason == .evaluatingBufferingRate { code = 2 }
++            else if reason != nil { code = 3 }
++            var result: [String: Double] = [:]
++            result["avSampleAvailable"] = 1
++            result["avTimeControl"] = Double(player.timeControlStatus.rawValue)
++            result["avWaitingReason"] = code
++            result["avItemMs"] = now.isFinite ? now * 1000 : -1
++            result["avAheadMs"] = ahead * 1000
++            result["avTargetAheadMs"] = targetAhead < 0 ? -1 : targetAhead * 1000
++            result["avBufferEmpty"] = item.isPlaybackBufferEmpty ? 1 : 0
++            result["avLikelyToKeepUp"] = item.isPlaybackLikelyToKeepUp ? 1 : 0
++            return result
++        }
++        fields["avReadMs"] = (ProcessInfo.processInfo.systemUptime - before) * 1000
++        if let reading { fields.merge(reading) { _, new in new } }
++        else { fields["avSampleAvailable"] = 0; fields["avReadTimedOut"] = 1 }
++        return fields
++    }
++
+     /// #220 diagnostic opt-in: appends a live large-block census (blocks >= 1 MB, bucketed by
+     /// size class) to the 30 s memprobe line. A flat `mallocBlocks` with a rising `mallocMB`
+     /// identifies "one large buffer is growing" but not which one; the census names the size
+diff --git a/Sources/AetherEngine/Network/HLSLocalServer.swift b/Sources/AetherEngine/Network/HLSLocalServer.swift
+index 12d42a6..ff6ca51 100644
+--- a/Sources/AetherEngine/Network/HLSLocalServer.swift
++++ b/Sources/AetherEngine/Network/HLSLocalServer.swift
+@@ -1299,9 +1299,17 @@ final class HLSLocalServer: @unchecked Sendable {
+                 stateLock.lock(); servedMediaBytes = true; stateLock.unlock()
+                 let indexStr = normalizedPath.dropFirst(4).dropLast(4)
+                 if let index = Int(indexStr), index >= 0 {
++                    let neoServeStarted = Self.uptimeSeconds()
++                    var neoFileFastPath = false
++                    var neoDelivered = false
++                    defer {
++                        let ms = max(0, Int((Self.uptimeSeconds() - neoServeStarted) * 1000))
++                        EngineLog.emit("[NeoSeekSegment] index=\(index) file=\(neoFileFastPath ? 1 : 0) ok=\(neoDelivered ? 1 : 0) durationMs=\(ms)", category: .hlsServer)
++                    }
+                     // AE#418 round 7: every exit from this branch says what became of the request, so
+                     // a placement composed from it can tell "not delivered yet" from "never arriving".
+                     func delivered(_ ok: Bool) -> Bool {
++                        neoDelivered = ok
+                         provider?.didServeMediaSegment(index: index, delivered: ok)
+                         return ok
+                     }
+@@ -1311,6 +1319,7 @@ final class HLSLocalServer: @unchecked Sendable {
+                     }
+                     // File-backed fast path: stream page cache -> socket without Data materialization.
+                     if let url = provider?.mediaSegmentURL(at: index) {
++                        neoFileFastPath = true
+                         let outcome = send200File(fd: fd, path: normalizedPath,
+                                                   fileURL: url,
+                                                   contentType: "video/mp4",
+diff --git a/Sources/AetherEngine/Video/HLSVideoEngine.swift b/Sources/AetherEngine/Video/HLSVideoEngine.swift
+index 1510d42..6b13c4a 100644
+--- a/Sources/AetherEngine/Video/HLSVideoEngine.swift
++++ b/Sources/AetherEngine/Video/HLSVideoEngine.swift
+@@ -2720,6 +2720,35 @@ public final class HLSVideoEngine: @unchecked Sendable {
+     /// The cache read stays OUTSIDE `restartLock` like every other forwarder above: the plan is a
+     /// COW array, so snapshotting it is a retain, and nesting the cache's condition under the
+     /// restart lock would add a lock order this file does not otherwise have.
++    /// Read only in-memory cache metadata and lifetime counters; no file enumeration.
++    func neoSeekCacheDiagnostics(at seconds: Double) -> [String: Double] {
++        restartLock.lock()
++        let plan = segmentPlan
++        let cacheRef = cache
++        restartLock.unlock()
++        var result: [String: Double] = [:]
++        result["sourceBytes"] = Double(demuxerBytesFetched)
++        result["muxedBytes"] = Double(muxedBytesLifetime)
++        result["serverBytes"] = Double(serverLifetimeBytesSent)
++        result["serverRequests"] = Double(serverRequestCount)
++        result["producerRestarts"] = Double(producerRestartCount)
++        guard seconds.isFinite, !plan.isEmpty else { return result }
++        var lower = 0
++        var upper = plan.count
++        while lower < upper {
++            let middle = lower + (upper - lower) / 2
++            if plan[middle].startSeconds <= seconds { lower = middle + 1 } else { upper = middle }
++        }
++        let index = min(max(lower - 1, 0), plan.count - 1)
++        result["segmentIndex"] = Double(index)
++        result["segmentStartMs"] = plan[index].startSeconds * 1000
++        result["segmentDurationMs"] = plan[index].durationSeconds * 1000
++        result["segmentOffsetMs"] = (seconds - plan[index].startSeconds) * 1000
++        let ranges = cacheRef?.residentIndexRanges() ?? []
++        result["targetResident"] = ranges.contains(where: { $0.contains(index) }) ? 1 : 0
++        return result
++    }
++
+     func residentPlaylistRanges() -> [ClosedRange<Double>] {
+         restartLock.lock()
+         let live = isLiveSession

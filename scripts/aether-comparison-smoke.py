@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -79,9 +80,12 @@ if inspect:
     run('codesign', '--force', '--sign', '-', 'dist/aether-renderer-inspect.dylib')
 fixtures = (os.environ['AETHER_FIXTURE'],) if os.environ.get('AETHER_FIXTURE') else (('hevc-seek-10.mkv',) if inspect else ('encoded-seek-1080.mkv', 'hevc-seek-10.mkv', 'av1-seek-10.mkv'))
 assert set(fixtures) <= set(references), 'Unknown synthetic fixture'
-print('Aether fixture scope:', list(fixtures), flush=True)
+seek_work = '--seek-work' in sys.argv
+cases = ([(fixtures[0], True)] if seek_work else []) + [(fixture, False) for fixture in fixtures]
+print('Aether fixture scope:', cases, flush=True)
 try:
-    for fixture in fixtures:
+    for fixture, baseline in cases:
+        case_name = fixture + ('-ui-baseline' if baseline else '')
         try:
             video = Path('tests/fixtures', fixture).read_bytes(); transferred = requests = 0
             assert hashlib.sha256(video).hexdigest() == references[fixture]['sha256']
@@ -93,14 +97,14 @@ try:
             for index in range(5): (documents/f'aether-seek-{index}.png').unlink(missing_ok=True)
             for name in names:
                 (documents/name).unlink(missing_ok=True)
-            environment = dict(os.environ, SIMCTL_CHILD_NEO_EPG_AETHER_COMPARE=f'http://127.0.0.1:{server.server_port}')
+            environment = dict(os.environ, SIMCTL_CHILD_NEO_EPG_AETHER_COMPARE=f'http://127.0.0.1:{server.server_port}', SIMCTL_CHILD_NEO_EPG_AETHER_UI_BASELINE='1' if baseline else '0')
             if inspect:
                 environment['SIMCTL_CHILD_DYLD_INSERT_LIBRARIES'] = str(Path('dist/aether-renderer-inspect.dylib').resolve())
                 for extra in ('aether-renderer-inspection.json', 'aether-renderer-picture.png'):
                     (documents/extra).unlink(missing_ok=True)
             # Synthetic sources only: collect the engine's release-visible routing and
             # renderer diagnostics. No real server URL or credentials enter this log.
-            with Path('dist', fixture+'-aether-engine.log').open('w') as log:
+            with Path('dist', case_name+'-aether-engine.log').open('w') as log:
                 observer = subprocess.Popen(['xcrun', 'simctl', 'spawn', device, 'log', 'stream',
                     '--style', 'compact', '--level', 'info', '--predicate',
                     'subsystem == "de.superuser404.AetherEngine"'], stdout=log, stderr=log)
@@ -116,12 +120,12 @@ try:
                     except subprocess.TimeoutExpired: observer.kill(); observer.wait()
             for name in names:
                 if (documents/name).exists():
-                    shutil.copyfile(documents/name, Path('dist', fixture+'-'+name))
+                    shutil.copyfile(documents/name, Path('dist', case_name+'-'+name))
             if inspect:
                 for extra in ('aether-renderer-inspection.json', 'aether-renderer-picture.png'):
-                    if (documents/extra).exists(): shutil.copyfile(documents/extra, Path('dist', fixture+'-'+extra))
+                    if (documents/extra).exists(): shutil.copyfile(documents/extra, Path('dist', case_name+'-'+extra))
             picture = documents/'aether-comparison-picture.png'
-            if picture.exists(): shutil.copyfile(picture, Path('dist', fixture+'-aether-picture.png'))
+            if picture.exists(): shutil.copyfile(picture, Path('dist', case_name+'-aether-picture.png'))
             assert picture.exists(), 'No actual output picture for '+fixture
             stats = json.loads(run(str(checker), str(picture)))
             assert stats['nonBlack'], 'Black/flat picture for '+fixture
@@ -137,12 +141,12 @@ try:
             assert all(abs(e['decodedMs']-e['targetMs'])<500 for e in decoded)
             for index in range(5):
                 captured = documents/f'aether-seek-{index}.png'
-                if captured.exists(): shutil.copyfile(captured, Path('dist', fixture+f'-seek-{index}.png'))
+                if captured.exists(): shutil.copyfile(captured, Path('dist', case_name+f'-seek-{index}.png'))
             picture_checks = []
             for index, target in enumerate((20, 40, 30, 20, 30)):
                 captured = documents/f'aether-seek-{index}.png'
                 assert captured.exists(), 'No actual target image'
-                shutil.copyfile(captured, Path('dist', fixture+f'-seek-{index}.png'))
+                shutil.copyfile(captured, Path('dist', case_name+f'-seek-{index}.png'))
                 match = json.loads(run(str(checker), str(captured), str(reference_root), fixture, str(target)))
                 assert match['targetMatches'], (fixture, index, target, match)
                 picture_checks.append(match)
@@ -150,18 +154,31 @@ try:
                 decisions = [e.get('decision') for e in events if e['event']=='aether.engineDecision']
                 hardware = next(e['av1'] for e in events if e['event']=='aether.hardware')
                 assert ('av1-native-route' if hardware else 'decoder-libdav1d') in decisions, decisions
+            ui = next((e for e in events if e['event']=='aether.uiSummary'), None)
+            if seek_work:
+                assert ui and ui['ticks'] > 0 and ui['uiThrottled'] == (not baseline), ui
+                if baseline: assert ui['playbackUpdates'] == ui['ticks'] and ui['diagnosticUpdates'] == ui['ticks'], ui
+                else: assert ui['playbackUpdates'] < ui['ticks']/3 and ui['diagnosticUpdates'] < ui['ticks']/3, ui
+                samples = [e for e in events if e['event']=='aether.seekSnapshot']
+                assert {e.get('originSeek') for e in samples} == {1, 2, 3, 4, 5} and all('requestedAfterSeekMs' in e for e in samples), samples
+                route = next(e['route'] for e in reversed(events) if e['event']=='aether.route')
+                if route == 'loopback':
+                    native = [e for e in samples if e.get('avSampleAvailable')==1]
+                    assert native and all('targetResident' in e and 'serverRequests' in e and 'segmentOffsetMs' in e for e in native), samples
+                else: assert all(e.get('avSampleAvailable')==0 for e in samples), samples
+                assert len([e for e in events if e['event']=='aether.seekUIWork']) == 5
             assert result['success'] and all(result['checks'].values()), result
             assert not any(e['event'] in ('aether.failure', 'aether.seekFailed', 'seek.timeout') for e in events), events[-10:]
-            results.append({'fixture': fixture, 'success': True, 'checks': result['checks'],
+            results.append({'fixture': fixture, 'uiBaseline': baseline, 'uiWork': ui, 'success': True, 'checks': result['checks'],
                             'seekMs': [e['durationMs'] for e in resumes], 'decodedTargetReadyMs': [e['decodeReadyMs'] for e in decoded],
                             'displayTimingVerified': len(resumes)==5, 'targetImagesVerified': len(picture_checks), 'pictureChecks': picture_checks, 'originBytes': transferred, 'originRequests': requests})
         except Exception as error:
-            results.append({'fixture': fixture, 'success': False, 'failure': type(error).__name__+': '+str(error)[:900]})
+            results.append({'fixture': fixture, 'uiBaseline': baseline, 'success': False, 'failure': type(error).__name__+': '+str(error)[:900]})
             print(fixture, 'FAIL', type(error).__name__, str(error)[:300], flush=True)
 
 finally:
     server.shutdown()
-    Path('dist/aether-comparison-results.json').write_text(json.dumps({'success': len(results)==len(fixtures) and all(r['success'] for r in results), 'requestedFixtures': list(fixtures),
+    Path('dist/aether-comparison-results.json').write_text(json.dumps({'success': len(results)==len(cases) and all(r['success'] for r in results), 'requestedFixtures': list(fixtures), 'seekWorkComparison': seek_work,
         'cases': results, 'hardwarePerformanceVerified': False}, indent=2)+'\n')
 
-if len(results)!=len(fixtures) or not all(r['success'] for r in results): raise SystemExit(1)
+if len(results)!=len(cases) or not all(r['success'] for r in results): raise SystemExit(1)

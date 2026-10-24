@@ -36,6 +36,27 @@
           "patchedSHA256": "b6ce77a6072b82a7abcaaaed94da9b7a0c49ad594e42e755aad6df1fcf321689"
         }
       ]
+    },
+    {
+      "file": "0005-seek-diagnostics.patch",
+      "sha256": "48be018466e0f41ccea51efba375930084c62a289a208b22ce46ab21d3b8789e",
+      "sources": [
+        {
+          "path": "Sources/AetherEngine/AetherEngine+Diagnostics.swift",
+          "upstreamSHA256": "9d2db53e5477dc4a588e5771197c1e5c2e3d333f90a98448247d205f61cab917",
+          "patchedSHA256": "5b50c3821450907175a713908e93bbdc810bef9f6ff4a5fcebfd0d19aed134d3"
+        },
+        {
+          "path": "Sources/AetherEngine/Video/HLSVideoEngine.swift",
+          "upstreamSHA256": "63c9103143d5eb322dc5dc6d1492ca053c2327afda4cd8ee451fd0d6cdc81702",
+          "patchedSHA256": "413cf723640422b2843fe0c925b5f32616ce380c5281115dc17f8288fe8783a7"
+        },
+        {
+          "path": "Sources/AetherEngine/Network/HLSLocalServer.swift",
+          "upstreamSHA256": "6ed5fbd275ec54d4b88295f1b08bbf269ba88686b3bd37f43912b852da5aaf5a",
+          "patchedSHA256": "b4b68330326f3d980bc510ad251c524188df5f27f838b0a1710299ccff4d5f17"
+        }
+      ]
     }
   ],
   "retiredHeaderCorrection": {

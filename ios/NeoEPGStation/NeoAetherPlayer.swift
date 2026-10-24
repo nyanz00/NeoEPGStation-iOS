@@ -13,6 +13,18 @@ private final class NeoAetherLogCapture: @unchecked Sendable {
   private let lock = NSLock()
   private var seen = Set<String>()
   func receive(_ line: String) {
+    if let prefix = line.range(of: "[NeoSeekSegment] "), NeoPlaybackDiagnostics.seekID > 0 {
+      let parts = line[prefix.upperBound...].split(separator: " ")
+      var values: [String: Any] = [:]
+      for part in parts {
+        let pair = part.split(separator: "=", maxSplits: 1)
+        guard pair.count == 2, ["index", "file", "ok", "durationMs"].contains(String(pair[0])),
+              let value = Int(pair[1]), value >= 0 else { return }
+        values[String(pair[0])] = value
+      }
+      if values.count == 4 { NeoPlaybackDiagnostics.record("aether.segmentServed", fields: values) }
+      return
+    }
     var token: String?
     for (match, value) in [
       ("[VTProbe] codec=av01 hwSupported=true", "av1-hardware-supported"),
@@ -69,6 +81,18 @@ final class NeoAetherPlayer: UIViewController {
   private var landedCount = 0, failedCount = 0
   private var lastPictureGeneration: UInt64?
   private var observedPicture: Picture?
+  private var diagnosticTask: Task<Void, Never>?
+  private var diagnosticBusy = false
+  private var queuedDiagnostic: (PendingSeek, String)?
+  private var uiTicks = 0, playbackUpdates = 0, diagnosticUpdates = 0
+  private var uiWorkMs = 0.0, lastTickAt = 0.0, seekTickGapMs = 0.0
+  private var lastUIPosition = Int64.min, lastUIDuration = Int64.min
+  private var lastUIRunning: Bool?, lastUIStatus: String?
+#if targetEnvironment(simulator)
+  private let uiBaseline = ProcessInfo.processInfo.environment["NEO_EPG_AETHER_UI_BASELINE"] == "1"
+#else
+  private let uiBaseline = false
+#endif
 #if targetEnvironment(simulator)
   private var startupPicture: CVPixelBuffer?
   private var probePicture: CVPixelBuffer?
@@ -84,6 +108,8 @@ final class NeoAetherPlayer: UIViewController {
     var engineID: UInt64?, landedTime: Double?
     var previousPictureGeneration: UInt64?
     var previousDecodedGeneration: UInt64?
+    var waitSampleLevel = 0
+    var uiWorkAtStart = 0.0
   }
   init(url: URL, title: String, initialPosition: Double, context: [String: Any] = [:]) {
     self.context = context
@@ -102,7 +128,9 @@ final class NeoAetherPlayer: UIViewController {
     chrome.videoView.addSubview(surface)
     surface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     chrome.onVideoLayout = { [weak self] in
-      guard let self else { return }; self.surface.frame = self.chrome.videoView.bounds
+      guard let self else { return }
+      let bounds = self.chrome.videoView.bounds
+      if self.surface.frame != bounds { self.surface.frame = bounds }
     }
     chrome.onAction = { [weak self] action in self?.perform(action) }
     chrome.updateLoading("準備中…"); chrome.showControls(true)
@@ -214,9 +242,12 @@ final class NeoAetherPlayer: UIViewController {
     let duration = engine.duration.isFinite ? max(0, engine.duration) : 0
     let position = engine.currentTime.isFinite ? max(0, engine.currentTime) : 0
     if !scrubbing { slider.value = duration > 0 ? Float(position/duration) : 0 }
-    chrome.updatePlayback(wantsPlayback, current: Int64(position), duration: Int64(duration))
+    uiTicks += 1
+    let now = CACurrentMediaTime()
+    if pending != nil, lastTickAt > 0 { seekTickGapMs = max(seekTickGapMs, (now-lastTickAt)*1000) }
+    lastTickAt = now
     slider.isEnabled = engine.canSeek && duration > 0
-    chrome.updateDiagnostics()
+    if uiBaseline { refreshChrome(position: position, duration: duration) }
     if !startupReady || pending != nil, let picture = displayedPicture() {
       if !startupReady {
         startupReady = true; chrome.updateLoading(nil); status.text = nil; scheduleHide()
@@ -257,6 +288,51 @@ final class NeoAetherPlayer: UIViewController {
       failedCount += 1
       NeoPlaybackDiagnostics.record("seek.timeout", fields: ["targetMs": pending.target*1000, "engine": "aether"])
       self.pending = nil; observedPicture = nil; chrome.finishSeekPreview(); status.text = "シーク先の映像を確認できませんでした。"
+    }
+    if var pending {
+      let elapsed = CACurrentMediaTime()-pending.started
+      if pending.waitSampleLevel == 0 && elapsed > 0.2 {
+        pending.waitSampleLevel = 1; self.pending = pending; sampleSeek(pending, phase: "waiting-200ms")
+      } else if pending.waitSampleLevel == 1 && elapsed > 0.6 {
+        pending.waitSampleLevel = 2; self.pending = pending; sampleSeek(pending, phase: "waiting-600ms")
+      }
+    }
+    if !uiBaseline { refreshChrome(position: position, duration: duration) }
+  }
+  private func refreshChrome(position: Double, duration: Double) {
+    let start = CACurrentMediaTime()
+    let second = Int64(position), length = Int64(duration)
+    if uiBaseline || lastUIPosition != second || lastUIDuration != length || lastUIRunning != wantsPlayback {
+      chrome.updatePlayback(wantsPlayback, current: second, duration: length); playbackUpdates += 1
+      lastUIPosition = second; lastUIDuration = length; lastUIRunning = wantsPlayback
+    }
+    let text = status.text ?? ""
+    if uiBaseline || lastUIStatus != text {
+      chrome.updateDiagnostics(); diagnosticUpdates += 1; lastUIStatus = text
+    }
+    uiWorkMs += (CACurrentMediaTime()-start)*1000
+  }
+  private func sampleSeek(_ seek: PendingSeek, phase: String) {
+    guard !closed, let engine else { return }
+    if diagnosticBusy { queuedDiagnostic = (seek, phase); return }
+    diagnosticBusy = true
+    let requested = CACurrentMediaTime()
+    diagnosticTask = Task { [weak self, engine] in
+      let fields = await engine.neoSeekDiagnostics(atDisplayTime: seek.target)
+      guard let self else { return }
+      defer {
+        diagnosticBusy = false
+        if let next = queuedDiagnostic {
+          queuedDiagnostic = nil; sampleSeek(next.0, phase: next.1)
+        }
+      }
+      guard !closed, self.engine === engine else { return }
+      guard sequence == seek.id else { return }
+      var event: [String: Any] = ["originSeek": seek.id, "phase": phase, "route": engine.videoRoute.rawValue,
+        "requestedAfterSeekMs": (requested-seek.started)*1000,
+        "finishedAfterSeekMs": (CACurrentMediaTime()-seek.started)*1000]
+      for (key, value) in fields where value.isFinite { event[key] = value }
+      NeoPlaybackDiagnostics.record("aether.seekSnapshot", fields: event)
     }
   }
   private func layers(in layer: CALayer) -> [CALayer] {
@@ -299,7 +375,7 @@ final class NeoAetherPlayer: UIViewController {
       NeoPlaybackDiagnostics.record("aether.seekLanded", fields: ["targetMs": pending.target*1000,
         "renderedMs": rendered*1000, "durationMs": (CACurrentMediaTime()-pending.started)*1000])
       guard rendered.isFinite, abs(rendered-pending.target) < 0.5 else { return }
-      pending.landedTime = rendered; self.pending = pending
+      pending.landedTime = rendered; self.pending = pending; sampleSeek(pending, phase: "completion")
     case .stalled, .rejected:
       guard pending.engineID == event.id || abs(event.target-pending.target) < 0.01 else { return }
       failedCount += 1; self.pending = nil; observedPicture = nil
@@ -310,6 +386,9 @@ final class NeoAetherPlayer: UIViewController {
   private func finishSeek(position: Double, verification: String, displayed: Bool) {
     guard let pending, let engine else { return }
     landedCount += 1
+    sampleSeek(pending, phase: "picture")
+    NeoPlaybackDiagnostics.record("aether.seekUIWork", fields: ["uiWorkMs": uiWorkMs-pending.uiWorkAtStart,
+      "maxTickGapMs": seekTickGapMs, "uiThrottled": !uiBaseline])
     if displayed {
       NeoPlaybackDiagnostics.record("seek.videoResume", fields: ["engine": "aether", "mediaMs": position*1000,
         "targetMs": pending.target*1000, "durationMs": (CACurrentMediaTime()-pending.started)*1000,
@@ -332,7 +411,9 @@ final class NeoAetherPlayer: UIViewController {
     observedPicture = nil
     pending = PendingSeek(id: sequence, target: target, started: CACurrentMediaTime(),
       previousPictureGeneration: displayedPicture()?.generation ?? lastPictureGeneration,
-      previousDecodedGeneration: decodedFrames.latest()?.generation)
+      previousDecodedGeneration: decodedFrames.latest()?.generation, uiWorkAtStart: uiWorkMs)
+    seekTickGapMs = 0; queuedDiagnostic = nil
+    if let pending { sampleSeek(pending, phase: "request") }
     status.text = nil; chrome.previewSeek(Int64(target)); chrome.showControls(true)
     NeoPlaybackDiagnostics.record("seek.start", fields: ["fromMs": previous*1000, "targetMs": target*1000, "engine": "aether"])
     seekTask = Task { await engine.seek(to: target) }
@@ -366,6 +447,9 @@ final class NeoAetherPlayer: UIViewController {
     guard !closed else { return }; closed = true
     loading?.cancel(); seekTask?.cancel(); probeTask?.cancel(); timer?.invalidate(); timer = nil
     if let output = videoOutput { outputItem?.remove(output) }; outputItem = nil; videoOutput = nil
+    diagnosticTask?.cancel(); queuedDiagnostic = nil
+    NeoPlaybackDiagnostics.record("aether.uiSummary", fields: ["ticks": uiTicks, "playbackUpdates": playbackUpdates,
+      "diagnosticUpdates": diagnosticUpdates, "uiWorkMs": uiWorkMs, "uiThrottled": !uiBaseline])
     hideControls?.cancel(); observedPicture = nil; subscriptions.removeAll(); engine?.stop(); engine = nil; EngineLog.handler = nil
     NotificationCenter.default.removeObserver(self)
     NeoPlaybackDiagnostics.record("aether.closed", fields: [:])
@@ -424,6 +508,8 @@ final class NeoAetherPlayer: UIViewController {
       while pending != nil && CACurrentMediaTime()<pausedDeadline { try? await Task.sleep(for: .milliseconds(50)) }
       checks["pausedSeek"] = landedCount == pausedCount+1 && engine?.state == .paused
       await captureSeekPicture(4)
+      let sampleDeadline = CACurrentMediaTime()+0.5
+      while diagnosticBusy && CACurrentMediaTime()<sampleDeadline { try? await Task.sleep(for: .milliseconds(20)) }
       checks["noFailures"] = failedCount == 0
       checks["targetPictures"] = seekPictures.count == 5
       for (picture, name) in seekPictures { saveComparisonPicture(picture, name: name) }; seekPictures.removeAll()
