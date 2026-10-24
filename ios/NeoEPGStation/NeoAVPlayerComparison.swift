@@ -15,7 +15,7 @@ final class NeoAVPlayerComparison: UIViewController {
   private var output: AVPlayerItemVideoOutput?
   private var timer: Timer?, hideControls: DispatchWorkItem?, probeTask: Task<Void, Never>?
   private var closed = false, startupReady = false, failed = false, scrubbing = false
-  private var wantsPlayback = true, resumeAfterBackground = false, landscape = false
+  private var wantsPlayback = true, resumeAfterBackground = false, landscape = false, audioActive = false
   private var openedAt = 0.0, sequence = 0, landedCount = 0
   private var lastTransport = "", observedPicture: Picture?
   private var pending: PendingSeek?
@@ -43,6 +43,10 @@ final class NeoAVPlayerComparison: UIViewController {
     NeoPlaybackDiagnostics.record("player.engine", fields: ["engine": "avplayer-direct", "initialMs": 0])
     NeoPlaybackDiagnostics.record("avplayer.source", fields: ["serverRemux": true,
       "av1HardwareSupported": VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1)])
+    do {
+      let audio = AVAudioSession.sharedInstance()
+      try audio.setCategory(.playback, mode: .moviePlayback); try audio.setActive(true); audioActive = true
+    } catch { fail("audio-session", code: (error as NSError).code); return }
     let item = AVPlayerItem(asset: AVURLAsset(url: source))
     let output = AVPlayerItemVideoOutput(pixelBufferAttributes: nil); item.add(output); self.output = output
     let player = AVPlayer(playerItem: item); self.player = player; layer.player = player
@@ -199,6 +203,7 @@ final class NeoAVPlayerComparison: UIViewController {
     player?.pause(); player?.currentItem?.cancelPendingSeeks()
     if let output { player?.currentItem?.remove(output) }; output = nil
     player?.replaceCurrentItem(with: nil); layer.player = nil; player = nil; pending = nil; observedPicture = nil
+    if audioActive { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation); audioActive = false }
     NotificationCenter.default.removeObserver(self); NeoPlaybackDiagnostics.record("avplayer.closed", fields: [:])
   }
   private func close() { shutdown(); let completion = onClose; onClose = nil; dismiss(animated: true) { completion?() } }
