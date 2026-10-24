@@ -98,6 +98,8 @@ final class NeoAetherPlayer: UIViewController {
   private var probePicture: CVPixelBuffer?
   private var seekPictures: [(CVPixelBuffer, String)] = []
 #endif
+  private var decodeTrialActive = false
+  private var decodeTrialRows: [[String: Double]] = []
   private var rendererFailureReported = false
   private let engineLog = NeoAetherLogCapture()
   private let decodedFrames = NeoAetherDecodedFrames()
@@ -399,8 +401,38 @@ final class NeoAetherPlayer: UIViewController {
         "decodedMs": position*1000, "decodeReadyMs": (CACurrentMediaTime()-pending.started)*1000,
         "displayTimeVerified": false, "verification": verification, "route": engine.videoRoute.rawValue])
     }
+    if decodeTrialActive {
+      decodeTrialRows.append(["targetSeconds": pending.target, "frameSeconds": position,
+        "frameReadyMs": (CACurrentMediaTime()-pending.started)*1000,
+        "displayTimestampVerified": displayed ? 1 : 0])
+    }
     self.pending = nil; observedPicture = nil; chrome.finishSeekPreview(); scheduleHide()
   }
+  // Lab-only entry: use the shipping seek and fresh-picture checks, with local
+  // video-only input. A callback alone can never complete a measurement.
+  func runDecodeTrialTargets(_ targets: [Double]) async throws -> [[String: Double]] {
+    decodeTrialActive = true; decodeTrialRows = []
+    defer { decodeTrialActive = false }
+    let deadline = CACurrentMediaTime()+35
+    while !startupReady && !closed && CACurrentMediaTime()<deadline {
+      try Task.checkCancellation(); try await Task.sleep(for: .milliseconds(30))
+    }
+    guard startupReady, !closed else { throw NSError(domain: "NeoDecodeTrial", code: 30) }
+    for _ in 0..<2 {
+      for target in targets.reversed() {
+        try Task.checkCancellation()
+        let before = decodeTrialRows.count
+        seek(to: target)
+        let end = CACurrentMediaTime()+13
+        while pending != nil && !closed && CACurrentMediaTime()<end {
+          try Task.checkCancellation(); try await Task.sleep(for: .milliseconds(10))
+        }
+        guard !closed, decodeTrialRows.count == before+1 else { throw NSError(domain: "NeoDecodeTrial", code: 31) }
+      }
+    }
+    return decodeTrialRows
+  }
+  func stopDecodeTrial() { shutdown() }
   func seek(to target: Double) {
     guard !closed, let engine, engine.canSeek, target.isFinite else { return }
     let end = engine.duration.isFinite ? max(0, engine.duration-0.1) : 0

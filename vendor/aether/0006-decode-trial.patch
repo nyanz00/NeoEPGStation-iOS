@@ -1,0 +1,342 @@
+diff --git a/Sources/AetherEngine/AetherEngine+Diagnostics.swift b/Sources/AetherEngine/AetherEngine+Diagnostics.swift
+--- a/Sources/AetherEngine/AetherEngine+Diagnostics.swift
++++ b/Sources/AetherEngine/AetherEngine+Diagnostics.swift
+@@ -691,3 +691,338 @@
+         nativeVideoSession?.lastAVGapMs ?? 0
+     }
+ }
++
++// Explicit, opt-in lab only. None of this participates in normal playback.
++import VideoToolbox
++import CryptoKit
++import CoreMedia
++import CoreVideo
++import AetherLibavformat
++import AetherLibavcodec
++import AetherLibavutil
++
++public struct NeoDecodeTrialRow: Codable, Sendable {
++    public var backend: String
++    public var repetition: Int
++    public var targetSeconds: Double
++    public var status: String
++    public var initializeMs: Double
++    public var decodeMs: Double?
++    public var frameSeconds: Double?
++    public var submittedPackets: Int = 0
++    public var hardware: Bool = false
++    public var imageMeanError: Double?
++    public var lumaSHA256: String?
++    public var nativeStatus: Int32?
++}
++
++/// Owns a bounded, immutable packet sample. Network/demux/mux are preparation,
++/// NEVER part of decodeMs. Each trial starts a fresh decoder, with initialization
++/// separately reported. No audio, UI, conversion or frame hashing in the timer.
++public final class NeoDecodeTrial: @unchecked Sendable {
++    private let gate = NSLock()
++    private var cancelled = false
++    private var demuxer: Demuxer?
++    private var packets: [UnsafeMutablePointer<AVPacket>] = []
++    private var parameters: UnsafeMutablePointer<AVCodecParameters>?
++    private var timeBase = AVRational(num: 1, den: 1000)
++    private var origin = 0.0
++    private var gopEnd = 0.0
++    public private(set) var targets: [Double] = []
++    public private(set) var summary: [String: Double] = [:]
++    public init() {}
++    public func cancel() { gate.withLock { cancelled = true } }
++    private var isCancelled: Bool { gate.withLock { cancelled } }
++    private func check() throws { if isCancelled { throw CancellationError() } }
++    deinit {
++        for var packet in packets { av_packet_free(&packet) }
++        var par = parameters; avcodec_parameters_free(&par)
++    }
++    private func failure(_ code: Int) -> NSError { NSError(domain: "NeoDecodeTrial", code: code) }
++
++    public func prepare(url: URL, clipURL: URL) async throws {
++        try await Task.detached(priority: .userInitiated) { [self] in
++            try prepareSync(url: url, clipURL: clipURL)
++        }.value
++    }
++    private func prepareSync(url: URL, clipURL: URL) throws {
++        try check()
++        let began = ProcessInfo.processInfo.systemUptime
++        let dem = Demuxer(); demuxer = dem
++        defer { dem.close(); demuxer = nil }
++        try dem.open(url: url, profile: .stillExtraction)
++        guard let stream = dem.stream(at: dem.videoStreamIndex), let par = stream.pointee.codecpar,
++              par.pointee.codec_id == AV_CODEC_ID_AV1,
++              let copied = avcodec_parameters_alloc() else { throw failure(1) }
++        guard avcodec_parameters_copy(copied, par) >= 0 else {
++            var p: UnsafeMutablePointer<AVCodecParameters>? = copied; avcodec_parameters_free(&p); throw failure(2)
++        }
++        parameters = copied; timeBase = stream.pointee.time_base
++        var bytes = 0, foundKey = false, nextKey: Double?
++        while let raw = try dem.readPacket(isCurrent: { [self] in !isCancelled }) {
++            var packet: UnsafeMutablePointer<AVPacket>? = raw
++            defer { av_packet_free(&packet) }
++            try check()
++            guard ProcessInfo.processInfo.systemUptime - began < 90 else { throw failure(3) }
++            if raw.pointee.stream_index != dem.videoStreamIndex { continue }
++            guard raw.pointee.pts != Int64.min else { throw failure(4) }
++            let seconds = Double(raw.pointee.pts) * Double(timeBase.num) / Double(timeBase.den)
++            let key = raw.pointee.flags & AV_PKT_FLAG_KEY != 0
++            if !foundKey { if !key { continue }; foundKey = true; origin = seconds }
++            else if key && nextKey == nil && seconds > origin { nextKey = seconds }
++            if let end = nextKey, seconds > end + 1 { break }
++            bytes += Int(raw.pointee.size)
++            guard bytes <= 96 * 1024 * 1024, packets.count < 3000, seconds-origin < 65,
++                  let clone = av_packet_clone(raw) else { throw failure(5) }
++            packets.append(clone)
++        }
++        guard let end = nextKey, end-origin > 0.5, packets.count > 4 else { throw failure(6) }
++        gopEnd = end
++        // Same near/middle/far points in one real GOP for all three backends.
++        targets = [0.1, 0.5, 0.9].map { origin + (end-origin) * $0 }
++        try writeClip(to: clipURL)
++        summary = ["originSeconds": origin, "gopSeconds": end-origin,
++            "packetBytes": Double(bytes), "packetCount": Double(packets.count),
++            "width": Double(copied.pointee.width), "height": Double(copied.pointee.height),
++            "preparationMs": (ProcessInfo.processInfo.systemUptime-began)*1000]
++    }
++    private func writeClip(to url: URL) throws {
++        var context: UnsafeMutablePointer<AVFormatContext>?
++        guard avformat_alloc_output_context2(&context, nil, "matroska", url.path) >= 0,
++              let ctx = context else { throw failure(7) }
++        defer { if ctx.pointee.pb != nil { avio_closep(&ctx.pointee.pb) }; avformat_free_context(ctx) }
++        guard let stream = avformat_new_stream(ctx, nil), let dst = stream.pointee.codecpar,
++              let par = parameters, avcodec_parameters_copy(dst, par) >= 0 else { throw failure(8) }
++        stream.pointee.time_base = timeBase
++        ctx.pointee.avoid_negative_ts = 0
++        guard avio_open(&ctx.pointee.pb, url.path, AVIO_FLAG_WRITE) >= 0,
++              avformat_write_header(ctx, nil) >= 0 else { throw failure(9) }
++        let offset = Int64((origin * Double(timeBase.den) / Double(timeBase.num)).rounded())
++        for source in packets {
++            var owned = av_packet_clone(source)
++            guard let packet = owned else { throw failure(10) }
++            defer { av_packet_free(&owned) }
++            if packet.pointee.pts != Int64.min { packet.pointee.pts -= offset }
++            if packet.pointee.dts != Int64.min { packet.pointee.dts -= offset }
++            packet.pointee.stream_index = 0; packet.pointee.pos = -1
++            av_packet_rescale_ts(packet, timeBase, stream.pointee.time_base)
++            guard av_interleaved_write_frame(ctx, packet) >= 0 else { throw failure(11) }
++        }
++        guard av_write_trailer(ctx) >= 0 else { throw failure(12) }
++    }
++    public func runDirect() async throws -> [NeoDecodeTrialRow] {
++        try await Task.detached(priority: .userInitiated) { [self] in
++            var rows: [NeoDecodeTrialRow] = []
++            for repetition in 0..<2 {
++                for target in targets {
++                    try check()
++                    // A fresh dav1d result supplies actual decoded PTS and luma
++                    // reference. Copying/verification happens AFTER decode timing.
++                    let sw = try software(target: target, repetition: repetition)
++                    rows.append(sw.row)
++                    try check()
++                    rows.append(hardware(target: target, repetition: repetition, reference: sw))
++                }
++            }
++            return rows
++        }.value
++    }
++    private struct Reference {
++        var row: NeoDecodeTrialRow
++        var luma: [UInt16]
++        var width: Int
++        var height: Int
++    }
++    private func software(target: Double, repetition: Int) throws -> Reference {
++        let initialize = ProcessInfo.processInfo.systemUptime
++        guard let codec = avcodec_find_decoder_by_name("libdav1d"), codec.pointee.id == AV_CODEC_ID_AV1, let par = parameters else { throw failure(13) }
++        var ownedContext = avcodec_alloc_context3(codec)
++        guard let ctx = ownedContext else { throw failure(13) }
++        defer { avcodec_free_context(&ownedContext) }
++        guard avcodec_parameters_to_context(ctx, par) >= 0 else { throw failure(14) }
++        ctx.pointee.pkt_timebase = timeBase
++        ctx.pointee.thread_count = Int32(min(8, ProcessInfo.processInfo.activeProcessorCount))
++        ctx.pointee.thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE
++        ctx.pointee.get_format = { _, formats in
++            guard let formats else { return AV_PIX_FMT_NONE }
++            var i = 0
++            while formats[i] != AV_PIX_FMT_NONE {
++                if let d = av_pix_fmt_desc_get(formats[i]), d.pointee.flags & UInt64(AV_PIX_FMT_FLAG_HWACCEL) == 0 { return formats[i] }
++                i += 1
++            }
++            return AV_PIX_FMT_NONE
++        }
++        guard avcodec_open2(ctx, codec, nil) >= 0 else { throw failure(15) }
++        var ownedFrame = av_frame_alloc()
++        guard let frame = ownedFrame else { throw failure(15) }
++        defer { av_frame_free(&ownedFrame) }
++        var row = NeoDecodeTrialRow(backend: "dav1d", repetition: repetition,
++            targetSeconds: target-origin, status: "target-not-produced", initializeMs: (ProcessInfo.processInfo.systemUptime-initialize)*1000)
++        let start = ProcessInfo.processInfo.systemUptime
++        func drain() -> Bool {
++            while avcodec_receive_frame(ctx, frame) >= 0 {
++                let ticks = frame.pointee.best_effort_timestamp != Int64.min ? frame.pointee.best_effort_timestamp : frame.pointee.pts
++                let pts = Double(ticks) * Double(timeBase.num) / Double(timeBase.den)
++                if ticks != Int64.min && pts + 0.000001 >= target {
++                    row.decodeMs = (ProcessInfo.processInfo.systemUptime-start)*1000
++                    row.frameSeconds = pts-origin; row.status = "ok"; return true
++                }
++                av_frame_unref(frame)
++            }
++            return false
++        }
++        var found = false
++        for packet in packets {
++            try check(); guard ProcessInfo.processInfo.systemUptime-start < 12 else { row.status = "timeout"; break }
++            let result = avcodec_send_packet(ctx, packet)
++            if result == FFmpegErr.eagain {
++                if drain() { found = true; break }
++                if avcodec_send_packet(ctx, packet) < 0 { row.status = "decode-error"; break }
++            } else if result < 0 { row.status = "decode-error"; break }
++            row.submittedPackets += 1
++            if drain() { found = true; break }
++        }
++        if !found && row.status == "target-not-produced" { _ = avcodec_send_packet(ctx, nil); found = drain() }
++        guard found, let base = frame.pointee.data.0 else { return Reference(row: row, luma: [], width: 0, height: 0) }
++        let format = AVPixelFormat(rawValue: frame.pointee.format)
++        guard format == AV_PIX_FMT_YUV420P || format == AV_PIX_FMT_YUV420P10LE else {
++            row.status = "unsupported-pixel-format"; return Reference(row: row, luma: [], width: 0, height: 0)
++        }
++        let w = Int(frame.pointee.width), h = Int(frame.pointee.height), stride = Int(frame.pointee.linesize.0)
++        let values = Self.sampleLuma(base: UnsafeRawPointer(base), stride: stride, width: w, height: h,
++            tenBit: format == AV_PIX_FMT_YUV420P10LE, highBits: false)
++        row.lumaSHA256 = SHA256.hash(data: values.withUnsafeBufferPointer { Data(buffer: $0) }).map { String(format: "%02x", $0) }.joined()
++        return Reference(row: row, luma: values, width: w, height: h)
++    }
++    private final class Output: @unchecked Sendable {
++        let lock = NSLock()
++        var target: Double = 0
++        var started: Double = 0
++        var buffer: CVPixelBuffer?
++        var seconds: Double?
++        var elapsed: Double?
++        var error: OSStatus = 0
++        func receive(status: OSStatus, buffer: CVPixelBuffer?, pts: CMTime) {
++            let now = ProcessInfo.processInfo.systemUptime
++            lock.withLock {
++                if status != noErr { error = status }
++                guard self.buffer == nil, let buffer, pts.isNumeric, pts.seconds+0.000001 >= target else { return }
++                self.buffer = buffer; seconds = pts.seconds; elapsed = (now-started)*1000
++            }
++        }
++        var ready: Bool { lock.withLock { buffer != nil } }
++    }
++    private func hardware(target: Double, repetition: Int, reference: Reference) -> NeoDecodeTrialRow {
++        let initialize = ProcessInfo.processInfo.systemUptime
++        var row = NeoDecodeTrialRow(backend: "videotoolbox", repetition: repetition,
++            targetSeconds: target-origin, status: "hardware-unavailable", initializeMs: 0)
++        guard VTCapabilityProbe.av1Available, let par = parameters,
++              let bytes = par.pointee.extradata, par.pointee.extradata_size >= 4 else { return row }
++        var config = Data(bytes: bytes, count: Int(par.pointee.extradata_size))
++        guard config[0] == 0x81 else { row.status = "unsupported-av1-config"; return row }
++        // Some Matroska av1C atoms contain only the four-byte header. Include
++        // the first in-band sequence header OBU, without rewriting sample bytes.
++        if config.count == 4, let packet = packets.first, let data = packet.pointee.data,
++           let obu = Self.sequenceHeader(Data(bytes: data, count: Int(packet.pointee.size))) { config.append(obu) }
++        var format: CMVideoFormatDescription?
++        let extensions = [kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms: ["av1C": config]] as CFDictionary
++        guard CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault, codecType: kCMVideoCodecType_AV1,
++            width: par.pointee.width, height: par.pointee.height, extensions: extensions,
++            formatDescriptionOut: &format) == noErr, let format else { row.status = "format-rejected"; return row }
++        let output = Output(); output.target = reference.row.frameSeconds.map { $0+origin } ?? target
++        var callback = VTDecompressionOutputCallbackRecord(decompressionOutputCallback: { ref, _, status, _, buffer, pts, _ in
++            guard let ref else { return }; Unmanaged<Output>.fromOpaque(ref).takeUnretainedValue().receive(status: status, buffer: buffer, pts: pts)
++        }, decompressionOutputRefCon: Unmanaged.passUnretained(output).toOpaque())
++        let ten = config[2] & 0x40 != 0
++        let attrs = [kCVPixelBufferPixelFormatTypeKey: ten ? kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
++                     kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
++        let spec = [kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder: true] as CFDictionary
++        var session: VTDecompressionSession?
++        let creation = VTDecompressionSessionCreate(allocator: kCFAllocatorDefault, formatDescription: format,
++            decoderSpecification: spec, imageBufferAttributes: attrs, outputCallback: &callback, decompressionSessionOut: &session)
++        guard creation == noErr, let session else { row.status = "session-rejected"; row.nativeStatus = creation; return row }
++        defer { VTDecompressionSessionWaitForAsynchronousFrames(session); VTDecompressionSessionInvalidate(session) }
++        var property: CFTypeRef?
++        guard VTSessionCopyProperty(session, key: kVTDecompressionPropertyKey_UsingHardwareAcceleratedVideoDecoder,
++            allocator: kCFAllocatorDefault, propertyValueOut: &property) == noErr,
++              (property as? NSNumber)?.boolValue == true else { row.status = "hardware-unverified"; return row }
++        row.hardware = true; row.initializeMs = (ProcessInfo.processInfo.systemUptime-initialize)*1000
++        output.started = ProcessInfo.processInfo.systemUptime
++        row.status = "target-not-produced"
++        for packet in packets {
++            if isCancelled { row.status = "cancelled"; break }
++            if ProcessInfo.processInfo.systemUptime-output.started > 12 { row.status = "timeout"; break }
++            if output.ready { break }
++            let size = Int(packet.pointee.size)
++            var block: CMBlockBuffer?
++            guard let data = packet.pointee.data,
++                  CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: size,
++                    blockAllocator: kCFAllocatorDefault, customBlockSource: nil, offsetToData: 0, dataLength: size,
++                    flags: 0, blockBufferOut: &block) == noErr, let block,
++                  CMBlockBufferReplaceDataBytes(with: data, blockBuffer: block, offsetIntoDestination: 0, dataLength: size) == noErr else { row.status = "sample-error"; break }
++            func time(_ value: Int64) -> CMTime {
++                value == Int64.min ? .invalid : CMTime(seconds: Double(value)*Double(timeBase.num)/Double(timeBase.den), preferredTimescale: 1_000_000)
++            }
++            var timing = CMSampleTimingInfo(duration: time(packet.pointee.duration), presentationTimeStamp: time(packet.pointee.pts), decodeTimeStamp: time(packet.pointee.dts))
++            var sample: CMSampleBuffer?, length = size
++            guard CMSampleBufferCreateReady(allocator: kCFAllocatorDefault, dataBuffer: block, formatDescription: format,
++                sampleCount: 1, sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleSizeEntryCount: 1,
++                sampleSizeArray: &length, sampleBufferOut: &sample) == noErr, let sample else { row.status = "sample-error"; break }
++            if packet.pointee.flags & AV_PKT_FLAG_KEY == 0,
++               let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true), CFArrayGetCount(attachments) > 0 {
++                let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
++                for key in [kCMSampleAttachmentKey_DependsOnOthers, kCMSampleAttachmentKey_NotSync] {
++                    CFDictionarySetValue(dict, Unmanaged.passUnretained(key).toOpaque(), Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
++                }
++            }
++            let result = VTDecompressionSessionDecodeFrame(session, sampleBuffer: sample,
++                flags: [._EnableAsynchronousDecompression, ._EnableTemporalProcessing], frameRefcon: nil, infoFlagsOut: nil)
++            if result != noErr { row.status = "decode-error"; row.nativeStatus = result; break }
++            row.submittedPackets += 1
++        }
++        VTDecompressionSessionFinishDelayedFrames(session)
++        VTDecompressionSessionWaitForAsynchronousFrames(session)
++        guard let buffer = output.buffer, let seconds = output.seconds, let elapsed = output.elapsed else { return row }
++        row.decodeMs = elapsed; row.frameSeconds = seconds-origin
++        guard output.error == noErr, !reference.luma.isEmpty,
++              abs((reference.row.frameSeconds ?? -999)-(seconds-origin)) < 0.002,
++              CVPixelBufferGetWidth(buffer) == reference.width, CVPixelBufferGetHeight(buffer) == reference.height else {
++            row.status = "target-mismatch"; return row
++        }
++        CVPixelBufferLockBaseAddress(buffer, .readOnly); defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
++        guard let base = CVPixelBufferGetBaseAddressOfPlane(buffer, 0) else { row.status = "pixel-unavailable"; return row }
++        let formatCode = CVPixelBufferGetPixelFormatType(buffer)
++        guard [kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange, kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange].contains(formatCode) else {
++            row.status = "unsupported-pixel-format"; return row
++        }
++        let actual = Self.sampleLuma(base: base, stride: CVPixelBufferGetBytesPerRowOfPlane(buffer, 0),
++            width: reference.width, height: reference.height, tenBit: formatCode == kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange, highBits: true)
++        let error = zip(actual, reference.luma).reduce(0.0) { $0 + abs(Double($1.0)-Double($1.1)) } / Double(actual.count)
++        row.imageMeanError = error; row.status = error <= 2 ? "ok" : "picture-mismatch"
++        return row
++    }
++    private static func sampleLuma(base: UnsafeRawPointer, stride: Int, width: Int, height: Int, tenBit: Bool, highBits: Bool) -> [UInt16] {
++        (0..<36).flatMap { gy in (0..<64).map { gx in
++            let x = min(width-1, gx*width/64), y = min(height-1, gy*height/36)
++            if tenBit { let v = base.advanced(by: y*stride).assumingMemoryBound(to: UInt16.self)[x]; return highBits ? v >> 6 : v }
++            return UInt16(base.advanced(by: y*stride).assumingMemoryBound(to: UInt8.self)[x])*4
++        } }
++    }
++    private static func sequenceHeader(_ bytes: Data) -> Data? {
++        var i = 0
++        while i < bytes.count {
++            let start = i, header = bytes[i]; i += 1
++            guard header & 0x80 == 0, header & 2 != 0 else { return nil }
++            if header & 4 != 0 { i += 1 }
++            var size = 0, shift = 0, ended = false
++            while i < bytes.count && shift < 56 {
++                let byte = bytes[i]; i += 1; size |= Int(byte & 127) << shift
++                if byte & 128 == 0 { ended = true; break }; shift += 7
++            }
++            guard ended, size <= bytes.count-i else { return nil }
++            if (header >> 3) & 15 == 1 { return bytes.subdata(in: start..<(i+size)) }
++            i += size
++        }
++        return nil
++    }
++}

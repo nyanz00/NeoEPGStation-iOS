@@ -102,7 +102,7 @@ final class NeoSettingsCategoryPage: NeoPage {
           NeoPlaybackExperiment.selected = value; self?.render()
         }
       })
-      row("再生エンジン", explanation: "試験用はエンコード済みPLAYを先頭から開きます。コメント・字幕・PiP・視聴履歴の保存には未対応です。次の再生から適用します。", control: engine)
+      row("再生エンジン", explanation: "試験用はエンコード済みPLAYを先頭から開きます。コメント・字幕・PiP・視聴履歴の保存には未対応です。診断用はAV1動画の復号速度を自動比較します。次の再生から適用します。", control: engine)
       button("接続先を変更") { [weak self, weak shell] in
         guard let shell else { return }; self?.navigationController?.pushViewController(NeoConnectionPage(shell: shell), animated: true)
       }

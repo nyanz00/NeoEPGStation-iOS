@@ -493,6 +493,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
   private func presentPlayer(_ file: NeoVideoFile, recording: NeoRecording, api: NeoAPI, user: String, start: Double, streaming: Int?, streamSubtitle: Int?) {
     let experiment = NeoPlaybackExperiment.selected
+    if experiment == .decodeTrial, experiment.applies(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
+      let controller = NeoDecodeTrialController(source: api.url("/videos/\(file.id)"))
+      player = controller; controller.onClose = { [weak self] in self?.player = nil }
+      present(controller, animated: true); return
+    }
     if experiment == .avplayer, experiment.applies(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
       let controller = NeoAVPlayerComparison(url: api.url("/videos/\(file.id)/web"), title: recording.name,
         context: ["baseURL": api.base.absoluteString, "id": recording.id, "disableHistory": true,

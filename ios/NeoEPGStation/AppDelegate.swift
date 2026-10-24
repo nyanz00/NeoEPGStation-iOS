@@ -20,6 +20,13 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     let window = UIWindow(frame: UIScreen.main.bounds)
     window.rootViewController = NeoShell(); self.window = window; window.makeKeyAndVisible()
 #if targetEnvironment(simulator)
+    if let path = ProcessInfo.processInfo.environment["NEO_EPG_DECODE_TRIAL"], let url = URL(string: path) {
+      DispatchQueue.main.asyncAfter(deadline: .now()+1) {
+        let controller = NeoDecodeTrialController(source: url)
+        window.rootViewController?.present(controller, animated: false) { controller.run() }
+      }
+      return true
+    }
     if let base = ProcessInfo.processInfo.environment["NEO_EPG_AVPLAYER_COMPARE"], let url = URL(string: base+"/api/videos/1/web") {
       DispatchQueue.main.asyncAfter(deadline: .now()+1) {
         let player = NeoAVPlayerComparison(url: url, title: "Synthetic direct comparison")
