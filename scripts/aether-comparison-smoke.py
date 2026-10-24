@@ -70,7 +70,7 @@ if inspect:
     run('xcrun', 'clang', '-dynamiclib', '-fobjc-arc', '-target', 'arm64-apple-ios18.0-simulator',
         '-isysroot', sdk, 'scripts/aether-renderer-inspect.m', '-o', 'dist/aether-renderer-inspect.dylib',
         '-framework', 'UIKit', '-framework', 'AVFoundation', '-framework', 'CoreImage', '-framework', 'CoreVideo',
-        '-framework', 'CoreGraphics', '-framework', 'CoreFoundation', '-framework', 'QuartzCore', '-framework', 'Foundation')
+        '-framework', 'CoreGraphics', '-framework', 'CoreFoundation', '-framework', 'QuartzCore', '-framework', 'Foundation', '-framework', 'IOSurface')
     run('codesign', '--force', '--sign', '-', 'dist/aether-renderer-inspect.dylib')
 try:
     for fixture in ('encoded-seek-1080.mkv', 'hevc-seek-10.mkv', 'av1-seek-10.mkv'):
@@ -95,6 +95,7 @@ try:
                 subprocess.run(['xcrun', 'simctl', 'launch', device, bundle], env=environment, check=True, timeout=60)
                 deadline = time.monotonic()+100
                 while not all((documents/name).exists() for name in names) and time.monotonic()<deadline:
+                    if inspect and (documents/'aether-renderer-inspection.json').exists(): break
                     time.sleep(.5)
             finally:
                 observer.terminate()
