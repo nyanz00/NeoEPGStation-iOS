@@ -32,11 +32,13 @@ __attribute__((constructor)) static void BeginInspection(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 6*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         NSURL *directory = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
         NSMutableArray *rows = [NSMutableArray array];
+        NSMutableSet<UIWindow *> *windows = [NSMutableSet setWithArray:UIApplication.sharedApplication.windows];
         for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
             if ([scene isKindOfClass:UIWindowScene.class]) {
-                for (UIWindow *window in ((UIWindowScene *)scene).windows) InspectLayer(window.layer, rows, directory);
+                [windows addObjectsFromArray:((UIWindowScene *)scene).windows];
             }
         }
+        for (UIWindow *window in windows) InspectLayer(window.layer, rows, directory);
         NSData *json = [NSJSONSerialization dataWithJSONObject:@{@"layers":rows} options:NSJSONWritingPrettyPrinted error:NULL];
         [json writeToURL:[directory URLByAppendingPathComponent:@"aether-renderer-inspection.json"] atomically:YES];
     });
