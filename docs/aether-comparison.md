@@ -64,13 +64,21 @@ AV1 software decode failure: generic FFmpeg `av1` selected hardware formats
 The old five "successful" software seeks were false positives from the clock
 flag and are superseded, not evidence of displayed video.
 
-The pinned FFmpegBuild 3.9.0 codec_id.h includes deprecated V410/V308/V408 enum
-members: header HEVC=173 / AV1=225, while linked runtime diagnostics identify
-HEVC=172 / AV1=222. This bypasses the AV1 capability gate. Local patch 0003 removes
-those obsolete header members for both iOS slices; startup checks the runtime codec
-descriptors and dav1d against imported IDs, failing closed on a future mismatch.
-Patch 0002 explicitly opens libdav1d for software AV1 and rejects all hardware
-pixel formats there. Both patches are hash verified and retained with the exact
-source recipes. No device hardware support is inferred from simulator results.
+Build 247 established the actual integration defect: app imports such as
+av_read_frame, avcodec_descriptor_get_by_name, avcodec_find_decoder_by_name,
+avcodec_send_packet and avformat_open_input bind to VLCKit, while avcodec_version
+binds to AetherLibavcodec. VLCKit exports its own static FFmpeg symbols, and the
+application linker selected them before the SPM dynamic frameworks. The observed
+ID discrepancy belongs to those different libraries; the pinned Aether headers
+are correct. The earlier 0003 header experiment is retired and reversed on any
+already-prepared checkout, not applied to the new build.
 
-The next device/simulator build and scoped playback verification are pending.
+The application links Aether's nine frameworks before inherited CocoaPods flags.
+An independent Mach-O import check rejects any FFmpeg/dav1d function bound to
+VLCKit on both device and simulator outputs, before packaging/testing. The runtime
+codec descriptor/dav1d check then detects a future binding/ABI error. Software AV1
+explicitly opens libdav1d and rejects hardware-only pixel formats. Actual displayed
+picture PTS/generation gates still replace the old clock-only seek assertion.
+All active source patches are hash verified and retained with source recipes.
+
+The corrected device/simulator build and scoped playback verification are pending.

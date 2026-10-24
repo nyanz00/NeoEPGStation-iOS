@@ -191,6 +191,8 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             build 2>&1 | tee dist/device-build.log | xcbeautify
+      - name: Verify device FFmpeg import isolation
+        run: python3 scripts/verify-aether-bindings.py build/device/Build/Products/Release-iphoneos/NeoEPGStation.app/NeoEPGStation --output dist/aether-bindings-device.json
       - name: Package LiveContainer IPA
         id: package-ipa
         run: bash scripts/package-ipa.sh
@@ -205,6 +207,8 @@ jobs:
             CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=- \
             CODE_SIGN_LOCAL_EXECUTION_IDENTITY='Ad Hoc' \
             build 2>&1 | tee dist/simulator-build.log | xcbeautify
+      - name: Verify simulator FFmpeg import isolation
+        run: python3 scripts/verify-aether-bindings.py build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app/NeoEPGStation --output dist/aether-bindings-simulator.json
       - name: Check opt-in Aether playback and rendered seeks
         id: aether-checks
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'aether-compare' }}

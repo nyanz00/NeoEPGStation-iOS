@@ -22,10 +22,11 @@
       ]
     }
   ],
-  "ffmpegCodecHeader": {
+  "retiredHeaderCorrection": {
     "file": "0003-ffmpeg-codec-id-abi.patch",
     "sha256": "2769898a5920387d6840e36aaec11a01feb4cc39ce4381c657d8fecf20d3e5e5",
     "upstreamSHA256": "0e4f73c111601ff36bc7013f0ed03bee0756049137c4a31abf9649d438b7c07d",
-    "patchedSHA256": "463d4025959595d653bb407b28bb78b2f080d621965b4686c652566d177e8256"
+    "patchedSHA256": "463d4025959595d653bb407b28bb78b2f080d621965b4686c652566d177e8256",
+    "applied": false
   }
 }

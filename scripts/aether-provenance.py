@@ -38,7 +38,9 @@ for change in recipe.get('additionalPatches', []):
         subprocess.run(['git', '-C', str(engine), 'apply', str(extra.resolve())], check=True)
     assert [hashlib.sha256((engine/f['path']).read_bytes()).hexdigest() for f in change['sources']] == [f['patchedSHA256'] for f in change['sources']]
     shutil.copyfile(extra, notice/extra.name)
-header = recipe['ffmpegCodecHeader']
+# Undo the retired header experiment on a previously prepared checkout.
+# The dependency headers themselves are correct; cross-library bindings were not.
+header = recipe['retiredHeaderCorrection']
 extra = Path('vendor/aether')/header['file']
 assert hashlib.sha256(extra.read_bytes()).hexdigest() == header['sha256']
 ffmpeg = next(p for p in root.iterdir() if p.name.lower() == 'ffmpegbuild')
@@ -46,10 +48,10 @@ ffmpeg = next(p for p in root.iterdir() if p.name.lower() == 'ffmpegbuild')
 headers = list(ffmpeg.glob('Sources/AetherLibavcodec.xcframework/ios-*/AetherLibavcodec.framework/Headers/codec_id.h'))
 assert headers, 'Missing FFmpeg codec headers'
 for path in headers:
-    if hashlib.sha256(path.read_bytes()).hexdigest() == header['upstreamSHA256']:
+    if hashlib.sha256(path.read_bytes()).hexdigest() == header['patchedSHA256']:
         directory = str(path.parent.relative_to(ffmpeg))
-        subprocess.run(['git', '-C', str(ffmpeg), 'apply', '--directory='+directory, str(extra.resolve())], check=True)
-    assert hashlib.sha256(path.read_bytes()).hexdigest() == header['patchedSHA256'], str(path)
+        subprocess.run(['git', '-C', str(ffmpeg), 'apply', '--reverse', '--directory='+directory, str(extra.resolve())], check=True)
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == header['upstreamSHA256'], str(path)
 shutil.copyfile(extra, notice/extra.name)
 shutil.copyfile(patch, notice/patch.name)
 shutil.copyfile('vendor/aether/source.json', notice/'modifications.json')

@@ -416,6 +416,15 @@
 				);
 				MARKETING_VERSION = 0.1.0;
 				OTHER_LDFLAGS = (
+					"-framework", "AetherLibavcodec",
+					"-framework", "AetherLibavformat",
+					"-framework", "AetherLibavutil",
+					"-framework", "AetherLibswresample",
+					"-framework", "AetherLibswscale",
+					"-framework", "AetherLibavfilter",
+					"-framework", "AetherLibdav1d",
+					"-framework", "AetherLibzimg",
+					"-framework", "AetherLibzvbi",
 					"$(inherited)",
 					"-ObjC",
 					"-lc++",
@@ -446,6 +455,15 @@
 				);
 				MARKETING_VERSION = 0.1.0;
 				OTHER_LDFLAGS = (
+					"-framework", "AetherLibavcodec",
+					"-framework", "AetherLibavformat",
+					"-framework", "AetherLibavutil",
+					"-framework", "AetherLibswresample",
+					"-framework", "AetherLibswscale",
+					"-framework", "AetherLibavfilter",
+					"-framework", "AetherLibdav1d",
+					"-framework", "AetherLibzimg",
+					"-framework", "AetherLibzvbi",
 					"$(inherited)",
 					"-ObjC",
 					"-lc++",

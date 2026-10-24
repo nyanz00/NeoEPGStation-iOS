@@ -36,7 +36,8 @@ if full_recheck or network_probe or focused:
     jobs = json.loads(subprocess.check_output(['gh', 'run', 'view', info['run'], '--json', 'jobs']))['jobs']
     steps = {step['name']: step['conclusion'] for job in jobs for step in job['steps']}
     for name in ['Native ASS parser and playback clock tests', 'Native UI type checks',
-                 'Build device application', 'Package LiveContainer IPA', 'Build simulator application']:
+                 'Build device application', 'Verify device FFmpeg import isolation',
+                 'Package LiveContainer IPA', 'Build simulator application', 'Verify simulator FFmpeg import isolation']:
         if steps.get(name) != 'success':
             raise RuntimeError(f'Cannot retest a failed application build: {name}')
 Path('dist/reused-build-info.json').write_text(json.dumps(info, indent=2) + '\n')
