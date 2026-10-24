@@ -48,3 +48,22 @@ coalesce; superseded/source-changed results are rejected. A busy or timed-out
 read is marked unavailable. Admission opens again only when the actual worker
 returns, so slow reads can recover without creating a queue of stuck threads. Playback does not await
 these diagnostics. Existing periodic telemetry remains explicitly age-stamped.
+
+Verified build 265, source e9db60ff38344fa0b7f4b5c132e2a95ccaf48690,
+Actions run 40104159617: device/simulator builds, package/hash/provenance and
+FFmpeg binding isolation passed. The focused test passed all four cases
+(H.264 per-frame baseline, H.264 changed-state UI, HEVC and AV1), 48 controller
+checks, 20 source-reference target images, and seek-associated diagnostic
+snapshots for every operation. H.264 playback refreshes fell from 441 to 8 and
+diagnostic refreshes from 441 to 1 on the same operation sequence. Measured UI
+refresh work was about 984 ms vs 8.9 ms across those respective runs; run lengths
+and simulator timing differ, so this is not a physical-device latency claim.
+
+All four simulator cases selected the software route. Thus software fallback,
+UI work reduction and diagnostic unavailability handling are exercised. The new
+native loopback cache/AVPlayer snapshot and segment-serve metrics compile in
+both binaries but were not exercised by those simulator cases. On-device
+native diagnostic availability and actual seek-speed improvement remain open.
+
+Installable artifact: NeoEPGStation-build265.ipa, SHA-256
+`deb3cc01e7c6612126ba0a7f8d9c34aacf94c06edd71ef6eff10a94797862b8f`.
