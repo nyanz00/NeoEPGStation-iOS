@@ -46,3 +46,12 @@ frame (for example 19.979 at 20 s). Direct comparison uses separate source-
 hashed MP4-time references for those frames. Target identities must still beat
 all wrong targets with the original strict threshold; no matcher tolerance was
 relaxed. The H.264 MP4 and original MKV references already share the same origin.
+
+Build 263 (`efbc5be088e251f0961197a3d82b207c3c3c81b1`) passed device/simulator
+builds, native preference/routing checks and both FFmpeg import isolation guards
+in Actions run 40092182300. Run 40094013683 reused that exact application after
+the test-only MP4 reference correction and passed both direct MP4 cases, all
+24 controller checks and all 10 target-image checks, including paused seeks.
+The original run's overall result was failed due to the reference mismatch;
+the successful recheck supplies the functional verification. No additional IPA
+was built. Real-device AV1 playback and perceived seek speed remain unverified.
