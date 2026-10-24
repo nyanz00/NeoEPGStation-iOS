@@ -2,7 +2,8 @@
 #import <AVFoundation/AVFoundation.h>
 #import <CoreImage/CoreImage.h>
 #import <CoreVideo/CoreVideo.h>
-#import <IOSurface/IOSurface.h>
+#import <IOSurface/IOSurfaceRef.h>
+#import <CoreVideo/CVPixelBufferIOSurface.h>
 #import <stdatomic.h>
 static _Atomic(unsigned) tagWrites = 0;
 
