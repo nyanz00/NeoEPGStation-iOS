@@ -109,9 +109,17 @@ final class NeoAVPlayerComparison: UIViewController {
   }
   private func transportFields() -> [String: Any] {
     guard let player, let item = player.currentItem else { return [:] }
-    let ahead = item.loadedTimeRanges.map { $0.timeRangeValue }.filter {
-      $0.start.seconds <= position+0.05 && $0.end.seconds >= position
-    }.map { max(0, $0.end.seconds-position) }.max() ?? 0
+    let now: Double = position
+    var ahead: Double = 0
+    for value in item.loadedTimeRanges {
+      let range: CMTimeRange = value.timeRangeValue
+      let start: Double = CMTimeGetSeconds(range.start)
+      let end: Double = CMTimeGetSeconds(CMTimeRangeGetEnd(range))
+      if start.isFinite && end.isFinite && start <= now+0.05 && end >= now {
+        let remaining: Double = end-now
+        if remaining > ahead { ahead = remaining }
+      }
+    }
     let reason = player.reasonForWaitingToPlay == .toMinimizeStalls ? "minimizeStalls" :
       player.reasonForWaitingToPlay == .evaluatingBufferingRate ? "evaluating" : "other"
     return ["timeControl": player.timeControlStatus.rawValue, "waitingReason": reason,
