@@ -1,6 +1,6 @@
 # Optional AetherEngine comparison
 
-Settings > App settings > 試験用AetherEngineを使用 defaults off. Snapshot the
+Settings > App settings > 再生エンジン > 試験用：AetherEngine is opt-in (default VLC). Snapshot the
 choice when opening a recording: only non-recording encoded PLAY uses the new
 controller. TS PLAY and every STREAMING request retain VLC. Closing the trial
 releases the engine; switching off restores normal PLAY on the next opening.

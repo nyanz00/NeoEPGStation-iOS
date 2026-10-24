@@ -92,7 +92,17 @@ final class NeoSettingsCategoryPage: NeoPage {
     guard let shell, let api = shell.api else { return }
     switch category {
     case .app:
-      toggle("試験用AetherEngineを使用", explanation: "エンコード済みPLAYを先頭から比較用プレイヤーで開きます。コメント・字幕・PiP・視聴履歴の保存には未対応です。次の再生から適用します。", on: NeoPlaybackExperiment.enabled) { NeoPlaybackExperiment.enabled = $0 }
+      let engine = UIButton(type: .system)
+      engine.setTitle(NeoPlaybackExperiment.selected.title, for: .normal); engine.tintColor = NeoStyle.accent
+      engine.titleLabel?.font = .systemFont(ofSize: 14); engine.titleLabel?.numberOfLines = 2
+      engine.widthAnchor.constraint(lessThanOrEqualToConstant: 180).isActive = true
+      engine.accessibilityIdentifier = "playback-experiment-engine"; engine.showsMenuAsPrimaryAction = true
+      engine.menu = UIMenu(children: NeoPlaybackExperiment.allCases.map { value in
+        UIAction(title: value.title, state: value == NeoPlaybackExperiment.selected ? .on : .off) { [weak self] _ in
+          NeoPlaybackExperiment.selected = value; self?.render()
+        }
+      })
+      row("再生エンジン", explanation: "試験用はエンコード済みPLAYを先頭から開きます。コメント・字幕・PiP・視聴履歴の保存には未対応です。次の再生から適用します。", control: engine)
       button("接続先を変更") { [weak self, weak shell] in
         guard let shell else { return }; self?.navigationController?.pushViewController(NeoConnectionPage(shell: shell), animated: true)
       }

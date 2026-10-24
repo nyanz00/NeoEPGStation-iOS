@@ -46,17 +46,6 @@ private final class NeoAetherDecodedFrames: @unchecked Sendable {
   func latest() -> Frame? { lock.lock(); defer { lock.unlock() }; return frame }
 }
 
-// Opt-in comparison only. Normal PLAY, TS and STREAMING keep their VLC path.
-enum NeoPlaybackExperiment {
-  static var enabled: Bool {
-    get { UserDefaults.standard.bool(forKey: "player.experiment.aether") }
-    set { UserDefaults.standard.set(newValue, forKey: "player.experiment.aether") }
-  }
-  static func usesAether(fileType: String, streaming: Bool, recording: Bool) -> Bool {
-    enabled && fileType == "encoded" && !streaming && !recording
-  }
-}
-
 @MainActor
 final class NeoAetherPlayer: UIViewController {
   var onClose: (() -> Void)?

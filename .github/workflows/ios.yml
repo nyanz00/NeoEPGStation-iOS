@@ -14,7 +14,7 @@ on:
         required: false
         default: full
         type: choice
-        options: [full, zoom-font, ts-comments, recovery-ui, streaming, encoded-seek, av1-decoder, startup-preroll, aether-compare]
+        options: [full, zoom-font, ts-comments, recovery-ui, streaming, encoded-seek, av1-decoder, startup-preroll, aether-compare, avplayer-compare]
       network_codec:
         description: 'Synthetic codec for network fault checks (same app binary)'
         required: false
@@ -116,7 +116,7 @@ jobs:
           xcodebuild -version
           bundle exec pod --version
       - name: Prepare synthetic picture verification
-        if: ${{ inputs.check_scope == 'aether-compare' }}
+        if: ${{ inputs.check_scope == 'aether-compare' || inputs.check_scope == 'avplayer-compare' }}
         run: |
           mkdir -p dist
           xcrun swiftc scripts/check-aether-picture.swift -o dist/aether-picture-check
@@ -129,6 +129,7 @@ jobs:
           mkdir -p build/native-tests
           task_checks_failed=0
           swiftc ios/NeoEPGStation/NeoASSComments.swift ios/NeoEPGStation/NeoCommentLoader.swift ios/NeoEPGStation/NeoCommentLayout.swift ios/NeoEPGStation/NeoMediaByteClock.swift ios/NeoEPGStation/NeoPlaybackHistory.swift ios/NeoEPGStation/NeoVideoRecovery.swift tests/native/main.swift -o build/native-tests/comments && build/native-tests/comments || task_checks_failed=1
+          swiftc ios/NeoEPGStation/NeoPlaybackExperiment.swift tests/experiment/main.swift -o build/native-tests/experiment && build/native-tests/experiment || task_checks_failed=1
           swiftc ios/NeoEPGStation/NeoModels.swift tests/ui/main.swift -o build/native-tests/ui && build/native-tests/ui || task_checks_failed=1
           swiftc ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoHLSManifest.swift tests/streaming/main.swift -o build/native-tests/hls && build/native-tests/hls || task_checks_failed=1
           swiftc ios/NeoEPGStation/NeoHTTPByteStream.swift tests/progressive/main.swift -o build/native-tests/progressive && build/native-tests/progressive || task_checks_failed=1
@@ -225,6 +226,10 @@ jobs:
           python3 -u scripts/aether-comparison-smoke.py || comparison_failed=1
           python3 -u scripts/encoded-seek-smoke.py --startup || comparison_failed=1
           exit "$comparison_failed"
+      - name: Check direct AVPlayer MP4 playback and target images
+        id: avplayer-checks
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'avplayer-compare' }}
+        run: python3 -u scripts/avplayer-comparison-smoke.py
       - name: Check encoded PLAY cached seek latency
         id: encoded-seek-checks
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'encoded-seek' }}
@@ -253,7 +258,7 @@ jobs:
           test "$hls_result" = 0 && test "$ts_result" = 0 && test "$mpeg_result" = 0
       - name: Check native playback and iPhone UI
         id: iphone-checks
-        if: ${{ inputs.check_scope != 'zoom-font' && inputs.check_scope != 'ts-comments' && inputs.check_scope != 'recovery-ui' && inputs.check_scope != 'streaming' && inputs.check_scope != 'encoded-seek' && inputs.check_scope != 'av1-decoder' && inputs.check_scope != 'startup-preroll' && inputs.check_scope != 'aether-compare' }}
+        if: ${{ inputs.check_scope != 'zoom-font' && inputs.check_scope != 'ts-comments' && inputs.check_scope != 'recovery-ui' && inputs.check_scope != 'streaming' && inputs.check_scope != 'encoded-seek' && inputs.check_scope != 'av1-decoder' && inputs.check_scope != 'startup-preroll' && inputs.check_scope != 'aether-compare' && inputs.check_scope != 'avplayer-compare' }}
         run: python3 -u scripts/simulator-smoke.py --iphone-only
       - name: Check zoom, haptics and comment font diagnostics
         id: zoom-font-checks
@@ -277,15 +282,15 @@ jobs:
         run: python3 -u scripts/network-recovery-smoke.py
       - name: Compare native ARIB subtitle timing
         id: arib-checks
-        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope != 'zoom-font' && inputs.check_scope != 'ts-comments' && inputs.check_scope != 'recovery-ui' && inputs.check_scope != 'streaming' && inputs.check_scope != 'encoded-seek' && inputs.check_scope != 'av1-decoder' && inputs.check_scope != 'startup-preroll' && inputs.check_scope != 'aether-compare' }}
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope != 'zoom-font' && inputs.check_scope != 'ts-comments' && inputs.check_scope != 'recovery-ui' && inputs.check_scope != 'streaming' && inputs.check_scope != 'encoded-seek' && inputs.check_scope != 'av1-decoder' && inputs.check_scope != 'startup-preroll' && inputs.check_scope != 'aether-compare' && inputs.check_scope != 'avplayer-compare' }}
         run: python3 -u scripts/arib-timing-smoke.py
       - name: Check iPad UI
         id: ipad-checks
-        if: ${{ inputs.check_ipad == true && inputs.check_scope != 'zoom-font' && inputs.check_scope != 'ts-comments' && inputs.check_scope != 'recovery-ui' && inputs.check_scope != 'streaming' && inputs.check_scope != 'encoded-seek' && inputs.check_scope != 'av1-decoder' && inputs.check_scope != 'startup-preroll' && inputs.check_scope != 'aether-compare' }}
+        if: ${{ inputs.check_ipad == true && inputs.check_scope != 'zoom-font' && inputs.check_scope != 'ts-comments' && inputs.check_scope != 'recovery-ui' && inputs.check_scope != 'streaming' && inputs.check_scope != 'encoded-seek' && inputs.check_scope != 'av1-decoder' && inputs.check_scope != 'startup-preroll' && inputs.check_scope != 'aether-compare' && inputs.check_scope != 'avplayer-compare' }}
         run: python3 -u scripts/simulator-smoke.py --ipad-only
       - name: Exercise network loss and recovery through native VLC
         id: network-checks
-        if: always() && inputs.check_scope != 'zoom-font' && inputs.check_scope != 'ts-comments' && inputs.check_scope != 'recovery-ui' && inputs.check_scope != 'streaming' && inputs.check_scope != 'encoded-seek' && inputs.check_scope != 'av1-decoder' && inputs.check_scope != 'startup-preroll' && inputs.check_scope != 'aether-compare' && hashFiles('build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app/Info.plist') != ''
+        if: always() && inputs.check_scope != 'zoom-font' && inputs.check_scope != 'ts-comments' && inputs.check_scope != 'recovery-ui' && inputs.check_scope != 'streaming' && inputs.check_scope != 'encoded-seek' && inputs.check_scope != 'av1-decoder' && inputs.check_scope != 'startup-preroll' && inputs.check_scope != 'aether-compare' && inputs.check_scope != 'avplayer-compare' && hashFiles('build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app/Info.plist') != ''
         run: python3 -u scripts/network-recovery-smoke.py
       - name: Preserve simulator application for UI diagnostics
         id: preserve-simulator
@@ -323,7 +328,7 @@ jobs:
         if: always()
         env:
           CI_STEPS: ${{ toJSON(steps) }}
-          CI_SCOPE: ${{ inputs.check_scope == 'aether-compare' && 'Aether encoded PLAY; actual output seeks; retained VLC startup' || inputs.check_scope == 'startup-preroll' && 'one-shot startup; full rewind range; preroll preparation costs; HLS/TS positioning' || inputs.check_scope == 'av1-decoder' && 'AV1 OS capability; native selection; 8/10-bit PLAY; cached seeks' || inputs.check_scope == 'encoded-seek' && 'encoded PLAY cached seeks; resume; buffering boundaries' || inputs.check_scope == 'streaming' && 'HLS streaming; segment cache; quality; recovery' || inputs.check_scope == 'recovery-ui' && 'tunnel recovery; reflow; zoom; comment selection' || inputs.check_scope == 'ts-comments' && 'TS resume/comments + zoom/haptic/font' || inputs.check_scope == 'zoom-font' && 'build; zoom/haptic/font only' || 'build; iPhone playback/UI; network' }}; codec=${{ inputs.network_codec || 'h264' }}; iPad=${{ inputs.check_ipad && 'yes' || 'no' }}
+          CI_SCOPE: ${{ inputs.check_scope == 'avplayer-compare' && 'AVPlayer direct MP4; H264/HEVC actual target images; AV1 device check required' || inputs.check_scope == 'aether-compare' && 'Aether encoded PLAY; actual output seeks; retained VLC startup' || inputs.check_scope == 'startup-preroll' && 'one-shot startup; full rewind range; preroll preparation costs; HLS/TS positioning' || inputs.check_scope == 'av1-decoder' && 'AV1 OS capability; native selection; 8/10-bit PLAY; cached seeks' || inputs.check_scope == 'encoded-seek' && 'encoded PLAY cached seeks; resume; buffering boundaries' || inputs.check_scope == 'streaming' && 'HLS streaming; segment cache; quality; recovery' || inputs.check_scope == 'recovery-ui' && 'tunnel recovery; reflow; zoom; comment selection' || inputs.check_scope == 'ts-comments' && 'TS resume/comments + zoom/haptic/font' || inputs.check_scope == 'zoom-font' && 'build; zoom/haptic/font only' || 'build; iPhone playback/UI; network' }}; codec=${{ inputs.network_codec || 'h264' }}; iPad=${{ inputs.check_ipad && 'yes' || 'no' }}
         run: python3 scripts/ci-support.py summary
 
   ipad-ui:
@@ -371,6 +376,9 @@ jobs:
             python3 -u scripts/streaming-smoke.py
             python3 -u scripts/ts-resume-smoke.py
             python3 -u scripts/ts-resume-smoke.py mpeg2
+          elif [ "$CHECK_SCOPE" = "avplayer-compare" ]; then
+            python3 -u scripts/simulator-smoke.py --prepare
+            python3 -u scripts/avplayer-comparison-smoke.py
           elif [ "$CHECK_SCOPE" = "aether-compare" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
             comparison_failed=0
@@ -435,5 +443,5 @@ jobs:
         if: always()
         env:
           CI_STEPS: ${{ toJSON(steps) }}
-          CI_SCOPE: ${{ inputs.check_scope == 'aether-compare' && 'Aether encoded PLAY; actual output seeks; retained VLC startup' || inputs.check_scope == 'startup-preroll' && 'one-shot startup; full rewind range; preroll preparation costs; HLS/TS positioning' || inputs.check_scope == 'av1-decoder' && 'AV1 OS capability; native selection; 8/10-bit PLAY; cached seeks' || inputs.check_scope == 'encoded-seek' && 'encoded PLAY cached seeks; resume; buffering boundaries' || inputs.check_scope == 'streaming' && 'HLS streaming; segment cache; quality; recovery' || inputs.check_scope == 'recovery-ui' && 'tunnel recovery; reflow; zoom; comment selection' || inputs.check_scope == 'ts-comments' && 'TS resume/comments + zoom/haptic/font' || inputs.check_scope == 'zoom-font' && 'zoom/haptic/font only' || inputs.network_probe && 'network' || inputs.recheck_playback && 'playback + iPhone/iPad' || inputs.recheck_iphone && 'iPhone UI' || 'iPad UI' }}; stage=${{ inputs.ui_stage || 'all' }}; codec=${{ inputs.network_codec || 'h264' }}; extra-iPad=${{ inputs.check_ipad && 'yes' || 'no' }}
+          CI_SCOPE: ${{ inputs.check_scope == 'avplayer-compare' && 'AVPlayer direct MP4; H264/HEVC actual target images; AV1 device check required' || inputs.check_scope == 'aether-compare' && 'Aether encoded PLAY; actual output seeks; retained VLC startup' || inputs.check_scope == 'startup-preroll' && 'one-shot startup; full rewind range; preroll preparation costs; HLS/TS positioning' || inputs.check_scope == 'av1-decoder' && 'AV1 OS capability; native selection; 8/10-bit PLAY; cached seeks' || inputs.check_scope == 'encoded-seek' && 'encoded PLAY cached seeks; resume; buffering boundaries' || inputs.check_scope == 'streaming' && 'HLS streaming; segment cache; quality; recovery' || inputs.check_scope == 'recovery-ui' && 'tunnel recovery; reflow; zoom; comment selection' || inputs.check_scope == 'ts-comments' && 'TS resume/comments + zoom/haptic/font' || inputs.check_scope == 'zoom-font' && 'zoom/haptic/font only' || inputs.network_probe && 'network' || inputs.recheck_playback && 'playback + iPhone/iPad' || inputs.recheck_iphone && 'iPhone UI' || 'iPad UI' }}; stage=${{ inputs.ui_stage || 'all' }}; codec=${{ inputs.network_codec || 'h264' }}; extra-iPad=${{ inputs.check_ipad && 'yes' || 'no' }}
         run: python3 scripts/ci-support.py summary

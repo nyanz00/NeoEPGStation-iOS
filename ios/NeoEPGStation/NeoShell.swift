@@ -492,7 +492,17 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     }
   }
   private func presentPlayer(_ file: NeoVideoFile, recording: NeoRecording, api: NeoAPI, user: String, start: Double, streaming: Int?, streamSubtitle: Int?) {
-    if NeoPlaybackExperiment.usesAether(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
+    let experiment = NeoPlaybackExperiment.selected
+    if experiment == .avplayer, experiment.applies(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
+      let controller = NeoAVPlayerComparison(url: api.url("/videos/\(file.id)/web"), title: recording.name,
+        context: ["baseURL": api.base.absoluteString, "id": recording.id, "disableHistory": true,
+          "channelId": recording.channelId ?? 0, "channelName": recording.channelName ?? "",
+          "name": recording.name, "startAt": recording.startAt, "endAt": recording.endAt,
+          "description": recording.description ?? "", "extended": recording.extended ?? ""])
+      player = controller; controller.onClose = { [weak self] in self?.player = nil }
+      present(controller, animated: true); return
+    }
+    if experiment == .aether, experiment.applies(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
       let controller = NeoAetherPlayer(url: api.url("/videos/\(file.id)"), title: recording.name, initialPosition: 0,
         context: ["baseURL": api.base.absoluteString, "id": recording.id, "disableHistory": true,
           "channelId": recording.channelId ?? 0, "channelName": recording.channelName ?? "",
