@@ -95,7 +95,6 @@ try:
                 subprocess.run(['xcrun', 'simctl', 'launch', device, bundle], env=environment, check=True, timeout=60)
                 deadline = time.monotonic()+100
                 while not all((documents/name).exists() for name in names) and time.monotonic()<deadline:
-                    if inspect and (documents/'aether-renderer-inspection.json').exists(): break
                     time.sleep(.5)
             finally:
                 observer.terminate()

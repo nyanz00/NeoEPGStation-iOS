@@ -4,7 +4,16 @@
 #import <CoreVideo/CoreVideo.h>
 
 // Test-only observer, injected into the unchanged synthetic simulator app.
-// No changes to the engine or its clocks, callbacks, buffers or rendering.
+// No changes to engine clocks, decoding, seeks or rendering. The interposer
+// tests propagation of host-only timestamp tags on Apple's copied output buffer.
+static void TaggedAttachment(CVBufferRef buffer, CFStringRef key, CFTypeRef value, CVAttachmentMode mode) {
+    if (CFEqual(key, CFSTR("NeoAetherSourcePTS")) || CFEqual(key, CFSTR("NeoAetherPictureGeneration")))
+        mode = kCVAttachmentMode_ShouldPropagate;
+    CVBufferSetAttachment(buffer, key, value, mode);
+}
+__attribute__((used, section("__DATA,__interpose"))) static const struct {
+    const void *replacement; const void *original;
+} TaggedAttachmentInterpose = { (const void *)TaggedAttachment, (const void *)CVBufferSetAttachment };
 static void InspectLayer(CALayer *layer, NSMutableArray *rows, NSURL *directory) {
     if ([layer isKindOfClass:AVSampleBufferDisplayLayer.class]) {
         AVSampleBufferDisplayLayer *display = (id)layer;
