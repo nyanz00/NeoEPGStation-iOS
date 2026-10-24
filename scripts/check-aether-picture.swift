@@ -31,7 +31,10 @@ if CommandLine.arguments.count == 5 {
         let ny = roi[1] + (Double(y)+0.5)/64*(roi[3]-roi[1])
         let color = bitmap.colorAt(x: min(bitmap.pixelsWide-1, Int(nx*Double(bitmap.pixelsWide))),
                                   y: min(bitmap.pixelsHigh-1, Int(ny*Double(bitmap.pixelsHigh))))?.usingColorSpace(.deviceRGB)
-        pixels.append((color?.redComponent ?? 0) > 150.0/255 && (color?.greenComponent ?? 0) > 150.0/255)
+        // The AV1 counter is yellow on a black panel. Its green component
+        // shifts during P010-to-BGRA/sRGB conversion; red preserves the glyph.
+        let red = (color?.redComponent ?? 0) > 150.0/255
+        pixels.append(fixture.hasPrefix("av1") ? red : red && (color?.greenComponent ?? 0) > 150.0/255)
       }
     }
     return pixels

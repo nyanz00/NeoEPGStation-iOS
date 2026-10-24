@@ -40,5 +40,16 @@ if full_recheck or network_probe or focused:
                  'Package LiveContainer IPA', 'Build simulator application', 'Verify simulator FFmpeg import isolation']:
         if steps.get(name) != 'success':
             raise RuntimeError(f'Cannot retest a failed application build: {name}')
+# Reuse retained-VLC checks only when both its code/fixtures and the binary
+# are identical. A test-only Aether image matcher correction needs no new VLC run.
+if os.environ.get('CHECK_SCOPE') == 'aether-compare':
+    unchanged = subprocess.run(['git', 'diff', '--quiet', commit, 'HEAD', '--',
+        'scripts/encoded-seek-smoke.py', 'tests/fixtures'], cwd=repository).returncode == 0
+    names = ['startup-h264-mkv-baseline', 'startup-h264-mkv', 'startup-h264-mp4',
+             'startup-hevc10-mkv', 'startup-av1-8-mkv', 'startup-av1-10-mkv']
+    files = [artifact/(name+'-encoded-seek-smoke.json') for name in names]
+    if unchanged and all(p.exists() and json.loads(p.read_text()).get('success') is True for p in files):
+        Path('dist/reused-vlc-startup.json').write_text(json.dumps({'success': True,
+            'sourceRun': info['run'], 'commit': commit, 'cases': names}, indent=2)+'\n')
 Path('dist/reused-build-info.json').write_text(json.dumps(info, indent=2) + '\n')
 print(f'Reusing application build {info["build"]} at {commit} for the requested checks', flush=True)

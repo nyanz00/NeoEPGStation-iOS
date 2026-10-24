@@ -77,8 +77,11 @@ if inspect:
         '-framework', 'UIKit', '-framework', 'AVFoundation', '-framework', 'CoreImage', '-framework', 'CoreVideo',
         '-framework', 'CoreGraphics', '-framework', 'CoreFoundation', '-framework', 'QuartzCore', '-framework', 'Foundation', '-framework', 'IOSurface')
     run('codesign', '--force', '--sign', '-', 'dist/aether-renderer-inspect.dylib')
+fixtures = (os.environ['AETHER_FIXTURE'],) if os.environ.get('AETHER_FIXTURE') else (('hevc-seek-10.mkv',) if inspect else ('encoded-seek-1080.mkv', 'hevc-seek-10.mkv', 'av1-seek-10.mkv'))
+assert set(fixtures) <= set(references), 'Unknown synthetic fixture'
+print('Aether fixture scope:', list(fixtures), flush=True)
 try:
-    for fixture in (('hevc-seek-10.mkv',) if inspect else ('encoded-seek-1080.mkv', 'hevc-seek-10.mkv', 'av1-seek-10.mkv')):
+    for fixture in fixtures:
         try:
             video = Path('tests/fixtures', fixture).read_bytes(); transferred = requests = 0
             assert hashlib.sha256(video).hexdigest() == references[fixture]['sha256']
@@ -132,6 +135,9 @@ try:
             assert len(resumes)+len(decoded) == 5
             assert all(abs(e['mediaMs']-e['targetMs'])<500 for e in resumes)
             assert all(abs(e['decodedMs']-e['targetMs'])<500 for e in decoded)
+            for index in range(5):
+                captured = documents/f'aether-seek-{index}.png'
+                if captured.exists(): shutil.copyfile(captured, Path('dist', fixture+f'-seek-{index}.png'))
             picture_checks = []
             for index, target in enumerate((20, 40, 30, 20, 30)):
                 captured = documents/f'aether-seek-{index}.png'
@@ -155,7 +161,7 @@ try:
 
 finally:
     server.shutdown()
-    Path('dist/aether-comparison-results.json').write_text(json.dumps({'success': len(results)==3 and all(r['success'] for r in results),
+    Path('dist/aether-comparison-results.json').write_text(json.dumps({'success': len(results)==len(fixtures) and all(r['success'] for r in results), 'requestedFixtures': list(fixtures),
         'cases': results, 'hardwarePerformanceVerified': False}, indent=2)+'\n')
 
-if len(results)!=3 or not all(r['success'] for r in results): raise SystemExit(1)
+if len(results)!=len(fixtures) or not all(r['success'] for r in results): raise SystemExit(1)
