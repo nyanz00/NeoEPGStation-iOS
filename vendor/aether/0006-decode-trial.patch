@@ -49,7 +49,7 @@ diff --git a/Sources/AetherEngine/AetherEngine+Diagnostics.swift b/Sources/Aethe
 +    private var isCancelled: Bool { gate.withLock { cancelled } }
 +    private func check() throws { if isCancelled { throw CancellationError() } }
 +    deinit {
-+        for var packet in packets { av_packet_free(&packet) }
++        for packet in packets { var owned: UnsafeMutablePointer<AVPacket>? = packet; av_packet_free(&owned) }
 +        var par = parameters; avcodec_parameters_free(&par)
 +    }
 +    private func failure(_ code: Int) -> NSError { NSError(domain: "NeoDecodeTrial", code: code) }
@@ -258,7 +258,7 @@ diff --git a/Sources/AetherEngine/AetherEngine+Diagnostics.swift b/Sources/Aethe
 +        defer { VTDecompressionSessionWaitForAsynchronousFrames(session); VTDecompressionSessionInvalidate(session) }
 +        var property: CFTypeRef?
 +        guard VTSessionCopyProperty(session, key: kVTDecompressionPropertyKey_UsingHardwareAcceleratedVideoDecoder,
-+            allocator: kCFAllocatorDefault, propertyValueOut: &property) == noErr,
++            allocator: kCFAllocatorDefault, valueOut: &property) == noErr,
 +              (property as? NSNumber)?.boolValue == true else { row.status = "hardware-unverified"; return row }
 +        row.hardware = true; row.initializeMs = (ProcessInfo.processInfo.systemUptime-initialize)*1000
 +        output.started = ProcessInfo.processInfo.systemUptime
