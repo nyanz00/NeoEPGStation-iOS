@@ -5,6 +5,13 @@ test ! -f "$app/main.jsbundle"
 test -f "$app/PrivacyInfo.xcprivacy"
 test -d "$app/Frameworks/VLCKit.framework"
 test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app/Info.plist")" = '18.0'
+build_number="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Info.plist")"
+if [[ ! "$build_number" =~ ^[0-9]+$ ]]; then
+  echo 'Expected a numeric application build number for the IPA filename' >&2
+  exit 1
+fi
+ipa_name="NeoEPGStation-build${build_number}.ipa"
+ipa_path="dist/$ipa_name"
 mkdir -p dist/Payload
 ditto "$app" dist/Payload/NeoEPGStation.app
 mkdir -p dist/notices
@@ -20,8 +27,11 @@ ditto dist/notices dist/Payload/NeoEPGStation.app/ThirdPartyNotices
 # Ad-hoc signing is for LiveContainer import, not App Store distribution.
 codesign --force --deep --sign - dist/Payload/NeoEPGStation.app
 codesign --verify --deep --strict dist/Payload/NeoEPGStation.app
-ditto -c -k --keepParent dist/Payload dist/NeoEPGStation.ipa
-shasum -a 256 dist/NeoEPGStation.ipa > dist/NeoEPGStation.ipa.sha256
+ditto -c -k --keepParent dist/Payload "$ipa_path"
+shasum -a 256 "$ipa_path" > "$ipa_path.sha256"
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  printf 'ipa_path=%s\nipa_name=%s\n' "$ipa_path" "$ipa_name" >> "$GITHUB_OUTPUT"
+fi
 python3 - <<'PY'
 import json, os, plistlib
 from pathlib import Path
@@ -31,6 +41,7 @@ Path('dist/build-info.json').write_text(json.dumps({
     'commit': os.environ.get('GITHUB_SHA'), 'run': os.environ.get('GITHUB_RUN_ID'),
     'minimumOS': info['MinimumOSVersion'], 'bundleIdentifier': info['CFBundleIdentifier'],
     'version': info['CFBundleShortVersionString'], 'build': info['CFBundleVersion'],
+    'ipaFile': f'NeoEPGStation-build{info["CFBundleVersion"]}.ipa',
     'ui': 'Swift / UIKit', 'vlckit': f'4.0.0a25 / Neo VideoToolbox v{source["patchVersion"]}',
     'vlckitSources': source,
     'signing': 'ad-hoc for LiveContainer'

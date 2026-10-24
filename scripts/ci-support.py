@@ -85,11 +85,17 @@ def render_summary(directory, steps, scope, sha, reuse_run=''):
                   '- This run rechecks a saved application; **no new IPA** is generated.']
     else:
         ipa = steps.get('upload-ipa', {})
+        ipa_name = 'NeoEPGStation.ipa'  # Existing builds remain readable.
+        try:
+            info = json.loads((directory / 'build-info.json').read_text(encoding='utf-8'))
+            ipa_name = info.get('ipaFile', ipa_name)
+        except (ValueError, OSError):
+            pass
         url = ipa.get('outputs', {}).get('artifact-url', '')
         if ipa.get('outcome') == 'success' and url:
-            lines += [f'- [Download NeoEPGStation.ipa]({url}) (single file; no ZIP extraction).']
+            lines += [f'- [Download {cell(ipa_name)}]({url}) (single file; no ZIP extraction).']
         else:
-            lines += ['- Installable IPA: `NeoEPGStation.ipa` artifact, available only after successful packaging and upload.']
+            lines += [f'- Installable IPA: `{cell(ipa_name)}` artifact, available only after successful packaging and upload.']
         lines += ['- Logs, screenshots, hashes and simulator application: `NeoEPGStation-iOS-*` diagnostic artifact.']
     for name in ('build-info.json', 'reused-build-info.json'):
         path = directory / name

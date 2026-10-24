@@ -32,7 +32,7 @@ AV1 VideoToolbox対応・選択規則・ソース配布と再ビルドは `vendo
 
 CI補助処理だけの確認は `python -m unittest discover -s tests/ci -v` で実行できる。
 
-Actionsの `NeoEPGStation.ipa` ArtifactからIPAを単体ダウンロードし、
+Actionsの `NeoEPGStation-build<ビルド番号>.ipa` ArtifactからIPAを単体ダウンロードし、
 そのままLiveContainerに取り込む。ZIPの展開は不要。
 検証画像・ログ・ハッシュ・シミュレーターアプリ等は、従来の
 `NeoEPGStation-iOS-<run number>` Artifactに分けて保存する。
