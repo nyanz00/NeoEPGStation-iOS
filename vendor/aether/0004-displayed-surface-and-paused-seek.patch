@@ -1,0 +1,58 @@
+--- a/Sources/AetherEngine/Renderer/SampleBufferRenderer.swift
++++ b/Sources/AetherEngine/Renderer/SampleBufferRenderer.swift
+@@ -2,6 +2,7 @@
+ import AVFoundation
+ import CoreMedia
+ import CoreVideo
++import IOSurface
+ 
+ /// Video renderer using AVSampleBufferDisplayLayer for optimal frame pacing.
+ ///
+@@ -773,6 +774,12 @@
+                               NSNumber(value: pts.seconds), .shouldNotPropagate)
+         CVBufferSetAttachment(outputBuffer, "NeoAetherPictureGeneration" as CFString,
+                               NSNumber(value: pictureGeneration), .shouldNotPropagate)
++        // copyDisplayedPixelBuffer drops custom CVBuffer attachments, but keeps
++        // the same IOSurface. Bind source PTS/generation to that actual picture.
++        if let backing = CVPixelBufferGetIOSurface(outputBuffer)?.takeUnretainedValue() {
++            IOSurfaceSetValue(backing, "NeoAetherSourcePTS" as CFString, NSNumber(value: pts.seconds))
++            IOSurfaceSetValue(backing, "NeoAetherPictureGeneration" as CFString, NSNumber(value: pictureGeneration))
++        }
+         target.enqueue(sampleBuffer)
+         reorderLock.lock()
+         _lastEnqueuedFrame = pixelBuffer
+--- a/Sources/AetherEngine/Native/SoftwarePlaybackHost.swift
++++ b/Sources/AetherEngine/Native/SoftwarePlaybackHost.swift
+@@ -1283,14 +1283,15 @@
+             // Decoder callback is off-main; SampleBufferRenderer is internally locked.
+             self.renderer.enqueue(pixelBuffer: pixelBuffer, pts: pts, hdr10PlusData: hdr10PlusData)
+             // First-frame milestone: demux reached a video packet + decoder produced a pixel buffer.
+-            if self.bumpFramesEnqueued() == 0 {
++            let firstInSession = self.bumpFramesEnqueued() == 0
++            if self.takePausedBeforeFirstFrame() {
++                // A stopped seek needs one fresh picture, just like a paused
++                // startup. Drain it before parking the loops again; never run audio.
++                self.renderer.drainReorderBuffer()
++                self.presentFirstFrameUnderPause(pts: pts.seconds, generation: self.decodeGeneration)
++            }
++            if firstInSession {
+                 self.noteFirstFrameEnqueuedForDisplayFallback()
+-                if self.takePausedBeforeFirstFrame() {
+-                    // The reorder buffer holds frames before it hands one to the layer, and the
+-                    // loops park again from here: without the drain the frame never leaves it.
+-                    self.renderer.drainReorderBuffer()
+-                    self.presentFirstFrameUnderPause(pts: pts.seconds, generation: self.decodeGeneration)
+-                }
+                 let pfType = CVPixelBufferGetPixelFormatType(pixelBuffer)
+                 EngineLog.emit(
+                     "[SWHost] first video frame enqueued: "
+@@ -1962,6 +1963,9 @@
+             // Paused seek: anchor at target with rate 0 so play() resumes from the seek position (without this, scrubs freeze or drop all samples).
+             audioOutput?.seekClock(to: targetTime, rate: 0)
+             pausedByHost = true
++            // Permit exactly the first decoded post-target picture through a
++            // paused transport. Its callback clears this flag and parks the feeder.
++            pausedBeforeFirstFrame = true
+         }
+         // Arm now so the demux loop doesn't re-arm at stale initialClockTime (a pre-first-audio seek snapped back to session start without this).
+         clockArmed = true

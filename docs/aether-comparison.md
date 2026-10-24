@@ -22,7 +22,7 @@ build recipes. FFmpeg components remain dynamically embedded beside VLCKit.
 
 Measure `seek.start` to `seek.videoResume`; keep `aether.seekLanded` separate.
 A software result requires the pixel buffer actually displayed by the sample
-buffer renderer, tagged with source PTS and flush generation; a prior generation
+buffer renderer, identified by source PTS and flush generation on its IOSurface; a prior generation
 cannot satisfy a new seek. Native output requires a display-ready AVPlayerLayer
 and a pixel buffer whose item PTS maps through PresentationAxisMap to the target.
 The generic sourceTimeFollowsPicture flag is not picture evidence. Startup also
@@ -82,3 +82,22 @@ picture PTS/generation gates still replace the old clock-only seek assertion.
 All active source patches are hash verified and retained with source recipes.
 
 The corrected device/simulator build and scoped playback verification are pending.
+
+Build 249 passed all 145 FFmpeg import bindings on both architectures, and the
+runtime descriptors/dav1d agreed with the original headers. A displayed synthetic
+H.264 frame was captured from the unchanged binary. Calibration runs 253/256
+established that copyDisplayedPixelBuffer strips custom CVBuffer attachments,
+even when propagation is requested, but retains IOSurface metadata (42 observed
+tag writes, source PTS/generation present on the actual displayed surface).
+Patch 0004 stores that identity on the surface, not on an optimistic clock.
+A native output observed just before the seek callback is retained for that same
+pending seek, so a paused frame is not consumed and lost by the observer.
+
+The software host previously parked its feeder on every paused seek, moving its
+clock and reporting landed without decoding a target picture. Patch 0004 reuses
+the existing paused-first-frame gate to decode/drain one post-target frame at a
+stopped audio clock, then parks again; it does not resume paused audio. The
+comparison probe requires an actual displayed target picture for that case too.
+A retained VLC cost assertion now permits one admitted producer frame between
+sample preparation/submission and the asynchronous stats callback; larger gaps,
+inversions and accounting errors remain failures.

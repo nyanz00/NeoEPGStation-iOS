@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tarfile
+from aether_source import prepare_sources
 
 lock = Path('ios/NeoEPGStation.xcworkspace/xcshareddata/swiftpm/Package.resolved')
 pins = json.loads(lock.read_text())['pins']
@@ -29,14 +30,9 @@ if digest == recipe['upstreamSHA256']:
 assert hashlib.sha256(source.read_bytes()).hexdigest() == recipe['patchedSHA256'], 'Unexpected engine modifications'
 # Every local change is hash checked, idempotent on dependency-cache restores,
 # and shipped with the source recipe archive. No unverified package edits.
+prepare_sources(engine, recipe.get('additionalPatches', []), Path('vendor/aether'))
 for change in recipe.get('additionalPatches', []):
     extra = Path('vendor/aether')/change['file']
-    assert hashlib.sha256(extra.read_bytes()).hexdigest() == change['sha256']
-    before = [hashlib.sha256((engine/f['path']).read_bytes()).hexdigest() for f in change['sources']]
-    if before == [f['upstreamSHA256'] for f in change['sources']]:
-        subprocess.run(['git', '-C', str(engine), 'apply', '--check', str(extra.resolve())], check=True)
-        subprocess.run(['git', '-C', str(engine), 'apply', str(extra.resolve())], check=True)
-    assert [hashlib.sha256((engine/f['path']).read_bytes()).hexdigest() for f in change['sources']] == [f['patchedSHA256'] for f in change['sources']]
     shutil.copyfile(extra, notice/extra.name)
 # Undo the retired header experiment on a previously prepared checkout.
 # The dependency headers themselves are correct; cross-library bindings were not.

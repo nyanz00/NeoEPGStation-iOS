@@ -20,6 +20,22 @@
           "patchedSHA256": "fbcdf3e7e541104e90aed2c4dba8c62c4b47ed6e026d5bc5ee7a70723ff79993"
         }
       ]
+    },
+    {
+      "file": "0004-displayed-surface-and-paused-seek.patch",
+      "sha256": "9e9ca359ae2a6d32f698621a066f3cce4f9526117276da00c04384d5facdaee5",
+      "sources": [
+        {
+          "path": "Sources/AetherEngine/Renderer/SampleBufferRenderer.swift",
+          "upstreamSHA256": "fbcdf3e7e541104e90aed2c4dba8c62c4b47ed6e026d5bc5ee7a70723ff79993",
+          "patchedSHA256": "ef91563588523cc06ffad3e081f122763e76988ca07493c0a1e50dd0c2c10042"
+        },
+        {
+          "path": "Sources/AetherEngine/Native/SoftwarePlaybackHost.swift",
+          "upstreamSHA256": "2301cd464164bfaa03c1d572f050914fac79182559649584886ffbb6b9af20a6",
+          "patchedSHA256": "b6ce77a6072b82a7abcaaaed94da9b7a0c49ad594e42e755aad6df1fcf321689"
+        }
+      ]
     }
   ],
   "retiredHeaderCorrection": {

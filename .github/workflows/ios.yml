@@ -353,8 +353,6 @@ jobs:
           codesign --verify --deep --strict build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app
       - name: Check reused application UI
         id: reused-checks
-        env:
-          AETHER_INSPECT_RENDERER: ${{ inputs.check_scope == 'aether-compare' && '1' || '0' }}
         run: |
           if [ "$CHECK_SCOPE" = "av1-decoder" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
@@ -369,11 +367,7 @@ jobs:
             python3 -u scripts/simulator-smoke.py --prepare
             comparison_failed=0
             python3 -u scripts/aether-comparison-smoke.py || comparison_failed=1
-            # Inspection runs collect evidence from an unchanged failing binary;
-            # they do not repeat the unrelated retained-VLC checks.
-            if [ "$AETHER_INSPECT_RENDERER" != "1" ]; then
-              python3 -u scripts/encoded-seek-smoke.py --startup || comparison_failed=1
-            fi
+            python3 -u scripts/encoded-seek-smoke.py --startup || comparison_failed=1
             exit "$comparison_failed"
           elif [ "$CHECK_SCOPE" = "encoded-seek" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
