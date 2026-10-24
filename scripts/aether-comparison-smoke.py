@@ -64,6 +64,13 @@ class Handler(BaseHTTPRequestHandler):
 server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 results = []
+inspect = os.environ.get('AETHER_INSPECT_RENDERER') == '1'
+if inspect:
+    sdk = run('xcrun', '--sdk', 'iphonesimulator', '--show-sdk-path')
+    run('xcrun', 'clang', '-dynamiclib', '-fobjc-arc', '-target', 'arm64-apple-ios18.0-simulator',
+        '-isysroot', sdk, 'scripts/aether-renderer-inspect.m', '-o', 'dist/aether-renderer-inspect.dylib',
+        '-framework', 'UIKit', '-framework', 'AVFoundation', '-framework', 'CoreImage', '-framework', 'CoreVideo')
+    run('codesign', '--force', '--sign', '-', 'dist/aether-renderer-inspect.dylib')
 try:
     for fixture in ('encoded-seek-1080.mkv', 'hevc-seek-10.mkv', 'av1-seek-10.mkv'):
         video = Path('tests/fixtures', fixture).read_bytes(); transferred = requests = 0
@@ -73,6 +80,10 @@ try:
         for name in names:
             (documents/name).unlink(missing_ok=True)
         environment = dict(os.environ, SIMCTL_CHILD_NEO_EPG_AETHER_COMPARE=f'http://127.0.0.1:{server.server_port}')
+        if inspect:
+            environment['SIMCTL_CHILD_DYLD_INSERT_LIBRARIES'] = str(Path('dist/aether-renderer-inspect.dylib').resolve())
+            for extra in ('aether-renderer-inspection.json', 'aether-renderer-picture.png'):
+                (documents/extra).unlink(missing_ok=True)
         # Synthetic sources only: collect the engine's release-visible routing and
         # renderer diagnostics. No real server URL or credentials enter this log.
         with Path('dist', fixture+'-aether-engine.log').open('w') as log:
@@ -91,6 +102,9 @@ try:
         for name in names:
             if (documents/name).exists():
                 shutil.copyfile(documents/name, Path('dist', fixture+'-'+name))
+        if inspect:
+            for extra in ('aether-renderer-inspection.json', 'aether-renderer-picture.png'):
+                if (documents/extra).exists(): shutil.copyfile(documents/extra, Path('dist', fixture+'-'+extra))
         picture = documents/'aether-comparison-picture.png'
         if picture.exists(): shutil.copyfile(picture, Path('dist', fixture+'-aether-picture.png'))
         assert picture.exists(), 'No actual output picture for '+fixture

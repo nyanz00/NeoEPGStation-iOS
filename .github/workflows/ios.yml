@@ -353,6 +353,8 @@ jobs:
           codesign --verify --deep --strict build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app
       - name: Check reused application UI
         id: reused-checks
+        env:
+          AETHER_INSPECT_RENDERER: ${{ inputs.check_scope == 'aether-compare' && '1' || '0' }}
         run: |
           if [ "$CHECK_SCOPE" = "av1-decoder" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
