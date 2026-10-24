@@ -9,7 +9,7 @@ static void InspectLayer(CALayer *layer, NSMutableArray *rows, NSURL *directory)
     if ([layer isKindOfClass:AVSampleBufferDisplayLayer.class]) {
         AVSampleBufferDisplayLayer *display = (id)layer;
         AVSampleBufferVideoRenderer *renderer = display.sampleBufferRenderer;
-        CVPixelBufferRef pixel = [renderer displayedPixelBuffer];
+        CVPixelBufferRef pixel = [renderer copyDisplayedPixelBuffer];
         CFTypeRef pts = pixel ? CVBufferCopyAttachment(pixel, CFSTR("NeoAetherSourcePTS"), NULL) : NULL;
         CFTypeRef gen = pixel ? CVBufferCopyAttachment(pixel, CFSTR("NeoAetherPictureGeneration"), NULL) : NULL;
         [rows addObject:@{@"kind":@"sample", @"ready":@(display.isReadyForDisplay),

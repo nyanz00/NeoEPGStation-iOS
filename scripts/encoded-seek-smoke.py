@@ -158,8 +158,13 @@ try:
             prerolls = [e for e in events if e['event'] == 'vlc.prerollReady']
             assert len(costs) == len(prerolls), (costs, prerolls)
             for cost, preroll in zip(costs, prerolls):
-                assert cost['submittedFrames'] == cost['sampleBuffers'], cost
-                assert cost['sampleBuffers'] + preroll['droppedFrames'] == preroll['frames'], (cost, preroll)
+                # One serial producer admits a frame before preparing its sample
+                # and submitting it. ReportPreroll runs in the asynchronous VT
+                # callback under the same stats lock; that one in-flight producer
+                # may be between these stages. Reject larger gaps or inversions.
+                assert 0 <= cost['sampleBuffers'] - cost['submittedFrames'] <= 1, cost
+                accounted = cost['sampleBuffers'] + preroll['droppedFrames']
+                assert 0 <= preroll['frames'] - accounted <= 1, (cost, preroll)
                 assert cost['prepareMs'] >= cost['sampleMs'] >= 0 and cost['submitCallMs'] >= 0, cost
                 assert cost['callbackLatencySumMs'] >= 0 and cost['completionTailMs'] >= 0, cost
                 if cost['codec'] == 1:
