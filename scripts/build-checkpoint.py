@@ -44,13 +44,18 @@ def prepare():
     common = run('git', '-C', SOURCE, 'show', 'HEAD:include/dav1d/common.h')+'\n'
     common = common.replace('#ifndef DAV1D_API', prefix+'\n#ifdef _WIN32\n#define DAV1D_API\n#else\n#define DAV1D_API __attribute__((visibility("hidden")))\n#endif\n#ifndef DAV1D_API', 1)
     write_changed(SOURCE/'include/dav1d/common.h', common.encode())
-    for src, dst in [('experiments/dav1d-checkpoint/checkpoint.c','src/neo_checkpoint.c'),
-                     ('experiments/dav1d-checkpoint/neo_checkpoint.h','include/neo_checkpoint.h'),
+    for src, dst in [('vendor/checkpoint/core.c','src/neo_checkpoint.c'),
+                     ('vendor/checkpoint/neo_checkpoint.h','include/neo_checkpoint.h'),
+                     ('vendor/checkpoint/packed.c','src/neo_packed_checkpoint.c'),
+                     ('vendor/checkpoint/packed.h','include/packed.h'),
                      ('vendor/checkpoint/lab.c','src/neo_checkpoint_lab.c'),
                      ('vendor/checkpoint/NeoCheckpointLab.h','include/NeoCheckpointLab.h')]:
         write_changed(SOURCE/dst, (ROOT/src).read_bytes())
     meson = run('git','-C',SOURCE,'show','HEAD:src/meson.build')+'\n'
-    write_changed(SOURCE/'src/meson.build', meson.replace("'cdf.c',", "'cdf.c',\n    'neo_checkpoint.c',\n    'neo_checkpoint_lab.c',", 1).encode())
+    # packed.c includes core.c: compile it once, not as two translation units.
+    write_changed(SOURCE/'src/meson.build', meson.replace("'cdf.c',", "'cdf.c',\n    'neo_packed_checkpoint.c',\n    'neo_checkpoint_lab.c',", 1).encode())
+    picture = run('git','-C',SOURCE,'show','HEAD:src/picture.c')+'\n'
+    write_changed(SOURCE/'src/picture.c',picture.encode()+(ROOT/'vendor/checkpoint/picture-helper.inc').read_bytes())
     return public
 
 
@@ -86,9 +91,10 @@ def main():
     metadata={'revision':PIN,'sdk':args.sdk,'publicRenames':public,
               'librarySHA256':hashlib.sha256(library.read_bytes()).hexdigest(),
               'sourceSHA256':{p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in (
-                  'scripts/build-checkpoint.py','experiments/dav1d-checkpoint/checkpoint.c',
-                  'experiments/dav1d-checkpoint/neo_checkpoint.h','vendor/checkpoint/lab.c',
-                  'vendor/checkpoint/NeoCheckpointLab.h')},
+                  'scripts/build-checkpoint.py','vendor/checkpoint/core.c',
+                  'vendor/checkpoint/neo_checkpoint.h','vendor/checkpoint/packed.c',
+                  'vendor/checkpoint/packed.h','vendor/checkpoint/picture-helper.inc',
+                  'vendor/checkpoint/lab.c','vendor/checkpoint/NeoCheckpointLab.h')},
               'normalPlaybackDecoderUnchanged':True}
     (output/'provenance.json').write_text(json.dumps(metadata,indent=2)+'\n')
     notice=ROOT/'dist/notices/CheckpointDav1d'

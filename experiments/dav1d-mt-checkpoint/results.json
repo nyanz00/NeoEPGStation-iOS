@@ -1,0 +1,1222 @@
+{
+  "upstreamRevision": "54706fc6bc0cdecab7e9593974a4039cc038fca7",
+  "method": "drained immutable checkpoints; worker idle synchronization; 5 repeated cross-keyframe full-pixel restores; timing excludes verification/network/UI",
+  "sourceSHA256": {
+    "experiments/dav1d-mt-checkpoint/core.c": "4fbe9ef94b677c650fb4f4bd4c23502c7e836fca0c0cd5b434ca9d649dbc1f03",
+    "experiments/dav1d-mt-checkpoint/packed.c": "d28b7d5450d155aa734864c44a6ee5587a73b28b216d019f7e4ac6c012f58c9f",
+    "experiments/dav1d-mt-checkpoint/probe.c": "2d74dccd2f036ce1a532dac27b9b4365f5506398b1a34e1a7dfc9379c853bad4",
+    "experiments/dav1d-mt-checkpoint/core.h": "a8eb2c633a090b76ec6651c022cd355c0aa62c2c0dabf9e99b2f08c755927b8c",
+    "experiments/dav1d-mt-checkpoint/picture-helper.inc": "cf1bea59bec12dbc2b78ee01f16afc8a853343786e887d7e08fc2955dbc3bbaf",
+    "experiments/dav1d-mt-checkpoint/run.py": "3a0b086871edf4349fcce7930664109868900dea72f4a5699113c6104cda04d2",
+    "experiments/dav1d-packed-checkpoint/packed.h": "756f22d7aef08e211bc697aedd0488513a91e66f59d2990a7c253b8d43d8481a",
+    "experiments/dav1d-checkpoint/probe.c": "5af8ae2c60019819b9d8df97897544acf9e741715b0e08a18d705b605fba9886",
+    "experiments/dav1d-parallel/probe.c": "5c5e0f697fe8dfd40e7043430063100e52f7391d4917f5528f5d25f3a21ee492"
+  },
+  "compiler": "gcc.EXE (Rev3, Built by MSYS2 project) 16.2.0",
+  "cases": [
+    {
+      "success": true,
+      "threads": 1,
+      "frameContexts": 1,
+      "affinityMask": 1365,
+      "checkpointSeconds": 18.021,
+      "targetSeconds": 20.021,
+      "endSeconds": 30.021,
+      "sameOwnerDecoder": true,
+      "fullPipelineDrained": true,
+      "crossedRealKeyframe": true,
+      "multiPointStressTargets": 0,
+      "unpacked": {
+        "heldBytes": 1367544,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": false,
+        "fullPixelComparedFrames": 1728,
+        "fullPixelComparedBytes": 149299200,
+        "saveMs": [
+          0.0014,
+          0.0023,
+          0.0017,
+          0.0016,
+          0.0017
+        ],
+        "restoreMs": [
+          0.0027,
+          0.003,
+          0.0034,
+          0.0022,
+          0.004
+        ],
+        "restoreAndSuffixMs": [
+          10.7439,
+          10.2633,
+          9.3189,
+          19.0953,
+          9.3975
+        ],
+        "saveMsMedian": 0.0017,
+        "restoreMsMedian": 0.003,
+        "restoreAndSuffixMsMedian": 10.2633,
+        "heldMiB": 1.3041915893554688
+      },
+      "packed": {
+        "heldBytes": 1364520,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": true,
+        "fullPixelComparedFrames": 1728,
+        "fullPixelComparedBytes": 149299200,
+        "saveMs": [
+          0.3634,
+          0.2142,
+          0.2059,
+          0.2283,
+          0.2094
+        ],
+        "restoreMs": [
+          0.0799,
+          0.1029,
+          0.1017,
+          0.0861,
+          0.0927
+        ],
+        "restoreAndSuffixMs": [
+          9.068,
+          9.1358,
+          9.6997,
+          8.7044,
+          9.7458
+        ],
+        "saveMsMedian": 0.2142,
+        "restoreMsMedian": 0.0927,
+        "restoreAndSuffixMsMedian": 9.1358,
+        "heldMiB": 1.3013076782226562
+      },
+      "case": "fixture-8bit"
+    },
+    {
+      "success": true,
+      "threads": 2,
+      "frameContexts": 2,
+      "affinityMask": 1365,
+      "checkpointSeconds": 18.021,
+      "targetSeconds": 20.021,
+      "endSeconds": 30.021,
+      "sameOwnerDecoder": true,
+      "fullPipelineDrained": true,
+      "crossedRealKeyframe": true,
+      "multiPointStressTargets": 0,
+      "unpacked": {
+        "heldBytes": 1367608,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": false,
+        "fullPixelComparedFrames": 1728,
+        "fullPixelComparedBytes": 149299200,
+        "saveMs": [
+          0.0017,
+          0.0023,
+          0.0016,
+          0.0021,
+          0.0018
+        ],
+        "restoreMs": [
+          0.0424,
+          0.0403,
+          0.042,
+          0.0415,
+          0.0335
+        ],
+        "restoreAndSuffixMs": [
+          7.7706,
+          6.8021,
+          6.9965,
+          8.0013,
+          7.3635
+        ],
+        "saveMsMedian": 0.0018,
+        "restoreMsMedian": 0.0415,
+        "restoreAndSuffixMsMedian": 7.3635,
+        "heldMiB": 1.3042526245117188
+      },
+      "packed": {
+        "heldBytes": 1364520,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": true,
+        "fullPixelComparedFrames": 1728,
+        "fullPixelComparedBytes": 149299200,
+        "saveMs": [
+          0.1901,
+          0.2463,
+          0.2163,
+          0.2052,
+          0.1824
+        ],
+        "restoreMs": [
+          0.1308,
+          0.1725,
+          0.12,
+          0.1228,
+          0.1226
+        ],
+        "restoreAndSuffixMs": [
+          7.0612,
+          7.5191,
+          7.3104,
+          7.1425,
+          7.5793
+        ],
+        "saveMsMedian": 0.2052,
+        "restoreMsMedian": 0.1228,
+        "restoreAndSuffixMsMedian": 7.3104,
+        "heldMiB": 1.3013076782226562
+      },
+      "case": "fixture-8bit"
+    },
+    {
+      "success": true,
+      "threads": 4,
+      "frameContexts": 2,
+      "affinityMask": 1365,
+      "checkpointSeconds": 18.021,
+      "targetSeconds": 20.021,
+      "endSeconds": 30.021,
+      "sameOwnerDecoder": true,
+      "fullPipelineDrained": true,
+      "crossedRealKeyframe": true,
+      "multiPointStressTargets": 0,
+      "unpacked": {
+        "heldBytes": 1367608,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": false,
+        "fullPixelComparedFrames": 1728,
+        "fullPixelComparedBytes": 149299200,
+        "saveMs": [
+          0.0017,
+          0.0018,
+          0.0021,
+          0.0023,
+          0.003
+        ],
+        "restoreMs": [
+          0.038,
+          0.0354,
+          0.0463,
+          0.0414,
+          0.0388
+        ],
+        "restoreAndSuffixMs": [
+          6.9819,
+          7.0041,
+          8.8287,
+          8.5887,
+          7.6748
+        ],
+        "saveMsMedian": 0.0021,
+        "restoreMsMedian": 0.0388,
+        "restoreAndSuffixMsMedian": 7.6748,
+        "heldMiB": 1.3042526245117188
+      },
+      "packed": {
+        "heldBytes": 1364520,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": true,
+        "fullPixelComparedFrames": 1728,
+        "fullPixelComparedBytes": 149299200,
+        "saveMs": [
+          0.2708,
+          0.2223,
+          0.2383,
+          0.2128,
+          0.2217
+        ],
+        "restoreMs": [
+          0.1202,
+          0.1303,
+          0.1362,
+          0.117,
+          0.1327
+        ],
+        "restoreAndSuffixMs": [
+          7.6774,
+          7.103,
+          7.2686,
+          6.956,
+          7.0541
+        ],
+        "saveMsMedian": 0.2223,
+        "restoreMsMedian": 0.1303,
+        "restoreAndSuffixMsMedian": 7.103,
+        "heldMiB": 1.3013076782226562
+      },
+      "case": "fixture-8bit"
+    },
+    {
+      "success": true,
+      "threads": 6,
+      "frameContexts": 3,
+      "affinityMask": 1365,
+      "checkpointSeconds": 19.813,
+      "targetSeconds": 20.021,
+      "endSeconds": 30.021,
+      "sameOwnerDecoder": true,
+      "fullPipelineDrained": true,
+      "crossedRealKeyframe": true,
+      "multiPointStressTargets": 130,
+      "unpacked": {
+        "heldBytes": 1367608,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": false,
+        "fullPixelComparedFrames": 1470,
+        "fullPixelComparedBytes": 127008000,
+        "saveMs": [
+          0.0034,
+          0.0026,
+          0.002,
+          0.0032,
+          0.0026
+        ],
+        "restoreMs": [
+          0.0653,
+          0.0538,
+          0.0615,
+          0.0333,
+          0.0648
+        ],
+        "restoreAndSuffixMs": [
+          0.641,
+          0.4889,
+          0.5438,
+          0.5744,
+          0.5108
+        ],
+        "saveMsMedian": 0.0026,
+        "restoreMsMedian": 0.0615,
+        "restoreAndSuffixMsMedian": 0.5438,
+        "heldMiB": 1.3042526245117188
+      },
+      "packed": {
+        "heldBytes": 1364520,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": true,
+        "fullPixelComparedFrames": 1470,
+        "fullPixelComparedBytes": 127008000,
+        "saveMs": [
+          0.2448,
+          0.4202,
+          0.2153,
+          0.2558,
+          0.3235
+        ],
+        "restoreMs": [
+          0.1734,
+          0.152,
+          0.1471,
+          0.1667,
+          0.1574
+        ],
+        "restoreAndSuffixMs": [
+          0.8146,
+          0.6233,
+          0.6853,
+          0.6805,
+          0.6085
+        ],
+        "saveMsMedian": 0.2558,
+        "restoreMsMedian": 0.1574,
+        "restoreAndSuffixMsMedian": 0.6805,
+        "heldMiB": 1.3013076782226562
+      },
+      "case": "fixture-8bit"
+    },
+    {
+      "success": true,
+      "threads": 1,
+      "frameContexts": 1,
+      "affinityMask": 1365,
+      "checkpointSeconds": 18.021,
+      "targetSeconds": 20.021,
+      "endSeconds": 30.021,
+      "sameOwnerDecoder": true,
+      "fullPipelineDrained": true,
+      "crossedRealKeyframe": true,
+      "multiPointStressTargets": 0,
+      "unpacked": {
+        "heldBytes": 2547192,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": false,
+        "fullPixelComparedFrames": 1728,
+        "fullPixelComparedBytes": 298598400,
+        "saveMs": [
+          0.0011,
+          0.0016,
+          0.0019,
+          0.0016,
+          0.002
+        ],
+        "restoreMs": [
+          0.0027,
+          0.0023,
+          0.0024,
+          0.0025,
+          0.0021
+        ],
+        "restoreAndSuffixMs": [
+          9.2214,
+          9.8971,
+          9.3842,
+          9.2843,
+          9.0024
+        ],
+        "saveMsMedian": 0.0016,
+        "restoreMsMedian": 0.0024,
+        "restoreAndSuffixMsMedian": 9.2843,
+        "heldMiB": 2.4291915893554688
+      },
+      "packed": {
+        "heldBytes": 2025768,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": true,
+        "fullPixelComparedFrames": 1728,
+        "fullPixelComparedBytes": 298598400,
+        "saveMs": [
+          0.5145,
+          0.491,
+          0.5699,
+          0.5138,
+          0.5808
+        ],
+        "restoreMs": [
+          0.2722,
+          0.2936,
+          0.2803,
+          0.2727,
+          0.292
+        ],
+        "restoreAndSuffixMs": [
+          9.3087,
+          9.355,
+          9.259,
+          9.6249,
+          9.3714
+        ],
+        "saveMsMedian": 0.5145,
+        "restoreMsMedian": 0.2803,
+        "restoreAndSuffixMsMedian": 9.355,
+        "heldMiB": 1.9319229125976562
+      },
+      "case": "fixture-10bit"
+    },
+    {
+      "success": true,
+      "threads": 2,
+      "frameContexts": 2,
+      "affinityMask": 1365,
+      "checkpointSeconds": 18.021,
+      "targetSeconds": 20.021,
+      "endSeconds": 30.021,
+      "sameOwnerDecoder": true,
+      "fullPipelineDrained": true,
+      "crossedRealKeyframe": true,
+      "multiPointStressTargets": 0,
+      "unpacked": {
+        "heldBytes": 2547256,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": false,
+        "fullPixelComparedFrames": 1728,
+        "fullPixelComparedBytes": 298598400,
+        "saveMs": [
+          0.0025,
+          0.0042,
+          0.0025,
+          0.002,
+          0.0029
+        ],
+        "restoreMs": [
+          0.0722,
+          0.0695,
+          0.0678,
+          0.0738,
+          0.0751
+        ],
+        "restoreAndSuffixMs": [
+          7.2794,
+          6.9042,
+          7.2155,
+          6.9875,
+          6.835
+        ],
+        "saveMsMedian": 0.0025,
+        "restoreMsMedian": 0.0722,
+        "restoreAndSuffixMsMedian": 6.9875,
+        "heldMiB": 2.4292526245117188
+      },
+      "packed": {
+        "heldBytes": 2025768,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": true,
+        "fullPixelComparedFrames": 1728,
+        "fullPixelComparedBytes": 298598400,
+        "saveMs": [
+          0.4913,
+          0.5027,
+          0.5354,
+          0.522,
+          0.5139
+        ],
+        "restoreMs": [
+          0.3785,
+          0.3572,
+          0.4685,
+          0.3576,
+          0.4261
+        ],
+        "restoreAndSuffixMs": [
+          7.274,
+          7.345,
+          7.9598,
+          7.2509,
+          7.1143
+        ],
+        "saveMsMedian": 0.5139,
+        "restoreMsMedian": 0.3785,
+        "restoreAndSuffixMsMedian": 7.274,
+        "heldMiB": 1.9319229125976562
+      },
+      "case": "fixture-10bit"
+    },
+    {
+      "success": true,
+      "threads": 4,
+      "frameContexts": 2,
+      "affinityMask": 1365,
+      "checkpointSeconds": 18.021,
+      "targetSeconds": 20.021,
+      "endSeconds": 30.021,
+      "sameOwnerDecoder": true,
+      "fullPipelineDrained": true,
+      "crossedRealKeyframe": true,
+      "multiPointStressTargets": 0,
+      "unpacked": {
+        "heldBytes": 2547256,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": false,
+        "fullPixelComparedFrames": 1728,
+        "fullPixelComparedBytes": 298598400,
+        "saveMs": [
+          0.0015,
+          0.0021,
+          0.0025,
+          0.0023,
+          0.0026
+        ],
+        "restoreMs": [
+          0.0892,
+          0.0689,
+          0.0683,
+          0.08,
+          0.0845
+        ],
+        "restoreAndSuffixMs": [
+          6.7388,
+          6.3872,
+          6.7413,
+          7.4994,
+          6.8271
+        ],
+        "saveMsMedian": 0.0023,
+        "restoreMsMedian": 0.08,
+        "restoreAndSuffixMsMedian": 6.7413,
+        "heldMiB": 2.4292526245117188
+      },
+      "packed": {
+        "heldBytes": 2025768,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": true,
+        "fullPixelComparedFrames": 1728,
+        "fullPixelComparedBytes": 298598400,
+        "saveMs": [
+          0.4493,
+          0.6287,
+          0.5129,
+          0.5942,
+          0.4971
+        ],
+        "restoreMs": [
+          0.3781,
+          0.4497,
+          0.3609,
+          0.3829,
+          0.3787
+        ],
+        "restoreAndSuffixMs": [
+          6.7599,
+          7.5712,
+          7.0294,
+          6.7107,
+          6.6946
+        ],
+        "saveMsMedian": 0.5129,
+        "restoreMsMedian": 0.3787,
+        "restoreAndSuffixMsMedian": 6.7599,
+        "heldMiB": 1.9319229125976562
+      },
+      "case": "fixture-10bit"
+    },
+    {
+      "success": true,
+      "threads": 6,
+      "frameContexts": 3,
+      "affinityMask": 1365,
+      "checkpointSeconds": 19.813,
+      "targetSeconds": 20.021,
+      "endSeconds": 30.021,
+      "sameOwnerDecoder": true,
+      "fullPipelineDrained": true,
+      "crossedRealKeyframe": true,
+      "multiPointStressTargets": 130,
+      "unpacked": {
+        "heldBytes": 2547256,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": false,
+        "fullPixelComparedFrames": 1470,
+        "fullPixelComparedBytes": 254016000,
+        "saveMs": [
+          0.0022,
+          0.0024,
+          0.0022,
+          0.0034,
+          0.0028
+        ],
+        "restoreMs": [
+          0.1712,
+          0.1189,
+          0.1053,
+          0.1002,
+          0.1275
+        ],
+        "restoreAndSuffixMs": [
+          0.634,
+          0.5555,
+          0.5431,
+          0.6068,
+          0.6208
+        ],
+        "saveMsMedian": 0.0024,
+        "restoreMsMedian": 0.1189,
+        "restoreAndSuffixMsMedian": 0.6068,
+        "heldMiB": 2.4292526245117188
+      },
+      "packed": {
+        "heldBytes": 2025768,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": true,
+        "fullPixelComparedFrames": 1470,
+        "fullPixelComparedBytes": 254016000,
+        "saveMs": [
+          0.5073,
+          0.4895,
+          0.4935,
+          0.5679,
+          0.5052
+        ],
+        "restoreMs": [
+          0.4184,
+          0.4037,
+          0.4031,
+          0.3864,
+          0.3889
+        ],
+        "restoreAndSuffixMs": [
+          0.8644,
+          0.8684,
+          0.8527,
+          0.8519,
+          0.8785
+        ],
+        "saveMsMedian": 0.5052,
+        "restoreMsMedian": 0.4031,
+        "restoreAndSuffixMsMedian": 0.8644,
+        "heldMiB": 1.9319229125976562
+      },
+      "case": "fixture-10bit"
+    },
+    {
+      "success": true,
+      "threads": 1,
+      "frameContexts": 1,
+      "affinityMask": 1365,
+      "checkpointSeconds": 14.031,
+      "targetSeconds": 20.037,
+      "endSeconds": 30.005,
+      "sameOwnerDecoder": true,
+      "fullPipelineDrained": true,
+      "crossedRealKeyframe": true,
+      "multiPointStressTargets": 0,
+      "unpacked": {
+        "heldBytes": 27682332,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": false,
+        "fullPixelComparedFrames": 2298,
+        "fullPixelComparedBytes": 10721548800,
+        "saveMs": [
+          0.0052,
+          0.0025,
+          0.0028,
+          0.0029,
+          0.0027
+        ],
+        "restoreMs": [
+          0.0051,
+          0.0057,
+          0.0057,
+          0.0042,
+          0.0042
+        ],
+        "restoreAndSuffixMs": [
+          623.5284,
+          585.1298,
+          585.2058,
+          589.3392,
+          582.0342
+        ],
+        "saveMsMedian": 0.0028,
+        "restoreMsMedian": 0.0051,
+        "restoreAndSuffixMsMedian": 585.2058,
+        "heldMiB": 26.39992904663086
+      },
+      "packed": {
+        "heldBytes": 18932700,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": true,
+        "fullPixelComparedFrames": 2298,
+        "fullPixelComparedBytes": 10721548800,
+        "saveMs": [
+          5.8922,
+          5.925,
+          5.7633,
+          5.7606,
+          6.1186
+        ],
+        "restoreMs": [
+          4.9734,
+          4.3311,
+          5.3941,
+          4.6653,
+          3.9509
+        ],
+        "restoreAndSuffixMs": [
+          583.0146,
+          580.9168,
+          548.2429,
+          581.7797,
+          570.2077
+        ],
+        "saveMsMedian": 5.8922,
+        "restoreMsMedian": 4.6653,
+        "restoreAndSuffixMsMedian": 580.9168,
+        "heldMiB": 18.05562973022461
+      },
+      "case": "recording-10bit-long-gop"
+    },
+    {
+      "success": true,
+      "threads": 2,
+      "frameContexts": 2,
+      "affinityMask": 1365,
+      "checkpointSeconds": 14.031,
+      "targetSeconds": 20.037,
+      "endSeconds": 30.005,
+      "sameOwnerDecoder": true,
+      "fullPipelineDrained": true,
+      "crossedRealKeyframe": true,
+      "multiPointStressTargets": 0,
+      "unpacked": {
+        "heldBytes": 27682372,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": false,
+        "fullPixelComparedFrames": 2298,
+        "fullPixelComparedBytes": 10721548800,
+        "saveMs": [
+          0.0045,
+          0.0049,
+          0.0059,
+          0.0054,
+          0.0032
+        ],
+        "restoreMs": [
+          1.5938,
+          1.217,
+          1.6547,
+          1.5529,
+          1.503
+        ],
+        "restoreAndSuffixMs": [
+          378.6955,
+          442.018,
+          364.5571,
+          377.6684,
+          360.7654
+        ],
+        "saveMsMedian": 0.0049,
+        "restoreMsMedian": 1.5529,
+        "restoreAndSuffixMsMedian": 377.6684,
+        "heldMiB": 26.399967193603516
+      },
+      "packed": {
+        "heldBytes": 18932700,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": true,
+        "fullPixelComparedFrames": 2298,
+        "fullPixelComparedBytes": 10721548800,
+        "saveMs": [
+          5.7099,
+          5.4956,
+          5.818,
+          5.9586,
+          6.8297
+        ],
+        "restoreMs": [
+          6.2975,
+          6.9529,
+          7.0141,
+          5.5988,
+          5.9458
+        ],
+        "restoreAndSuffixMs": [
+          353.4168,
+          369.0579,
+          383.8551,
+          353.8165,
+          385.3171
+        ],
+        "saveMsMedian": 5.818,
+        "restoreMsMedian": 6.2975,
+        "restoreAndSuffixMsMedian": 369.0579,
+        "heldMiB": 18.05562973022461
+      },
+      "case": "recording-10bit-long-gop"
+    },
+    {
+      "success": true,
+      "threads": 4,
+      "frameContexts": 2,
+      "affinityMask": 1365,
+      "checkpointSeconds": 14.031,
+      "targetSeconds": 20.037,
+      "endSeconds": 30.005,
+      "sameOwnerDecoder": true,
+      "fullPipelineDrained": true,
+      "crossedRealKeyframe": true,
+      "multiPointStressTargets": 0,
+      "unpacked": {
+        "heldBytes": 27682372,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": false,
+        "fullPixelComparedFrames": 2298,
+        "fullPixelComparedBytes": 10721548800,
+        "saveMs": [
+          0.0058,
+          0.0032,
+          0.0056,
+          0.0028,
+          0.0037
+        ],
+        "restoreMs": [
+          1.4071,
+          1.7012,
+          1.4648,
+          1.5943,
+          1.5874
+        ],
+        "restoreAndSuffixMs": [
+          281.9641,
+          282.4739,
+          285.7542,
+          281.5454,
+          275.5104
+        ],
+        "saveMsMedian": 0.0037,
+        "restoreMsMedian": 1.5874,
+        "restoreAndSuffixMsMedian": 281.9641,
+        "heldMiB": 26.399967193603516
+      },
+      "packed": {
+        "heldBytes": 18932700,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": true,
+        "fullPixelComparedFrames": 2298,
+        "fullPixelComparedBytes": 10721548800,
+        "saveMs": [
+          6.4847,
+          5.7256,
+          6.0085,
+          5.7028,
+          7.1292
+        ],
+        "restoreMs": [
+          5.5962,
+          6.2023,
+          5.3608,
+          6.4471,
+          5.923
+        ],
+        "restoreAndSuffixMs": [
+          322.2369,
+          284.1871,
+          282.4322,
+          286.8691,
+          281.5681
+        ],
+        "saveMsMedian": 6.0085,
+        "restoreMsMedian": 5.923,
+        "restoreAndSuffixMsMedian": 284.1871,
+        "heldMiB": 18.05562973022461
+      },
+      "case": "recording-10bit-long-gop"
+    },
+    {
+      "success": true,
+      "threads": 6,
+      "frameContexts": 3,
+      "affinityMask": 1365,
+      "checkpointSeconds": 14.031,
+      "targetSeconds": 20.037,
+      "endSeconds": 30.005,
+      "sameOwnerDecoder": true,
+      "fullPipelineDrained": true,
+      "crossedRealKeyframe": true,
+      "multiPointStressTargets": 0,
+      "unpacked": {
+        "heldBytes": 27682372,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": false,
+        "fullPixelComparedFrames": 2298,
+        "fullPixelComparedBytes": 10721548800,
+        "saveMs": [
+          0.0063,
+          0.0031,
+          0.0039,
+          0.0038,
+          0.0035
+        ],
+        "restoreMs": [
+          2.3054,
+          2.2292,
+          2.2665,
+          2.2131,
+          2.139
+        ],
+        "restoreAndSuffixMs": [
+          212.7512,
+          208.3253,
+          206.8671,
+          203.1392,
+          204.0997
+        ],
+        "saveMsMedian": 0.0038,
+        "restoreMsMedian": 2.2292,
+        "restoreAndSuffixMsMedian": 206.8671,
+        "heldMiB": 26.399967193603516
+      },
+      "packed": {
+        "heldBytes": 18932700,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": true,
+        "fullPixelComparedFrames": 2298,
+        "fullPixelComparedBytes": 10721548800,
+        "saveMs": [
+          5.821,
+          5.7057,
+          5.7555,
+          5.8171,
+          6.9303
+        ],
+        "restoreMs": [
+          8.4868,
+          6.7258,
+          7.5913,
+          6.2419,
+          5.8473
+        ],
+        "restoreAndSuffixMs": [
+          212.0792,
+          210.3881,
+          211.0466,
+          200.3783,
+          206.9361
+        ],
+        "saveMsMedian": 5.8171,
+        "restoreMsMedian": 6.7258,
+        "restoreAndSuffixMsMedian": 210.3881,
+        "heldMiB": 18.05562973022461
+      },
+      "case": "recording-10bit-long-gop"
+    },
+    {
+      "success": true,
+      "threads": 6,
+      "frameContexts": 3,
+      "affinityMask": 1365,
+      "checkpointSeconds": 18.035,
+      "targetSeconds": 20.037,
+      "endSeconds": 30.005,
+      "sameOwnerDecoder": true,
+      "fullPipelineDrained": true,
+      "crossedRealKeyframe": true,
+      "multiPointStressTargets": 0,
+      "unpacked": {
+        "heldBytes": 27682372,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": false,
+        "fullPixelComparedFrames": 1722,
+        "fullPixelComparedBytes": 8034163200,
+        "saveMs": [
+          0.0046,
+          0.0037,
+          0.0036,
+          0.0032,
+          0.0052
+        ],
+        "restoreMs": [
+          2.2293,
+          2.0799,
+          2.0738,
+          2.3543,
+          2.0179
+        ],
+        "restoreAndSuffixMs": [
+          75.6511,
+          70.5606,
+          75.4358,
+          84.1919,
+          73.8457
+        ],
+        "saveMsMedian": 0.0037,
+        "restoreMsMedian": 2.0799,
+        "restoreAndSuffixMsMedian": 75.4358,
+        "heldMiB": 26.399967193603516
+      },
+      "packed": {
+        "heldBytes": 18932700,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": true,
+        "fullPixelComparedFrames": 1722,
+        "fullPixelComparedBytes": 8034163200,
+        "saveMs": [
+          5.9608,
+          5.64,
+          5.7132,
+          5.8083,
+          5.6717
+        ],
+        "restoreMs": [
+          8.0422,
+          6.6849,
+          6.7973,
+          7.2563,
+          7.2806
+        ],
+        "restoreAndSuffixMs": [
+          86.453,
+          79.7335,
+          82.614,
+          78.7817,
+          80.7885
+        ],
+        "saveMsMedian": 5.7132,
+        "restoreMsMedian": 7.2563,
+        "restoreAndSuffixMsMedian": 80.7885,
+        "heldMiB": 18.05562973022461
+      },
+      "case": "recording-10bit-long-gop"
+    },
+    {
+      "success": true,
+      "threads": 6,
+      "frameContexts": 3,
+      "affinityMask": 1365,
+      "checkpointSeconds": 19.828,
+      "targetSeconds": 20.037,
+      "endSeconds": 30.005,
+      "sameOwnerDecoder": true,
+      "fullPipelineDrained": true,
+      "crossedRealKeyframe": true,
+      "multiPointStressTargets": 130,
+      "unpacked": {
+        "heldBytes": 27682372,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": false,
+        "fullPixelComparedFrames": 1464,
+        "fullPixelComparedBytes": 6830438400,
+        "saveMs": [
+          0.0051,
+          0.0043,
+          0.006,
+          0.005,
+          0.0043
+        ],
+        "restoreMs": [
+          1.6928,
+          2.1851,
+          2.2203,
+          2.2484,
+          2.1563
+        ],
+        "restoreAndSuffixMs": [
+          7.2834,
+          8.2261,
+          7.6608,
+          7.5098,
+          7.6809
+        ],
+        "saveMsMedian": 0.005,
+        "restoreMsMedian": 2.1851,
+        "restoreAndSuffixMsMedian": 7.6608,
+        "heldMiB": 26.399967193603516
+      },
+      "packed": {
+        "heldBytes": 18932700,
+        "busyRejected": true,
+        "wrongOwnerRejected": true,
+        "originalPixelsDetached": true,
+        "fullPixelComparedFrames": 1464,
+        "fullPixelComparedBytes": 6830438400,
+        "saveMs": [
+          6.5146,
+          5.7381,
+          6.021,
+          5.7214,
+          5.8017
+        ],
+        "restoreMs": [
+          6.5789,
+          6.5483,
+          6.9774,
+          6.7879,
+          6.6505
+        ],
+        "restoreAndSuffixMs": [
+          12.3975,
+          11.9174,
+          12.4874,
+          12.6386,
+          12.0596
+        ],
+        "saveMsMedian": 5.8017,
+        "restoreMsMedian": 6.6505,
+        "restoreAndSuffixMsMedian": 12.3975,
+        "heldMiB": 18.05562973022461
+      },
+      "case": "recording-10bit-long-gop"
+    }
+  ],
+  "additionalControl": {
+    "success": true,
+    "threads": 6,
+    "frameContexts": 1,
+    "affinityMask": 1365,
+    "checkpointSeconds": 18.021,
+    "targetSeconds": 20.021,
+    "endSeconds": 30.021,
+    "sameOwnerDecoder": true,
+    "fullPipelineDrained": true,
+    "crossedRealKeyframe": true,
+    "multiPointStressTargets": 0,
+    "unpacked": {
+      "heldBytes": 2547192,
+      "busyRejected": true,
+      "wrongOwnerRejected": true,
+      "originalPixelsDetached": false,
+      "fullPixelComparedFrames": 1728,
+      "fullPixelComparedBytes": 298598400,
+      "saveMs": [
+        0.0013,
+        0.0018,
+        0.0021,
+        0.0016,
+        0.0019
+      ],
+      "restoreMs": [
+        0.0026,
+        0.0026,
+        0.0028,
+        0.0026,
+        0.0028
+      ],
+      "restoreAndSuffixMs": [
+        9.8587,
+        9.711,
+        10.9119,
+        10.0467,
+        10.2025
+      ],
+      "saveMsMedian": 0.0018,
+      "restoreMsMedian": 0.0026,
+      "restoreAndSuffixMsMedian": 10.0467,
+      "heldMiB": 2.4291915893554688
+    },
+    "packed": {
+      "heldBytes": 2025768,
+      "busyRejected": true,
+      "wrongOwnerRejected": true,
+      "originalPixelsDetached": true,
+      "fullPixelComparedFrames": 1728,
+      "fullPixelComparedBytes": 298598400,
+      "saveMs": [
+        0.5849,
+        0.855,
+        0.646,
+        0.6395,
+        0.5524
+      ],
+      "restoreMs": [
+        0.3056,
+        0.2778,
+        0.2798,
+        0.297,
+        0.2751
+      ],
+      "restoreAndSuffixMs": [
+        10.1213,
+        10.0467,
+        10.847,
+        10.3249,
+        9.9962
+      ],
+      "saveMsMedian": 0.6395,
+      "restoreMsMedian": 0.2798,
+      "restoreAndSuffixMsMedian": 10.1213,
+      "heldMiB": 1.9319229125976562
+    },
+    "case": "fixture-10bit-one-frame-control"
+  },
+  "cpu": "Intel Core i7-12700K",
+  "date": "2026-10-25",
+  "librarySHA256": "3472d596c4cac9cd424369dad11e13aec0528d06128309f203c98ffb5809a9bc",
+  "probeSHA256": "19b149dafa2457d423d06d92a21e396aaef01b6cd3e878ef6702454b97a1c20f"
+}

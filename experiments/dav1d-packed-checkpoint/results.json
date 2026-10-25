@@ -1,0 +1,517 @@
+{
+  "upstreamRevision": "54706fc6bc0cdecab7e9593974a4039cc038fca7",
+  "method": "Windows PC single-thread; first allowed logical CPU; images in RAM; no network/audio/UI in timers",
+  "compiler": "gcc.EXE (Rev3, Built by MSYS2 project) 16.2.0",
+  "sourceSHA256": {
+    "experiments/dav1d-packed-checkpoint/packed.c": "64950d0a3a22051268ea27d3fd17494c0f2acc60177dd0dec2f082512bc9b7f5",
+    "experiments/dav1d-packed-checkpoint/packed.h": "756f22d7aef08e211bc697aedd0488513a91e66f59d2990a7c253b8d43d8481a",
+    "experiments/dav1d-packed-checkpoint/picture-helper.inc": "181fccb6f5574242bf25bf3b93d138cd8db920442b8d481c86b7cb77e5f6b6b8",
+    "experiments/dav1d-packed-checkpoint/probe.c": "cb6721efc47acbd6c72d35c1893d9c93eee83c3ea219837644ef3c8c4c4ed335",
+    "experiments/dav1d-checkpoint/checkpoint.c": "7d3189a2525db8ba3bebb65af1fc0e7ab15723249710f69607c113bad46b5f4f",
+    "experiments/dav1d-checkpoint/probe.c": "5af8ae2c60019819b9d8df97897544acf9e741715b0e08a18d705b605fba9886"
+  },
+  "cases": [
+    {
+      "success": true,
+      "singleThread": true,
+      "threadAffinityPinned": true,
+      "affinityMask": 1,
+      "checkpointSeconds": 18.021,
+      "targetSeconds": 20.021,
+      "endSeconds": 30.021,
+      "allAllocationBytesVerified": true,
+      "crossedRealKeyframe": true,
+      "sameDecoderPerPhase": true,
+      "selfTestWidths": 257,
+      "unpacked": {
+        "heldBytes": 1367536,
+        "pixelBytes": 1180672,
+        "metadataAndStateBytes": 186864,
+        "uniquePictures": 8,
+        "originalPixelReferencesDetached": false,
+        "fullPixelComparedFrames": 1728,
+        "fullPixelComparedBytes": 149299200,
+        "saveMs": [
+          0.0022,
+          0.0014,
+          0.0013,
+          0.0014,
+          0.0019
+        ],
+        "freeMs": [
+          0.0005,
+          0.0009,
+          0.0008,
+          0.0007,
+          0.0007
+        ],
+        "restoreMs": [
+          0.0021,
+          0.002,
+          0.0022,
+          0.002,
+          0.0021
+        ],
+        "restoreAndSuffixMs": [
+          8.9893,
+          9.7829,
+          8.3234,
+          9.5048,
+          9.4553
+        ],
+        "saveMsMedian": 0.0014,
+        "freeMsMedian": 0.0007,
+        "restoreMsMedian": 0.0021,
+        "restoreAndSuffixMsMedian": 9.4553,
+        "heldMiB": 1.3041839599609375
+      },
+      "packed": {
+        "heldBytes": 1364512,
+        "pixelBytes": 1180160,
+        "metadataAndStateBytes": 184352,
+        "uniquePictures": 8,
+        "originalPixelReferencesDetached": true,
+        "fullPixelComparedFrames": 1728,
+        "fullPixelComparedBytes": 149299200,
+        "saveMs": [
+          0.2516,
+          0.2865,
+          0.2466,
+          0.2202,
+          0.2456
+        ],
+        "freeMs": [
+          0.0756,
+          0.0866,
+          0.0779,
+          0.0765,
+          0.0743
+        ],
+        "restoreMs": [
+          0.0791,
+          0.0767,
+          0.0763,
+          0.082,
+          0.3106
+        ],
+        "restoreAndSuffixMs": [
+          9.0784,
+          8.7483,
+          9.077,
+          9.9711,
+          9.0882
+        ],
+        "saveMsMedian": 0.2466,
+        "freeMsMedian": 0.0765,
+        "restoreMsMedian": 0.0791,
+        "restoreAndSuffixMsMedian": 9.0784,
+        "heldMiB": 1.301300048828125
+      },
+      "case": "fixture-8bit",
+      "savedMiB": 0.0028839111328125,
+      "reductionPercent": 0.2211276339343149
+    },
+    {
+      "success": true,
+      "singleThread": true,
+      "threadAffinityPinned": true,
+      "affinityMask": 1,
+      "checkpointSeconds": 18.021,
+      "targetSeconds": 20.021,
+      "endSeconds": 30.021,
+      "allAllocationBytesVerified": true,
+      "crossedRealKeyframe": true,
+      "sameDecoderPerPhase": true,
+      "selfTestWidths": 257,
+      "unpacked": {
+        "heldBytes": 2547184,
+        "pixelBytes": 2360320,
+        "metadataAndStateBytes": 186864,
+        "uniquePictures": 8,
+        "originalPixelReferencesDetached": false,
+        "fullPixelComparedFrames": 1728,
+        "fullPixelComparedBytes": 298598400,
+        "saveMs": [
+          0.0015,
+          0.0012,
+          0.0012,
+          0.0014,
+          0.0013
+        ],
+        "freeMs": [
+          0.0005,
+          0.0009,
+          0.0013,
+          0.0009,
+          0.0008
+        ],
+        "restoreMs": [
+          0.0022,
+          0.0025,
+          0.0024,
+          0.0024,
+          0.0023
+        ],
+        "restoreAndSuffixMs": [
+          9.181,
+          8.5963,
+          10.9721,
+          9.2605,
+          9.7023
+        ],
+        "saveMsMedian": 0.0013,
+        "freeMsMedian": 0.0009,
+        "restoreMsMedian": 0.0024,
+        "restoreAndSuffixMsMedian": 9.2605,
+        "heldMiB": 2.4291839599609375
+      },
+      "packed": {
+        "heldBytes": 2025760,
+        "pixelBytes": 1841408,
+        "metadataAndStateBytes": 184352,
+        "uniquePictures": 8,
+        "originalPixelReferencesDetached": true,
+        "fullPixelComparedFrames": 1728,
+        "fullPixelComparedBytes": 298598400,
+        "saveMs": [
+          0.5441,
+          0.6273,
+          0.5377,
+          0.9461,
+          0.4996
+        ],
+        "freeMs": [
+          0.1106,
+          0.1213,
+          0.1165,
+          0.1409,
+          0.1121
+        ],
+        "restoreMs": [
+          0.4046,
+          0.276,
+          0.2716,
+          0.2734,
+          0.2861
+        ],
+        "restoreAndSuffixMs": [
+          9.462,
+          8.7777,
+          9.1002,
+          8.9369,
+          8.6199
+        ],
+        "saveMsMedian": 0.5441,
+        "freeMsMedian": 0.1165,
+        "restoreMsMedian": 0.276,
+        "restoreAndSuffixMsMedian": 8.9369,
+        "heldMiB": 1.931915283203125
+      },
+      "case": "fixture-10bit",
+      "savedMiB": 0.4972686767578125,
+      "reductionPercent": 20.47060597114303
+    },
+    {
+      "success": true,
+      "singleThread": true,
+      "threadAffinityPinned": true,
+      "affinityMask": 1,
+      "checkpointSeconds": 19.828,
+      "targetSeconds": 20.037,
+      "endSeconds": 30.005,
+      "allAllocationBytesVerified": true,
+      "crossedRealKeyframe": true,
+      "sameDecoderPerPhase": true,
+      "selfTestWidths": 257,
+      "unpacked": {
+        "heldBytes": 27682324,
+        "pixelBytes": 26911360,
+        "metadataAndStateBytes": 770964,
+        "uniquePictures": 5,
+        "originalPixelReferencesDetached": false,
+        "fullPixelComparedFrames": 1464,
+        "fullPixelComparedBytes": 6830438400,
+        "saveMs": [
+          0.0023,
+          0.0019,
+          0.0024,
+          0.0018,
+          0.0032
+        ],
+        "freeMs": [
+          0.0005,
+          0.0006,
+          0.0014,
+          0.0007,
+          0.0015
+        ],
+        "restoreMs": [
+          0.0032,
+          0.004,
+          0.0039,
+          0.0037,
+          0.0038
+        ],
+        "restoreAndSuffixMs": [
+          13.7041,
+          12.603,
+          14.7386,
+          13.3837,
+          14.6033
+        ],
+        "saveMsMedian": 0.0023,
+        "freeMsMedian": 0.0007,
+        "restoreMsMedian": 0.0038,
+        "restoreAndSuffixMsMedian": 13.7041,
+        "heldMiB": 26.399921417236328
+      },
+      "packed": {
+        "heldBytes": 18932692,
+        "pixelBytes": 18163040,
+        "metadataAndStateBytes": 769652,
+        "uniquePictures": 5,
+        "originalPixelReferencesDetached": true,
+        "fullPixelComparedFrames": 1464,
+        "fullPixelComparedBytes": 6830438400,
+        "saveMs": [
+          5.3861,
+          5.3774,
+          5.516,
+          5.3751,
+          5.6317
+        ],
+        "freeMs": [
+          1.0959,
+          1.1289,
+          1.1225,
+          1.058,
+          1.0899
+        ],
+        "restoreMs": [
+          3.6129,
+          3.5901,
+          3.5639,
+          4.2105,
+          3.551
+        ],
+        "restoreAndSuffixMs": [
+          17.0734,
+          15.7607,
+          16.873,
+          17.1468,
+          17.1011
+        ],
+        "saveMsMedian": 5.3861,
+        "freeMsMedian": 1.0959,
+        "restoreMsMedian": 3.5901,
+        "restoreAndSuffixMsMedian": 17.0734,
+        "heldMiB": 18.055622100830078
+      },
+      "case": "recording-10bit-long-gop",
+      "savedMiB": 8.34429931640625,
+      "reductionPercent": 31.607288463208505
+    },
+    {
+      "success": true,
+      "singleThread": true,
+      "threadAffinityPinned": true,
+      "affinityMask": 1,
+      "checkpointSeconds": 18.035,
+      "targetSeconds": 20.037,
+      "endSeconds": 30.005,
+      "allAllocationBytesVerified": true,
+      "crossedRealKeyframe": true,
+      "sameDecoderPerPhase": true,
+      "selfTestWidths": 257,
+      "unpacked": {
+        "heldBytes": 27682324,
+        "pixelBytes": 26911360,
+        "metadataAndStateBytes": 770964,
+        "uniquePictures": 5,
+        "originalPixelReferencesDetached": false,
+        "fullPixelComparedFrames": 1722,
+        "fullPixelComparedBytes": 8034163200,
+        "saveMs": [
+          0.0022,
+          0.0038,
+          0.0037,
+          0.0021,
+          0.0028
+        ],
+        "freeMs": [
+          0.0004,
+          0.0008,
+          0.0009,
+          0.0009,
+          0.0011
+        ],
+        "restoreMs": [
+          0.0029,
+          0.0033,
+          0.0038,
+          0.0029,
+          0.0037
+        ],
+        "restoreAndSuffixMs": [
+          167.6175,
+          165.1667,
+          164.6661,
+          192.7012,
+          179.7802
+        ],
+        "saveMsMedian": 0.0028,
+        "freeMsMedian": 0.0009,
+        "restoreMsMedian": 0.0033,
+        "restoreAndSuffixMsMedian": 167.6175,
+        "heldMiB": 26.399921417236328
+      },
+      "packed": {
+        "heldBytes": 18932692,
+        "pixelBytes": 18163040,
+        "metadataAndStateBytes": 769652,
+        "uniquePictures": 5,
+        "originalPixelReferencesDetached": true,
+        "fullPixelComparedFrames": 1722,
+        "fullPixelComparedBytes": 8034163200,
+        "saveMs": [
+          5.4675,
+          5.4922,
+          5.7986,
+          5.4836,
+          5.5788
+        ],
+        "freeMs": [
+          1.2058,
+          1.2759,
+          1.101,
+          1.1016,
+          1.108
+        ],
+        "restoreMs": [
+          3.9151,
+          3.5811,
+          3.6087,
+          3.622,
+          3.9297
+        ],
+        "restoreAndSuffixMs": [
+          172.6072,
+          166.9823,
+          169.1437,
+          168.9506,
+          168.936
+        ],
+        "saveMsMedian": 5.4922,
+        "freeMsMedian": 1.108,
+        "restoreMsMedian": 3.622,
+        "restoreAndSuffixMsMedian": 168.9506,
+        "heldMiB": 18.055622100830078
+      },
+      "case": "recording-10bit-long-gop",
+      "savedMiB": 8.34429931640625,
+      "reductionPercent": 31.607288463208505
+    },
+    {
+      "success": true,
+      "singleThread": true,
+      "threadAffinityPinned": true,
+      "affinityMask": 1,
+      "checkpointSeconds": 14.031,
+      "targetSeconds": 20.037,
+      "endSeconds": 30.005,
+      "allAllocationBytesVerified": true,
+      "crossedRealKeyframe": true,
+      "sameDecoderPerPhase": true,
+      "selfTestWidths": 257,
+      "unpacked": {
+        "heldBytes": 27682324,
+        "pixelBytes": 26911360,
+        "metadataAndStateBytes": 770964,
+        "uniquePictures": 5,
+        "originalPixelReferencesDetached": false,
+        "fullPixelComparedFrames": 2298,
+        "fullPixelComparedBytes": 10721548800,
+        "saveMs": [
+          0.0026,
+          0.0026,
+          0.0037,
+          0.0035,
+          0.0027
+        ],
+        "freeMs": [
+          0.0004,
+          0.0006,
+          0.0013,
+          0.0017,
+          0.0009
+        ],
+        "restoreMs": [
+          0.0031,
+          0.0037,
+          0.0035,
+          0.0041,
+          0.0045
+        ],
+        "restoreAndSuffixMs": [
+          504.5059,
+          512.5734,
+          504.8764,
+          508.584,
+          503.6678
+        ],
+        "saveMsMedian": 0.0027,
+        "freeMsMedian": 0.0009,
+        "restoreMsMedian": 0.0037,
+        "restoreAndSuffixMsMedian": 504.8764,
+        "heldMiB": 26.399921417236328
+      },
+      "packed": {
+        "heldBytes": 18932692,
+        "pixelBytes": 18163040,
+        "metadataAndStateBytes": 769652,
+        "uniquePictures": 5,
+        "originalPixelReferencesDetached": true,
+        "fullPixelComparedFrames": 2298,
+        "fullPixelComparedBytes": 10721548800,
+        "saveMs": [
+          5.509,
+          10.8588,
+          5.3301,
+          5.9028,
+          6.2342
+        ],
+        "freeMs": [
+          1.1001,
+          1.1189,
+          1.1174,
+          1.1679,
+          1.2182
+        ],
+        "restoreMs": [
+          3.5587,
+          3.5378,
+          4.2101,
+          3.6418,
+          3.7323
+        ],
+        "restoreAndSuffixMs": [
+          503.6698,
+          503.0746,
+          519.769,
+          518.7069,
+          522.7267
+        ],
+        "saveMsMedian": 5.9028,
+        "freeMsMedian": 1.1189,
+        "restoreMsMedian": 3.6418,
+        "restoreAndSuffixMsMedian": 518.7069,
+        "heldMiB": 18.055622100830078
+      },
+      "case": "recording-10bit-long-gop",
+      "savedMiB": 8.34429931640625,
+      "reductionPercent": 31.607288463208505
+    }
+  ],
+  "cpu": "Intel Core i7-12700K",
+  "date": "2026-10-25"
+}

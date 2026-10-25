@@ -7,7 +7,7 @@
 static uint32_t u32(const uint8_t *p) {return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;}
 static int cancelled(void *p) {return *(int*)p;}
 int main(int argc,char **argv) {
-    if(argc!=4) return 2;
+    if(argc!=6) return 2;
     FILE *f=fopen(argv[1],"rb"); if(!f) return 3;
     uint8_t h[32]; if(fread(h,1,32,f)!=32 || memcmp(h,"DKIF",4)) return 4;
     NeoCheckpointPacket *input=calloc(3000,sizeof(*input)); if(!input) return 5;
@@ -25,16 +25,15 @@ int main(int argc,char **argv) {
         input[count++]=(NeoCheckpointPacket){data,n,seconds-origin};
     }
     fclose(f); int cancel=0; NeoCheckpointResult r;
-    int code=neo_checkpoint_lab_run(input,count,strtod(argv[2],NULL),strtod(argv[3],NULL),&r,cancelled,&cancel);
-    printf("{\"status\":%d,\"decoderError\":%d,\"comparedFrames\":%llu,\"retainedBytes\":%llu,\"restoreCount\":%d,\"checkpointSeconds\":%.6f,\"targetSeconds\":%.6f,\"followingKeySeconds\":%.6f,\"baselineMs\":[",code,r.decoder_error,(unsigned long long)r.compared_frames,(unsigned long long)r.retained_bytes,r.restore_count,r.checkpoint_seconds,r.target_seconds,r.first_following_key_seconds);
-    for(int i=0;i<5;i++) printf("%s%.6f",i?",":"",r.baseline_ms[i]);
-    printf("],\"restoredMs\":[");
+    int threads=atoi(argv[4]),packed=atoi(argv[5]);
+    int code=neo_checkpoint_lab_run(input,count,strtod(argv[2],NULL),strtod(argv[3],NULL),threads,packed,&r,cancelled,&cancel);
+    printf("{\"status\":%d,\"stage\":%d,\"decoderError\":%d,\"threads\":%d,\"frameContexts\":%d,\"packed\":%d,\"comparedFrames\":%llu,\"retainedBytes\":%llu,\"restoreCount\":%d,\"checkpointSeconds\":%.6f,\"targetSeconds\":%.6f,\"followingKeySeconds\":%.6f,\"restoredMs\":[",code,r.failure_stage,r.decoder_error,r.threads,r.frame_contexts,r.packed,(unsigned long long)r.compared_frames,(unsigned long long)r.retained_bytes,r.restore_count,r.checkpoint_seconds,r.target_seconds,r.first_following_key_seconds);
     for(int i=0;i<5;i++) printf("%s%.6f",i?",":"",r.restored_ms[i]);
     printf("]}\n");
-    int failed=code || r.restore_count!=5 || r.temporary_save_free_count!=5 || !r.empty_rejected || !r.wrong_owner_rejected || !r.suffix_without_state_rejected || r.compared_frames<50;
+    int failed=code || r.restore_count!=5 || r.target_verified_count!=5 || r.full_suffix_passes!=2 || r.temporary_save_free_count!=5 || !r.empty_rejected || !r.busy_rejected || !r.wrong_owner_rejected || !r.suffix_without_state_rejected || !r.compared_frames || (packed && (r.allocation_verification_passes!=2 || !r.original_pixels_detached));
     cancel=1;
-    if(neo_checkpoint_lab_run(input,count,strtod(argv[2],NULL),.25,&r,cancelled,&cancel)!=1006) failed=1;
-    if(neo_checkpoint_lab_run(input,count,0,.25,&r,NULL,NULL)!=1001) failed=1;
+    if(neo_checkpoint_lab_run(input,count,strtod(argv[2],NULL),.25,threads,packed,&r,cancelled,&cancel)!=1006) failed=1;
+    if(neo_checkpoint_lab_run(input,count,0,.25,threads,packed,&r,NULL,NULL)!=1001) failed=1;
     for(size_t i=0;i<count;i++) free((void*)input[i].data);
     free(input); return failed ? 1 : 0;
 }

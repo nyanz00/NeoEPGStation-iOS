@@ -1,0 +1,16 @@
+--- a/Sources/AetherEngine/AetherEngine+Diagnostics.swift
++++ b/Sources/AetherEngine/AetherEngine+Diagnostics.swift
+@@ -800,6 +800,13 @@
+                 seconds: Double(p.pointee.pts) * Double(timeBase.num) / Double(timeBase.den) - origin))
+         }
+         return try withExtendedLifetime(self) { try body(input, gopEnd-origin) }
++    }
++    /// Worker-exclusive cleanup, only after preparation and all borrowed packet
++    /// closures finish. Cancellation does not prevent releasing owned input.
++    public func releaseCheckpointPackets() {
++        for packet in packets { var owned: UnsafeMutablePointer<AVPacket>? = packet; av_packet_free(&owned) }
++        packets.removeAll(keepingCapacity: false)
++        var par = parameters; avcodec_parameters_free(&par); parameters = nil
+     }
+     private func writeClip(to url: URL) throws {
+         var context: UnsafeMutablePointer<AVFormatContext>?

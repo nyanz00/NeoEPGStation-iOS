@@ -1,0 +1,896 @@
+{
+  "upstreamRevision": "54706fc6bc0cdecab7e9593974a4039cc038fca7",
+  "compiler": "gcc.EXE (Rev3, Built by MSYS2 project) 16.2.0",
+  "method": "fresh decoder; prefix 0..14 fully decoded/drained outside timer; RAM packets 14..20 to actual target image; no checkpoints/skips/audio/network/UI; 5 rotated repetitions",
+  "sourceSHA256": {
+    "experiments/dav1d-parallel/probe.c": "5c5e0f697fe8dfd40e7043430063100e52f7391d4917f5528f5d25f3a21ee492",
+    "experiments/dav1d-parallel/run.py": "06affad82f439ae7cf3404226148bf968936c88e1da88da72adde83a4c2cf401",
+    "experiments/dav1d-checkpoint/probe.c": "5af8ae2c60019819b9d8df97897544acf9e741715b0e08a18d705b605fba9886",
+    "experiments/dav1d-checkpoint/checkpoint.c": "7d3189a2525db8ba3bebb65af1fc0e7ab15723249710f69607c113bad46b5f4f",
+    "experiments/dav1d-checkpoint/neo_checkpoint.h": "a2b06865afa4a920e9100a76866af479206b032a0e1b56cf00eda0e56a3a6bf3"
+  },
+  "librarySHA256": "9e8dee7020d018892be9a80bc599f013a8370159dbbbcf55fca3d63bd49d0afa",
+  "cases": [
+    {
+      "success": true,
+      "checkpointUsed": false,
+      "frameSkipping": false,
+      "affinityMask": 1365,
+      "physicalCoresAvailable": 6,
+      "prefixFullyDrained": true,
+      "startSeconds": 14.021,
+      "targetSeconds": 20.021,
+      "rows": [
+        {
+          "threads": 1,
+          "maxFrameDelaySetting": 1,
+          "frameContexts": 1,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 12528000,
+          "targetMs": [
+            25.7166,
+            25.0722,
+            24.9543,
+            25.5353,
+            25.9882
+          ],
+          "processCpuMs": [
+            31.25,
+            15.625,
+            31.25,
+            31.25,
+            15.625
+          ],
+          "prefixMs": [
+            60.1294,
+            58.651,
+            58.9038,
+            59.5861,
+            58.3578
+          ],
+          "initializeMs": [
+            0.1097,
+            0.1058,
+            0.0647,
+            0.0796,
+            0.0662
+          ],
+          "targetMsMedian": 25.5353,
+          "processCpuMsMedian": 31.25,
+          "prefixMsMedian": 58.9038,
+          "initializeMsMedian": 0.0796,
+          "averageCpuParallelismMedian": 1.215168412620642
+        },
+        {
+          "threads": 2,
+          "maxFrameDelaySetting": 1,
+          "frameContexts": 1,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 12528000,
+          "targetMs": [
+            26.2201,
+            26.8716,
+            27.1125,
+            26.3214,
+            29.0073
+          ],
+          "processCpuMs": [
+            46.875,
+            31.25,
+            31.25,
+            15.625,
+            31.25
+          ],
+          "prefixMs": [
+            62.8256,
+            63.207,
+            63.6784,
+            62.1664,
+            75.8604
+          ],
+          "initializeMs": [
+            0.1822,
+            0.1692,
+            0.1646,
+            0.206,
+            0.1738
+          ],
+          "targetMsMedian": 26.8716,
+          "processCpuMsMedian": 31.25,
+          "prefixMsMedian": 63.207,
+          "initializeMsMedian": 0.1738,
+          "averageCpuParallelismMedian": 1.152604887044721
+        },
+        {
+          "threads": 4,
+          "maxFrameDelaySetting": 1,
+          "frameContexts": 1,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 12528000,
+          "targetMs": [
+            27.574,
+            29.184,
+            30.2623,
+            27.7555,
+            27.0377
+          ],
+          "processCpuMs": [
+            46.875,
+            31.25,
+            31.25,
+            62.5,
+            78.125
+          ],
+          "prefixMs": [
+            62.7128,
+            67.2548,
+            64.7045,
+            65.6366,
+            67.4175
+          ],
+          "initializeMs": [
+            0.3975,
+            0.3195,
+            0.3656,
+            0.3012,
+            0.3225
+          ],
+          "targetMsMedian": 27.7555,
+          "processCpuMsMedian": 46.875,
+          "prefixMsMedian": 65.6366,
+          "initializeMsMedian": 0.3225,
+          "averageCpuParallelismMedian": 1.699970987161819
+        },
+        {
+          "threads": 6,
+          "maxFrameDelaySetting": 1,
+          "frameContexts": 1,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 12528000,
+          "targetMs": [
+            26.7014,
+            27.9433,
+            27.9056,
+            27.0757,
+            27.104
+          ],
+          "processCpuMs": [
+            46.875,
+            46.875,
+            31.25,
+            62.5,
+            31.25
+          ],
+          "prefixMs": [
+            65.8988,
+            69.9708,
+            71.2076,
+            66.8985,
+            63.0797
+          ],
+          "initializeMs": [
+            0.2932,
+            0.2797,
+            0.3801,
+            0.4276,
+            0.3004
+          ],
+          "targetMsMedian": 27.104,
+          "processCpuMsMedian": 46.875,
+          "prefixMsMedian": 66.8985,
+          "initializeMsMedian": 0.3004,
+          "averageCpuParallelismMedian": 1.677504088636632
+        },
+        {
+          "threads": 2,
+          "maxFrameDelaySetting": 0,
+          "frameContexts": 2,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 12528000,
+          "targetMs": [
+            20.1891,
+            19.6575,
+            20.4804,
+            20.7727,
+            20.0331
+          ],
+          "processCpuMs": [
+            46.875,
+            31.25,
+            46.875,
+            31.25,
+            31.25
+          ],
+          "prefixMs": [
+            45.054,
+            46.4237,
+            51.2861,
+            45.2187,
+            45.4871
+          ],
+          "initializeMs": [
+            0.1608,
+            0.2389,
+            0.1709,
+            0.1622,
+            0.1745
+          ],
+          "targetMsMedian": 20.1891,
+          "processCpuMsMedian": 31.25,
+          "prefixMsMedian": 45.4871,
+          "initializeMsMedian": 0.1709,
+          "averageCpuParallelismMedian": 1.5897240239094494
+        },
+        {
+          "threads": 4,
+          "maxFrameDelaySetting": 0,
+          "frameContexts": 2,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 12528000,
+          "targetMs": [
+            19.0846,
+            19.1308,
+            19.8898,
+            19.2455,
+            18.9235
+          ],
+          "processCpuMs": [
+            31.25,
+            46.875,
+            15.625,
+            62.5,
+            15.625
+          ],
+          "prefixMs": [
+            47.7963,
+            45.0724,
+            46.8009,
+            45.2452,
+            45.1841
+          ],
+          "initializeMs": [
+            0.295,
+            0.3115,
+            0.3131,
+            0.3005,
+            0.4054
+          ],
+          "targetMsMedian": 19.1308,
+          "processCpuMsMedian": 31.25,
+          "prefixMsMedian": 45.2452,
+          "initializeMsMedian": 0.3115,
+          "averageCpuParallelismMedian": 1.6374458987875042
+        },
+        {
+          "threads": 6,
+          "maxFrameDelaySetting": 0,
+          "frameContexts": 3,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 12528000,
+          "targetMs": [
+            19.4852,
+            15.433,
+            18.6078,
+            15.6938,
+            15.695
+          ],
+          "processCpuMs": [
+            46.875,
+            15.625,
+            31.25,
+            62.5,
+            46.875
+          ],
+          "prefixMs": [
+            38.6285,
+            37.141,
+            44.1323,
+            38.0304,
+            37.5786
+          ],
+          "initializeMs": [
+            0.3871,
+            0.3129,
+            0.2979,
+            0.529,
+            0.2869
+          ],
+          "targetMsMedian": 15.695,
+          "processCpuMsMedian": 46.875,
+          "prefixMsMedian": 38.0304,
+          "initializeMsMedian": 0.3129,
+          "averageCpuParallelismMedian": 2.4056719972081377
+        }
+      ],
+      "case": "fixture-8bit"
+    },
+    {
+      "success": true,
+      "checkpointUsed": false,
+      "frameSkipping": false,
+      "affinityMask": 1365,
+      "physicalCoresAvailable": 6,
+      "prefixFullyDrained": true,
+      "startSeconds": 14.021,
+      "targetSeconds": 20.021,
+      "rows": [
+        {
+          "threads": 1,
+          "maxFrameDelaySetting": 1,
+          "frameContexts": 1,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 25056000,
+          "targetMs": [
+            25.8192,
+            24.227,
+            25.4342,
+            24.6906,
+            24.4248
+          ],
+          "processCpuMs": [
+            31.25,
+            15.625,
+            31.25,
+            31.25,
+            15.625
+          ],
+          "prefixMs": [
+            59.0639,
+            58.3518,
+            60.2736,
+            58.0523,
+            57.3533
+          ],
+          "initializeMs": [
+            0.1232,
+            0.0711,
+            0.0696,
+            0.0706,
+            0.0789
+          ],
+          "targetMsMedian": 24.6906,
+          "processCpuMsMedian": 31.25,
+          "prefixMsMedian": 58.3518,
+          "initializeMsMedian": 0.0711,
+          "averageCpuParallelismMedian": 1.2103395922414328
+        },
+        {
+          "threads": 2,
+          "maxFrameDelaySetting": 1,
+          "frameContexts": 1,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 25056000,
+          "targetMs": [
+            26.6224,
+            25.3566,
+            26.8453,
+            26.54,
+            26.066
+          ],
+          "processCpuMs": [
+            31.25,
+            31.25,
+            62.5,
+            46.875,
+            31.25
+          ],
+          "prefixMs": [
+            61.7689,
+            64.7035,
+            61.3807,
+            61.9727,
+            65.9754
+          ],
+          "initializeMs": [
+            0.1847,
+            0.1688,
+            0.1957,
+            0.1644,
+            0.1729
+          ],
+          "targetMsMedian": 26.54,
+          "processCpuMsMedian": 31.25,
+          "prefixMsMedian": 61.9727,
+          "initializeMsMedian": 0.1729,
+          "averageCpuParallelismMedian": 1.2324207504160651
+        },
+        {
+          "threads": 4,
+          "maxFrameDelaySetting": 1,
+          "frameContexts": 1,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 25056000,
+          "targetMs": [
+            26.2169,
+            28.0817,
+            27.4097,
+            26.2387,
+            31.2592
+          ],
+          "processCpuMs": [
+            15.625,
+            31.25,
+            62.5,
+            31.25,
+            46.875
+          ],
+          "prefixMs": [
+            61.6264,
+            60.79,
+            66.7316,
+            62.2515,
+            64.327
+          ],
+          "initializeMs": [
+            0.3631,
+            0.4254,
+            0.3327,
+            0.2977,
+            0.3117
+          ],
+          "targetMsMedian": 27.4097,
+          "processCpuMsMedian": 31.25,
+          "prefixMsMedian": 62.2515,
+          "initializeMsMedian": 0.3327,
+          "averageCpuParallelismMedian": 1.1909888828333721
+        },
+        {
+          "threads": 6,
+          "maxFrameDelaySetting": 1,
+          "frameContexts": 1,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 25056000,
+          "targetMs": [
+            26.5303,
+            26.8253,
+            25.9827,
+            32.5547,
+            25.767
+          ],
+          "processCpuMs": [
+            46.875,
+            46.875,
+            93.75,
+            31.25,
+            62.5
+          ],
+          "prefixMs": [
+            61.699,
+            64.0793,
+            62.0418,
+            104.558,
+            60.6337
+          ],
+          "initializeMs": [
+            0.3076,
+            0.3486,
+            0.3172,
+            0.2864,
+            0.3396
+          ],
+          "targetMsMedian": 26.5303,
+          "processCpuMsMedian": 46.875,
+          "prefixMsMedian": 62.0418,
+          "initializeMsMedian": 0.3172,
+          "averageCpuParallelismMedian": 1.7668477175154447
+        },
+        {
+          "threads": 2,
+          "maxFrameDelaySetting": 0,
+          "frameContexts": 2,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 25056000,
+          "targetMs": [
+            18.5674,
+            18.5166,
+            18.1382,
+            18.9892,
+            19.7004
+          ],
+          "processCpuMs": [
+            31.25,
+            31.25,
+            46.875,
+            15.625,
+            15.625
+          ],
+          "prefixMs": [
+            43.5464,
+            43.2373,
+            44.0312,
+            46.2782,
+            52.3269
+          ],
+          "initializeMs": [
+            0.1688,
+            0.1726,
+            0.1729,
+            0.247,
+            0.1713
+          ],
+          "targetMsMedian": 18.5674,
+          "processCpuMsMedian": 31.25,
+          "prefixMsMedian": 44.0312,
+          "initializeMsMedian": 0.1726,
+          "averageCpuParallelismMedian": 1.6830574016825188
+        },
+        {
+          "threads": 4,
+          "maxFrameDelaySetting": 0,
+          "frameContexts": 2,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 25056000,
+          "targetMs": [
+            18.3012,
+            22.4184,
+            18.1176,
+            18.4523,
+            20.1143
+          ],
+          "processCpuMs": [
+            31.25,
+            31.25,
+            62.5,
+            62.5,
+            15.625
+          ],
+          "prefixMs": [
+            43.1386,
+            43.3534,
+            46.239,
+            43.2071,
+            47.5658
+          ],
+          "initializeMs": [
+            0.3545,
+            0.3105,
+            0.3318,
+            0.3183,
+            0.4537
+          ],
+          "targetMsMedian": 18.4523,
+          "processCpuMsMedian": 31.25,
+          "prefixMsMedian": 43.3534,
+          "initializeMsMedian": 0.3318,
+          "averageCpuParallelismMedian": 1.707538303499224
+        },
+        {
+          "threads": 6,
+          "maxFrameDelaySetting": 0,
+          "frameContexts": 3,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 25056000,
+          "targetMs": [
+            14.5803,
+            16.8255,
+            15.628,
+            14.3021,
+            18.7706
+          ],
+          "processCpuMs": [
+            62.5,
+            31.25,
+            46.875,
+            62.5,
+            31.25
+          ],
+          "prefixMs": [
+            34.5151,
+            37.5666,
+            45.1794,
+            33.657,
+            42.4113
+          ],
+          "initializeMs": [
+            0.3297,
+            0.4534,
+            0.3191,
+            0.3008,
+            0.2956
+          ],
+          "targetMsMedian": 15.628,
+          "processCpuMsMedian": 46.875,
+          "prefixMsMedian": 37.5666,
+          "initializeMsMedian": 0.3191,
+          "averageCpuParallelismMedian": 2.99942411057077
+        }
+      ],
+      "case": "fixture-10bit"
+    },
+    {
+      "success": true,
+      "checkpointUsed": false,
+      "frameSkipping": false,
+      "affinityMask": 1365,
+      "physicalCoresAvailable": 6,
+      "prefixFullyDrained": true,
+      "startSeconds": 14.031,
+      "targetSeconds": 20.037,
+      "rows": [
+        {
+          "threads": 1,
+          "maxFrameDelaySetting": 1,
+          "frameContexts": 1,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 676512000,
+          "targetMs": [
+            500.754,
+            506.5132,
+            495.3983,
+            510.5929,
+            497.9188
+          ],
+          "processCpuMs": [
+            500.0,
+            500.0,
+            500.0,
+            515.625,
+            468.75
+          ],
+          "prefixMs": [
+            994.037,
+            1047.2738,
+            1019.0046,
+            989.7683,
+            992.9299
+          ],
+          "initializeMs": [
+            0.0826,
+            0.0832,
+            0.1015,
+            0.0722,
+            0.0808
+          ],
+          "targetMsMedian": 500.754,
+          "processCpuMsMedian": 500.0,
+          "prefixMsMedian": 994.037,
+          "initializeMsMedian": 0.0826,
+          "averageCpuParallelismMedian": 0.9984942706398751
+        },
+        {
+          "threads": 2,
+          "maxFrameDelaySetting": 1,
+          "frameContexts": 1,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 676512000,
+          "targetMs": [
+            418.3206,
+            430.6394,
+            409.3696,
+            438.0814,
+            428.8185
+          ],
+          "processCpuMs": [
+            484.375,
+            531.25,
+            593.75,
+            500.0,
+            515.625
+          ],
+          "prefixMs": [
+            775.3261,
+            810.5465,
+            821.9756,
+            837.5333,
+            811.7187
+          ],
+          "initializeMs": [
+            0.172,
+            0.1893,
+            0.2226,
+            0.2199,
+            0.2147
+          ],
+          "targetMsMedian": 428.8185,
+          "processCpuMsMedian": 515.625,
+          "prefixMsMedian": 811.7187,
+          "initializeMsMedian": 0.2147,
+          "averageCpuParallelismMedian": 1.2024317980684136
+        },
+        {
+          "threads": 4,
+          "maxFrameDelaySetting": 1,
+          "frameContexts": 1,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 676512000,
+          "targetMs": [
+            425.8622,
+            418.7108,
+            426.0914,
+            435.7639,
+            421.1493
+          ],
+          "processCpuMs": [
+            546.875,
+            578.125,
+            625.0,
+            578.125,
+            546.875
+          ],
+          "prefixMs": [
+            821.9118,
+            791.879,
+            817.4904,
+            783.9901,
+            817.1085
+          ],
+          "initializeMs": [
+            0.3013,
+            0.3022,
+            0.3876,
+            0.3011,
+            0.3482
+          ],
+          "targetMsMedian": 425.8622,
+          "processCpuMsMedian": 578.125,
+          "prefixMsMedian": 817.1085,
+          "initializeMsMedian": 0.3022,
+          "averageCpuParallelismMedian": 1.3266931932636
+        },
+        {
+          "threads": 6,
+          "maxFrameDelaySetting": 1,
+          "frameContexts": 1,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 676512000,
+          "targetMs": [
+            420.8889,
+            414.7273,
+            419.0244,
+            408.4766,
+            404.0234
+          ],
+          "processCpuMs": [
+            531.25,
+            546.875,
+            640.625,
+            578.125,
+            484.375
+          ],
+          "prefixMs": [
+            793.4628,
+            839.1475,
+            841.6405,
+            778.0948,
+            811.6079
+          ],
+          "initializeMs": [
+            0.2786,
+            0.2968,
+            0.333,
+            0.3319,
+            0.4064
+          ],
+          "targetMsMedian": 414.7273,
+          "processCpuMsMedian": 546.875,
+          "prefixMsMedian": 811.6079,
+          "initializeMsMedian": 0.3319,
+          "averageCpuParallelismMedian": 1.3186375722070864
+        },
+        {
+          "threads": 2,
+          "maxFrameDelaySetting": 0,
+          "frameContexts": 2,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 676512000,
+          "targetMs": [
+            303.462,
+            305.7574,
+            305.9875,
+            301.4436,
+            297.3591
+          ],
+          "processCpuMs": [
+            562.5,
+            515.625,
+            578.125,
+            515.625,
+            562.5
+          ],
+          "prefixMs": [
+            627.0541,
+            589.7598,
+            588.9727,
+            592.2038,
+            597.9263
+          ],
+          "initializeMs": [
+            0.1757,
+            0.1655,
+            0.1841,
+            0.1664,
+            0.2145
+          ],
+          "targetMsMedian": 303.462,
+          "processCpuMsMedian": 562.5,
+          "prefixMsMedian": 592.2038,
+          "initializeMsMedian": 0.1757,
+          "averageCpuParallelismMedian": 1.8536093481226645
+        },
+        {
+          "threads": 4,
+          "maxFrameDelaySetting": 0,
+          "frameContexts": 2,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 676512000,
+          "targetMs": [
+            236.4268,
+            234.7125,
+            258.6282,
+            251.17,
+            237.6948
+          ],
+          "processCpuMs": [
+            750.0,
+            718.75,
+            609.375,
+            593.75,
+            640.625
+          ],
+          "prefixMs": [
+            488.5865,
+            489.227,
+            482.8865,
+            490.3806,
+            514.1823
+          ],
+          "initializeMs": [
+            0.4694,
+            0.3144,
+            0.3037,
+            0.3101,
+            0.3009
+          ],
+          "targetMsMedian": 237.6948,
+          "processCpuMsMedian": 640.625,
+          "prefixMsMedian": 489.227,
+          "initializeMsMedian": 0.3101,
+          "averageCpuParallelismMedian": 2.6951578242351117
+        },
+        {
+          "threads": 6,
+          "maxFrameDelaySetting": 0,
+          "frameContexts": 3,
+          "fullPixelComparedFrames": 145,
+          "fullPixelComparedBytes": 676512000,
+          "targetMs": [
+            180.2468,
+            178.9684,
+            194.7826,
+            181.6239,
+            174.7483
+          ],
+          "processCpuMs": [
+            578.125,
+            578.125,
+            671.875,
+            609.375,
+            578.125
+          ],
+          "prefixMs": [
+            354.4306,
+            358.3512,
+            390.391,
+            360.3362,
+            359.6845
+          ],
+          "initializeMs": [
+            0.3772,
+            0.4173,
+            0.2888,
+            0.3068,
+            0.2968
+          ],
+          "targetMsMedian": 180.2468,
+          "processCpuMsMedian": 578.125,
+          "prefixMsMedian": 359.6845,
+          "initializeMsMedian": 0.3068,
+          "averageCpuParallelismMedian": 3.308329751991865
+        }
+      ],
+      "case": "recording-10bit-long-gop"
+    }
+  ],
+  "cpu": "Intel Core i7-12700K",
+  "date": "2026-10-25"
+}

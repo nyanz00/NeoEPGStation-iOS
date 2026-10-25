@@ -26,7 +26,7 @@ final class NeoDecodeTrialController: UIViewController {
     let close = UIButton(type: .system); close.setTitle("閉じる", for: .normal)
     close.addAction(UIAction { [weak self] _ in self?.close() }, for: .touchUpInside)
     let title = NeoStyle.label(checkpointMode ? "AV1 状態復元診断" : "AV1 シーク診断", size: 21, bold: true)
-    if checkpointMode { status.text = "1080p以下の長いGOPのAV1動画が対象です。取得後に、状態復元の速度・全画素一致・保持メモリーを確認します。通常の再生処理は変更しません。" }
+    if checkpointMode { status.text = "1080p以下の長いGOPのAV1動画が対象です。1・2・4・6スレッドで、容量削減した状態復元の速度・全画素一致・保持メモリーを比較します。" }
     status.numberOfLines = 0
     start.setTitle("診断を開始", for: .normal); start.accessibilityIdentifier = "decode-trial-start"
     start.addAction(UIAction { [weak self] _ in self?.run() }, for: .touchUpInside)
@@ -57,8 +57,9 @@ final class NeoDecodeTrialController: UIViewController {
           "timing": "fresh-decoder-feed-to-target-output; initialization-separate; luma-check-after-timer",
           "audio": false, "networkInDecodeTimer": false]
         if checkpointMode {
-          report["schema"] = 2; report["mode"] = "dav1d-checkpoint"
-          report["timing"] = "single-thread-same-decoder-restored-state-to-target-output; full-pixel-check-outside-timer"
+          report["schema"] = 3; report["mode"] = "dav1d-checkpoint"
+          report["expectedConditions"] = 16
+          report["timing"] = "multi-thread-same-decoder-restore-to-target-output; full-pixel-check-outside-timer; no-frame-skipping"
           report["thermalStateStart"] = ProcessInfo.processInfo.thermalState.rawValue
         }
         status.text = "比較する映像データを準備中…"
@@ -67,14 +68,21 @@ final class NeoDecodeTrialController: UIViewController {
         report["sample"] = trial.summary
         if checkpointMode {
           status.text = "状態復元・全画素照合・メモリーを計測中…\n閉じる、またはバックグラウンドへの移動で中断します。"
-          let data = try await NeoCheckpointWorker.run(trial)
+          let data = try await NeoCheckpointWorker.run(trial) { [weak self] data, completed, total in
+            guard let self else { return }
+            if let rows = try? JSONSerialization.jsonObject(with: data) { report["checkpoint"] = rows }
+            report["status"] = "running"; save()
+            status.text = "状態復元・全画素照合・メモリーを計測中… \(completed)/\(total)条件\n閉じる、またはバックグラウンドへの移動で中断します。"
+          }
           try Task.checkCancellation()
-          let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] ?? []
+          let result = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+          let rows = result["rows"] as? [[String: Any]] ?? []
           report["checkpoint"] = rows
+          report["processFootprintAfterInputReleaseBytes"] = result["processFootprintAfterInputReleaseBytes"]
           let passed = rows.filter { ($0["status"] as? Int) == 0 }.count
-          report["status"] = passed == 2 ? "complete" : "partial"
+          report["status"] = passed == 16 ? "complete" : "partial"
           report["thermalStateEnd"] = ProcessInfo.processInfo.thermalState.rawValue
-          status.text = "状態復元診断が完了しました。\n全画素一致・復元試験：\(passed)/2条件\n診断結果を共有してください。画面表示や音声の速度は今回の測定に含みません。"
+          status.text = "状態復元診断が完了しました。\n全画素一致・復元試験：\(passed)/16条件\n診断結果を共有してください。画面表示や音声の速度は今回の測定に含みません。"
         } else {
           let origin = trial.summary["originSeconds"] ?? 0
           let points = trial.targets.map { $0-origin }
@@ -102,6 +110,10 @@ final class NeoDecodeTrialController: UIViewController {
         removePlayer()
         report["status"] = Task.isCancelled || trial.checkpointCancelled ? "cancelled" : "failed"
         report["errorCode"] = (error as NSError).code
+        if checkpointMode {
+          trial.releaseCheckpointPackets()
+          report["processFootprintAfterInputReleaseBytes"] = neo_checkpoint_lab_footprint()
+        }
         // Never export raw URL-bearing engine error descriptions.
         status.text = Task.isCancelled || trial.checkpointCancelled ? "診断を中断しました。" : "診断を完了できませんでした。対象動画か確認し、診断結果を共有してください。"
         save(); share.isEnabled = true
@@ -145,44 +157,64 @@ final class NeoDecodeTrialController: UIViewController {
 /// dedicated static library owns every decoder/checkpoint and releases them on
 /// success, mismatch, cancellation or timeout. It never touches a player engine.
 private enum NeoCheckpointWorker {
-  static func run(_ trial: NeoDecodeTrial) async throws -> Data {
+  static func run(_ trial: NeoDecodeTrial,
+    progress: @escaping @MainActor @Sendable (Data, Int, Int) -> Void) async throws -> Data {
     try await Task.detached(priority: .userInitiated) {
-      try trial.withCheckpointPackets { packets, gop in
-        let input = packets.map { NeoCheckpointPacket(data: $0.data, size: $0.count, seconds: $0.seconds) }
-        var rows: [[String: Any]] = []
-        for distance in [2.0, 0.25] {
-          if trial.checkpointCancelled { throw CancellationError() }
-          var result = NeoCheckpointResult()
-          let code = input.withUnsafeBufferPointer { buffer in
-            neo_checkpoint_lab_run(buffer.baseAddress, buffer.count, gop, distance, &result, { cookie in
-              guard let cookie else { return 1 }
-              return Unmanaged<NeoDecodeTrial>.fromOpaque(cookie).takeUnretainedValue().checkpointCancelled ? 1 : 0
-            }, Unmanaged.passUnretained(trial).toOpaque())
+      defer { trial.releaseCheckpointPackets() }
+      var rows: [[String: Any]] = []
+      // Rotate thread order between groups to reduce fixed-order thermal bias.
+      let groups: [(Bool, Double, [Int32])] = [
+        (false, 6, [1, 2, 4, 6]), (true, 6, [6, 4, 2, 1]),
+        (true, 2, [2, 6, 1, 4]), (true, 0.25, [4, 1, 6, 2])]
+      for (packed, distance, threads) in groups {
+        for threadCount in threads {
+          if Task.isCancelled || trial.checkpointCancelled { throw CancellationError() }
+          let rowData = try trial.withCheckpointPackets { packets, gop in
+            let input = packets.map { NeoCheckpointPacket(data: $0.data, size: $0.count, seconds: $0.seconds) }
+            var result = NeoCheckpointResult()
+            let code = input.withUnsafeBufferPointer { buffer in
+              neo_checkpoint_lab_run(buffer.baseAddress, buffer.count, gop, distance, threadCount, packed ? 1 : 0, &result, { cookie in
+                guard let cookie else { return 1 }
+                return Unmanaged<NeoDecodeTrial>.fromOpaque(cookie).takeUnretainedValue().checkpointCancelled ? 1 : 0
+              }, Unmanaged.passUnretained(trial).toOpaque())
+            }
+            if code == 1006 { throw CancellationError() }
+            let saves = withUnsafeBytes(of: result.repeated_save_ms) { Array($0.bindMemory(to: Double.self)) }
+            let restored = withUnsafeBytes(of: result.restored_ms) { Array($0.bindMemory(to: Double.self)) }
+            let restoreOnly = withUnsafeBytes(of: result.restore_only_ms) { Array($0.bindMemory(to: Double.self)) }
+            let footprints = withUnsafeBytes(of: result.sampled_footprint_bytes) { Array($0.bindMemory(to: UInt64.self)) }
+            let row: [String: Any] = [
+              "status": Int(code), "decoderError": Int(result.decoder_error), "failureStage": Int(result.failure_stage),
+              "threads": Int(result.threads), "frameContexts": Int(result.frame_contexts), "packed": packed,
+              "packing": packed ? "lossless-active-10bit; padding-preserved" : "none",
+              "requestedDistanceSeconds": distance, "checkpointSeconds": result.checkpoint_seconds,
+              "targetSeconds": result.target_seconds, "firstFollowingKeyframeSeconds": result.first_following_key_seconds,
+              "width": result.width, "height": result.height, "bitDepth": result.bit_depth,
+              "fullPixelComparedFrames": result.compared_frames, "fullPixelComparedBytes": result.compared_pixel_bytes,
+              "retainedBytes": result.retained_bytes, "stateBytes": result.state_bytes,
+              "pictureBytes": result.picture_bytes, "uniquePictures": result.unique_pictures,
+              "saveMs": result.save_ms, "repeatedSaveMs": saves, "restoredMs": restored, "restoreOnlyMs": restoreOnly,
+              "drainBeforeSaveMs": result.drain_before_save_ms,
+              "sampledFootprintBytes": footprints, "processFootprintBeforeBytes": result.before_bytes,
+              "sampledProcessFootprintPeakBytes": result.sampled_peak_bytes, "processFootprintAfterBytes": result.after_bytes,
+              "emptyDecoderRejected": result.empty_rejected != 0, "wrongOwnerRejected": result.wrong_owner_rejected != 0,
+              "busyDecoderRejected": result.busy_rejected != 0, "originalPixelsDetached": result.original_pixels_detached != 0,
+              "suffixWithoutStateRejected": result.suffix_without_state_rejected != 0,
+              "restoreCount": result.restore_count, "temporarySaveFreeCount": result.temporary_save_free_count,
+              "targetVerifiedCount": result.target_verified_count, "fullSuffixPasses": result.full_suffix_passes,
+              "allocationVerificationPasses": result.allocation_verification_passes,
+              "sameDecoder": true, "fullPixelCheckOutsideTimer": true, "normalPlaybackUnchanged": true
+            ]
+            return try JSONSerialization.data(withJSONObject: row, options: [.sortedKeys])
           }
-          if code == 1006 { throw CancellationError() }
-          let baseline = withUnsafeBytes(of: result.baseline_ms) { Array($0.bindMemory(to: Double.self)) }
-          let restored = withUnsafeBytes(of: result.restored_ms) { Array($0.bindMemory(to: Double.self)) }
-          let restoreOnly = withUnsafeBytes(of: result.restore_only_ms) { Array($0.bindMemory(to: Double.self)) }
-          let footprints = withUnsafeBytes(of: result.sampled_footprint_bytes) { Array($0.bindMemory(to: UInt64.self)) }
-          rows.append([
-            "status": Int(code), "decoderError": Int(result.decoder_error), "threads": 1, "frameDelay": 1,
-            "requestedDistanceSeconds": distance, "checkpointSeconds": result.checkpoint_seconds,
-            "targetSeconds": result.target_seconds, "firstFollowingKeyframeSeconds": result.first_following_key_seconds,
-            "width": result.width, "height": result.height, "bitDepth": result.bit_depth,
-            "fullPixelComparedFrames": result.compared_frames, "fullPixelComparedBytes": result.compared_pixel_bytes,
-            "retainedBytes": result.retained_bytes, "stateBytes": result.state_bytes,
-            "pictureBytes": result.picture_bytes, "uniquePictures": result.unique_pictures,
-            "saveMs": result.save_ms, "baselineMs": baseline, "restoredMs": restored, "restoreOnlyMs": restoreOnly,
-            "sampledFootprintBytes": footprints, "processFootprintBeforeBytes": result.before_bytes,
-            "sampledProcessFootprintPeakBytes": result.sampled_peak_bytes, "processFootprintAfterBytes": result.after_bytes,
-            "emptyDecoderRejected": result.empty_rejected != 0, "wrongOwnerRejected": result.wrong_owner_rejected != 0,
-            "suffixWithoutStateRejected": result.suffix_without_state_rejected != 0,
-            "restoreCount": result.restore_count, "temporarySaveFreeCount": result.temporary_save_free_count,
-            "sameDecoder": true, "fullPixelCheckOutsideTimer": true, "normalPlaybackUnchanged": true
-          ])
+          if let row = try JSONSerialization.jsonObject(with: rowData) as? [String: Any] { rows.append(row) }
+          let snapshot = try JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys])
+          await progress(snapshot, rows.count, 16)
         }
-        return try JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys])
       }
+      trial.releaseCheckpointPackets()
+      return try JSONSerialization.data(withJSONObject: ["rows": rows,
+        "processFootprintAfterInputReleaseBytes": neo_checkpoint_lab_footprint()], options: [.sortedKeys])
     }.value
   }
 }
