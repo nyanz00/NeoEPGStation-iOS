@@ -86,3 +86,20 @@ IPA: `NeoEPGStation-build269.ipa`、SHA-256:
 GitHub が記録するファイルの digest、ZIP CRC、埋め込みビルド番号、
 収録した checkpoint のソース/ライセンスと Aether のパッチレシピを照合済み。
 iPhone での速度・熱・電力の測定は未実施であり、シミュレーター試験と区別する。
+
+## ビルド270の確認
+
+ソース `f53126b3172d281204056ae4bc3856a640473c1d`、
+[Actions 40190633901](https://github.com/nyanz00/NeoEPGStation-iOS/actions/runs/40190633901)
+でdevice/simulatorのビルドに成功。診断画面を経由した8bit/10bit各16条件がcomplete。
+1/2/4/6スレッド、元の参照保持/無損失パック、約6/2/0.25秒の残り復号を確認した。
+各条件で全後続区間2回・復元目的画像5回の全画素一致、パックのアロケーション全体一致、
+拒否検査、phys_footprint、入力解放後の観測値、schema 3の共有JSONが揃うことを確認。
+手元でも同じアプリ用C APIの8bit/10bit各16条件と、1080p長GOP入力の6スレッドパックが成功。
+
+IPA: `NeoEPGStation-build270.ipa`、SHA-256:
+`ca7d5d9f121aeb0a0e867d58fb51b74fc839d5d73005cee5bfcd76f75cadbd81`。
+GitHub artifact digest、ZIP CRC、埋め込みビルド番号、checkpointソース/ライセンス、
+Aetherパッチレシピを照合済み。通常経路のFFmpeg/dav1dインポート146個が既存の
+Aetherフレームワークへ結び付くことも確認した。
+実機の速度・熱・電力や通常プレイヤーへの採用判断は、このビルドの実機結果で行う。
