@@ -140,3 +140,19 @@ Aetherフレームワークへ結び付くことも確認した。
 実録画の等速区間は約20秒、保存10回。同じ64MiB枠に現在方式3地点、LZ4は8地点、
 Zstandardは10地点が残った。3地点の予算内シークも全画素一致。
 このPCではフレーム間隔を超える出力遅れは観測しなかったが、iPhone性能の結論には使わない。
+
+## ビルド272の確認
+
+ソース `b47df4aa2d700753c693b4cf4e5724c932707baa`、
+[Actions 40221461845](https://github.com/nyanz00/NeoEPGStation-iOS/actions/runs/40221461845)
+でdevice/simulatorビルドと診断画面の試験に成功。8bit/10bit各10条件、合計20条件が
+schema 4・`complete`。CPU保存時間、非同期定期圧縮、保持枠内シーク、全画素一致とJSON出力を確認。
+通常経路のFFmpegインポート146件もAetherフレームワークへの結び付きを確認した。
+
+初回ビルド271はZstandardの補助ヘッダー欠落で停止。固定ソースから `zstd_errors.h` を
+同梱するよう修正し、ホストの依存参照も同梱ヘッダーへ向くことを確認してから再実行した。
+
+IPA: `NeoEPGStation-build272.ipa`、SHA-256:
+`abf30e18a5111ead400fccd89bc28351c4435989a7b5313b99e03243bd943b29`。
+配布物のCRC・artifact digest・ソースハッシュ・ライセンス同梱を照合済み。
+iPhone上の速度・同時復号負荷・発熱の結論は実機結果待ち。
