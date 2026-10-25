@@ -1,0 +1,36 @@
+diff --git a/Sources/AetherEngine/AetherEngine+Diagnostics.swift b/Sources/AetherEngine/AetherEngine+Diagnostics.swift
+--- a/Sources/AetherEngine/AetherEngine+Diagnostics.swift
++++ b/Sources/AetherEngine/AetherEngine+Diagnostics.swift
+@@ -785,6 +785,21 @@
+             "packetBytes": Double(bytes), "packetCount": Double(packets.count),
+             "width": Double(copied.pointee.width), "height": Double(copied.pointee.height),
+             "preparationMs": (ProcessInfo.processInfo.systemUptime-began)*1000]
++    }
++    /// Borrowed packet storage, valid only for the synchronous closure. The
++    /// dedicated app lab owns its isolated dav1d; ordinary playback never calls it.
++    public var checkpointCancelled: Bool { isCancelled }
++    public func withCheckpointPackets<T>(_ body: ([NeoDecodeTrialPacket], Double) throws -> T) throws -> T {
++        try check()
++        guard let par = parameters, par.pointee.width > 0, par.pointee.height > 0,
++              par.pointee.width <= 1920, par.pointee.height <= 1080 else { throw failure(40) }
++        var input: [NeoDecodeTrialPacket] = []
++        for p in packets {
++            guard let bytes = p.pointee.data, p.pointee.size > 0 else { throw failure(41) }
++            input.append(NeoDecodeTrialPacket(data: UnsafePointer(bytes), count: Int(p.pointee.size),
++                seconds: Double(p.pointee.pts) * Double(timeBase.num) / Double(timeBase.den) - origin))
++        }
++        return try withExtendedLifetime(self) { try body(input, gopEnd-origin) }
+     }
+     private func writeClip(to url: URL) throws {
+         var context: UnsafeMutablePointer<AVFormatContext>?
+@@ -1028,3 +1043,10 @@
+         return nil
+     }
+ }
++
++/// Packet views may not escape withCheckpointPackets's synchronous closure.
++public struct NeoDecodeTrialPacket {
++    public let data: UnsafePointer<UInt8>
++    public let count: Int
++    public let seconds: Double
++}

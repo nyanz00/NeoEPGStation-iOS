@@ -2,13 +2,14 @@ import Foundation
 
 // Snapshot at player creation; changing this never replaces a running engine.
 enum NeoPlaybackExperiment: String, CaseIterable {
-  case vlc, aether, avplayer, decodeTrial
+  case vlc, aether, avplayer, decodeTrial, checkpointTrial
   var title: String {
     switch self {
     case .vlc: return "標準：VLC"
     case .aether: return "試験用：AetherEngine"
     case .avplayer: return "試験用：AVPlayer直接再生"
     case .decodeTrial: return "診断用：AV1復号比較"
+    case .checkpointTrial: return "診断用：AV1状態復元"
     }
   }
   static var selected: Self {

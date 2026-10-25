@@ -1,0 +1,239 @@
+{
+  "upstreamRevision": "54706fc6bc0cdecab7e9593974a4039cc038fca7",
+  "compiler": "gcc.EXE (Rev3, Built by MSYS2 project) 16.2.0",
+  "method": "Windows x86_64, one thread, input in RAM, decoded pictures only; no network/audio/UI",
+  "sourceSha256": {
+    "checkpoint.c": "7d3189a2525db8ba3bebb65af1fc0e7ab15723249710f69607c113bad46b5f4f",
+    "neo_checkpoint.h": "a2b06865afa4a920e9100a76866af479206b032a0e1b56cf00eda0e56a3a6bf3",
+    "probe.c": "5af8ae2c60019819b9d8df97897544acf9e741715b0e08a18d705b605fba9886"
+  },
+  "cases": [
+    {
+      "success": true,
+      "dav1dVersion": "1.5.4-0-g54706fc",
+      "threads": 1,
+      "frameDelay": 1,
+      "checkpointPacket": 432,
+      "checkpointSeconds": 18.021,
+      "targetSeconds": 20.021,
+      "endSeconds": 30.021,
+      "comparedFrames": 1728,
+      "comparedPixelBytes": 149299200,
+      "sameDecoder": true,
+      "negativeControlRejected": true,
+      "crossedKeyframe": true,
+      "firstSuffixKeyframeSeconds": 24.021,
+      "saveMs": 0.0024,
+      "stateBytes": 2792,
+      "retainedBytes": 1367536,
+      "pictureBytes": 1180672,
+      "uniquePictures": 8,
+      "uniqueAllocations": 41,
+      "restoreMs": [
+        0.004,
+        0.0036,
+        0.0037,
+        0.0041,
+        0.0039
+      ],
+      "restoreAndSuffixMs": [
+        9.4029,
+        9.0243,
+        9.824,
+        9.7186,
+        9.651
+      ],
+      "fromKeyframeMs": [
+        93.8234,
+        93.7846,
+        95.1751,
+        96.3702,
+        94.4623
+      ],
+      "warmFromKeyframeMs": [
+        95.3047,
+        96.8041,
+        93.8278,
+        95.5366,
+        109.4946
+      ],
+      "case": "fixture-8bit",
+      "restoreMsMedian": 0.0039,
+      "restoreAndSuffixMsMedian": 9.651,
+      "fromKeyframeMsMedian": 94.4623,
+      "warmFromKeyframeMsMedian": 95.5366,
+      "retainedMiB": 1.3041839599609375
+    },
+    {
+      "success": true,
+      "dav1dVersion": "1.5.4-0-g54706fc",
+      "threads": 1,
+      "frameDelay": 1,
+      "checkpointPacket": 432,
+      "checkpointSeconds": 18.021,
+      "targetSeconds": 20.021,
+      "endSeconds": 30.021,
+      "comparedFrames": 1728,
+      "comparedPixelBytes": 298598400,
+      "sameDecoder": true,
+      "negativeControlRejected": true,
+      "crossedKeyframe": true,
+      "firstSuffixKeyframeSeconds": 24.021,
+      "saveMs": 0.0028,
+      "stateBytes": 2792,
+      "retainedBytes": 2547184,
+      "pictureBytes": 2360320,
+      "uniquePictures": 8,
+      "uniqueAllocations": 41,
+      "restoreMs": [
+        0.0038,
+        0.004,
+        0.0043,
+        0.0044,
+        0.0036
+      ],
+      "restoreAndSuffixMs": [
+        9.0555,
+        9.7368,
+        9.6637,
+        9.4213,
+        9.2869
+      ],
+      "fromKeyframeMs": [
+        94.3412,
+        92.349,
+        90.249,
+        93.8119,
+        92.568
+      ],
+      "warmFromKeyframeMs": [
+        93.058,
+        91.168,
+        88.9377,
+        92.4588,
+        91.9961
+      ],
+      "case": "fixture-10bit",
+      "restoreMsMedian": 0.004,
+      "restoreAndSuffixMsMedian": 9.4213,
+      "fromKeyframeMsMedian": 92.568,
+      "warmFromKeyframeMsMedian": 91.9961,
+      "retainedMiB": 2.4291839599609375
+    },
+    {
+      "success": true,
+      "dav1dVersion": "1.5.4-0-g54706fc",
+      "threads": 1,
+      "frameDelay": 1,
+      "checkpointPacket": 498,
+      "checkpointSeconds": 18.035,
+      "targetSeconds": 20.037,
+      "endSeconds": 30.005,
+      "comparedFrames": 1722,
+      "comparedPixelBytes": 8034163200,
+      "sameDecoder": true,
+      "negativeControlRejected": true,
+      "crossedKeyframe": true,
+      "firstSuffixKeyframeSeconds": 22.289,
+      "saveMs": 0.0036,
+      "stateBytes": 2792,
+      "retainedBytes": 27682324,
+      "pictureBytes": 26911360,
+      "uniquePictures": 5,
+      "uniqueAllocations": 26,
+      "restoreMs": [
+        0.0039,
+        0.0044,
+        0.0047,
+        0.0039,
+        0.0038
+      ],
+      "restoreAndSuffixMs": [
+        193.1378,
+        190.7123,
+        321.8466,
+        322.9708,
+        326.1396
+      ],
+      "fromKeyframeMs": [
+        1765.4266,
+        1756.2419,
+        3110.0119,
+        3080.6199,
+        3117.6309
+      ],
+      "warmFromKeyframeMs": [
+        1776.7551,
+        1750.8756,
+        3185.2737,
+        3083.1687,
+        3069.1525
+      ],
+      "case": "recording-10bit-long-gop",
+      "restoreMsMedian": 0.0039,
+      "restoreAndSuffixMsMedian": 321.8466,
+      "fromKeyframeMsMedian": 3080.6199,
+      "warmFromKeyframeMsMedian": 3069.1525,
+      "retainedMiB": 26.399921417236328
+    },
+    {
+      "success": true,
+      "dav1dVersion": "1.5.4-0-g54706fc",
+      "threads": 1,
+      "frameDelay": 1,
+      "checkpointPacket": 541,
+      "checkpointSeconds": 19.828,
+      "targetSeconds": 20.037,
+      "endSeconds": 30.005,
+      "comparedFrames": 1464,
+      "comparedPixelBytes": 6830438400,
+      "sameDecoder": true,
+      "negativeControlRejected": true,
+      "crossedKeyframe": true,
+      "firstSuffixKeyframeSeconds": 22.289,
+      "saveMs": 0.0026,
+      "stateBytes": 2792,
+      "retainedBytes": 27682324,
+      "pictureBytes": 26911360,
+      "uniquePictures": 5,
+      "uniqueAllocations": 26,
+      "restoreMs": [
+        0.0036,
+        0.0082,
+        0.0076,
+        0.0194,
+        0.0082
+      ],
+      "restoreAndSuffixMs": [
+        24.1626,
+        21.9779,
+        26.2554,
+        31.9431,
+        22.8529
+      ],
+      "fromKeyframeMs": [
+        3110.0282,
+        3087.0457,
+        3043.7408,
+        3075.4489,
+        3098.3883
+      ],
+      "warmFromKeyframeMs": [
+        3075.5462,
+        3032.2405,
+        3170.0109,
+        3129.4033,
+        3064.8431
+      ],
+      "case": "recording-10bit-long-gop",
+      "restoreMsMedian": 0.0082,
+      "restoreAndSuffixMsMedian": 24.1626,
+      "fromKeyframeMsMedian": 3087.0457,
+      "warmFromKeyframeMsMedian": 3075.5462,
+      "retainedMiB": 26.399921417236328
+    }
+  ],
+  "cpu": "Intel Core i7-12700K",
+  "platform": "Windows x86_64",
+  "date": "2026-10-25"
+}

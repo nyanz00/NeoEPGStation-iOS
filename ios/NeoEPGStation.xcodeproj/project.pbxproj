@@ -427,7 +427,9 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
+				LIBRARY_SEARCH_PATHS = ("$(inherited)", "$(PROJECT_DIR)/../build/checkpoint/$(PLATFORM_NAME)");
 				OTHER_LDFLAGS = (
+					"-lneocheckpoint",
 					"-framework", "AetherLibavcodec",
 					"-framework", "AetherLibavformat",
 					"-framework", "AetherLibavutil",
@@ -466,7 +468,9 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
+				LIBRARY_SEARCH_PATHS = ("$(inherited)", "$(PROJECT_DIR)/../build/checkpoint/$(PLATFORM_NAME)");
 				OTHER_LDFLAGS = (
+					"-lneocheckpoint",
 					"-framework", "AetherLibavcodec",
 					"-framework", "AetherLibavformat",
 					"-framework", "AetherLibavutil",

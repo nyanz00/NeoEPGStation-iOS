@@ -68,6 +68,17 @@
           "patchedSHA256": "9c7b2725c69eecb40caba62748d7969ee5976807aedc2a8b425bc35cf0e1a63f"
         }
       ]
+    },
+    {
+      "file": "0007-checkpoint-packet-view.patch",
+      "sha256": "eaaf0c604ddd2e35f1828dd8294ec18dffc57ec1a1652f3462dee824c7dc9514",
+      "sources": [
+        {
+          "path": "Sources/AetherEngine/AetherEngine+Diagnostics.swift",
+          "upstreamSHA256": "9c7b2725c69eecb40caba62748d7969ee5976807aedc2a8b425bc35cf0e1a63f",
+          "patchedSHA256": "59921ff3bce9e2fb0db9ca0c6f165793ade2fdb6059b4836c9bb2e020b628b66"
+        }
+      ]
     }
   ],
   "retiredHeaderCorrection": {
