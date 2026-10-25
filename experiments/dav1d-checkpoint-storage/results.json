@@ -1,0 +1,1875 @@
+{
+  "revision": "54706fc6bc0cdecab7e9593974a4039cc038fca7",
+  "platform": "Windows PC; six physical cores; software dav1d; GPU performance not measured",
+  "method": "exact allocation roundtrips for nine lossless methods; original compressed frame dependency closure and header-only replay; exact reference pixels and full suffix; no network/audio/UI",
+  "cases": [
+    {
+      "success": true,
+      "threads": 6,
+      "frameContexts": 3,
+      "affinityMask": 1365,
+      "checkpointSeconds": 18.021,
+      "targetSeconds": 20.021,
+      "endSeconds": 26.021,
+      "keySeconds": 0.021,
+      "baselineBytes": 2025768,
+      "baselinePixelBytes": 1841408,
+      "compression": [
+        {
+          "method": "packed10",
+          "heldBytes": 2025848,
+          "pixelBytes": 1841408,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 192,
+          "saveMs": [
+            0.6099,
+            0.7163,
+            0.7861
+          ],
+          "restoreMs": [
+            0.3574,
+            0.3799,
+            0.3621
+          ],
+          "saveMedianMs": 0.7163,
+          "restoreMedianMs": 0.3621,
+          "heldMiB": 1.9319992065429688
+        },
+        {
+          "method": "raw-lz4",
+          "heldBytes": 512765,
+          "pixelBytes": 328325,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 192,
+          "saveMs": [
+            1.6202,
+            1.7677,
+            1.5885
+          ],
+          "restoreMs": [
+            0.4615,
+            0.4745,
+            0.4259
+          ],
+          "saveMedianMs": 1.6202,
+          "restoreMedianMs": 0.4615,
+          "heldMiB": 0.4890108108520508
+        },
+        {
+          "method": "packed10-lz4",
+          "heldBytes": 450587,
+          "pixelBytes": 266147,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 192,
+          "saveMs": [
+            1.3913,
+            1.1963,
+            1.5482
+          ],
+          "restoreMs": [
+            0.6025,
+            0.5631,
+            0.7543
+          ],
+          "saveMedianMs": 1.3913,
+          "restoreMedianMs": 0.6025,
+          "heldMiB": 0.42971324920654297
+        },
+        {
+          "method": "horizontal-delta-lz4",
+          "heldBytes": 491027,
+          "pixelBytes": 306587,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 192,
+          "saveMs": [
+            2.5021,
+            2.401,
+            2.4388
+          ],
+          "restoreMs": [
+            0.7421,
+            0.7469,
+            0.7469
+          ],
+          "saveMedianMs": 2.4388,
+          "restoreMedianMs": 0.7469,
+          "heldMiB": 0.4682798385620117
+        },
+        {
+          "method": "shuffled-delta-lz4",
+          "heldBytes": 458281,
+          "pixelBytes": 273841,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 192,
+          "saveMs": [
+            2.3685,
+            2.1282,
+            2.1268
+          ],
+          "restoreMs": [
+            0.8163,
+            0.8947,
+            0.7985
+          ],
+          "saveMedianMs": 2.1282,
+          "restoreMedianMs": 0.8163,
+          "heldMiB": 0.43705081939697266
+        },
+        {
+          "method": "raw-zstd1",
+          "heldBytes": 422768,
+          "pixelBytes": 238328,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 192,
+          "saveMs": [
+            2.8032,
+            2.9393,
+            2.6366
+          ],
+          "restoreMs": [
+            1.0838,
+            1.0206,
+            1.2335
+          ],
+          "saveMedianMs": 2.8032,
+          "restoreMedianMs": 1.0838,
+          "heldMiB": 0.4031829833984375
+        },
+        {
+          "method": "packed10-zstd1",
+          "heldBytes": 410802,
+          "pixelBytes": 226362,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 192,
+          "saveMs": [
+            1.8655,
+            1.3652,
+            1.4847
+          ],
+          "restoreMs": [
+            0.9802,
+            0.9277,
+            1.0591
+          ],
+          "saveMedianMs": 1.4847,
+          "restoreMedianMs": 0.9802,
+          "heldMiB": 0.3917713165283203
+        },
+        {
+          "method": "shuffled-delta-zstd1",
+          "heldBytes": 363610,
+          "pixelBytes": 179170,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 192,
+          "saveMs": [
+            3.5027,
+            3.2388,
+            3.6526
+          ],
+          "restoreMs": [
+            1.2516,
+            1.2159,
+            1.2459
+          ],
+          "saveMedianMs": 3.5027,
+          "restoreMedianMs": 1.2459,
+          "heldMiB": 0.34676551818847656
+        },
+        {
+          "method": "block32-min-bitpack",
+          "heldBytes": 1772584,
+          "pixelBytes": 1588144,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 192,
+          "saveMs": [
+            1.6123,
+            1.46,
+            1.3794
+          ],
+          "restoreMs": [
+            1.0412,
+            0.9825,
+            1.4327
+          ],
+          "saveMedianMs": 1.46,
+          "restoreMedianMs": 1.0412,
+          "heldMiB": 1.6904678344726562
+        }
+      ],
+      "recipe": {
+        "heldBytes": 158249,
+        "compressedPayloadAndHeadersBytes": 147330,
+        "selectedCodedFrames": 434,
+        "originalCodedFrames": 447,
+        "headerDependencyClosure": true,
+        "traceFreedBeforeReplay": true,
+        "allEightReferenceSlotsVerified": true,
+        "suffixComparedFrames": 192,
+        "rebuildMs": [
+          50.225,
+          52.8936,
+          60.399,
+          52.6183,
+          51.0897
+        ],
+        "rebuildAndTargetMs": [
+          56.1462,
+          59.6966,
+          66.1838,
+          58.3243,
+          56.7351
+        ],
+        "keyToCheckpointMs": [
+          49.6616,
+          55.0349,
+          57.4839,
+          49.0197,
+          54.9502
+        ],
+        "keyToTargetMs": [
+          55.2622,
+          61.2708,
+          63.8799,
+          54.5579,
+          61.0349
+        ],
+        "packedRestoreMs": [
+          0.4423,
+          0.5393,
+          0.5004,
+          0.5303,
+          0.3844
+        ],
+        "packedRestoreAndTargetMs": [
+          6.2381,
+          7.0496,
+          7.0176,
+          6.3862,
+          6.2344
+        ],
+        "rebuildMsMedian": 52.6183,
+        "rebuildAndTargetMsMedian": 58.3243,
+        "keyToCheckpointMsMedian": 54.9502,
+        "keyToTargetMsMedian": 61.0349,
+        "packedRestoreMsMedian": 0.5004,
+        "packedRestoreAndTargetMsMedian": 6.3862
+      },
+      "comparedFrames": 1935,
+      "comparedBytes": 334368000,
+      "case": "fixture10"
+    },
+    {
+      "success": true,
+      "threads": 6,
+      "frameContexts": 3,
+      "affinityMask": 1365,
+      "checkpointSeconds": 14.031,
+      "targetSeconds": 20.037,
+      "endSeconds": 25.0,
+      "keySeconds": 0.0,
+      "baselineBytes": 18932700,
+      "baselinePixelBytes": 18163040,
+      "compression": [
+        {
+          "method": "packed10",
+          "heldBytes": 18932780,
+          "pixelBytes": 18163040,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 263,
+          "saveMs": [
+            6.0934,
+            6.1247,
+            5.6541
+          ],
+          "restoreMs": [
+            6.6353,
+            6.9603,
+            7.1607
+          ],
+          "saveMedianMs": 6.0934,
+          "restoreMedianMs": 6.9603,
+          "heldMiB": 18.055706024169922
+        },
+        {
+          "method": "raw-lz4",
+          "heldBytes": 11990387,
+          "pixelBytes": 11220647,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 263,
+          "saveMs": [
+            45.1869,
+            44.539,
+            44.7952
+          ],
+          "restoreMs": [
+            10.4275,
+            10.4671,
+            10.3436
+          ],
+          "saveMedianMs": 44.7952,
+          "restoreMedianMs": 10.4275,
+          "heldMiB": 11.434924125671387
+        },
+        {
+          "method": "packed10-lz4",
+          "heldBytes": 10447336,
+          "pixelBytes": 9677596,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 263,
+          "saveMs": [
+            28.1129,
+            28.5205,
+            30.1042
+          ],
+          "restoreMs": [
+            13.9592,
+            14.3819,
+            14.539
+          ],
+          "saveMedianMs": 28.5205,
+          "restoreMedianMs": 14.3819,
+          "heldMiB": 9.963356018066406
+        },
+        {
+          "method": "horizontal-delta-lz4",
+          "heldBytes": 10848122,
+          "pixelBytes": 10078382,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 263,
+          "saveMs": [
+            60.3198,
+            59.5597,
+            60.3953
+          ],
+          "restoreMs": [
+            16.4919,
+            16.8964,
+            16.9304
+          ],
+          "saveMedianMs": 60.3198,
+          "restoreMedianMs": 16.8964,
+          "heldMiB": 10.345575332641602
+        },
+        {
+          "method": "shuffled-delta-lz4",
+          "heldBytes": 7982416,
+          "pixelBytes": 7212676,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 263,
+          "saveMs": [
+            50.7065,
+            51.7478,
+            51.2415
+          ],
+          "restoreMs": [
+            15.4785,
+            15.5953,
+            15.0618
+          ],
+          "saveMedianMs": 51.2415,
+          "restoreMedianMs": 15.4785,
+          "heldMiB": 7.6126251220703125
+        },
+        {
+          "method": "raw-zstd1",
+          "heldBytes": 8650755,
+          "pixelBytes": 7881015,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 263,
+          "saveMs": [
+            58.8187,
+            59.6158,
+            60.2717
+          ],
+          "restoreMs": [
+            23.4941,
+            23.7973,
+            23.9625
+          ],
+          "saveMedianMs": 59.6158,
+          "restoreMedianMs": 23.7973,
+          "heldMiB": 8.25000286102295
+        },
+        {
+          "method": "packed10-zstd1",
+          "heldBytes": 9431828,
+          "pixelBytes": 8662088,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 263,
+          "saveMs": [
+            40.4136,
+            40.5557,
+            43.41
+          ],
+          "restoreMs": [
+            24.6808,
+            22.2527,
+            23.8004
+          ],
+          "saveMedianMs": 40.5557,
+          "restoreMedianMs": 23.8004,
+          "heldMiB": 8.994892120361328
+        },
+        {
+          "method": "shuffled-delta-zstd1",
+          "heldBytes": 5608160,
+          "pixelBytes": 4838420,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 263,
+          "saveMs": [
+            60.1415,
+            60.616,
+            60.1625
+          ],
+          "restoreMs": [
+            22.3378,
+            23.4425,
+            22.5905
+          ],
+          "saveMedianMs": 60.1625,
+          "restoreMedianMs": 22.5905,
+          "heldMiB": 5.348358154296875
+        },
+        {
+          "method": "block32-min-bitpack",
+          "heldBytes": 13426228,
+          "pixelBytes": 12656488,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 263,
+          "saveMs": [
+            21.3634,
+            20.0739,
+            19.9614
+          ],
+          "restoreMs": [
+            16.631,
+            16.583,
+            16.1509
+          ],
+          "saveMedianMs": 20.0739,
+          "restoreMedianMs": 16.583,
+          "heldMiB": 12.804248809814453
+        }
+      ],
+      "recipe": {
+        "heldBytes": 2090561,
+        "compressedPayloadAndHeadersBytes": 2080405,
+        "selectedCodedFrames": 203,
+        "originalCodedFrames": 404,
+        "headerDependencyClosure": true,
+        "traceFreedBeforeReplay": true,
+        "allEightReferenceSlotsVerified": true,
+        "suffixComparedFrames": 263,
+        "rebuildMs": [
+          340.6133,
+          316.8054,
+          315.7586,
+          316.4881,
+          317.318
+        ],
+        "rebuildAndTargetMs": [
+          556.9715,
+          534.6461,
+          532.3383,
+          529.6927,
+          534.8972
+        ],
+        "keyToCheckpointMs": [
+          472.3926,
+          470.67,
+          495.7428,
+          453.969,
+          454.2618
+        ],
+        "keyToTargetMs": [
+          696.0027,
+          693.9297,
+          711.5895,
+          681.1462,
+          676.8415
+        ],
+        "packedRestoreMs": [
+          6.2924,
+          6.9907,
+          6.5986,
+          6.4398,
+          6.9823
+        ],
+        "packedRestoreAndTargetMs": [
+          232.4887,
+          234.1743,
+          235.8866,
+          221.4278,
+          228.5025
+        ],
+        "rebuildMsMedian": 316.8054,
+        "rebuildAndTargetMsMedian": 534.6461,
+        "keyToCheckpointMsMedian": 470.67,
+        "keyToTargetMsMedian": 693.9297,
+        "packedRestoreMsMedian": 6.5986,
+        "packedRestoreAndTargetMsMedian": 232.4887
+      },
+      "comparedFrames": 2645,
+      "comparedBytes": 12340512000,
+      "case": "long-gop"
+    },
+    {
+      "success": true,
+      "threads": 6,
+      "frameContexts": 3,
+      "affinityMask": 1365,
+      "checkpointSeconds": 18.035,
+      "targetSeconds": 20.037,
+      "endSeconds": 25.0,
+      "keySeconds": 0.0,
+      "baselineBytes": 18932700,
+      "baselinePixelBytes": 18163040,
+      "compression": [
+        {
+          "method": "packed10",
+          "heldBytes": 18932780,
+          "pixelBytes": 18163040,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 167,
+          "saveMs": [
+            6.0895,
+            6.191,
+            5.9244
+          ],
+          "restoreMs": [
+            7.1193,
+            6.4703,
+            6.7427
+          ],
+          "saveMedianMs": 6.0895,
+          "restoreMedianMs": 6.7427,
+          "heldMiB": 18.055706024169922
+        },
+        {
+          "method": "raw-lz4",
+          "heldBytes": 15018007,
+          "pixelBytes": 14248267,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 167,
+          "saveMs": [
+            50.0936,
+            50.3622,
+            51.3022
+          ],
+          "restoreMs": [
+            10.7911,
+            11.3611,
+            10.8371
+          ],
+          "saveMedianMs": 50.3622,
+          "restoreMedianMs": 10.8371,
+          "heldMiB": 14.322287559509277
+        },
+        {
+          "method": "packed10-lz4",
+          "heldBytes": 13021048,
+          "pixelBytes": 12251308,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 167,
+          "saveMs": [
+            27.7865,
+            28.0151,
+            28.9609
+          ],
+          "restoreMs": [
+            14.1021,
+            14.0407,
+            13.7627
+          ],
+          "saveMedianMs": 28.0151,
+          "restoreMedianMs": 14.0407,
+          "heldMiB": 12.417839050292969
+        },
+        {
+          "method": "horizontal-delta-lz4",
+          "heldBytes": 12773872,
+          "pixelBytes": 12004132,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 167,
+          "saveMs": [
+            68.1836,
+            68.9948,
+            71.2469
+          ],
+          "restoreMs": [
+            15.7345,
+            16.6381,
+            16.0051
+          ],
+          "saveMedianMs": 68.9948,
+          "restoreMedianMs": 16.0051,
+          "heldMiB": 12.182113647460938
+        },
+        {
+          "method": "shuffled-delta-lz4",
+          "heldBytes": 9556011,
+          "pixelBytes": 8786271,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 167,
+          "saveMs": [
+            52.138,
+            55.9247,
+            51.5437
+          ],
+          "restoreMs": [
+            13.8248,
+            15.0823,
+            13.8229
+          ],
+          "saveMedianMs": 52.138,
+          "restoreMedianMs": 13.8248,
+          "heldMiB": 9.113322257995605
+        },
+        {
+          "method": "raw-zstd1",
+          "heldBytes": 11001678,
+          "pixelBytes": 10231938,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 167,
+          "saveMs": [
+            65.5477,
+            65.6468,
+            66.6936
+          ],
+          "restoreMs": [
+            23.5659,
+            25.9419,
+            24.8811
+          ],
+          "saveMedianMs": 65.6468,
+          "restoreMedianMs": 24.8811,
+          "heldMiB": 10.49201774597168
+        },
+        {
+          "method": "packed10-zstd1",
+          "heldBytes": 12211618,
+          "pixelBytes": 11441878,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 167,
+          "saveMs": [
+            40.3148,
+            40.2649,
+            38.7491
+          ],
+          "restoreMs": [
+            22.3207,
+            21.8035,
+            24.0901
+          ],
+          "saveMedianMs": 40.2649,
+          "restoreMedianMs": 22.3207,
+          "heldMiB": 11.645906448364258
+        },
+        {
+          "method": "shuffled-delta-zstd1",
+          "heldBytes": 6582662,
+          "pixelBytes": 5812922,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 167,
+          "saveMs": [
+            61.0634,
+            63.7718,
+            72.3357
+          ],
+          "restoreMs": [
+            21.7484,
+            21.9446,
+            28.1329
+          ],
+          "saveMedianMs": 63.7718,
+          "restoreMedianMs": 21.9446,
+          "heldMiB": 6.277715682983398
+        },
+        {
+          "method": "block32-min-bitpack",
+          "heldBytes": 13724718,
+          "pixelBytes": 12954978,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 167,
+          "saveMs": [
+            19.9358,
+            20.352,
+            19.3295
+          ],
+          "restoreMs": [
+            15.6845,
+            15.7547,
+            16.2455
+          ],
+          "saveMedianMs": 19.9358,
+          "restoreMedianMs": 15.7547,
+          "heldMiB": 13.088911056518555
+        }
+      ],
+      "recipe": {
+        "heldBytes": 2978897,
+        "compressedPayloadAndHeadersBytes": 2966341,
+        "selectedCodedFrames": 251,
+        "originalCodedFrames": 500,
+        "headerDependencyClosure": true,
+        "traceFreedBeforeReplay": true,
+        "allEightReferenceSlotsVerified": true,
+        "suffixComparedFrames": 167,
+        "rebuildMs": [
+          379.5109,
+          372.6337,
+          385.6048,
+          390.3532,
+          398.655
+        ],
+        "rebuildAndTargetMs": [
+          448.2221,
+          437.4978,
+          461.7183,
+          462.4493,
+          466.5299
+        ],
+        "keyToCheckpointMs": [
+          508.5579,
+          531.5751,
+          505.9642,
+          603.7994,
+          638.7797
+        ],
+        "keyToTargetMs": [
+          578.1787,
+          601.4044,
+          571.2916,
+          677.0648,
+          720.9294
+        ],
+        "packedRestoreMs": [
+          8.0534,
+          6.4685,
+          6.7071,
+          6.1753,
+          6.1275
+        ],
+        "packedRestoreAndTargetMs": [
+          75.8957,
+          78.9503,
+          75.5189,
+          76.7675,
+          77.0545
+        ],
+        "rebuildMsMedian": 385.6048,
+        "rebuildAndTargetMsMedian": 461.7183,
+        "keyToCheckpointMsMedian": 531.5751,
+        "keyToTargetMsMedian": 601.4044,
+        "packedRestoreMsMedian": 6.4685,
+        "packedRestoreAndTargetMsMedian": 76.7675
+      },
+      "comparedFrames": 1685,
+      "comparedBytes": 7861536000,
+      "case": "long-gop"
+    },
+    {
+      "success": true,
+      "threads": 6,
+      "frameContexts": 3,
+      "affinityMask": 1365,
+      "checkpointSeconds": 19.828,
+      "targetSeconds": 20.12,
+      "endSeconds": 25.0,
+      "keySeconds": 0.0,
+      "baselineBytes": 18932700,
+      "baselinePixelBytes": 18163040,
+      "compression": [
+        {
+          "method": "packed10",
+          "heldBytes": 18932780,
+          "pixelBytes": 18163040,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 124,
+          "saveMs": [
+            6.3372,
+            6.5432,
+            6.3653
+          ],
+          "restoreMs": [
+            7.7431,
+            7.8748,
+            6.6194
+          ],
+          "saveMedianMs": 6.3653,
+          "restoreMedianMs": 7.7431,
+          "heldMiB": 18.055706024169922
+        },
+        {
+          "method": "raw-lz4",
+          "heldBytes": 9997778,
+          "pixelBytes": 9228038,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 124,
+          "saveMs": [
+            40.1711,
+            40.0436,
+            40.0763
+          ],
+          "restoreMs": [
+            11.0166,
+            10.8095,
+            10.8962
+          ],
+          "saveMedianMs": 40.0763,
+          "restoreMedianMs": 10.8962,
+          "heldMiB": 9.534624099731445
+        },
+        {
+          "method": "packed10-lz4",
+          "heldBytes": 8630879,
+          "pixelBytes": 7861139,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 124,
+          "saveMs": [
+            30.9381,
+            31.3783,
+            31.8747
+          ],
+          "restoreMs": [
+            16.0997,
+            14.6518,
+            15.2231
+          ],
+          "saveMedianMs": 31.3783,
+          "restoreMedianMs": 15.2231,
+          "heldMiB": 8.231047630310059
+        },
+        {
+          "method": "horizontal-delta-lz4",
+          "heldBytes": 9758496,
+          "pixelBytes": 8988756,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 124,
+          "saveMs": [
+            59.2969,
+            60.5155,
+            58.4938
+          ],
+          "restoreMs": [
+            15.962,
+            16.1397,
+            17.8871
+          ],
+          "saveMedianMs": 59.2969,
+          "restoreMedianMs": 16.1397,
+          "heldMiB": 9.306427001953125
+        },
+        {
+          "method": "shuffled-delta-lz4",
+          "heldBytes": 7459910,
+          "pixelBytes": 6690170,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 124,
+          "saveMs": [
+            48.7826,
+            50.6438,
+            47.6996
+          ],
+          "restoreMs": [
+            14.6697,
+            14.9067,
+            14.8969
+          ],
+          "saveMedianMs": 48.7826,
+          "restoreMedianMs": 14.8969,
+          "heldMiB": 7.114324569702148
+        },
+        {
+          "method": "raw-zstd1",
+          "heldBytes": 6753041,
+          "pixelBytes": 5983301,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 124,
+          "saveMs": [
+            56.343,
+            54.9286,
+            55.2788
+          ],
+          "restoreMs": [
+            22.2235,
+            23.2481,
+            22.0382
+          ],
+          "saveMedianMs": 55.2788,
+          "restoreMedianMs": 22.2235,
+          "heldMiB": 6.440201759338379
+        },
+        {
+          "method": "packed10-zstd1",
+          "heldBytes": 6878120,
+          "pixelBytes": 6108380,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 124,
+          "saveMs": [
+            40.6867,
+            43.5913,
+            40.0326
+          ],
+          "restoreMs": [
+            23.6575,
+            25.9516,
+            23.5631
+          ],
+          "saveMedianMs": 40.6867,
+          "restoreMedianMs": 23.6575,
+          "heldMiB": 6.559486389160156
+        },
+        {
+          "method": "shuffled-delta-zstd1",
+          "heldBytes": 5049960,
+          "pixelBytes": 4280220,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 124,
+          "saveMs": [
+            56.6705,
+            56.3442,
+            57.356
+          ],
+          "restoreMs": [
+            21.1978,
+            24.0035,
+            21.3495
+          ],
+          "saveMedianMs": 56.6705,
+          "restoreMedianMs": 21.3495,
+          "heldMiB": 4.816017150878906
+        },
+        {
+          "method": "block32-min-bitpack",
+          "heldBytes": 11830784,
+          "pixelBytes": 11061044,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 124,
+          "saveMs": [
+            21.0795,
+            20.5534,
+            20.8087
+          ],
+          "restoreMs": [
+            16.3587,
+            16.7345,
+            14.8356
+          ],
+          "saveMedianMs": 20.8087,
+          "restoreMedianMs": 16.3587,
+          "heldMiB": 11.28271484375
+        }
+      ],
+      "recipe": {
+        "heldBytes": 3469637,
+        "compressedPayloadAndHeadersBytes": 3456007,
+        "selectedCodedFrames": 272,
+        "originalCodedFrames": 542,
+        "headerDependencyClosure": true,
+        "traceFreedBeforeReplay": true,
+        "allEightReferenceSlotsVerified": true,
+        "suffixComparedFrames": 124,
+        "rebuildMs": [
+          439.3959,
+          441.909,
+          435.9143,
+          452.9598,
+          445.5613
+        ],
+        "rebuildAndTargetMs": [
+          445.8665,
+          449.8259,
+          442.3365,
+          460.2192,
+          452.7217
+        ],
+        "keyToCheckpointMs": [
+          591.4215,
+          605.8325,
+          593.6576,
+          661.865,
+          596.1911
+        ],
+        "keyToTargetMs": [
+          597.7854,
+          612.052,
+          599.9265,
+          669.1385,
+          602.4158
+        ],
+        "packedRestoreMs": [
+          6.5233,
+          7.7061,
+          5.8698,
+          6.6906,
+          7.1218
+        ],
+        "packedRestoreAndTargetMs": [
+          12.8529,
+          14.4985,
+          12.2169,
+          14.2787,
+          14.971
+        ],
+        "rebuildMsMedian": 441.909,
+        "rebuildAndTargetMsMedian": 449.8259,
+        "keyToCheckpointMsMedian": 596.1911,
+        "keyToTargetMsMedian": 602.4158,
+        "packedRestoreMsMedian": 6.6906,
+        "packedRestoreAndTargetMsMedian": 14.2787
+      },
+      "comparedFrames": 1255,
+      "comparedBytes": 5855328000,
+      "case": "long-gop"
+    },
+    {
+      "success": true,
+      "threads": 6,
+      "frameContexts": 3,
+      "affinityMask": 1365,
+      "checkpointSeconds": 12.279,
+      "targetSeconds": 14.907,
+      "endSeconds": 17.034,
+      "keySeconds": 9.276,
+      "baselineBytes": 18932700,
+      "baselinePixelBytes": 18163040,
+      "compression": [
+        {
+          "method": "packed10",
+          "heldBytes": 18932780,
+          "pixelBytes": 18163040,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 114,
+          "saveMs": [
+            5.6582,
+            5.7322,
+            6.2048
+          ],
+          "restoreMs": [
+            6.6108,
+            7.0842,
+            5.9557
+          ],
+          "saveMedianMs": 5.7322,
+          "restoreMedianMs": 6.6108,
+          "heldMiB": 18.055706024169922
+        },
+        {
+          "method": "raw-lz4",
+          "heldBytes": 11637120,
+          "pixelBytes": 10867380,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 114,
+          "saveMs": [
+            43.1296,
+            44.248,
+            43.6632
+          ],
+          "restoreMs": [
+            9.8418,
+            10.3105,
+            12.1315
+          ],
+          "saveMedianMs": 43.6632,
+          "restoreMedianMs": 10.3105,
+          "heldMiB": 11.0980224609375
+        },
+        {
+          "method": "packed10-lz4",
+          "heldBytes": 10626255,
+          "pixelBytes": 9856515,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 114,
+          "saveMs": [
+            28.7739,
+            29.0799,
+            30.3816
+          ],
+          "restoreMs": [
+            15.1776,
+            24.7765,
+            14.0983
+          ],
+          "saveMedianMs": 29.0799,
+          "restoreMedianMs": 15.1776,
+          "heldMiB": 10.133986473083496
+        },
+        {
+          "method": "horizontal-delta-lz4",
+          "heldBytes": 10454216,
+          "pixelBytes": 9684476,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 114,
+          "saveMs": [
+            55.5364,
+            52.7511,
+            53.6352
+          ],
+          "restoreMs": [
+            16.8698,
+            16.3293,
+            18.1272
+          ],
+          "saveMedianMs": 53.6352,
+          "restoreMedianMs": 16.8698,
+          "heldMiB": 9.969917297363281
+        },
+        {
+          "method": "shuffled-delta-lz4",
+          "heldBytes": 7608839,
+          "pixelBytes": 6839099,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 114,
+          "saveMs": [
+            47.119,
+            47.9242,
+            47.2742
+          ],
+          "restoreMs": [
+            15.9615,
+            14.3805,
+            14.0202
+          ],
+          "saveMedianMs": 47.2742,
+          "restoreMedianMs": 14.3805,
+          "heldMiB": 7.256354331970215
+        },
+        {
+          "method": "raw-zstd1",
+          "heldBytes": 8294986,
+          "pixelBytes": 7525246,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 114,
+          "saveMs": [
+            61.2952,
+            60.4094,
+            61.1954
+          ],
+          "restoreMs": [
+            23.3293,
+            24.3746,
+            24.7681
+          ],
+          "saveMedianMs": 61.1954,
+          "restoreMedianMs": 24.3746,
+          "heldMiB": 7.910715103149414
+        },
+        {
+          "method": "packed10-zstd1",
+          "heldBytes": 9620500,
+          "pixelBytes": 8850760,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 114,
+          "saveMs": [
+            39.4481,
+            38.5158,
+            39.099
+          ],
+          "restoreMs": [
+            19.0028,
+            22.0839,
+            20.7197
+          ],
+          "saveMedianMs": 39.099,
+          "restoreMedianMs": 20.7197,
+          "heldMiB": 9.174823760986328
+        },
+        {
+          "method": "shuffled-delta-zstd1",
+          "heldBytes": 5166842,
+          "pixelBytes": 4397102,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 114,
+          "saveMs": [
+            56.935,
+            58.4074,
+            61.5002
+          ],
+          "restoreMs": [
+            21.2645,
+            21.5073,
+            23.6617
+          ],
+          "saveMedianMs": 58.4074,
+          "restoreMedianMs": 21.5073,
+          "heldMiB": 4.927484512329102
+        },
+        {
+          "method": "block32-min-bitpack",
+          "heldBytes": 12795798,
+          "pixelBytes": 12026058,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 114,
+          "saveMs": [
+            19.5153,
+            19.0367,
+            22.1195
+          ],
+          "restoreMs": [
+            14.9879,
+            15.6796,
+            18.862
+          ],
+          "saveMedianMs": 19.5153,
+          "restoreMedianMs": 15.6796,
+          "heldMiB": 12.203023910522461
+        }
+      ],
+      "recipe": {
+        "heldBytes": 996642,
+        "compressedPayloadAndHeadersBytes": 987537,
+        "selectedCodedFrames": 37,
+        "originalCodedFrames": 361,
+        "headerDependencyClosure": true,
+        "traceFreedBeforeReplay": true,
+        "allEightReferenceSlotsVerified": true,
+        "suffixComparedFrames": 114,
+        "rebuildMs": [
+          93.8255,
+          94.7065,
+          94.3,
+          94.8656,
+          98.6329
+        ],
+        "rebuildAndTargetMs": [
+          213.5239,
+          215.3804,
+          217.142,
+          218.9581,
+          219.7133
+        ],
+        "keyToCheckpointMs": [
+          115.0164,
+          110.3284,
+          113.611,
+          118.9109,
+          109.3429
+        ],
+        "keyToTargetMs": [
+          235.0137,
+          230.9909,
+          232.345,
+          238.9471,
+          228.9256
+        ],
+        "packedRestoreMs": [
+          6.2682,
+          6.6558,
+          5.6519,
+          7.2465,
+          6.1887
+        ],
+        "packedRestoreAndTargetMs": [
+          130.9112,
+          135.5008,
+          129.8719,
+          129.8215,
+          127.1795
+        ],
+        "rebuildMsMedian": 94.7065,
+        "rebuildAndTargetMsMedian": 217.142,
+        "keyToCheckpointMsMedian": 113.611,
+        "keyToTargetMsMedian": 232.345,
+        "packedRestoreMsMedian": 6.2682,
+        "packedRestoreAndTargetMsMedian": 129.8719
+      },
+      "comparedFrames": 1155,
+      "comparedBytes": 5388768000,
+      "case": "six-second-gop"
+    },
+    {
+      "success": true,
+      "threads": 6,
+      "frameContexts": 3,
+      "affinityMask": 1365,
+      "checkpointSeconds": 30.297,
+      "targetSeconds": 32.925,
+      "endSeconds": 35.01,
+      "keySeconds": 27.294,
+      "baselineBytes": 18932700,
+      "baselinePixelBytes": 18163040,
+      "compression": [
+        {
+          "method": "packed10",
+          "heldBytes": 18932780,
+          "pixelBytes": 18163040,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 113,
+          "saveMs": [
+            6.0558,
+            6.0463,
+            6.181
+          ],
+          "restoreMs": [
+            6.7374,
+            6.3903,
+            6.7261
+          ],
+          "saveMedianMs": 6.0558,
+          "restoreMedianMs": 6.7261,
+          "heldMiB": 18.055706024169922
+        },
+        {
+          "method": "raw-lz4",
+          "heldBytes": 16582193,
+          "pixelBytes": 15812453,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 113,
+          "saveMs": [
+            50.0163,
+            50.3349,
+            49.7163
+          ],
+          "restoreMs": [
+            9.986,
+            10.056,
+            9.9836
+          ],
+          "saveMedianMs": 50.0163,
+          "restoreMedianMs": 9.986,
+          "heldMiB": 15.814011573791504
+        },
+        {
+          "method": "packed10-lz4",
+          "heldBytes": 13362863,
+          "pixelBytes": 12593123,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 113,
+          "saveMs": [
+            24.8886,
+            25.1992,
+            24.7119
+          ],
+          "restoreMs": [
+            14.5088,
+            13.468,
+            13.1082
+          ],
+          "saveMedianMs": 24.8886,
+          "restoreMedianMs": 13.468,
+          "heldMiB": 12.743819236755371
+        },
+        {
+          "method": "horizontal-delta-lz4",
+          "heldBytes": 15842515,
+          "pixelBytes": 15072775,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 113,
+          "saveMs": [
+            80.6425,
+            80.8063,
+            81.4121
+          ],
+          "restoreMs": [
+            14.4362,
+            14.1387,
+            14.409
+          ],
+          "saveMedianMs": 80.8063,
+          "restoreMedianMs": 14.409,
+          "heldMiB": 15.108599662780762
+        },
+        {
+          "method": "shuffled-delta-lz4",
+          "heldBytes": 11260051,
+          "pixelBytes": 10490311,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 113,
+          "saveMs": [
+            57.3911,
+            59.3463,
+            58.3728
+          ],
+          "restoreMs": [
+            13.6002,
+            13.0787,
+            13.0426
+          ],
+          "saveMedianMs": 58.3728,
+          "restoreMedianMs": 13.0787,
+          "heldMiB": 10.738421440124512
+        },
+        {
+          "method": "raw-zstd1",
+          "heldBytes": 12318310,
+          "pixelBytes": 11548570,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 113,
+          "saveMs": [
+            61.2768,
+            64.0902,
+            63.5647
+          ],
+          "restoreMs": [
+            23.0271,
+            22.8802,
+            23.9241
+          ],
+          "saveMedianMs": 63.5647,
+          "restoreMedianMs": 23.0271,
+          "heldMiB": 11.747655868530273
+        },
+        {
+          "method": "packed10-zstd1",
+          "heldBytes": 12317231,
+          "pixelBytes": 11547491,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 113,
+          "saveMs": [
+            37.9534,
+            38.2447,
+            37.7495
+          ],
+          "restoreMs": [
+            24.7004,
+            24.6488,
+            23.9916
+          ],
+          "saveMedianMs": 37.9534,
+          "restoreMedianMs": 24.6488,
+          "heldMiB": 11.746626853942871
+        },
+        {
+          "method": "shuffled-delta-zstd1",
+          "heldBytes": 8497949,
+          "pixelBytes": 7728209,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 113,
+          "saveMs": [
+            66.6999,
+            67.5799,
+            67.4471
+          ],
+          "restoreMs": [
+            20.567,
+            20.5647,
+            21.0987
+          ],
+          "saveMedianMs": 67.4471,
+          "restoreMedianMs": 20.567,
+          "heldMiB": 8.104275703430176
+        },
+        {
+          "method": "block32-min-bitpack",
+          "heldBytes": 15520334,
+          "pixelBytes": 14750594,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 113,
+          "saveMs": [
+            19.1492,
+            19.1429,
+            18.6521
+          ],
+          "restoreMs": [
+            16.9334,
+            16.9498,
+            17.2959
+          ],
+          "saveMedianMs": 19.1429,
+          "restoreMedianMs": 16.9498,
+          "heldMiB": 14.80134391784668
+        }
+      ],
+      "recipe": {
+        "heldBytes": 1484827,
+        "compressedPayloadAndHeadersBytes": 1464922,
+        "selectedCodedFrames": 37,
+        "originalCodedFrames": 793,
+        "headerDependencyClosure": true,
+        "traceFreedBeforeReplay": true,
+        "allEightReferenceSlotsVerified": true,
+        "suffixComparedFrames": 113,
+        "rebuildMs": [
+          155.0578,
+          159.8122,
+          156.3376,
+          164.7969,
+          145.6383
+        ],
+        "rebuildAndTargetMs": [
+          297.1059,
+          308.5107,
+          303.4648,
+          300.7813,
+          276.237
+        ],
+        "keyToCheckpointMs": [
+          175.4501,
+          179.3432,
+          187.5464,
+          179.6965,
+          188.9721
+        ],
+        "keyToTargetMs": [
+          312.1282,
+          318.6071,
+          327.2771,
+          318.5002,
+          362.2407
+        ],
+        "packedRestoreMs": [
+          7.1708,
+          7.8371,
+          7.3861,
+          6.6644,
+          8.0782
+        ],
+        "packedRestoreAndTargetMs": [
+          153.8796,
+          148.0491,
+          145.2554,
+          149.9979,
+          127.0763
+        ],
+        "rebuildMsMedian": 156.3376,
+        "rebuildAndTargetMsMedian": 300.7813,
+        "keyToCheckpointMsMedian": 179.6965,
+        "keyToTargetMsMedian": 318.6071,
+        "packedRestoreMsMedian": 7.3861,
+        "packedRestoreAndTargetMsMedian": 148.0491
+      },
+      "comparedFrames": 1145,
+      "comparedBytes": 5342112000,
+      "case": "six-second-gop"
+    },
+    {
+      "success": true,
+      "threads": 6,
+      "frameContexts": 3,
+      "affinityMask": 1365,
+      "checkpointSeconds": 60.327,
+      "targetSeconds": 62.913,
+      "endSeconds": 64.039,
+      "keySeconds": 57.324,
+      "baselineBytes": 18932700,
+      "baselinePixelBytes": 18163040,
+      "compression": [
+        {
+          "method": "packed10",
+          "heldBytes": 18932780,
+          "pixelBytes": 18163040,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 89,
+          "saveMs": [
+            6.2169,
+            5.6352,
+            7.1725
+          ],
+          "restoreMs": [
+            6.0763,
+            6.4757,
+            6.7777
+          ],
+          "saveMedianMs": 6.2169,
+          "restoreMedianMs": 6.4757,
+          "heldMiB": 18.055706024169922
+        },
+        {
+          "method": "raw-lz4",
+          "heldBytes": 6142539,
+          "pixelBytes": 5372799,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 89,
+          "saveMs": [
+            33.0645,
+            31.6805,
+            35.1079
+          ],
+          "restoreMs": [
+            10.2017,
+            9.5283,
+            10.9139
+          ],
+          "saveMedianMs": 33.0645,
+          "restoreMedianMs": 10.2017,
+          "heldMiB": 5.8579816818237305
+        },
+        {
+          "method": "packed10-lz4",
+          "heldBytes": 5281161,
+          "pixelBytes": 4511421,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 89,
+          "saveMs": [
+            25.5847,
+            24.6816,
+            25.2479
+          ],
+          "restoreMs": [
+            14.3724,
+            14.6013,
+            17.4145
+          ],
+          "saveMedianMs": 25.2479,
+          "restoreMedianMs": 14.6013,
+          "heldMiB": 5.036507606506348
+        },
+        {
+          "method": "horizontal-delta-lz4",
+          "heldBytes": 6146831,
+          "pixelBytes": 5377091,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 89,
+          "saveMs": [
+            41.8677,
+            42.8259,
+            41.2622
+          ],
+          "restoreMs": [
+            15.4898,
+            14.2432,
+            18.3254
+          ],
+          "saveMedianMs": 41.8677,
+          "restoreMedianMs": 15.4898,
+          "heldMiB": 5.862074851989746
+        },
+        {
+          "method": "shuffled-delta-lz4",
+          "heldBytes": 4924258,
+          "pixelBytes": 4154518,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 89,
+          "saveMs": [
+            38.2494,
+            37.3423,
+            38.7863
+          ],
+          "restoreMs": [
+            15.6868,
+            14.966,
+            15.2073
+          ],
+          "saveMedianMs": 38.2494,
+          "restoreMedianMs": 15.2073,
+          "heldMiB": 4.696138381958008
+        },
+        {
+          "method": "raw-zstd1",
+          "heldBytes": 4236471,
+          "pixelBytes": 3466731,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 89,
+          "saveMs": [
+            38.1076,
+            38.7529,
+            37.6963
+          ],
+          "restoreMs": [
+            17.3614,
+            16.704,
+            16.7753
+          ],
+          "saveMedianMs": 38.1076,
+          "restoreMedianMs": 16.7753,
+          "heldMiB": 4.040213584899902
+        },
+        {
+          "method": "packed10-zstd1",
+          "heldBytes": 4261236,
+          "pixelBytes": 3491496,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 89,
+          "saveMs": [
+            33.0505,
+            30.5613,
+            30.2965
+          ],
+          "restoreMs": [
+            23.6323,
+            22.1493,
+            22.6419
+          ],
+          "saveMedianMs": 30.5613,
+          "restoreMedianMs": 22.6419,
+          "heldMiB": 4.063831329345703
+        },
+        {
+          "method": "shuffled-delta-zstd1",
+          "heldBytes": 3288836,
+          "pixelBytes": 2519096,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 89,
+          "saveMs": [
+            47.0868,
+            46.8113,
+            46.6015
+          ],
+          "restoreMs": [
+            21.0379,
+            21.6285,
+            21.4373
+          ],
+          "saveMedianMs": 46.8113,
+          "restoreMedianMs": 21.4373,
+          "heldMiB": 3.1364784240722656
+        },
+        {
+          "method": "block32-min-bitpack",
+          "heldBytes": 9661368,
+          "pixelBytes": 8891628,
+          "originalPixelsDetached": true,
+          "allocationByteVerifications": 3,
+          "suffixComparedFrames": 89,
+          "saveMs": [
+            19.2091,
+            19.2395,
+            19.1155
+          ],
+          "restoreMs": [
+            13.2291,
+            13.7355,
+            13.9862
+          ],
+          "saveMedianMs": 19.2091,
+          "restoreMedianMs": 13.7355,
+          "heldMiB": 9.213798522949219
+        }
+      ],
+      "recipe": {
+        "heldBytes": 594510,
+        "compressedPayloadAndHeadersBytes": 556605,
+        "selectedCodedFrames": 37,
+        "originalCodedFrames": 1513,
+        "headerDependencyClosure": true,
+        "traceFreedBeforeReplay": true,
+        "allEightReferenceSlotsVerified": true,
+        "suffixComparedFrames": 89,
+        "rebuildMs": [
+          73.9848,
+          80.08,
+          74.4211,
+          74.1744,
+          75.3923
+        ],
+        "rebuildAndTargetMs": [
+          144.8525,
+          162.22,
+          147.5742,
+          149.1384,
+          146.0919
+        ],
+        "keyToCheckpointMs": [
+          97.9576,
+          97.1012,
+          92.9782,
+          97.8187,
+          93.2474
+        ],
+        "keyToTargetMs": [
+          171.5298,
+          171.6237,
+          168.307,
+          169.6695,
+          164.5069
+        ],
+        "packedRestoreMs": [
+          6.619,
+          6.5282,
+          7.4519,
+          7.1477,
+          7.9033
+        ],
+        "packedRestoreAndTargetMs": [
+          77.4669,
+          79.2259,
+          82.1153,
+          78.5646,
+          77.6376
+        ],
+        "rebuildMsMedian": 74.4211,
+        "rebuildAndTargetMsMedian": 147.5742,
+        "keyToCheckpointMsMedian": 97.1012,
+        "keyToTargetMsMedian": 169.6695,
+        "packedRestoreMsMedian": 7.1477,
+        "packedRestoreAndTargetMsMedian": 78.5646
+      },
+      "comparedFrames": 905,
+      "comparedBytes": 4222368000,
+      "case": "six-second-gop"
+    }
+  ],
+  "sourceSHA256": {
+    "experiments/dav1d-checkpoint-storage/probe.c": "8de5992b16a97418b93257d380e587dfa8e8e2d910e88c9797cfcc197f506f2d",
+    "experiments/dav1d-checkpoint-storage/compress.inc": "fdc16dc5b46903961ae5abdda8424e25b18be95000df9a3f40ffb6033a2e2186",
+    "experiments/dav1d-checkpoint-storage/recipe.inc": "7704164b742536cc2f930cc8b39cdac7e6ca4392607227d24fb30d79a421f917",
+    "experiments/dav1d-checkpoint-storage/storage.h": "edc88153ce4d8da47d6ed5607eb383538b06f41fc1cbd1abce6fdbc6d6df45fa",
+    "experiments/dav1d-checkpoint-storage/run.py": "b95cc2874b3c00d86640adf43bee7ca94cf3550663502027c518294e2a2eb8ed",
+    "experiments/dav1d-mt-checkpoint/core.c": "4fbe9ef94b677c650fb4f4bd4c23502c7e836fca0c0cd5b434ca9d649dbc1f03",
+    "experiments/dav1d-mt-checkpoint/packed.c": "d28b7d5450d155aa734864c44a6ee5587a73b28b216d019f7e4ac6c012f58c9f",
+    "experiments/dav1d-mt-checkpoint/probe.c": "2d74dccd2f036ce1a532dac27b9b4365f5506398b1a34e1a7dfc9379c853bad4",
+    "experiments/dav1d-mt-checkpoint/core.h": "a8eb2c633a090b76ec6651c022cd355c0aa62c2c0dabf9e99b2f08c755927b8c",
+    "experiments/dav1d-mt-checkpoint/picture-helper.inc": "cf1bea59bec12dbc2b78ee01f16afc8a853343786e887d7e08fc2955dbc3bbaf",
+    "experiments/dav1d-parallel/probe.c": "5c5e0f697fe8dfd40e7043430063100e52f7391d4917f5528f5d25f3a21ee492",
+    "experiments/dav1d-checkpoint/probe.c": "5af8ae2c60019819b9d8df97897544acf9e741715b0e08a18d705b605fba9886",
+    "experiments/dav1d-packed-checkpoint/packed.h": "756f22d7aef08e211bc697aedd0488513a91e66f59d2990a7c253b8d43d8481a"
+  },
+  "lz4SourceSHA256": {
+    "lz4.c": "9396f7de527bc8435de9c7569fb7998e56545a84b4f3c2d808c0235c01774539",
+    "lz4.h": "26b82efc53d1570f3b54eef02e9c4764c1ad374ff03cac04e2ced5ea4d4c552f"
+  },
+  "librarySHA256": "183b7d75d9199400a11f398f12394b3ecdcd1c42e64535092f0c8b27a35e2d70"
+}

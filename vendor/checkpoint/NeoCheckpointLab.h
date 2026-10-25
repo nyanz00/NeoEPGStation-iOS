@@ -34,4 +34,30 @@ int neo_checkpoint_lab_run(const NeoCheckpointPacket *packets, size_t count,
     double gop_seconds, double distance_seconds, int threads, int packed, NeoCheckpointResult *out,
     int (*cancelled)(void *), void *cookie);
 uint64_t neo_checkpoint_lab_footprint(void);
+
+/* CPU storage diagnostic: method 0=packed10, 4=delta/shuffle LZ4,
+ * 7=delta/shuffle Zstd level 1. Normal playback never enters these APIs. */
+typedef struct NeoStorageResult {
+    NeoCheckpointResult checkpoint;
+    int method;
+    double save_cpu_ms[NEO_CHECKPOINT_REPEATS];
+} NeoStorageResult;
+int neo_checkpoint_storage_run(const NeoCheckpointPacket *,size_t,double,double,int,
+    NeoStorageResult *,int(*)(void*),void*);
+
+#define NEO_REALTIME_MAX_SAVES 32
+#define NEO_REALTIME_TARGETS 3
+typedef struct NeoRealtimeResult {
+    int status,decoder_error,method,frames,late_frames,completed_saves,skipped_busy,evicted;
+    int retained_count,target_verified_count;
+    uint64_t retained_bytes,maximum_retained_bytes,memory_budget_bytes;
+    uint64_t before_bytes,sampled_peak_bytes,after_bytes;
+    double media_seconds,wall_seconds,late_mean_ms,late_p95_ms,late_max_ms;
+    double save_ms[NEO_REALTIME_MAX_SAVES],save_cpu_ms[NEO_REALTIME_MAX_SAVES];
+    double capture_ms[NEO_REALTIME_MAX_SAVES];
+    double target_ms[NEO_REALTIME_TARGETS],target_seconds[NEO_REALTIME_TARGETS],chosen_seconds[NEO_REALTIME_TARGETS];
+    int used_checkpoint[NEO_REALTIME_TARGETS];
+} NeoRealtimeResult;
+int neo_checkpoint_realtime_run(const NeoCheckpointPacket *,size_t,double,int,
+    NeoRealtimeResult *,int(*)(void*),void*);
 #endif

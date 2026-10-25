@@ -1,0 +1,17 @@
+{
+  "success": true,
+  "cases": 7,
+  "recordingCases": 6,
+  "losslessMethods": 9,
+  "allocationByteRoundtrips": 189,
+  "fullPixelComparedFrames": 10725,
+  "fullPixelComparedBytes": 41344992000,
+  "allRecipeReferencesAndSuffixesMatched": true,
+  "recipeTraceFreedBeforeRebuild": true,
+  "sourceSHA256Verified": true,
+  "lz4Version": "1.10.0",
+  "zstdVersion": "1.5.7",
+  "zstdLibrarySHA256": "b95c223a9548a9ecf51377c962e0bc8f0c51eb0c6f67a296dbc885996f0dd40d",
+  "deviceOrGPUPerformanceMeasured": false,
+  "normalPlaybackUnchanged": true
+}

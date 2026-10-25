@@ -1,5 +1,13 @@
 # Third-party software
 
+The optional AV1 checkpoint diagnostic statically includes an isolated, modified
+BSD-2-Clause dav1d 1.5.4, LZ4 1.10.0 (BSD-2-Clause), and Zstandard 1.5.7
+under its BSD-3-Clause option. Their notices, pinned revisions, source hashes
+and the checkpoint modifications are in `ThirdPartyNotices/CheckpointDav1d`
+and `ThirdPartyNotices/CheckpointCompression`. The diagnostic decoder and
+compression functions use private namespaces and do not replace playback
+engine symbols. See `docs/checkpoint-trial.md` for the diagnostic boundary.
+
 The optional encoded-PLAY comparison screen uses AetherEngine 7.46.0,
 revision `40193cefa7244c097519d219f84af1b9028c181c`, under LGPL-3.0 with its
 Apple Store / DRM Exception. Source: https://github.com/superuser404notfound/AetherEngine/tree/40193cefa7244c097519d219f84af1b9028c181c
