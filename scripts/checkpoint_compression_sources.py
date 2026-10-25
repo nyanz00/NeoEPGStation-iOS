@@ -52,12 +52,13 @@ def prepare(root,source,notice):
     # Rename that local alias too so it cannot erase our outer namespace.
     zstd=amalgam.read_text(encoding="utf-8").replace('#define ZSTD_isError ERR_isError', '#define neo_ckpt_ZSTD_isError ERR_isError').replace('#undef ZSTD_isError', '#undef neo_ckpt_ZSTD_isError')
     files['zstd.c']=zstd.encode();files['zstd.h']=(extracted/'lib/zstd.h').read_bytes()
+    files['zstd_errors.h']=(extracted/'lib/zstd_errors.h').read_bytes()
     texts='\n'.join(files[n].decode() for n in ('lz4.c','lz4.h','zstd.c','zstd.h'))
     macros=set(re.findall(r'^\s*#\s*define\s+(\w+)',texts,re.M))
     names=sorted(set(re.findall(r'\b((?:ZSTD_|ZDICT_|LZ4_|HUF_|FSE_|HIST_|ERR_|XXH)\w+)\s*\(',texts))-macros)
     namespace='/* Generated from pinned sources; keep the normal engines isolated. */\n'+'\n'.join('#define '+n+' neo_ckpt_'+n for n in names)+'\n'
     changed(source/'include/neo_compression_namespace.h',namespace.encode())
-    for name,dst in (('lz4.h','include/lz4.h'),('zstd.h','include/zstd.h')):changed(source/dst,files[name])
+    for name,dst in (('lz4.h','include/lz4.h'),('zstd.h','include/zstd.h'),('zstd_errors.h','include/zstd_errors.h')):changed(source/dst,files[name])
     for name,dst in (('lz4.c','src/neo_lz4.c'),('zstd.c','src/neo_zstd.c')):
         # Upstream LZ4 has an internal global helper without a prototype; keep
         # dav1d's stricter rule for our code, but not this unchanged vendor TU.
@@ -69,4 +70,3 @@ def prepare(root,source,notice):
             'sourceSHA256':{k:hashlib.sha256(v).hexdigest() for k,v in files.items()},
             'namespaceSHA256':hashlib.sha256(namespace.encode()).hexdigest(),'renamedFunctions':names,
             'zstdMultithread':False,'urls':{'lz4':'https://github.com/lz4/lz4/tree/v1.10.0','zstd':'https://github.com/facebook/zstd/tree/v1.5.7'}}
-
