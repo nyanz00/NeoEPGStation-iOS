@@ -62,3 +62,19 @@ PC 実験と同じ `experiments/dav1d-checkpoint/checkpoint.c` を使い、ア�
 Actions の `checkpoint-trial` は device/simulator ビルドと、この診断画面の
 8bit/10bit 長 GOP 素材による検証に絞る。シミュレーターの成功は iPhone の速度や
 熱・電力の成功を意味しない。実機での診断結果を比較してから通常再生への採用を判断する。
+
+## ビルド269の確認
+
+ソース `050477c45f17c5d9a56888abb02d765c1c1825de`、
+[Actions 40172537801](https://github.com/nyanz00/NeoEPGStation-iOS/actions/runs/40172537801)
+で device / simulator のビルドと診断画面の試験に成功。
+8bit / 10bit の長 GOP 素材で各 2 条件が `complete`。
+各条件の全画素照合を伴う 5 回復元・5 回の一時保存解放・入力/所有者の拒否検査、
+phys_footprint と共有用 JSON の出力を確認した。
+通常経路の FFmpeg インポート先も Aether フレームワークへ結び付いている。
+
+IPA: `NeoEPGStation-build269.ipa`、SHA-256:
+`d2b041dd6d661fac22081dd6612760c71991d8527729a0bf3fd748d3a89111fa`。
+GitHub が記録するファイルの digest、ZIP CRC、埋め込みビルド番号、
+収録した checkpoint のソース/ライセンスと Aether のパッチレシピを照合済み。
+iPhone での速度・熱・電力の測定は未実施であり、シミュレーター試験と区別する。
