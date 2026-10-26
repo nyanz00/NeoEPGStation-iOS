@@ -32,6 +32,13 @@ AV1 VideoToolbox対応・選択規則・ソース配布と再ビルドは `vendo
 
 CI補助処理だけの確認は `python -m unittest discover -s tests/ci -v` で実行できる。
 
+VLCKitのキャッシュ再利用確認はLinuxで同じ `verify-vlckit.py` を実行する。
+SDK・Xcode・固定ソース/パッチ・バイナリSHAと必要な識別子が一致した場合だけArtifactへ渡し、
+一致しないSDKのみ従来のMacジョブで確認・ビルドする。本体のMacジョブでも再照合する。
+キャッシュが揃っている場合、再利用確認だけのためにMacランナーを2台待つ必要はない。
+圧縮カーネルの切り分けは `Checkpoint Metal probe` の手動実行を使い、
+Pods・再生ライブラリー・アプリ本体のビルドを伴わないMacの小試験から行う。
+
 Actionsの `NeoEPGStation-build<ビルド番号>.ipa` ArtifactからIPAを単体ダウンロードし、
 そのままLiveContainerに取り込む。ZIPの展開は不要。
 検証画像・ログ・ハッシュ・シミュレーターアプリ等は、従来の

@@ -14,13 +14,64 @@ on:
 permissions:
   contents: read
 jobs:
+  cached:
+    name: Verify reusable frameworks without a Mac
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      missing: ${{ steps.plan.outputs.missing }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore device framework
+        if: inputs.sdk == 'all' || inputs.sdk == 'iphoneos'
+        uses: actions/cache/restore@v4
+        with:
+          path: build/vlckit-output-iphoneos
+          key: vlckit-v1-iphoneos-xcode26.6-${{ hashFiles('vendor/vlckit/**', 'scripts/build-vlckit.sh', 'scripts/prepare-vlckit-source.py', 'scripts/fetch-vlckit-tools.py', 'scripts/vlckit-provenance.py') }}
+          restore-keys: vlckit-v1-iphoneos-xcode26.6-
+      - name: Verify device binary and source identity
+        if: inputs.sdk == 'all' || inputs.sdk == 'iphoneos'
+        id: device
+        run: python3 scripts/verify-vlckit.py iphoneos
+      - uses: actions/upload-artifact@v4
+        if: steps.device.outputs.usable == 'true'
+        with:
+          name: VLCKit-iphoneos
+          path: build/vlckit-output-iphoneos
+          retention-days: 30
+      - name: Restore simulator framework
+        if: inputs.sdk == 'all' || inputs.sdk == 'iphonesimulator'
+        uses: actions/cache/restore@v4
+        with:
+          path: build/vlckit-output-iphonesimulator
+          key: vlckit-v1-iphonesimulator-xcode26.6-${{ hashFiles('vendor/vlckit/**', 'scripts/build-vlckit.sh', 'scripts/prepare-vlckit-source.py', 'scripts/fetch-vlckit-tools.py', 'scripts/vlckit-provenance.py') }}
+          restore-keys: vlckit-v1-iphonesimulator-xcode26.6-
+      - name: Verify simulator binary and source identity
+        if: inputs.sdk == 'all' || inputs.sdk == 'iphonesimulator'
+        id: simulator
+        run: python3 scripts/verify-vlckit.py iphonesimulator
+      - uses: actions/upload-artifact@v4
+        if: steps.simulator.outputs.usable == 'true'
+        with:
+          name: VLCKit-iphonesimulator
+          path: build/vlckit-output-iphonesimulator
+          retention-days: 30
+      - name: Select only missing or stale frameworks for Mac verification/build
+        id: plan
+        env:
+          REQUESTED_SDK: ${{ inputs.sdk }}
+          DEVICE_USABLE: ${{ steps.device.outputs.usable }}
+          SIMULATOR_USABLE: ${{ steps.simulator.outputs.usable }}
+        run: python3 scripts/vlckit-cache-plan.py
   library:
+    needs: cached
+    if: needs.cached.outputs.missing != '[]'
     runs-on: macos-26
     timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
-        sdk: ${{ inputs.sdk != 'all' && fromJSON(format('["{0}"]', inputs.sdk)) || fromJSON('["iphoneos","iphonesimulator"]') }}
+        sdk: ${{ fromJSON(needs.cached.outputs.missing) }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
