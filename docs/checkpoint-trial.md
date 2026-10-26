@@ -314,3 +314,28 @@ IPA: `NeoEPGStation-build274.ipa`、SHA-256:
 artifact digest・ZIP CRC・ビルド番号・同梱ソース/ライセンス・上流ハッシュを照合。
 通常経路のFFmpegインポート146件も従来のAetherフレームワークへ結び付いている。
 iPhone上の保存時間・CPU負荷・GPU作業量・保持数は実機での比較待ち。
+
+## ビルド276の確認
+
+ソース `578cd66ba9acb43cd58de6d33f3d71073b7939d4`、
+[Actions 40311154746](https://github.com/nyanz00/NeoEPGStation-iOS/actions/runs/40311154746)
+でdevice/simulatorビルドと対象限定試験に成功。今回のビルド実行は1回。
+Mac上の配布用Metalブリッジは24条件・72画像すべてが標準Zstandardで全バイト復元。
+40画像はrawブロックより小さくなり、GPU上の符号化とフレーム生成まで実行した。
+
+診断画面では8bit/10bit各12条件、合計24条件がschema 7・`complete`。
+両GPU方式の単独・定期保存がCPU代替なしで成功。Metal Zstandardの
+`entropyBackend=GPU`、共有バッファー18,890,816バイトを確認した。
+各深度の等速区間では保存10回、期限を超える復号遅れ0回。
+これはMac/シミュレーターの結果であり、iPhoneの性能・電力・熱の結論には使わない。
+
+事前の配布用符号化演算492条件と、偏った頻度・繰り返しを含む追加512条件も、
+標準Zstandardでの展開・全バイト一致・出力番兵が成功した。CPU参照の
+状態復元6条件では、保存/復元各5回・全後続区間2回・allocation余白まで一致。
+
+IPA: `NeoEPGStation-build276.ipa`、SHA-256:
+`97266846ca025ecc33d060afb296b9120d24cdeb2ed7c5e74a1581e7b722d32f`。
+artifact digest・ZIP CRC・ビルド番号・同梱ソース/ライセンス・ソースSHA-256を照合。
+通常再生のFFmpegインポート146件は従来のAetherフレームワークへの結び付きを確認した。
+実機では従来と同じAV1入力と「診断用：AV1状態復元」を使い、
+`checkpoint-benchmark.json` の容量・保存時間・CPU時間・GPU時間・保持数を比較する。
