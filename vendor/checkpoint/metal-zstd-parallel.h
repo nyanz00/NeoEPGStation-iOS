@@ -31,13 +31,10 @@ static NzU nzp_match_length(NZ_D const NzB *src,NzU at,NzU off,NzU end) {
     NzU len=4; /* The matcher already compared these four bytes. */
     while(at+len+4<=end) {
         NzU diff=nzp_word(src+at+len)^nzp_word(src+at+len-off);
-        if(diff) {
-#ifdef __METAL_VERSION__
-            return len+ctz(diff)/8;
-#else
-            return len+(NzU)__builtin_ctz(diff)/8;
-#endif
-        }len+=4;
+        /* Select the first unequal byte explicitly. The native GPU oracle
+         * caught 1-2 excess bytes with the previous ctz-based selection. */
+        if(diff) {if(diff&255u)return len;if(diff&65280u)return len+1;if(diff&16711680u)return len+2;return len+3;}
+        len+=4;
     }
     while(at+len<end && src[at+len]==src[at+len-off])len++;return len;
 }
