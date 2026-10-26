@@ -7,6 +7,9 @@
 #include <string.h>
 #include <time.h>
 #include "metal-zstd-input-test.h"
+#ifdef NEO_MZSTD_NATIVE_DEBUG
+void neo_mzstd_debug_last(void);
+#endif
 static int prepared_images(double *cpuMs,double *gpuMs) {
     const unsigned widths[]={1,7,31,1440,1920};
     for(unsigned word=1;word<=2;word++)for(unsigned k=0;k<5;k++) {
@@ -64,7 +67,11 @@ int main(void) {
         for(unsigned j=0;j<3;j++) {
             uint8_t *decoded=malloc(in[j].size);if(!decoded)e=4;
             if(!e) {size_t n=ZSTD_decompress(decoded,in[j].size,out[j].data,out[j].size);
-                if(ZSTD_isError(n) || n!=in[j].size || memcmp(decoded,in[j].data,n)) {fprintf(stderr,"Zstd decode: %s\n",ZSTD_getErrorName(n));e=5;}
+                if(ZSTD_isError(n) || n!=in[j].size || memcmp(decoded,in[j].data,n)) {fprintf(stderr,"Zstd decode: %s image=%u\n",ZSTD_getErrorName(n),j);
+#ifdef NEO_MZSTD_NATIVE_DEBUG
+                    neo_mzstd_debug_last();
+#endif
+                    e=5;}
                 if(out[j].size<in[j].size)compressed++;
             }
             free(decoded);free((void*)in[j].data);free(out[j].data);

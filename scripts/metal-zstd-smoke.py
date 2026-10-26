@@ -6,7 +6,7 @@ root=Path(__file__).resolve().parents[1]
 out=root/'build/checkpoint/metal-zstd-smoke';out.mkdir(exist_ok=True)
 cc=subprocess.check_output(['xcrun','--sdk','macosx','--find','clang'],text=True).strip()
 sdk=subprocess.check_output(['xcrun','--sdk','macosx','--show-sdk-path'],text=True).strip()
-base=[cc,'-isysroot',sdk,'-O2','-I'+str(root/'vendor/checkpoint'),'-I'+str(root/'build/checkpoint/source/include')]
+base=[cc,'-isysroot',sdk,'-O2','-DNEO_MZSTD_NATIVE_DEBUG','-I'+str(root/'vendor/checkpoint'),'-I'+str(root/'build/checkpoint/source/include')]
 for source,name,extra in [
     ('build/checkpoint/source/src/neo_zstd.c','decoder',[]),
     ('vendor/checkpoint/metal-zstd-format.c','format',[]),

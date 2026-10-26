@@ -11,6 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef NEO_MZSTD_NATIVE_DEBUG
+#include <stdio.h>
+#endif
 #define MZ_BATCH 16u
 #define MZ_BLOCK 65536u
 #define MZ_HASH 32768u
@@ -26,6 +29,7 @@ typedef struct MzPending {unsigned count,owners[16],passes,stages[13];} MzPendin
     id<MTLCounterSampleBuffer> counters[2];id<MTLCommandBuffer> pending[2];
     MTLComputePassDescriptor *descriptors[2][13];
     MzPending info[2];uint64_t baseBytes;NeoRcompMetrics metrics;
+    unsigned lastSlot;
 }
 @end
 @implementation NeoMetalZstdSession
@@ -77,7 +81,7 @@ void neo_mzstd_last_metrics(NeoRcompMetrics *out) {memset(out,0,sizeof(*out));if
 static int mz_finish(NeoMetalZstdSession *s,unsigned slot,const NeoRcompInput *input,NeoRcompOutput *out) {
     id<MTLCommandBuffer> command=s->pending[slot];if(!command)return 0;MzPending info=s->info[slot];
     double began=mz_ms();[command waitUntilCompleted];double blocked=mz_ms()-began;
-    s->metrics.wait_ms+=blocked;s->metrics.host_ms[3]+=blocked;s->metrics.wait_count++;s->pending[slot]=nil;
+    s->metrics.wait_ms+=blocked;s->metrics.host_ms[3]+=blocked;s->metrics.wait_count++;s->pending[slot]=nil;s->lastSlot=slot;
     if(command.status!=MTLCommandBufferStatusCompleted)return 1011;
     if(command.GPUStartTime>0 && command.GPUEndTime>=command.GPUStartTime)s->metrics.gpu_ms+=(command.GPUEndTime-command.GPUStartTime)*1000;
     if(s->counters[slot]) {
@@ -92,6 +96,26 @@ static int mz_finish(NeoMetalZstdSession *s,unsigned slot,const NeoRcompInput *i
         memcpy(out[i].data+out[i].size,(const uint8_t*)s->outputs[slot].contents+(size_t)b*MZ_SLOT,n);out[i].size+=n;s->metrics.output_bytes+=n;
     }s->metrics.host_ms[4]+=mz_ms()-began;return 0;
 }
+#ifdef NEO_MZSTD_NATIVE_DEBUG
+/* Native failure-only oracle. Never compiled into the iPhone library or used
+ * in performance timing. Compare GPU tokens to the shipping scalar arithmetic. */
+void neo_mzstd_debug_last(void) {
+    if(!current)return;NeoMetalZstdSession *s=(__bridge id)current;unsigned slot=s->lastSlot;
+    NzWork *all=s->buffers[9].contents;NzSeq *seqs=s->buffers[4].contents;NzU *tokens=s->buffers[3].contents;
+    for(unsigned b=0;b<s->info[slot].count;b++) {
+        NzWork *g=all+b,c={0};c.ns=g->ns;NzU *expected=calloc(NZ_BLOCK,sizeof(NzU));if(!expected)return;
+        fprintf(stderr,"debug block=%u ns=%u nl=%u\n",b,g->ns,g->nl);
+        NzSeq *seq=seqs+b*16384;
+        for(unsigned j=0;j<c.ns;j++)for(unsigned f=0;f<3;f++)c.seqhist[f][nzp_code(seq[j],f)]++;
+        for(unsigned f=0;c.ns && f<3;f++) {
+            unsigned mode;c.tableSize[f]=nz_seqtable(c.tableHeader[f],c.fse+f,c.seqhist[f],c.ns,&mode);c.mode[f]=mode;
+            if(g->mode[f]!=mode || g->tableSize[f]!=c.tableSize[f] || memcmp(g->tableHeader[f],c.tableHeader[f],c.tableSize[f]))fprintf(stderr,"debug table mismatch family=%u mode GPU=%u CPU=%u size GPU=%u CPU=%u\n",f,g->mode[f],mode,g->tableSize[f],c.tableSize[f]);
+            nzp_chain(&c,seq,expected,f);
+            for(unsigned j=0;j<c.ns;j++)if(tokens[b*NZ_BLOCK+j*4+f]!=expected[j*4+f]) {fprintf(stderr,"debug token mismatch family=%u seq=%u GPU=%08x CPU=%08x log=%u GPUstate=%u CPUstate=%u\n",f,j,tokens[b*NZ_BLOCK+j*4+f],expected[j*4+f],c.fse[f].log,g->state[f],c.state[f]);break;}
+        }free(expected);
+    }
+}
+#endif
 static int mz_submit(NeoMetalZstdSession *s,unsigned slot,MzConfig *cfg,MzPending *info,int prepare) {
     static const unsigned fast[]={0,1,2,14,15,5,6,16,9,10,11,12};
     static const unsigned old[]={0,1,2,3,4,5,6,7,8,9,10,11,12};
