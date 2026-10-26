@@ -44,6 +44,36 @@ ARMのNEON経路も同じ独立oracleで比較する。2MiBの同一入力でbui
 またはサイズが3%以上増えた場合はアプリのビルド前に失敗にする。
 Macでの測定をiPhoneの速度・消費電力の結果として扱わない。
 
+### 配布前の検証結果（build 280）
+
+配布コミット `6ad94ef50bd749625de4ab01a90ce6754b2c16c9`、Actions
+[40356298821](https://github.com/nyanz00/NeoEPGStation-iOS/actions/runs/40356298821) で成功。
+圧縮コードは、最小GPU試験
+[40352684769](https://github.com/nyanz00/NeoEPGStation-iOS/actions/runs/40352684769)
+で成功した `21f12cd8a98e792568ee39cfde47f7fea430e9df` と同一。
+途中の4バイト比較案ではGPU側の一致長の不一致を検出したため、厳密比較へ戻した。
+FSEの符号・状態表と、解析リテラル・詰めたビット列を別々に照合して切り分けた。
+失敗時の中間状態oracleはMacの単体試験だけでコンパイルし、アプリには含めない。
+
+| 同一2MiB入力・warm中央値 | 保存wall | GPU command | サイズ比 |
+| --- | ---: | ---: | ---: |
+| build 277の解析/FSE＋同期投入control | 30.056ms | 28.826ms | 1.000000 |
+| 新しい協調処理＋2スロット投入 | 17.432ms | 16.964ms | 0.999949 |
+
+Macで約42%短縮。基礎GPU共有バッファーは21,283,072 bytes。
+別の1920×1080前処理probeはCPU直接40.536ms、GPU前処理55.711msだった。
+これは圧縮込みの単回probeであり、iPhoneの結果や電力比較ではない。
+GPU前処理を無条件に優先せず、実機診断で2方式を比較する。
+全92画像（基本72＋前処理20）の標準Zstandard展開と全バイト一致、
+ARMのCPU前処理oracle10条件、シミュレーター8/10bit各15条件が成功した。
+Mac counterは未対応として計測バッチ0を記録。実機でのcounter可否はログで判断する。
+
+IPAのCRC・Artifact digest・同梱ソース/sourceSHA・ライセンスを照合し、
+通常の再生エンジンのFFmpeg import 146個も隔離を確認した。
+再生ライブラリーのSDK/ソース/パッチ/バイナリSHA確認はLinuxで成功し、
+再利用確認のみのMacジョブ2本を省略。本体のMacジョブでも再照合した。
+IPA SHA-256: `aae5abc9f51b35ebe16cfdb648b11cc9bc5bcffb762f3cecc22eab8de4a0d802`
+
 ## 前版の測定条件（schema 8）
 
 現在は公式Zstandard 1.5.7のBSDライセンスを選択し、その公開形式とFSE/Huffman演算を
