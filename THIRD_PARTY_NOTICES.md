@@ -1,5 +1,12 @@
 # Third-party software
 
+The optional checkpoint diagnostic uses the unchanged Metal LZ4 kernel from
+rcomp-metal 0.4.0, published on crates.io. We use the upstream Apache-2.0
+licensing option (Cargo.toml declares MIT OR Apache-2.0). The original source,
+license, notices, crate checksum and a description of our new iOS host bridge
+are included in `ThirdPartyNotices/RcompMetal`. The upstream macOS Rust host
+and precompiled macOS metallib are not part of the running iOS dependency.
+
 The optional AV1 checkpoint diagnostic statically includes an isolated, modified
 BSD-2-Clause dav1d 1.5.4, LZ4 1.10.0 (BSD-2-Clause), and Zstandard 1.5.7
 under its BSD-3-Clause option. Their notices, pinned revisions, source hashes

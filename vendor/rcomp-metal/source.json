@@ -1,0 +1,12 @@
+{
+  "name": "rcomp-metal",
+  "version": "0.4.0",
+  "source": "https://static.crates.io/crates/rcomp-metal/rcomp-metal-0.4.0.crate",
+  "crateSHA256": "90fbc70a09c15c871d0cd0fc5f1f74ccc6461b7d2e31bc37b1f4ccb3dd254609",
+  "vcsRevision": "5af0db022b97fa659cee6fb037169a852daa40c9",
+  "licenseChoice": "Apache-2.0 (upstream declares MIT OR Apache-2.0)",
+  "shaderSHA256": "e452e5abd3ce2a6b9dc712683e6feaf4fa2fdbd3aa81173baedde12f25600aba",
+  "shaderModified": false,
+  "macosMetallibUsed": false,
+  "wrapper": "iOS Objective-C bridge; same independent 64KiB raw LZ4 blocks; CPU restore"
+}

@@ -4,6 +4,7 @@
 #include "lz4.h"
 #include <zstd.h>
 #include "lossless.h"
+#include "rcomp.h"
 struct NeoLosslessCheckpoint {
     NeoPackedCheckpoint *shell;
     size_t stage[8];
@@ -14,7 +15,7 @@ const char *neo_lossless_name(int m) {
     static const char *names[9]={"packed10","raw-lz4","packed10-lz4",
         "horizontal-delta-lz4","shuffled-delta-lz4","raw-zstd1","packed10-zstd1",
         "shuffled-delta-zstd1","block32-min-bitpack"};
-    return m>=0 && m<9?names[m]:"invalid";
+    return m==9?"cpu-lz4-64k":m==10?"rcomp-metal-lz4-64k":m>=0 && m<9?names[m]:"invalid";
 }
 static void geometry(PackedImage *im,const Dav1dPicture *p) {
     memset(im,0,sizeof(*im));im->w=p->p.w;im->h=p->p.h;im->bpc=p->p.bpc;im->layout=p->p.layout;
@@ -117,6 +118,7 @@ static int image_store(PackedImage *im,size_t *stage,const Dav1dPicture *p,int m
 }
 static int image_restore(const PackedImage *im,size_t stage,int method,uint8_t *raw) {
     if(method==0) {decode(im,raw);return 0;}
+    if(method==9 || method==10) {int e=neo_rcomp_unpack(im->bytes,im->size,raw,im->raw_size);if(!e)delta_rows(im,raw,1,1);return e;}
     if(method==8) {block_decode(im,im->bytes,raw);return 0;}
     int packed=method==2 || method==6;uint8_t *dest=packed?malloc(stage):raw;
     if(!dest)return DAV1D_ERR(ENOMEM);
@@ -129,7 +131,7 @@ static int image_restore(const PackedImage *im,size_t stage,int method,uint8_t *
     if(packed)free(dest);return e;
 }
 int neo_lossless_capture(Dav1dContext *c,int method,NeoLosslessCheckpoint **out) {
-    if(!out || *out || (method!=0 && method!=4 && method!=7))return DAV1D_ERR(EINVAL);
+    if(!out || *out || (method!=0 && method!=4 && method!=7 && method!=9 && method!=10))return DAV1D_ERR(EINVAL);
     Stored *s=calloc(1,sizeof(*s));if(!s)return DAV1D_ERR(ENOMEM);s->method=method;
     s->shell=calloc(1,sizeof(*s->shell));if(!s->shell) {free(s);return DAV1D_ERR(ENOMEM);}
     for(int i=0;i<8;i++)s->shell->slots[i]=-1;
@@ -137,9 +139,35 @@ int neo_lossless_capture(Dav1dContext *c,int method,NeoLosslessCheckpoint **out)
     if(e) {neo_lossless_free(&s);return e;}
     *out=s;return 0;
 }
+static int rcomp_store(Stored *s) {
+    NeoPackedCheckpoint *p=s->shell;const void *original[8]={0};
+    NeoRcompInput input[8]={{0}};NeoRcompOutput output[8]={{0}};int e=0;
+    for(int i=0;i<8;i++) {
+        const Dav1dPicture *pic=&p->meta->refs[i].p.p;if(!pic->data[0])continue;
+        if(pic->p.w>1920 || pic->p.h>1080 || (pic->p.bpc!=8 && pic->p.bpc!=10) ||
+           pic->m.user_data.ref || pic->content_light_ref || pic->mastering_display_ref || pic->itut_t35_ref) {e=DAV1D_ERR(EINVAL);goto done;}
+        unsigned j=0;for(;j<p->count;j++)if(original[j]==pic->allocator_data)break;
+        if(j==p->count) {
+            original[j]=pic->allocator_data;p->count++;geometry(&p->images[j],pic);
+            size_t n=p->images[j].raw_size;uint8_t *bytes=malloc(n);if(!bytes) {e=DAV1D_ERR(ENOMEM);goto done;}
+            memcpy(bytes,pic->allocator_data,n);delta_rows(&p->images[j],bytes,0,1);
+            input[j]=(NeoRcompInput){bytes,n};
+        }
+        p->slots[i]=(int)j;
+    }
+    e=s->method==10?neo_rcomp_gpu_pack(input,output,p->count):neo_rcomp_cpu_pack(input,output,p->count);
+    if(!e)for(unsigned j=0;j<p->count;j++) {
+        p->images[j].bytes=output[j].data;p->images[j].size=output[j].size;output[j].data=NULL;
+    }
+done:
+    for(unsigned j=0;j<8;j++) {free((void*)input[j].data);free(output[j].data);}
+    return e;
+}
 int neo_lossless_encode(NeoLosslessCheckpoint *s) {
     if(!s || !s->shell || !s->shell->meta || s->shell->count)return DAV1D_ERR(EINVAL);
     NeoPackedCheckpoint *p=s->shell;int e=0,method=s->method;
+    if(method==9 || method==10) {e=rcomp_store(s);if(e)return e;}
+    else {
     const void *original[8]={0};
     for(int i=0;i<8;i++) {
         Dav1dPicture *pic=&p->meta->refs[i].p.p;if(!pic->data[0])continue;
@@ -147,6 +175,7 @@ int neo_lossless_encode(NeoLosslessCheckpoint *s) {
         unsigned j=0;for(;j<p->count;j++)if(original[j]==pic->allocator_data)break;
         if(j==p->count) {original[j]=pic->allocator_data;p->count++;e=image_store(&p->images[j],&s->stage[j],pic,method);if(e)return e;}
         p->slots[i]=(int)j;
+    }
     }
     for(int i=0;i<8;i++) {
         Dav1dPicture *pic=&p->meta->refs[i].p.p;dav1d_ref_dec(&pic->ref);

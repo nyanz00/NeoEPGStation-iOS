@@ -1,0 +1,6 @@
+rcomp-metal 0.4.0
+Original work: rcomp-metal contributors. Published by d8vjork (Ruben R).
+Licensed under the Apache-2.0 option declared in Cargo.toml.
+The Metal compression kernel is unmodified. NeoEPGStation supplies a new
+iOS host bridge and bounded checkpoint block-container adapter.
+The original macOS Rust wrapper is retained as reference only.

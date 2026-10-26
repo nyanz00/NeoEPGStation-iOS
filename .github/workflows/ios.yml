@@ -193,7 +193,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/checkpoint
-          key: checkpoint-xcode26.6-v1-${{ hashFiles('scripts/build-checkpoint.py', 'scripts/checkpoint_compression_sources.py', 'vendor/checkpoint/**', 'experiments/dav1d-checkpoint/*.c', 'experiments/dav1d-checkpoint/*.h') }}
+          key: checkpoint-xcode26.6-v1-${{ hashFiles('scripts/build-checkpoint.py', 'scripts/checkpoint_compression_sources.py', 'vendor/checkpoint/**', 'vendor/rcomp-metal/**', 'experiments/dav1d-checkpoint/*.c', 'experiments/dav1d-checkpoint/*.h') }}
       - name: Build private checkpoint decoder for device and simulator
         run: |
           command -v meson >/dev/null && command -v ninja >/dev/null || brew install meson ninja

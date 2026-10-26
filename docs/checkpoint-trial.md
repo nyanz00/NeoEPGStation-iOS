@@ -6,23 +6,46 @@
 通常の視聴経路、TS、STREAMING、コメント、PiP、視聴履歴は変更しない。
 以前の「AV1復号比較」も別項目として残す。
 
-## 測定条件（schema 4）
+## 測定条件（schema 5）
 
 先頭の実キーフレームから次のキーフレームの約1秒後までの圧縮パケットを取得する。
 準備上限は96MiB・3,000パケット・65メディア秒・90秒。一時MP4はcodec copyで作り、
 終了時に削除する。通信・デマルチプレクス・MP4作成は復号タイマーに含めない。
 
-CPUによる現在方式・LZ4・Zstandard level 1を比較する。GPU圧縮は行わない。
+CPUによる現在方式・LZ4・Zstandard level 1と、rcomp-metalのGPU LZ4圧縮を比較する。
+rcomp-metal 0.4.0の公開crateをSHA-256で照合し、Metalカーネルは変更せず収録する。
+macOS専用Rustラッパーと同梱macOS用metallibは使わず、iOS Objective-Cブリッジから
+同じMetalソースを実行時コンパイルする。ライセンスは上流のApache-2.0選択肢を採用。
+入力の差分・バイト整形、保存コンテナー組み立て、復元・展開はCPUで行う。
 現在方式は10bit画素を16bit格納から10bit格納へ無損失で詰める方式（8bitは詰めない）。
 LZ4/Zstandardは水平方向の差分・zigzag変換、10bitではさらに行ごとの上下位バイト分離を行う。
 有効画素とアロケーション余白をすべて保存し、元画像への参照を圧縮完了時に解放する。
 
-復号は6ワーカー・フレーム並列度3、途中フレームスキップなし。合計10条件。
+復号は6ワーカー・フレーム並列度3、途中フレームスキップなし。合計14条件。
 
 | 種類 | 保存方式 | 条件数 |
 | --- | --- | --- |
-| 単独の保存・復元 | 現在方式・LZ4・Zstandard | 各2：目的位置まで約2秒・0.25秒 |
-| 等速復号と定期保存 | 保存なし・現在方式・LZ4・Zstandard | 各1：2秒ごと、保持上限64MiB |
+| 単独の保存・復元 | 現在方式・LZ4・Zstandard・CPU LZ4 64KiB・rcomp-metal | 各2：目的位置まで約2秒・0.25秒 |
+| 等速復号と定期保存 | 保存なし・Zstandard・CPU LZ4 64KiB・rcomp-metal | 各1：2秒ごと、保持上限64MiB |
+
+### rcomp-metalの比較条件
+
+method=9はliblz4による独立64KiBブロック、method=10はrcomp-metalの同じ64KiB区切り。
+現在のmethod=4は画像全体でLZ4圧縮するため、そのままGPU差の比較対象にはしない。
+method=9と10も検索実装は異なり、圧縮バイト列・保持量の一致までは要求しない。
+両方とも同じCPU前処理と`RCM1`診断用コンテナーを使用し、CPUのLZ4で復元する。
+各画像の末尾をゼロで64KiBへ揃え、1地点の参照画像全体を1回のGPU dispatchで処理する。
+復元では末尾を一時領域へ展開し、有効な元allocationサイズだけを書き戻す。
+元の余白も元どおり復元する。圧縮されないブロックは可逆な生バイトとして保存する。
+
+`gpuSetupMs`は端末・ライブラリー・パイプライン・キューの準備で、保存タイマーの外。
+GPUバッファーは条件の間再利用し、条件終了時に解放する。
+`gpuCommandMs`はMetalのGPU開始/終了時刻の差（取得できない場合0）、
+`gpuWaitMs`はcommitから完了待ちまでの実時間。保存時間は前処理・入力コピー・
+GPU待機・出力組み立ても含む。`gpuStagingBytes`は再利用するMetalバッファーの合計で、
+64MiBの保持枠とは別。入力48MiB・Metal作業バッファー合計128MiBに上限を設ける。
+GPU実行失敗をCPU成功へ置き換えない。1009はMetalデバイスなし、1010は不正なブロック、
+1011はMetalコンパイル/キュー/実行エラー。`gpuCompressionVerified`でGPU条件の成功を区別する。
 
 ### 単独の保存・復元（kind=storage）
 
@@ -64,7 +87,7 @@ LZ4/Zstandardは水平方向の差分・zigzag変換、10bitではさらに行�
 ## 結果と制限
 
 「診断結果を共有」で `checkpoint-benchmark.json` を共有する。
-10条件すべて成功なら `status=complete`、不一致・未対応・上限到達は `partial`。
+14条件すべて成功なら `status=complete`、不一致・未対応・上限到達は `partial`。
 準備失敗は `failed`。各条件終了時にも結果を保存し、中断時は完了した行を残す。
 ソースURL・タイトル・画像・認証情報は結果に入れない。
 
@@ -80,7 +103,7 @@ LZ4/Zstandardは水平方向の差分・zigzag変換、10bitではさらに行�
 ではない。開始/終了時のthermalStateも記録するが、消費電力は測定していない。
 
 同一プロセス・同一復号器・既定アロケーター限定。HDRメタデータ等の境界は未対応。
-以前のschema 3の16条件は履歴として残し、新しい10条件との違いに注意する。
+以前のschema 3の16条件とschema 4の10条件は履歴として残す。schema 5はGPU比較の14条件。
 複数地点を通常プレイヤーへ保持する機能は今回追加しない。
 
 ## ビルドと分離
@@ -94,7 +117,7 @@ LZ4 1.10.0・Zstandard 1.5.7は固定ハッシュで取得し、単一スレッ�
 全public dav1d APIを `neo_lab_` 接頭辞へ変更し、Apple側ではシンボルを非公開にする。
 ライセンス・固定ソース情報・追加ソースをIPAへ収録する。
 
-Actionsの `checkpoint-trial` はdevice/simulatorビルドと診断画面の8bit/10bit各10条件に絞る。
+Actionsの `checkpoint-trial` はdevice/simulatorビルドと診断画面の8bit/10bit各14条件に絞る。
 シミュレーター成功はiPhoneの速度・熱・電力を保証しない。実機結果で次の採用判断を行う。
 
 ## ビルド269の確認
@@ -156,3 +179,16 @@ IPA: `NeoEPGStation-build272.ipa`、SHA-256:
 `abf30e18a5111ead400fccd89bc28351c4435989a7b5313b99e03243bd943b29`。
 配布物のCRC・artifact digest・ソースハッシュ・ライセンス同梱を照合済み。
 iPhone上の速度・同時復号負荷・発熱の結論は実機結果待ち。
+
+## rcomp-metal追加時の事前検証
+
+公開crate `rcomp-metal-0.4.0.crate` のSHA-256は
+`90fbc70a09c15c871d0cd0fc5f1f74ccc6461b7d2e31bc37b1f4ccb3dd254609`。
+元ソース・ベンチマーク条件・ライセンス宣言・カーネルハッシュは `vendor/rcomp-metal/`。
+上流のM3 Max・数百MiB入力での速度は、iPhoneの参照画像にそのまま当てはめない。
+
+`tests/rcomp-shader-host.cpp` はカーネルの整数処理をC++として実行する正当性検査。
+48条件のゼロ・繰り返し・疑似乱数・段階値、64KiB前後と末尾を試し、配布用LZ4復元との
+バイト一致、出力番兵、不正な短縮コンテナーの拒否を確認する。GPU性能測定ではない。
+`python scripts/rcomp-host-kernel.py` で`.local/rcomp-host-kernel.inc`を生成して実行する。
+CPU比較方式も8/10bit合成素材と1080p長GOP素材で、全画素・allocation・後続区間を確認する。

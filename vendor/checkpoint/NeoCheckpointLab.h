@@ -36,11 +36,15 @@ int neo_checkpoint_lab_run(const NeoCheckpointPacket *packets, size_t count,
 uint64_t neo_checkpoint_lab_footprint(void);
 
 /* CPU storage diagnostic: method 0=packed10, 4=delta/shuffle LZ4,
- * 7=delta/shuffle Zstd level 1. Normal playback never enters these APIs. */
+ * 7=delta/shuffle Zstd level 1; 9=CPU independent LZ4 64KiB; 10=rcomp-metal.
+ * Preprocessing and restore remain on CPU. Never normal playback. */
 typedef struct NeoStorageResult {
     NeoCheckpointResult checkpoint;
     int method;
     double save_cpu_ms[NEO_CHECKPOINT_REPEATS];
+    double gpu_setup_ms,gpu_ms[NEO_CHECKPOINT_REPEATS],gpu_wait_ms[NEO_CHECKPOINT_REPEATS];
+    uint64_t gpu_staging_bytes;
+    int gpu_dispatches;
 } NeoStorageResult;
 int neo_checkpoint_storage_run(const NeoCheckpointPacket *,size_t,double,double,int,
     NeoStorageResult *,int(*)(void*),void*);
@@ -57,6 +61,9 @@ typedef struct NeoRealtimeResult {
     double capture_ms[NEO_REALTIME_MAX_SAVES];
     double target_ms[NEO_REALTIME_TARGETS],target_seconds[NEO_REALTIME_TARGETS],chosen_seconds[NEO_REALTIME_TARGETS];
     int used_checkpoint[NEO_REALTIME_TARGETS];
+    double gpu_setup_ms,gpu_ms[NEO_REALTIME_MAX_SAVES],gpu_wait_ms[NEO_REALTIME_MAX_SAVES];
+    uint64_t gpu_staging_bytes;
+    int gpu_dispatches;
 } NeoRealtimeResult;
 int neo_checkpoint_realtime_run(const NeoCheckpointPacket *,size_t,double,int,
     NeoRealtimeResult *,int(*)(void*),void*);
