@@ -192,3 +192,22 @@ iPhone上の速度・同時復号負荷・発熱の結論は実機結果待ち�
 バイト一致、出力番兵、不正な短縮コンテナーの拒否を確認する。GPU性能測定ではない。
 `python scripts/rcomp-host-kernel.py` で`.local/rcomp-host-kernel.inc`を生成して実行する。
 CPU比較方式も8/10bit合成素材と1080p長GOP素材で、全画素・allocation・後続区間を確認する。
+
+## ビルド273の確認
+
+ソース `50c1b669fdda272dd1f2c68d43535f968a1653b1`、
+[Actions 40277090848](https://github.com/nyanz00/NeoEPGStation-iOS/actions/runs/40277090848)
+でdevice/simulatorビルドに成功。8bit/10bit各14条件、合計28条件がschema 5・`complete`。
+各入力でGPU単独測定2条件・GPU定期保存1条件が実際にdispatchされ、CPU代替なしで
+復元・画素照合まで成功。`gpuCompressionVerified=true`。これはシミュレーターの
+GPU実行・正当性確認であり、iPhoneの速度や消費電力の結論ではない。
+
+事前のCPU比較方式7条件（8/10bit合成素材、1080p長GOPの単独・定期保存）も成功。
+Metalカーネル整数処理をホスト実行した48条件は、LZ4の全バイト復元・出力番兵・
+短縮コンテナー拒否が成功。こちらはGPU性能試験ではない。
+
+IPA: `NeoEPGStation-build273.ipa`、SHA-256:
+`040bfbd1eb688cbef8ce9f165cbdf35596ad00b180e0f146300c73f28b34b4d2`。
+artifact digest・ZIP CRC・ビルド番号・同梱ソース/ライセンス・元Metalコードのハッシュを照合。
+通常経路のFFmpegインポート146件も従来のAetherフレームワークへの結び付きを確認した。
+実機では以前と同じ診断項目とAV1入力を使い、`checkpoint-benchmark.json`を比較する。
