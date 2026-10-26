@@ -84,3 +84,12 @@ The CPU reference, new container and four-stage Metal implementation are
 modified lossless-only code, with quantization and pooling disabled; they
 are included in `ThirdPartyNotices/CheckpointDav1d`. The original CUDA
 kernel is retained as source and is not executed on iOS.
+
+The diagnostic Metal Zstandard backend adapts the BSD-3-Clause option of
+Meta Zstandard 1.5.7's format, FSE and Huffman arithmetic for an iPhone Metal
+encoder. Copyright (c) Meta Platforms, Inc. and affiliates. Its complete
+license and modified encoder/bridge sources are retained in
+`ThirdPartyNotices/CheckpointDav1d` (MetalZstd-LICENSE, metal-zstd*).
+The bounded matcher, GPU scheduling and host bridge are new code. No
+source or shader from gpu-zstd-comp is distributed or translated into this
+backend. CPU preprocessing and CPU decompression remain outside the GPU encoder.

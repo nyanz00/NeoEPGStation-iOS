@@ -122,7 +122,7 @@ int neo_checkpoint_realtime_run(const NeoCheckpointPacket *packets,size_t count,
     Dav1dContext *c=NULL;StorageWorker worker={0};Pace pace={0};pace.out=out;
     Dav1dPicture golden={0};Timing target_time={0};int error=0,worker_ready=0;
     out->before_bytes=sample(&r);TRY(storage_input(&r,gop));
-    if(method!=-1 && method!=0 && method!=4 && method!=7 && method!=9 && method!=10 && method!=11 && method!=12 && method!=13 && method!=14) {error=1001;goto done;}
+    if(method!=-1 && method!=0 && method!=4 && method!=7 && method!=9 && method!=10 && method!=11 && method!=12 && method!=13 && method!=14 && method!=15 && method!=16) {error=1001;goto done;}
     TRY(open_decoder(&c,6,NULL));
     size_t warm=0,end=0;double until=fmin(gop*.9,24.0);
     while(warm<count && packets[warm].seconds<.5)warm++;

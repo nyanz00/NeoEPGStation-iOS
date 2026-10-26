@@ -27,8 +27,13 @@ void neo_lscomp_last_metrics(NeoRcompMetrics *);
 int neo_lscomp_cpu_pack(const NeoRcompInput *,NeoRcompOutput *,unsigned);
 int neo_lscomp_gpu_pack(const NeoRcompInput *,NeoRcompOutput *,unsigned);
 int neo_lscomp_unpack(const uint8_t *,size_t,uint8_t *,size_t);
-static inline int neo_checkpoint_gpu_method(int m) {return m==10 || m==12 || m==14;}
-static inline int neo_checkpoint_gpu_begin(int m,double *ms) {return m==10?neo_rcomp_begin(ms):neo_lscomp_begin(ms);}
-static inline void neo_checkpoint_gpu_end(int m) {if(m==10)neo_rcomp_end();else neo_lscomp_end();}
-static inline void neo_checkpoint_gpu_metrics(int m,NeoRcompMetrics *out) {if(m==10)neo_rcomp_last_metrics(out);else neo_lscomp_last_metrics(out);}
+int neo_mzstd_begin(double *);
+void neo_mzstd_end(void);
+void neo_mzstd_last_metrics(NeoRcompMetrics *);
+int neo_mzstd_cpu_pack(const NeoRcompInput *,NeoRcompOutput *,unsigned);
+int neo_mzstd_gpu_pack(const NeoRcompInput *,NeoRcompOutput *,unsigned);
+static inline int neo_checkpoint_gpu_method(int m) {return m==10 || m==12 || m==14 || m==15;}
+static inline int neo_checkpoint_gpu_begin(int m,double *ms) {return m==15?neo_mzstd_begin(ms):m==10?neo_rcomp_begin(ms):neo_lscomp_begin(ms);}
+static inline void neo_checkpoint_gpu_end(int m) {if(m==15)neo_mzstd_end();else if(m==10)neo_rcomp_end();else neo_lscomp_end();}
+static inline void neo_checkpoint_gpu_metrics(int m,NeoRcompMetrics *out) {if(m==15)neo_mzstd_last_metrics(out);else if(m==10)neo_rcomp_last_metrics(out);else neo_lscomp_last_metrics(out);}
 #endif

@@ -54,6 +54,8 @@ def prepare():
                      ('vendor/checkpoint/lscomp.h','include/lscomp.h'),
                      ('vendor/checkpoint/lscomp-format.c','src/neo_lscomp_format.c'),
                      ('vendor/checkpoint/rcomp-format.c','src/neo_rcomp_format.c'),
+                     ('vendor/checkpoint/metal-zstd-core.h','include/metal-zstd-core.h'),
+                     ('vendor/checkpoint/metal-zstd-format.c','src/neo_metal_zstd_format.c'),
                      ('vendor/checkpoint/lab.c','src/neo_checkpoint_lab.c'),
                      ('vendor/checkpoint/NeoCheckpointLab.h','include/NeoCheckpointLab.h')]:
         write_changed(SOURCE/dst, (ROOT/src).read_bytes())
@@ -64,7 +66,7 @@ def prepare():
         (ROOT/'vendor/checkpoint/lab.c').read_bytes()+b'\n'+(ROOT/'vendor/checkpoint/storage-profile.inc').read_bytes()+b'\n'+(ROOT/'vendor/checkpoint/realtime.inc').read_bytes())
     meson = run('git','-C',SOURCE,'show','HEAD:src/meson.build')+'\n'
     # packed.c includes core.c: compile it once, not as two translation units.
-    write_changed(SOURCE/'src/meson.build', meson.replace("'cdf.c',", "'cdf.c',\n    'neo_packed_checkpoint.c',\n    'neo_checkpoint_lab.c',\n    'neo_lz4.c',\n    'neo_zstd.c',\n    'neo_rcomp_format.c',\n    'neo_lscomp_format.c',", 1).encode())
+    write_changed(SOURCE/'src/meson.build', meson.replace("'cdf.c',", "'cdf.c',\n    'neo_packed_checkpoint.c',\n    'neo_checkpoint_lab.c',\n    'neo_lz4.c',\n    'neo_zstd.c',\n    'neo_rcomp_format.c',\n    'neo_lscomp_format.c',\n    'neo_metal_zstd_format.c',", 1).encode())
     picture = run('git','-C',SOURCE,'show','HEAD:src/picture.c')+'\n'
     write_changed(SOURCE/'src/picture.c',picture.encode()+(ROOT/'vendor/checkpoint/picture-helper.inc').read_bytes())
     return public,compression
@@ -113,6 +115,12 @@ def main():
         run(cc,*flags,'-fobjc-arc','-fblocks','-std=gnu11','-Wall','-Werror=implicit-function-declaration',
             '-I',ROOT/'vendor/checkpoint','-I',output,'-c',ROOT/'vendor/checkpoint/lscomp-metal.m','-o',ls_bridge)
         run('/usr/bin/ar','r',library,ls_bridge)
+        mz_shader='#include <metal_stdlib>\nusing namespace metal;\n'+(ROOT/'vendor/checkpoint/metal-zstd-core.h').read_text()+'\n'+(ROOT/'vendor/checkpoint/metal-zstd.metal').read_text().replace('#include "metal-zstd-core.h"','')
+        write_changed(output/'metal-zstd-shader.h',('static const char neo_mzstd_shader_source[] = '+json.dumps(mz_shader)+';\n').encode())
+        mz_bridge=output/'metal-zstd.o'
+        run(cc,*flags,'-fobjc-arc','-fblocks','-std=gnu11','-Wall','-Werror=implicit-function-declaration',
+            '-I',ROOT/'vendor/checkpoint','-I',output,'-c',ROOT/'vendor/checkpoint/metal-zstd.m','-o',mz_bridge)
+        run('/usr/bin/ar','r',library,mz_bridge)
     symbols=run('nm','-g',library.relative_to(ROOT))
     assert '_neo_lab_dav1d_open' in symbols or ' neo_lab_dav1d_open' in symbols
     assert not re.search(r'\b[Tt] _?dav1d_(open|send_data|get_picture|close)\b',symbols), 'Public decoder namespace collision'
@@ -131,7 +139,9 @@ def main():
                   'vendor/checkpoint/rcomp-format.c','vendor/checkpoint/rcomp-metal.m',
                   'vendor/rcomp-metal/lz4.metal','vendor/rcomp-metal/source.json',
                   'vendor/checkpoint/lscomp.h','vendor/checkpoint/lscomp-format.c',
-                  'vendor/checkpoint/lscomp-metal.m','vendor/checkpoint/lscomp.metal','vendor/lscomp/source.json')},
+                  'vendor/checkpoint/lscomp-metal.m','vendor/checkpoint/lscomp.metal','vendor/lscomp/source.json',
+                  'vendor/checkpoint/metal-zstd-core.h','vendor/checkpoint/metal-zstd-format.c',
+                  'vendor/checkpoint/metal-zstd.m','vendor/checkpoint/metal-zstd.metal','vendor/checkpoint/MetalZstd-LICENSE')},
               'rcompMetal':rcomp_source,
               'lscomp':json.loads((ROOT/'vendor/lscomp/source.json').read_text()),
               'compression':compression,

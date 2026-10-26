@@ -38,6 +38,7 @@ uint64_t neo_checkpoint_lab_footprint(void);
 /* Storage diagnostic: method 0=packed10, 4=delta/shuffle LZ4,
  * 7=delta/shuffle Zstd level 1; 9=CPU independent LZ4 64KiB; 10=rcomp-metal;
  * 11/12=CPU/Metal lsCOMP raw; 13/14=CPU/Metal lsCOMP delta (lossless only).
+ * 15=Metal Zstd full encoder; 16=its CPU reference/control.
  * Preprocessing and restore remain on CPU. Never normal playback. */
 typedef struct NeoStorageResult {
     NeoCheckpointResult checkpoint;
