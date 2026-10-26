@@ -40,6 +40,8 @@ static void *compression_worker(void *cookie) {
                 NeoRcompMetrics m;neo_checkpoint_gpu_metrics(w->out->method,&m);w->out->gpu_ms[i]=m.gpu_ms;w->out->gpu_wait_ms[i]=m.wait_ms;
                 if(m.staging_bytes>w->out->gpu_staging_bytes)w->out->gpu_staging_bytes=m.staging_bytes;
                 w->out->gpu_dispatches+=m.dispatches;
+                w->out->gpu_stage_timed_batches+=m.stage_timing_available;
+                for(int stage=0;stage<7;stage++)w->out->gpu_stage_total_ms[stage]+=m.stage_ms[stage];
             }
             while(w->count && (w->out->retained_bytes+stats.held_bytes>w->out->memory_budget_bytes || w->count==NEO_REALTIME_MAX_SAVES)) {
                 w->out->retained_bytes-=w->retained[0].bytes;neo_lossless_free(&w->retained[0].state);

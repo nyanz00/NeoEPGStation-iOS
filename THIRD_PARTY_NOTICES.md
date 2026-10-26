@@ -93,3 +93,7 @@ license and modified encoder/bridge sources are retained in
 The bounded matcher, GPU scheduling and host bridge are new code. No
 source or shader from gpu-zstd-comp is distributed or translated into this
 backend. CPU preprocessing and CPU decompression remain outside the GPU encoder.
+The parallel revision keeps the 64KiB match window, parses 4KiB parts, reuses
+device buffers, cooperatively builds Huffman codes, and packs independent
+FSE/Huffman tokens with GPU prefix sums. The scalar encoder is retained only
+as a native diagnostic control, not an automatic runtime fallback.

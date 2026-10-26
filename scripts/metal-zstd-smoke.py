@@ -18,6 +18,12 @@ subprocess.run(base+[str(root/'tests/metal-zstd-metal.c'),str(out/'decoder.o'),s
     '-framework','Foundation','-framework','Metal','-o',str(binary)],check=True)
 result=json.loads(subprocess.check_output([str(binary)],text=True,timeout=180))
 assert result.get('gpuUnavailable') or result.get('cases')==24 and result.get('images')==72 and result.get('byteExact') and result.get('compressedImages',0)>0
+if not result.get('gpuUnavailable'):
+    # Same input, same matcher and GPU; stop before the app build if the new
+    # cooperative encoder regresses on the native correctness/performance probe.
+    assert result['parallelWallMs']<result['scalarWallMs'],result
+    assert result['parallelToScalarSize']<1.15,result
+    assert len(result['parallelStageMs'])==7
 result['devicePerformanceVerified']=False
 result['scope']='macOS Metal execution of shipping match/parse/Huffman/FSE/frame assembly; standard Zstd CPU decode'
 (root/'dist/metal-zstd-verification.json').write_text(json.dumps(result,indent=2)+'\n')

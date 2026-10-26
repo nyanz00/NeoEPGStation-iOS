@@ -47,6 +47,8 @@ typedef struct NeoStorageResult {
     double gpu_setup_ms,gpu_ms[NEO_CHECKPOINT_REPEATS],gpu_wait_ms[NEO_CHECKPOINT_REPEATS];
     uint64_t gpu_staging_bytes;
     int gpu_dispatches;
+    double gpu_stage_total_ms[7];
+    int gpu_stage_timed_batches;
 } NeoStorageResult;
 int neo_checkpoint_storage_run(const NeoCheckpointPacket *,size_t,double,double,int,
     NeoStorageResult *,int(*)(void*),void*);
@@ -66,6 +68,8 @@ typedef struct NeoRealtimeResult {
     double gpu_setup_ms,gpu_ms[NEO_REALTIME_MAX_SAVES],gpu_wait_ms[NEO_REALTIME_MAX_SAVES];
     uint64_t gpu_staging_bytes;
     int gpu_dispatches;
+    double gpu_stage_total_ms[7];
+    int gpu_stage_timed_batches;
 } NeoRealtimeResult;
 int neo_checkpoint_realtime_run(const NeoCheckpointPacket *,size_t,double,int,
     NeoRealtimeResult *,int(*)(void*),void*);

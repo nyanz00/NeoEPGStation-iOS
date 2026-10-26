@@ -57,7 +57,9 @@ final class NeoDecodeTrialController: UIViewController {
           "timing": "fresh-decoder-feed-to-target-output; initialization-separate; luma-check-after-timer",
           "audio": false, "networkInDecodeTimer": false]
         if checkpointMode {
-          report["schema"] = 7; report["mode"] = "metal-zstd-checkpoint"
+          report["schema"] = 8; report["mode"] = "metal-zstd-parallel-checkpoint"
+          report["metalZstdParseBytes"] = 4096; report["metalZstdWindowBytes"] = 65536
+          report["gpuStageNames"] = ["match", "parse", "histogram", "huffman", "fse", "packing", "assembly"]
           report["expectedConditions"] = 12
           report["gpuCompressionRequested"] = true; report["renderingIncluded"] = false
           report["lscompRevision"] = "d920dd9dc8ddbd2684c777d1e2ba27397212e59c"
@@ -202,6 +204,8 @@ private enum NeoCheckpointWorker {
             "entropyBackend": method == 15 ? "GPU" : "CPU/control",
             "gpuSetupMs": output.gpu_setup_ms, "gpuCommandMs": gpu, "gpuWaitMs": gpuWait,
             "gpuStagingBytes": output.gpu_staging_bytes, "gpuDispatches": Int(output.gpu_dispatches),
+            "gpuStageTotalMs": withUnsafeBytes(of: output.gpu_stage_total_ms) { Array($0.bindMemory(to: Double.self)) },
+            "gpuStageTimedBatches": Int(output.gpu_stage_timed_batches),
             "decoderError": Int(result.decoder_error), "failureStage": Int(result.failure_stage),
             "threads": Int(result.threads), "frameContexts": Int(result.frame_contexts),
             "requestedDistanceSeconds": distance, "checkpointSeconds": result.checkpoint_seconds,
@@ -254,6 +258,8 @@ private enum NeoCheckpointWorker {
             "entropyBackend": method == 15 ? "GPU" : "CPU/control",
             "gpuSetupMs": result.gpu_setup_ms, "gpuCommandMs": gpu, "gpuWaitMs": gpuWait,
             "gpuStagingBytes": result.gpu_staging_bytes, "gpuDispatches": Int(result.gpu_dispatches),
+            "gpuStageTotalMs": withUnsafeBytes(of: result.gpu_stage_total_ms) { Array($0.bindMemory(to: Double.self)) },
+            "gpuStageTimedBatches": Int(result.gpu_stage_timed_batches),
             "threads": 6, "frameContexts": 3, "saveIntervalSeconds": 2,
             "compressionWorkerQoS": "utility", "compressionWorkers": method < 0 ? 0 : 1,
             "frames": Int(result.frames), "frameDeadlineMisses": Int(result.late_frames),

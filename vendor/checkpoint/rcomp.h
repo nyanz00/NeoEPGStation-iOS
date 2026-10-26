@@ -9,6 +9,8 @@ typedef struct NeoRcompInput { const uint8_t *data; size_t size; uint32_t row_wi
 typedef struct NeoRcompOutput { uint8_t *data; size_t size; } NeoRcompOutput;
 typedef struct NeoRcompMetrics {
     double gpu_ms,wait_ms;
+    double stage_ms[7]; /* match, parse, histogram, Huffman, FSE, packing, assembly */
+    int stage_timing_available;
     uint64_t staging_bytes;
     int dispatches;
 } NeoRcompMetrics;
@@ -30,6 +32,8 @@ int neo_lscomp_unpack(const uint8_t *,size_t,uint8_t *,size_t);
 int neo_mzstd_begin(double *);
 void neo_mzstd_end(void);
 void neo_mzstd_last_metrics(NeoRcompMetrics *);
+/* Native diagnostic control only. Default is the parallel encoder. */
+void neo_mzstd_scalar_control(int);
 int neo_mzstd_cpu_pack(const NeoRcompInput *,NeoRcompOutput *,unsigned);
 int neo_mzstd_gpu_pack(const NeoRcompInput *,NeoRcompOutput *,unsigned);
 static inline int neo_checkpoint_gpu_method(int m) {return m==10 || m==12 || m==14 || m==15;}

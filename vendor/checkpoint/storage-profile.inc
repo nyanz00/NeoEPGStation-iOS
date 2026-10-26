@@ -75,6 +75,8 @@ int neo_checkpoint_storage_run(const NeoCheckpointPacket *packets,size_t count,d
             NeoRcompMetrics m;neo_checkpoint_gpu_metrics(method,&m);result->gpu_ms[k]=m.gpu_ms;result->gpu_wait_ms[k]=m.wait_ms;
             if(m.staging_bytes>result->gpu_staging_bytes)result->gpu_staging_bytes=m.staging_bytes;
             result->gpu_dispatches+=m.dispatches;
+            result->gpu_stage_timed_batches+=m.stage_timing_available;
+            for(int stage=0;stage<7;stage++)result->gpu_stage_total_ms[stage]+=m.stage_ms[stage];
         }
         neo_lossless_free(&temporary);out->temporary_save_free_count++;
     }

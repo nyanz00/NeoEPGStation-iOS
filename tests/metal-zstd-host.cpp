@@ -18,10 +18,13 @@ static void matching(const NzB *in,NzU n,std::vector<NzU>& matches) {
     }
 }
 static unsigned cases=0,compressed=0;static uint64_t rawbytes=0,packedbytes=0;
+#include "metal-zstd-parallel-host.h"
 static void check(const NzB *data,NzU n) {
     std::vector<NzU> matches;matching(data,n,matches);std::vector<NzSeq> seq(16384);
     std::vector<NzB> literals(NZ_BLOCK),huff(NZ_BLOCK*2),out(NZ_SLOT+64,0xa5),restored(n+1);
-    NzU size=nz_block(data,n,matches.data(),seq.data(),literals.data(),huff.data(),out.data());
+    for(unsigned parallel=0;parallel<2;parallel++) {
+    std::fill(out.begin(),out.end(),0xa5);
+    NzU size=parallel?parallel_block(data,n,matches.data(),out.data()):nz_block(data,n,matches.data(),seq.data(),literals.data(),huff.data(),out.data());
     size_t got=ZSTD_decompress(restored.data(),n,out.data(),size);
     if(!size || size>NZ_SLOT || ZSTD_isError(got) || got!=n || memcmp(data,restored.data(),n)) {
         fprintf(stderr,"case=%u raw=%u encoded=%u decoded=%zu error=%s\n",cases,n,size,got,ZSTD_getErrorName(got));
@@ -30,6 +33,7 @@ static void check(const NzB *data,NzU n) {
     }
     for(size_t j=NZ_SLOT;j<out.size();j++)if(out[j]!=0xa5)exit(2);
     if(size<n)compressed++;cases++;rawbytes+=n;packedbytes+=size;
+    }
 }
 int main(int argc,char **argv) {
     NzU state=1;for(NzU n:{1u,7u,31u,64u,127u,255u,256u,4095u,16383u,65535u,65536u})for(NzU kind=0;kind<7;kind++) {
@@ -41,4 +45,5 @@ int main(int argc,char **argv) {
     for(int arg=1;arg<argc;arg++) {FILE *f=fopen(argv[arg],"rb");if(!f)return 3;std::vector<NzB> bytes(NZ_BLOCK);size_t n;
         while((n=fread(bytes.data(),1,bytes.size(),f)))check(bytes.data(),(NzU)n);fclose(f);}
     printf("{\"cases\":%u,\"compressedBlocks\":%u,\"rawBytes\":%llu,\"packedBytes\":%llu,\"byteExact\":true,\"gpuMeasured\":false}\n",cases,compressed,(unsigned long long)rawbytes,(unsigned long long)packedbytes);
+    return 0;
 }

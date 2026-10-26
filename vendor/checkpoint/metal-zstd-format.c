@@ -32,6 +32,7 @@ int neo_mzstd_cpu_pack(const NeoRcompInput *in,NeoRcompOutput *out,unsigned coun
 done:free(head);free(prev);free(matches);free(seq);free(lit);free(huf);free(encoded);return error;
 }
 #ifndef __APPLE__
+void neo_mzstd_scalar_control(int enabled) {(void)enabled;}
 int neo_mzstd_begin(double *ms) {if(ms)*ms=0;return 1009;}
 void neo_mzstd_end(void) {}
 void neo_mzstd_last_metrics(NeoRcompMetrics *out) {memset(out,0,sizeof(*out));}

@@ -35,7 +35,9 @@ for depth in (8,10):
     assert report.get('status') in ('complete','partial','failed','cancelled'), 'Checkpoint tester did not finish'
     Path('dist',f'checkpoint-trial-{depth}.json').write_text(json.dumps(report,indent=2)+'\n')
     assert report['status'] in ('complete','partial'),report
-    assert report['schema']==7 and report['mode']=='metal-zstd-checkpoint'
+    assert report['schema']==8 and report['mode']=='metal-zstd-parallel-checkpoint'
+    assert report['metalZstdParseBytes']==4096 and report['metalZstdWindowBytes']==65536
+    assert report['gpuStageNames']==['match','parse','histogram','huffman','fse','packing','assembly']
     assert report['networkInDecodeTimer'] is False and report['gpuCompressionRequested'] is True
     assert report['renderingIncluded'] is False and report['audio'] is False
     assert report['expectedConditions']==12 and report['processFootprintAfterInputReleaseBytes']>0
@@ -54,6 +56,8 @@ for depth in (8,10):
         assert row['threads']==6 and row['frameContexts']==3
         assert row['normalPlaybackUnchanged'] and row['processFootprintAfterBytes']>0
         assert row['restoreBackend']=='CPU'
+        assert len(row['gpuStageTotalMs'])==7 and all(v>=0 for v in row['gpuStageTotalMs'])
+        assert row['gpuStageTimedBatches']>=0
         if row['method'] in (14,15):
             assert row['gpuSetupMs']>0 and row['gpuStagingBytes']>0 and row['gpuDispatches']>0
             assert all(v>=0 for v in row['gpuCommandMs']) and all(v>0 for v in row['gpuWaitMs'])
@@ -111,7 +115,8 @@ for depth in (8,10):
         if row['method']==14:
             assert row['gpuDispatches']==4*(5 if row['kind']=='storage' else row['completedSaves'])
         elif row['method']==15:
-            assert row['gpuDispatches']%4==0 and row['gpuDispatches']>=4*(5 if row['kind']=='storage' else row['completedSaves'])
+            assert row['gpuDispatches']%13==0 and row['gpuDispatches']>=13*(5 if row['kind']=='storage' else row['completedSaves'])
+            assert row['gpuStageTimedBatches']<=row['gpuDispatches']//13
             assert row['gpuStagingBytes']<=32*1024*1024 and row['entropyBackend']=='GPU'
     serialized=json.dumps(report)
     assert 'file://' not in serialized and '/api/' not in serialized

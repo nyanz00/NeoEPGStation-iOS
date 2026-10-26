@@ -30,7 +30,13 @@ static void nz_bits(NZ_T NzBits *b,NzU v,NzU n) {
     while(b->used>=8) {b->p[b->n++]=(NzB)b->bits;b->bits>>=8;b->used-=8;}
 }
 static NzU nz_end(NZ_T NzBits *b,int stop) {if(stop)nz_bits(b,1,1);if(b->used)b->p[b->n++]=(NzB)b->bits;return b->n;}
-static NzU nz_log(NzU n) {NzU k=0;while(n>>1) {n>>=1;k++;}return k;}
+static NzU nz_log(NzU n) {
+#ifdef __METAL_VERSION__
+    return n?31u-clz(n):0;
+#else
+    return n?31u-(NzU)__builtin_clz(n):0;
+#endif
+}
 static void nz_le(NZ_D NzB *p,NzU value,NzU bytes) {for(NzU j=0;j<bytes;j++)p[j]=(NzB)(value>>(8*j));}
 static NzU nz_hash(NZ_D const NzB *p) {NzU v=(NzU)p[0]|(NzU)p[1]<<8|(NzU)p[2]<<16|(NzU)p[3]<<24;return (v*2654435761u)>>(32-15);}
 typedef struct NzFse {NzU state[64],bits[64],log;int find[64];} NzFse;
@@ -55,8 +61,15 @@ static void nz_symbol(NZ_T NzBits *b,NZ_T const NzFse *f,NZ_T NzU *state,NzU sym
 }
 NZ_C NzU nz_llbits[36]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,2,2,3,3,4,6,7,8,9,10,11,12,13,14,15,16};
 NZ_C NzU nz_mlbits[53]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,2,2,3,3,4,4,5,7,8,9,10,11,12,13,14,15,16};
-static NzU nz_llcode(NzU value) {NzU base=0;for(NzU c=0;c<35;c++) {NzU next=base+(1u<<nz_llbits[c]);if(value<next)return c;base=next;}return 35;}
-static NzU nz_mlcode(NzU value) {NzU base=0;for(NzU c=0;c<52;c++) {NzU next=base+(1u<<nz_mlbits[c]);if(value<next)return c;base=next;}return 52;}
+static NzU nz_llcode(NzU v) {
+    if(v<16)return v;if(v<24)return 16+(v-16)/2;if(v<32)return 20+(v-24)/4;
+    if(v<48)return 22+(v-32)/8;if(v<64)return 24;return nz_log(v)+19;
+}
+static NzU nz_mlcode(NzU v) {
+    if(v<32)return v;if(v<40)return 32+(v-32)/2;if(v<48)return 36+(v-40)/4;
+    if(v<64)return 38+(v-48)/8;if(v<96)return 40+(v-64)/16;
+    if(v<128)return 42;return nz_log(v)+36;
+}
 static NzU nz_ncount(NZ_D NzB *,NZ_T const int *,NzU,NzU);
 static NzU nz_seqtable(NZ_D NzB *out,NZ_T NzFse *f,NZ_T const NzU *count,NzU total,NZ_T NzU *mode) {
     NzU max=0,biggest=0,sum=0;int norm[64]={0};
