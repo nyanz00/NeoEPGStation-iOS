@@ -1,0 +1,5417 @@
+{
+  "platform": "Windows x86-64 CPU, one compression thread, affinity mask 1; no audio/render/network",
+  "openzlVersion": "0.3.0",
+  "zstdVersion": "1.5.7",
+  "allocationMeasurement": "GNU ld wraps malloc/calloc/realloc/free of the static libraries and harness; requested live bytes, excludes allocator overhead and non-malloc allocations",
+  "timing": "one full unique-reference set per round; context creation, transform, compression, output allocation/shrink included; restoration includes output allocation and inverse transform; I/O and byte comparison excluded; first round warmup",
+  "scope": "reference-image compression only, not full decoder-state save/restore or seek latency; no training or custom OpenZL codec; numeric graph is contiguous LE16 including allocation padding, delta graph is one-dimensional",
+  "cases": [
+    {
+      "checkpointSeconds": 14.031,
+      "images": [
+        {
+          "file": "0.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "c4e87d56b6fd90ff0c6c97cbda18c8831d67a20184610b4348fad73089d5234e"
+        },
+        {
+          "file": "1.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "f31a818362d7b06f908e9f18a3036a75bb0656c8c1a8644afdb5fa5483f02056"
+        },
+        {
+          "file": "2.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "7693ae2792d05c86c7e601199015f9d204c9fff2356f64cf6c186d874ebed53a"
+        },
+        {
+          "file": "3.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "d8817c6a8202ea0e54b4ccdcdf20edf87937f9e6e63900b613dae0cb274ca517"
+        },
+        {
+          "file": "4.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "2a0ca92a4eff36b80ffaa9040bca63c15ba159fdb4728099df36d64232acc9ad"
+        }
+      ],
+      "rawImageBytes": 26911040,
+      "otherCheckpointBytes": 771332,
+      "case": "long-gop",
+      "methods": [
+        {
+          "method": 0,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 7881015,
+              "saveMs": 48.058,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 22.3699,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 12268682,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7881015,
+              "saveMs": 47.1023,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.2781,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 12268682,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7881015,
+              "saveMs": 49.1083,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 29.5694,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 12268682,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7881015,
+              "saveMs": 46.8874,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 22.0295,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 12268682,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7881015,
+              "saveMs": 48.068,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 21.7267,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 12268682,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7881015,
+              "saveMs": 47.0046,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.5727,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 12268682,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 66961408,
+          "processPeakCommitBytes": 63516672,
+          "name": "raw-zstd1",
+          "saveMsMedian": 47.1023,
+          "restoreMsMedian": 23.2781,
+          "saveThreadCpuMsMedian": 46.875,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 7881015,
+          "compressionAdditionalPeakBytesMedian": 12268682,
+          "restorationAdditionalPeakBytesMedian": 27007008,
+          "imagePayloadMiB": 7.515921592712402,
+          "estimatedCheckpointMiB": 8.251521110534668
+        },
+        {
+          "method": 1,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 4838420,
+              "saveMs": 54.1306,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 21.6333,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 15227308,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4838420,
+              "saveMs": 63.1949,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 22.3382,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 15227308,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4838420,
+              "saveMs": 55.1777,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 21.18,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 15227308,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4838420,
+              "saveMs": 53.3069,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 21.3195,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 15227308,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4838420,
+              "saveMs": 53.894,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 21.9008,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 15227308,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4838420,
+              "saveMs": 54.4464,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 21.5724,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 15227308,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 63827968,
+          "processPeakCommitBytes": 60473344,
+          "name": "row-delta-shuffle-zstd1",
+          "saveMsMedian": 54.4464,
+          "restoreMsMedian": 21.5724,
+          "saveThreadCpuMsMedian": 62.5,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 4838420,
+          "compressionAdditionalPeakBytesMedian": 15227308,
+          "restorationAdditionalPeakBytesMedian": 27007008,
+          "imagePayloadMiB": 4.614276885986328,
+          "estimatedCheckpointMiB": 5.349876403808594
+        },
+        {
+          "method": 2,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 7881155,
+              "saveMs": 52.3972,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 38.7356,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 23157851,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7881155,
+              "saveMs": 51.7114,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 25.1538,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 23157851,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7881155,
+              "saveMs": 52.3411,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 24.9091,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 23157851,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7881155,
+              "saveMs": 52.1807,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 24.3982,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 23157851,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7881155,
+              "saveMs": 53.5314,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.9813,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 23157851,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7881155,
+              "saveMs": 51.074,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.6646,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 23157851,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 67563520,
+          "processPeakCommitBytes": 63619072,
+          "name": "openzl-generic1",
+          "saveMsMedian": 52.1807,
+          "restoreMsMedian": 24.3982,
+          "saveThreadCpuMsMedian": 46.875,
+          "restoreThreadCpuMsMedian": 31.25,
+          "compressedBytesMedian": 7881155,
+          "compressionAdditionalPeakBytesMedian": 23157851,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 7.516055107116699,
+          "estimatedCheckpointMiB": 8.251654624938965
+        },
+        {
+          "method": 2,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 6539848,
+              "saveMs": 204.8822,
+              "saveThreadCpuMs": 203.125,
+              "restoreMs": 19.6837,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 24646787,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6539848,
+              "saveMs": 203.4352,
+              "saveThreadCpuMs": 203.125,
+              "restoreMs": 20.082,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 24646787,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6539848,
+              "saveMs": 202.975,
+              "saveThreadCpuMs": 187.5,
+              "restoreMs": 20.8713,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 24646787,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6539848,
+              "saveMs": 202.6343,
+              "saveThreadCpuMs": 203.125,
+              "restoreMs": 32.2462,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 24646787,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6539848,
+              "saveMs": 209.2693,
+              "saveThreadCpuMs": 218.75,
+              "restoreMs": 19.6047,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 24646787,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6539848,
+              "saveMs": 201.4005,
+              "saveThreadCpuMs": 203.125,
+              "restoreMs": 20.1209,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 24646787,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 66174976,
+          "processPeakCommitBytes": 62091264,
+          "name": "openzl-generic6",
+          "saveMsMedian": 202.975,
+          "restoreMsMedian": 20.1209,
+          "saveThreadCpuMsMedian": 203.125,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 6539848,
+          "compressionAdditionalPeakBytesMedian": 24646787,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 6.236885070800781,
+          "estimatedCheckpointMiB": 6.972484588623047
+        },
+        {
+          "method": 3,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 7164007,
+              "saveMs": 108.5459,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 39.953,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 68788557,
+              "restorationAdditionalPeakBytes": 36436510,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7164007,
+              "saveMs": 106.6174,
+              "saveThreadCpuMs": 93.75,
+              "restoreMs": 37.0319,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 68788557,
+              "restorationAdditionalPeakBytes": 36436510,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7164007,
+              "saveMs": 109.4808,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 38.258,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 68788557,
+              "restorationAdditionalPeakBytes": 36436510,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7164007,
+              "saveMs": 107.0734,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 37.7889,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 68788557,
+              "restorationAdditionalPeakBytes": 36436510,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7164007,
+              "saveMs": 126.3075,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 37.4166,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 68788557,
+              "restorationAdditionalPeakBytes": 36436510,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7164007,
+              "saveMs": 109.4157,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 36.0385,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 68788557,
+              "restorationAdditionalPeakBytes": 36436510,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 73961472,
+          "processPeakCommitBytes": 99135488,
+          "name": "openzl-numeric16-1",
+          "saveMsMedian": 109.4157,
+          "restoreMsMedian": 37.4166,
+          "saveThreadCpuMsMedian": 109.375,
+          "restoreThreadCpuMsMedian": 31.25,
+          "compressedBytesMedian": 7164007,
+          "compressionAdditionalPeakBytesMedian": 68788557,
+          "restorationAdditionalPeakBytesMedian": 36436510,
+          "imagePayloadMiB": 6.83212947845459,
+          "estimatedCheckpointMiB": 7.5677289962768555
+        },
+        {
+          "method": 3,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 6005562,
+              "saveMs": 475.0818,
+              "saveThreadCpuMs": 468.75,
+              "restoreMs": 26.8572,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 133921417,
+              "restorationAdditionalPeakBytes": 35056708,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6005562,
+              "saveMs": 454.7623,
+              "saveThreadCpuMs": 453.125,
+              "restoreMs": 26.6376,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 133921417,
+              "restorationAdditionalPeakBytes": 35056708,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6005562,
+              "saveMs": 481.9696,
+              "saveThreadCpuMs": 484.375,
+              "restoreMs": 28.4215,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 133921417,
+              "restorationAdditionalPeakBytes": 35056708,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6005562,
+              "saveMs": 503.7642,
+              "saveThreadCpuMs": 500.0,
+              "restoreMs": 30.6125,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 133921417,
+              "restorationAdditionalPeakBytes": 35056708,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6005562,
+              "saveMs": 509.1234,
+              "saveThreadCpuMs": 484.375,
+              "restoreMs": 32.2428,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 133921417,
+              "restorationAdditionalPeakBytes": 35056708,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6005562,
+              "saveMs": 507.9972,
+              "saveThreadCpuMs": 500.0,
+              "restoreMs": 27.9784,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 133921417,
+              "restorationAdditionalPeakBytes": 35056708,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 115130368,
+          "processPeakCommitBytes": 164376576,
+          "name": "openzl-numeric16-6",
+          "saveMsMedian": 503.7642,
+          "restoreMsMedian": 28.4215,
+          "saveThreadCpuMsMedian": 484.375,
+          "restoreThreadCpuMsMedian": 31.25,
+          "compressedBytesMedian": 6005562,
+          "compressionAdditionalPeakBytesMedian": 133921417,
+          "restorationAdditionalPeakBytesMedian": 35056708,
+          "imagePayloadMiB": 5.727350234985352,
+          "estimatedCheckpointMiB": 6.462949752807617
+        },
+        {
+          "method": 4,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 5888780,
+              "saveMs": 130.9146,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 55.7937,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 78533311,
+              "restorationAdditionalPeakBytes": 37816687,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5888780,
+              "saveMs": 144.2082,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 57.3451,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 78533311,
+              "restorationAdditionalPeakBytes": 37816687,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5888780,
+              "saveMs": 128.349,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 61.3154,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 78533311,
+              "restorationAdditionalPeakBytes": 37816687,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5888780,
+              "saveMs": 139.1669,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 70.8414,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 78533311,
+              "restorationAdditionalPeakBytes": 37816687,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5888780,
+              "saveMs": 127.9293,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 55.9772,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 78533311,
+              "restorationAdditionalPeakBytes": 37816687,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5888780,
+              "saveMs": 132.8475,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 55.813,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 78533311,
+              "restorationAdditionalPeakBytes": 37816687,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 72679424,
+          "processPeakCommitBytes": 108023808,
+          "name": "openzl-delta-zigzag-numeric16-1",
+          "saveMsMedian": 132.8475,
+          "restoreMsMedian": 57.3451,
+          "saveThreadCpuMsMedian": 125.0,
+          "restoreThreadCpuMsMedian": 62.5,
+          "compressedBytesMedian": 5888780,
+          "compressionAdditionalPeakBytesMedian": 78533311,
+          "restorationAdditionalPeakBytesMedian": 37816687,
+          "imagePayloadMiB": 5.615978240966797,
+          "estimatedCheckpointMiB": 6.3515777587890625
+        },
+        {
+          "method": 4,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 5029931,
+              "saveMs": 397.495,
+              "saveThreadCpuMs": 390.625,
+              "restoreMs": 42.0931,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 143909883,
+              "restorationAdditionalPeakBytes": 37801724,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5029931,
+              "saveMs": 404.1283,
+              "saveThreadCpuMs": 406.25,
+              "restoreMs": 37.2685,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 143909883,
+              "restorationAdditionalPeakBytes": 37801724,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5029931,
+              "saveMs": 393.2784,
+              "saveThreadCpuMs": 390.625,
+              "restoreMs": 36.5204,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 143909883,
+              "restorationAdditionalPeakBytes": 37801724,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5029931,
+              "saveMs": 388.8149,
+              "saveThreadCpuMs": 390.625,
+              "restoreMs": 37.079,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 143909883,
+              "restorationAdditionalPeakBytes": 37801724,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5029931,
+              "saveMs": 393.3424,
+              "saveThreadCpuMs": 390.625,
+              "restoreMs": 36.7674,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 143909883,
+              "restorationAdditionalPeakBytes": 37801724,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5029931,
+              "saveMs": 387.2218,
+              "saveThreadCpuMs": 390.625,
+              "restoreMs": 36.6052,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 143909883,
+              "restorationAdditionalPeakBytes": 37801724,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 124551168,
+          "processPeakCommitBytes": 173219840,
+          "name": "openzl-delta-zigzag-numeric16-6",
+          "saveMsMedian": 393.2784,
+          "restoreMsMedian": 36.7674,
+          "saveThreadCpuMsMedian": 390.625,
+          "restoreThreadCpuMsMedian": 31.25,
+          "compressedBytesMedian": 5029931,
+          "compressionAdditionalPeakBytesMedian": 143909883,
+          "restorationAdditionalPeakBytesMedian": 37801724,
+          "imagePayloadMiB": 4.7969160079956055,
+          "estimatedCheckpointMiB": 5.532515525817871
+        },
+        {
+          "method": 5,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 4838560,
+              "saveMs": 59.5479,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 26.3928,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 26116477,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4838560,
+              "saveMs": 56.2696,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 23.1317,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 26116477,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4838560,
+              "saveMs": 71.7877,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 23.1405,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 26116477,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4838560,
+              "saveMs": 56.6411,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 22.9412,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 26116477,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4838560,
+              "saveMs": 57.8005,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 23.8141,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 26116477,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4838560,
+              "saveMs": 58.1811,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 22.928,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 26116477,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 64499712,
+          "processPeakCommitBytes": 60542976,
+          "name": "row-delta-shuffle-openzl-generic1",
+          "saveMsMedian": 57.8005,
+          "restoreMsMedian": 23.1317,
+          "saveThreadCpuMsMedian": 62.5,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 4838560,
+          "compressionAdditionalPeakBytesMedian": 26116477,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 4.614410400390625,
+          "estimatedCheckpointMiB": 5.350009918212891
+        }
+      ]
+    },
+    {
+      "checkpointSeconds": 18.035,
+      "images": [
+        {
+          "file": "0.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "8189fa158fc58d18f61191415c732c7eb45779903cf38d9f7c179d1992150e3f"
+        },
+        {
+          "file": "1.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "1c357f45c9f91790657ab1234c92c97fb3d97baf8ed95439d009835590f9d168"
+        },
+        {
+          "file": "2.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "cd11c976dd0a0c3fa5d002bf3d76af6d3d8b29ba69c1dd376aca20551322698a"
+        },
+        {
+          "file": "3.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "26d8f60504f383847c93ea38dc6daa208d14b4dca18de363d2b2adfe96fbb6bc"
+        },
+        {
+          "file": "4.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "4e646bb48be38288bd50a50455e1f0970c6a79fbae405424abe68225150d774d"
+        }
+      ],
+      "rawImageBytes": 26911040,
+      "otherCheckpointBytes": 771332,
+      "case": "long-gop",
+      "methods": [
+        {
+          "method": 1,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 5812922,
+              "saveMs": 58.378,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 21.0769,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 16008971,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5812922,
+              "saveMs": 56.9409,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 20.4388,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 16008971,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5812922,
+              "saveMs": 57.9624,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 21.0319,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 16008971,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5812922,
+              "saveMs": 57.1022,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 20.4501,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 16008971,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5812922,
+              "saveMs": 57.5062,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 22.9759,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 16008971,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5812922,
+              "saveMs": 59.3645,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.3989,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 16008971,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 64819200,
+          "processPeakCommitBytes": 61444096,
+          "name": "row-delta-shuffle-zstd1",
+          "saveMsMedian": 57.5062,
+          "restoreMsMedian": 21.0319,
+          "saveThreadCpuMsMedian": 62.5,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 5812922,
+          "compressionAdditionalPeakBytesMedian": 16008971,
+          "restorationAdditionalPeakBytesMedian": 27007008,
+          "imagePayloadMiB": 5.543634414672852,
+          "estimatedCheckpointMiB": 6.279233932495117
+        },
+        {
+          "method": 2,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 10232078,
+              "saveMs": 62.825,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 26.5166,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 25046643,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 10232078,
+              "saveMs": 58.7769,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 25.1715,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 25046643,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 10232078,
+              "saveMs": 58.8723,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 24.4461,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 25046643,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 10232078,
+              "saveMs": 69.2348,
+              "saveThreadCpuMs": 78.125,
+              "restoreMs": 25.1721,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 25046643,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 10232078,
+              "saveMs": 70.0593,
+              "saveThreadCpuMs": 78.125,
+              "restoreMs": 24.563,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 25046643,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 10232078,
+              "saveMs": 58.0694,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 25.0511,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 25046643,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 69873664,
+          "processPeakCommitBytes": 65921024,
+          "name": "openzl-generic1",
+          "saveMsMedian": 58.8723,
+          "restoreMsMedian": 25.0511,
+          "saveThreadCpuMsMedian": 62.5,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 10232078,
+          "compressionAdditionalPeakBytesMedian": 25046643,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 9.75806999206543,
+          "estimatedCheckpointMiB": 10.493669509887695
+        },
+        {
+          "method": 2,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 8461959,
+              "saveMs": 231.6528,
+              "saveThreadCpuMs": 234.375,
+              "restoreMs": 22.5183,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 26189556,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 8461959,
+              "saveMs": 231.7543,
+              "saveThreadCpuMs": 234.375,
+              "restoreMs": 21.9959,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 26189556,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 8461959,
+              "saveMs": 263.55,
+              "saveThreadCpuMs": 250.0,
+              "restoreMs": 23.3231,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 26189556,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 8461959,
+              "saveMs": 233.8401,
+              "saveThreadCpuMs": 234.375,
+              "restoreMs": 22.8741,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 26189556,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 8461959,
+              "saveMs": 235.4542,
+              "saveThreadCpuMs": 234.375,
+              "restoreMs": 22.33,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 26189556,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 8461959,
+              "saveMs": 232.0819,
+              "saveThreadCpuMs": 234.375,
+              "restoreMs": 22.625,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 26189556,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 68100096,
+          "processPeakCommitBytes": 64020480,
+          "name": "openzl-generic6",
+          "saveMsMedian": 233.8401,
+          "restoreMsMedian": 22.625,
+          "saveThreadCpuMsMedian": 234.375,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 8461959,
+          "compressionAdditionalPeakBytesMedian": 26189556,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 8.069952964782715,
+          "estimatedCheckpointMiB": 8.80555248260498
+        },
+        {
+          "method": 3,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 8961104,
+              "saveMs": 122.7865,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 43.5149,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 70229992,
+              "restorationAdditionalPeakBytes": 37819391,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 8961104,
+              "saveMs": 125.8479,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 43.3624,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 70229992,
+              "restorationAdditionalPeakBytes": 37819391,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 8961104,
+              "saveMs": 122.8309,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 45.6392,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 70229992,
+              "restorationAdditionalPeakBytes": 37819391,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 8961104,
+              "saveMs": 128.6426,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 44.7384,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 70229992,
+              "restorationAdditionalPeakBytes": 37819391,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 8961104,
+              "saveMs": 124.4451,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 44.7209,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 70229992,
+              "restorationAdditionalPeakBytes": 37819391,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 8961104,
+              "saveMs": 126.037,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 44.4092,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 70229992,
+              "restorationAdditionalPeakBytes": 37819391,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 75874304,
+          "processPeakCommitBytes": 100999168,
+          "name": "openzl-numeric16-1",
+          "saveMsMedian": 125.8479,
+          "restoreMsMedian": 44.7209,
+          "saveThreadCpuMsMedian": 125.0,
+          "restoreThreadCpuMsMedian": 46.875,
+          "compressedBytesMedian": 8961104,
+          "compressionAdditionalPeakBytesMedian": 70229992,
+          "restorationAdditionalPeakBytesMedian": 37819391,
+          "imagePayloadMiB": 8.545974731445312,
+          "estimatedCheckpointMiB": 9.281574249267578
+        },
+        {
+          "method": 3,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 7764405,
+              "saveMs": 606.9309,
+              "saveThreadCpuMs": 578.125,
+              "restoreMs": 31.873,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 135332153,
+              "restorationAdditionalPeakBytes": 35990361,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7764405,
+              "saveMs": 627.6571,
+              "saveThreadCpuMs": 546.875,
+              "restoreMs": 32.1113,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 135332153,
+              "restorationAdditionalPeakBytes": 35990361,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7764405,
+              "saveMs": 573.3452,
+              "saveThreadCpuMs": 578.125,
+              "restoreMs": 30.6592,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 135332153,
+              "restorationAdditionalPeakBytes": 35990361,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7764405,
+              "saveMs": 550.7676,
+              "saveThreadCpuMs": 546.875,
+              "restoreMs": 33.2442,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 135332153,
+              "restorationAdditionalPeakBytes": 35990361,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7764405,
+              "saveMs": 641.2937,
+              "saveThreadCpuMs": 609.375,
+              "restoreMs": 38.112,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 135332153,
+              "restorationAdditionalPeakBytes": 35990361,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7764405,
+              "saveMs": 616.2676,
+              "saveThreadCpuMs": 609.375,
+              "restoreMs": 34.4609,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 135332153,
+              "restorationAdditionalPeakBytes": 35990361,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 120172544,
+          "processPeakCommitBytes": 165167104,
+          "name": "openzl-numeric16-6",
+          "saveMsMedian": 616.2676,
+          "restoreMsMedian": 33.2442,
+          "saveThreadCpuMsMedian": 578.125,
+          "restoreThreadCpuMsMedian": 31.25,
+          "compressedBytesMedian": 7764405,
+          "compressionAdditionalPeakBytesMedian": 135332153,
+          "restorationAdditionalPeakBytesMedian": 35990361,
+          "imagePayloadMiB": 7.4047136306762695,
+          "estimatedCheckpointMiB": 8.140313148498535
+        },
+        {
+          "method": 4,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 7085242,
+              "saveMs": 146.0787,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 60.5984,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 79494759,
+              "restorationAdditionalPeakBytes": 38004914,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7085242,
+              "saveMs": 136.8194,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 58.8311,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 79494759,
+              "restorationAdditionalPeakBytes": 38004914,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7085242,
+              "saveMs": 136.4465,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 62.6481,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 79494759,
+              "restorationAdditionalPeakBytes": 38004914,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7085242,
+              "saveMs": 138.1882,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 59.3297,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 79494759,
+              "restorationAdditionalPeakBytes": 38004914,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7085242,
+              "saveMs": 138.7547,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 58.914,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 79494759,
+              "restorationAdditionalPeakBytes": 38004914,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7085242,
+              "saveMs": 136.5778,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 59.3271,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 79494759,
+              "restorationAdditionalPeakBytes": 38004914,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 74190848,
+          "processPeakCommitBytes": 111493120,
+          "name": "openzl-delta-zigzag-numeric16-1",
+          "saveMsMedian": 136.8194,
+          "restoreMsMedian": 59.3271,
+          "saveThreadCpuMsMedian": 140.625,
+          "restoreThreadCpuMsMedian": 62.5,
+          "compressedBytesMedian": 7085242,
+          "compressionAdditionalPeakBytesMedian": 79494759,
+          "restorationAdditionalPeakBytesMedian": 38004914,
+          "imagePayloadMiB": 6.757013320922852,
+          "estimatedCheckpointMiB": 7.492612838745117
+        },
+        {
+          "method": 4,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 6175457,
+              "saveMs": 454.2736,
+              "saveThreadCpuMs": 437.5,
+              "restoreMs": 39.9436,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 144827635,
+              "restorationAdditionalPeakBytes": 37808775,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6175457,
+              "saveMs": 432.4498,
+              "saveThreadCpuMs": 437.5,
+              "restoreMs": 39.9514,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 144827635,
+              "restorationAdditionalPeakBytes": 37808775,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6175457,
+              "saveMs": 441.7039,
+              "saveThreadCpuMs": 437.5,
+              "restoreMs": 41.2861,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 144827635,
+              "restorationAdditionalPeakBytes": 37808775,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6175457,
+              "saveMs": 435.319,
+              "saveThreadCpuMs": 437.5,
+              "restoreMs": 39.6338,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 144827635,
+              "restorationAdditionalPeakBytes": 37808775,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6175457,
+              "saveMs": 441.9721,
+              "saveThreadCpuMs": 421.875,
+              "restoreMs": 44.4035,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 144827635,
+              "restorationAdditionalPeakBytes": 37808775,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6175457,
+              "saveMs": 437.1279,
+              "saveThreadCpuMs": 437.5,
+              "restoreMs": 39.7223,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 144827635,
+              "restorationAdditionalPeakBytes": 37808775,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 127676416,
+          "processPeakCommitBytes": 175222784,
+          "name": "openzl-delta-zigzag-numeric16-6",
+          "saveMsMedian": 437.1279,
+          "restoreMsMedian": 39.9514,
+          "saveThreadCpuMsMedian": 437.5,
+          "restoreThreadCpuMsMedian": 46.875,
+          "compressedBytesMedian": 6175457,
+          "compressionAdditionalPeakBytesMedian": 144827635,
+          "restorationAdditionalPeakBytesMedian": 37808775,
+          "imagePayloadMiB": 5.889374732971191,
+          "estimatedCheckpointMiB": 6.624974250793457
+        },
+        {
+          "method": 5,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 5813062,
+              "saveMs": 60.3219,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 22.9642,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 26898140,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5813062,
+              "saveMs": 60.7605,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 22.3075,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 26898140,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5813062,
+              "saveMs": 76.6544,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.9102,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 26898140,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5813062,
+              "saveMs": 63.0031,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 23.375,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 26898140,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5813062,
+              "saveMs": 62.3511,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 22.9503,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 26898140,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5813062,
+              "saveMs": 61.6268,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 22.5406,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 26898140,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 65482752,
+          "processPeakCommitBytes": 61575168,
+          "name": "row-delta-shuffle-openzl-generic1",
+          "saveMsMedian": 62.3511,
+          "restoreMsMedian": 22.9503,
+          "saveThreadCpuMsMedian": 62.5,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 5813062,
+          "compressionAdditionalPeakBytesMedian": 26898140,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 5.543767929077148,
+          "estimatedCheckpointMiB": 6.279367446899414
+        },
+        {
+          "method": 0,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 10231938,
+              "saveMs": 54.1507,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 23.6367,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 14157474,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 10231938,
+              "saveMs": 53.2644,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.8435,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 14157474,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 10231938,
+              "saveMs": 54.665,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 22.8954,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 14157474,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 10231938,
+              "saveMs": 54.9659,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 23.4115,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 14157474,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 10231938,
+              "saveMs": 53.997,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 23.2027,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 14157474,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 10231938,
+              "saveMs": 53.6574,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 22.8852,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 14157474,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 69341184,
+          "processPeakCommitBytes": 65888256,
+          "name": "raw-zstd1",
+          "saveMsMedian": 53.997,
+          "restoreMsMedian": 23.2027,
+          "saveThreadCpuMsMedian": 46.875,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 10231938,
+          "compressionAdditionalPeakBytesMedian": 14157474,
+          "restorationAdditionalPeakBytesMedian": 27007008,
+          "imagePayloadMiB": 9.757936477661133,
+          "estimatedCheckpointMiB": 10.493535995483398
+        }
+      ]
+    },
+    {
+      "checkpointSeconds": 19.828,
+      "images": [
+        {
+          "file": "0.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "423d654bda08ee9bff73a9672a2d91ba10143936320f71442c2d569a1bf1eea9"
+        },
+        {
+          "file": "1.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "4369dc15ae0b8bf63f34dfc8a5f32c053d8a0a9c5fd7cff97ae694cca0ef5232"
+        },
+        {
+          "file": "2.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "3e0db4b384ad736f3be946d8520d1650167e1a2a68bf2cbd34bea2c4684d0882"
+        },
+        {
+          "file": "3.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "b03ee8419704d7f853f6ae74e446458e6ca0f8208d61be4212c7bc9e7e2fd10f"
+        },
+        {
+          "file": "4.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "f7b6174896e948ac8875d36ee639eb2c6b3752b6e1f80ec244dce8dc42f007d6"
+        }
+      ],
+      "rawImageBytes": 26911040,
+      "otherCheckpointBytes": 771332,
+      "case": "long-gop",
+      "methods": [
+        {
+          "method": 2,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 5983441,
+              "saveMs": 59.958,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 23.7684,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 21675836,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5983441,
+              "saveMs": 50.985,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 24.2601,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 21675836,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5983441,
+              "saveMs": 50.4139,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.7336,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 21675836,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5983441,
+              "saveMs": 49.5782,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.4687,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 21675836,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5983441,
+              "saveMs": 52.8807,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 24.5996,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 21675836,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5983441,
+              "saveMs": 51.6951,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 24.6526,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 21675836,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 65634304,
+          "processPeakCommitBytes": 61710336,
+          "name": "openzl-generic1",
+          "saveMsMedian": 50.985,
+          "restoreMsMedian": 24.2601,
+          "saveThreadCpuMsMedian": 46.875,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 5983441,
+          "compressionAdditionalPeakBytesMedian": 21675836,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 5.706254005432129,
+          "estimatedCheckpointMiB": 6.4418535232543945
+        },
+        {
+          "method": 2,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 5343014,
+              "saveMs": 213.3754,
+              "saveThreadCpuMs": 203.125,
+              "restoreMs": 21.3179,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 23718139,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5343014,
+              "saveMs": 195.257,
+              "saveThreadCpuMs": 203.125,
+              "restoreMs": 21.3385,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 23718139,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5343014,
+              "saveMs": 193.3593,
+              "saveThreadCpuMs": 187.5,
+              "restoreMs": 21.6755,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 23718139,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5343014,
+              "saveMs": 194.4577,
+              "saveThreadCpuMs": 187.5,
+              "restoreMs": 21.1198,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 23718139,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5343014,
+              "saveMs": 191.7906,
+              "saveThreadCpuMs": 187.5,
+              "restoreMs": 20.3714,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 23718139,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5343014,
+              "saveMs": 189.9898,
+              "saveThreadCpuMs": 187.5,
+              "restoreMs": 20.1623,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 23718139,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 64987136,
+          "processPeakCommitBytes": 60878848,
+          "name": "openzl-generic6",
+          "saveMsMedian": 193.3593,
+          "restoreMsMedian": 21.1198,
+          "saveThreadCpuMsMedian": 187.5,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 5343014,
+          "compressionAdditionalPeakBytesMedian": 23718139,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 5.095495223999023,
+          "estimatedCheckpointMiB": 5.831094741821289
+        },
+        {
+          "method": 3,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 5772979,
+              "saveMs": 105.6331,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 38.4335,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 67698875,
+              "restorationAdditionalPeakBytes": 36218536,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5772979,
+              "saveMs": 104.9178,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 39.4307,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 67698875,
+              "restorationAdditionalPeakBytes": 36218536,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5772979,
+              "saveMs": 108.9247,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 38.3609,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 67698875,
+              "restorationAdditionalPeakBytes": 36218536,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5772979,
+              "saveMs": 117.0904,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 39.3753,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 67698875,
+              "restorationAdditionalPeakBytes": 36218536,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5772979,
+              "saveMs": 107.7728,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 40.3717,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 67698875,
+              "restorationAdditionalPeakBytes": 36218536,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5772979,
+              "saveMs": 119.4504,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 43.964,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 67698875,
+              "restorationAdditionalPeakBytes": 36218536,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 72241152,
+          "processPeakCommitBytes": 96718848,
+          "name": "openzl-numeric16-1",
+          "saveMsMedian": 108.9247,
+          "restoreMsMedian": 39.4307,
+          "saveThreadCpuMsMedian": 109.375,
+          "restoreThreadCpuMsMedian": 31.25,
+          "compressedBytesMedian": 5772979,
+          "compressionAdditionalPeakBytesMedian": 67698875,
+          "restorationAdditionalPeakBytesMedian": 36218536,
+          "imagePayloadMiB": 5.505541801452637,
+          "estimatedCheckpointMiB": 6.241141319274902
+        },
+        {
+          "method": 3,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 4776818,
+              "saveMs": 385.6103,
+              "saveThreadCpuMs": 390.625,
+              "restoreMs": 24.173,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 132965931,
+              "restorationAdditionalPeakBytes": 34631364,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4776818,
+              "saveMs": 409.6754,
+              "saveThreadCpuMs": 421.875,
+              "restoreMs": 29.6604,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 132965931,
+              "restorationAdditionalPeakBytes": 34631364,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4776818,
+              "saveMs": 398.2922,
+              "saveThreadCpuMs": 390.625,
+              "restoreMs": 23.7932,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 132965931,
+              "restorationAdditionalPeakBytes": 34631364,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4776818,
+              "saveMs": 388.8522,
+              "saveThreadCpuMs": 390.625,
+              "restoreMs": 24.6052,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 132965931,
+              "restorationAdditionalPeakBytes": 34631364,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4776818,
+              "saveMs": 379.8232,
+              "saveThreadCpuMs": 375.0,
+              "restoreMs": 24.0923,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 132965931,
+              "restorationAdditionalPeakBytes": 34631364,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4776818,
+              "saveMs": 384.123,
+              "saveThreadCpuMs": 390.625,
+              "restoreMs": 32.7132,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 132965931,
+              "restorationAdditionalPeakBytes": 34631364,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 112771072,
+          "processPeakCommitBytes": 162422784,
+          "name": "openzl-numeric16-6",
+          "saveMsMedian": 388.8522,
+          "restoreMsMedian": 24.6052,
+          "saveThreadCpuMsMedian": 390.625,
+          "restoreThreadCpuMsMedian": 31.25,
+          "compressedBytesMedian": 4776818,
+          "compressionAdditionalPeakBytesMedian": 132965931,
+          "restorationAdditionalPeakBytesMedian": 34631364,
+          "imagePayloadMiB": 4.55552864074707,
+          "estimatedCheckpointMiB": 5.291128158569336
+        },
+        {
+          "method": 4,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 5255553,
+              "saveMs": 121.1072,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 53.8202,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 78056073,
+              "restorationAdditionalPeakBytes": 37714040,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5255553,
+              "saveMs": 135.5687,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 59.2782,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 78056073,
+              "restorationAdditionalPeakBytes": 37714040,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5255553,
+              "saveMs": 121.0664,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 53.8571,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 78056073,
+              "restorationAdditionalPeakBytes": 37714040,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5255553,
+              "saveMs": 120.6423,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 56.2117,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 78056073,
+              "restorationAdditionalPeakBytes": 37714040,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5255553,
+              "saveMs": 120.7004,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 55.7547,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 78056073,
+              "restorationAdditionalPeakBytes": 37714040,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5255553,
+              "saveMs": 120.3564,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 53.5488,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 78056073,
+              "restorationAdditionalPeakBytes": 37714040,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 71860224,
+          "processPeakCommitBytes": 107868160,
+          "name": "openzl-delta-zigzag-numeric16-1",
+          "saveMsMedian": 120.7004,
+          "restoreMsMedian": 55.7547,
+          "saveThreadCpuMsMedian": 125.0,
+          "restoreThreadCpuMsMedian": 62.5,
+          "compressedBytesMedian": 5255553,
+          "compressionAdditionalPeakBytesMedian": 78056073,
+          "restorationAdditionalPeakBytesMedian": 37714040,
+          "imagePayloadMiB": 5.012085914611816,
+          "estimatedCheckpointMiB": 5.747685432434082
+        },
+        {
+          "method": 4,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 4525661,
+              "saveMs": 397.4382,
+              "saveThreadCpuMs": 390.625,
+              "restoreMs": 37.5094,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 143532712,
+              "restorationAdditionalPeakBytes": 37704984,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4525661,
+              "saveMs": 387.5509,
+              "saveThreadCpuMs": 390.625,
+              "restoreMs": 35.6623,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 143532712,
+              "restorationAdditionalPeakBytes": 37704984,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4525661,
+              "saveMs": 405.0724,
+              "saveThreadCpuMs": 390.625,
+              "restoreMs": 38.4632,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 143532712,
+              "restorationAdditionalPeakBytes": 37704984,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4525661,
+              "saveMs": 385.0698,
+              "saveThreadCpuMs": 375.0,
+              "restoreMs": 35.9492,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 143532712,
+              "restorationAdditionalPeakBytes": 37704984,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4525661,
+              "saveMs": 411.4162,
+              "saveThreadCpuMs": 406.25,
+              "restoreMs": 37.1016,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 143532712,
+              "restorationAdditionalPeakBytes": 37704984,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4525661,
+              "saveMs": 423.6638,
+              "saveThreadCpuMs": 421.875,
+              "restoreMs": 35.6148,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 143532712,
+              "restorationAdditionalPeakBytes": 37704984,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 123092992,
+          "processPeakCommitBytes": 172949504,
+          "name": "openzl-delta-zigzag-numeric16-6",
+          "saveMsMedian": 405.0724,
+          "restoreMsMedian": 35.9492,
+          "saveThreadCpuMsMedian": 390.625,
+          "restoreThreadCpuMsMedian": 46.875,
+          "compressedBytesMedian": 4525661,
+          "compressionAdditionalPeakBytesMedian": 143532712,
+          "restorationAdditionalPeakBytesMedian": 37704984,
+          "imagePayloadMiB": 4.316006660461426,
+          "estimatedCheckpointMiB": 5.051606178283691
+        },
+        {
+          "method": 5,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 4280360,
+              "saveMs": 58.7216,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.345,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 25687700,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4280360,
+              "saveMs": 58.04,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 23.7556,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 25687700,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4280360,
+              "saveMs": 62.698,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 24.7467,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 25687700,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4280360,
+              "saveMs": 64.3355,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 23.3365,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 25687700,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4280360,
+              "saveMs": 57.8782,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 22.8767,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 25687700,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4280360,
+              "saveMs": 57.2469,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.2544,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 25687700,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 63959040,
+          "processPeakCommitBytes": 60047360,
+          "name": "row-delta-shuffle-openzl-generic1",
+          "saveMsMedian": 58.04,
+          "restoreMsMedian": 23.3365,
+          "saveThreadCpuMsMedian": 62.5,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 4280360,
+          "compressionAdditionalPeakBytesMedian": 25687700,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 4.082069396972656,
+          "estimatedCheckpointMiB": 4.817668914794922
+        },
+        {
+          "method": 0,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 5983301,
+              "saveMs": 45.932,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 21.7225,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 10786667,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5983301,
+              "saveMs": 45.8743,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 21.7813,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 10786667,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5983301,
+              "saveMs": 46.6425,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 21.5242,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 10786667,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5983301,
+              "saveMs": 47.0826,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 21.5281,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 10786667,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5983301,
+              "saveMs": 46.1652,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 21.8784,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 10786667,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5983301,
+              "saveMs": 46.0607,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 21.6887,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 10786667,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 65011712,
+          "processPeakCommitBytes": 61607936,
+          "name": "raw-zstd1",
+          "saveMsMedian": 46.1652,
+          "restoreMsMedian": 21.6887,
+          "saveThreadCpuMsMedian": 46.875,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 5983301,
+          "compressionAdditionalPeakBytesMedian": 10786667,
+          "restorationAdditionalPeakBytesMedian": 27007008,
+          "imagePayloadMiB": 5.706120491027832,
+          "estimatedCheckpointMiB": 6.441720008850098
+        },
+        {
+          "method": 1,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 4280220,
+              "saveMs": 54.3095,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 21.8166,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 14798531,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4280220,
+              "saveMs": 54.7933,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 21.7761,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 14798531,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4280220,
+              "saveMs": 57.5505,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 21.9157,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 14798531,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4280220,
+              "saveMs": 54.0378,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 21.698,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 14798531,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4280220,
+              "saveMs": 55.8843,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 21.8576,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 14798531,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4280220,
+              "saveMs": 81.2648,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.0422,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 14798531,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 115,
+          "trackedPreCompressionNonImageBytes": 115,
+          "processPeakWorkingSetBytes": 63270912,
+          "processPeakCommitBytes": 59953152,
+          "name": "row-delta-shuffle-zstd1",
+          "saveMsMedian": 55.8843,
+          "restoreMsMedian": 21.8576,
+          "saveThreadCpuMsMedian": 46.875,
+          "restoreThreadCpuMsMedian": 31.25,
+          "compressedBytesMedian": 4280220,
+          "compressionAdditionalPeakBytesMedian": 14798531,
+          "restorationAdditionalPeakBytesMedian": 27007008,
+          "imagePayloadMiB": 4.081935882568359,
+          "estimatedCheckpointMiB": 4.817535400390625
+        }
+      ]
+    },
+    {
+      "checkpointSeconds": 12.279,
+      "images": [
+        {
+          "file": "0.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "4f2c8c339b4b87d3ce8ab19b3d3d24dc10e4f1ce82a00804fca455c9cc7d8567"
+        },
+        {
+          "file": "1.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "94e0f59e876eea3088c750779006119fb2b9d1981e052e9d7f43f651d36c82f6"
+        },
+        {
+          "file": "2.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "c0557c291637505efe9c911d03b3f22de8b99ec27366012aac84f8553ac7649c"
+        },
+        {
+          "file": "3.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "70982142c3c6327a33b74c686b784e5e5dfa6d7a56a2f422644bbd94377d77a6"
+        },
+        {
+          "file": "4.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "d71418b452020e05e46ba9fdc0a1e0b40fc7ca30598d13266c63010163d7a3da"
+        }
+      ],
+      "rawImageBytes": 26911040,
+      "otherCheckpointBytes": 771332,
+      "case": "six-second-gop",
+      "methods": [
+        {
+          "method": 0,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 7525246,
+              "saveMs": 50.4695,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 22.0867,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 12031294,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7525246,
+              "saveMs": 58.0564,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 22.9066,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 12031294,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7525246,
+              "saveMs": 49.7653,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 22.5592,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 12031294,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7525246,
+              "saveMs": 50.3629,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 22.5178,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 12031294,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7525246,
+              "saveMs": 50.8766,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.4225,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 12031294,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7525246,
+              "saveMs": 49.6749,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 22.7798,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 12031294,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 66600960,
+          "processPeakCommitBytes": 63180800,
+          "name": "raw-zstd1",
+          "saveMsMedian": 50.3629,
+          "restoreMsMedian": 22.7798,
+          "saveThreadCpuMsMedian": 46.875,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 7525246,
+          "compressionAdditionalPeakBytesMedian": 12031294,
+          "restorationAdditionalPeakBytesMedian": 27007008,
+          "imagePayloadMiB": 7.176633834838867,
+          "estimatedCheckpointMiB": 7.912233352661133
+        },
+        {
+          "method": 1,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 4397102,
+              "saveMs": 57.2236,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.8416,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 14891724,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4397102,
+              "saveMs": 55.326,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 22.4612,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 14891724,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4397102,
+              "saveMs": 55.448,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 27.0277,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 14891724,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4397102,
+              "saveMs": 54.9792,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 22.1181,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 14891724,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4397102,
+              "saveMs": 61.5349,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 21.9016,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 14891724,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4397102,
+              "saveMs": 56.8916,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 22.6701,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 14891724,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 63397888,
+          "processPeakCommitBytes": 60067840,
+          "name": "row-delta-shuffle-zstd1",
+          "saveMsMedian": 55.448,
+          "restoreMsMedian": 22.4612,
+          "saveThreadCpuMsMedian": 62.5,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 4397102,
+          "compressionAdditionalPeakBytesMedian": 14891724,
+          "restorationAdditionalPeakBytesMedian": 27007008,
+          "imagePayloadMiB": 4.193403244018555,
+          "estimatedCheckpointMiB": 4.92900276184082
+        },
+        {
+          "method": 2,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 7525386,
+              "saveMs": 55.8977,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 24.2988,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 22920463,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7525386,
+              "saveMs": 54.0201,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 24.8699,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 22920463,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7525386,
+              "saveMs": 52.6578,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 23.7203,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 22920463,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7525386,
+              "saveMs": 53.5463,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 30.0094,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 22920463,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7525386,
+              "saveMs": 53.8687,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 23.6734,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 22920463,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7525386,
+              "saveMs": 53.6343,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 25.2025,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 22920463,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 67194880,
+          "processPeakCommitBytes": 63229952,
+          "name": "openzl-generic1",
+          "saveMsMedian": 53.6343,
+          "restoreMsMedian": 24.8699,
+          "saveThreadCpuMsMedian": 62.5,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 7525386,
+          "compressionAdditionalPeakBytesMedian": 22920463,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 7.176767349243164,
+          "estimatedCheckpointMiB": 7.91236686706543
+        },
+        {
+          "method": 2,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 6180543,
+              "saveMs": 205.9347,
+              "saveThreadCpuMs": 203.125,
+              "restoreMs": 22.6613,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 24394098,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6180543,
+              "saveMs": 222.2995,
+              "saveThreadCpuMs": 203.125,
+              "restoreMs": 20.1183,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 24394098,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6180543,
+              "saveMs": 209.8027,
+              "saveThreadCpuMs": 218.75,
+              "restoreMs": 19.771,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 24394098,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6180543,
+              "saveMs": 212.2766,
+              "saveThreadCpuMs": 218.75,
+              "restoreMs": 20.2126,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 24394098,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6180543,
+              "saveMs": 203.526,
+              "saveThreadCpuMs": 203.125,
+              "restoreMs": 26.8897,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 24394098,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6180543,
+              "saveMs": 213.9961,
+              "saveThreadCpuMs": 203.125,
+              "restoreMs": 20.2016,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 24394098,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 65798144,
+          "processPeakCommitBytes": 61652992,
+          "name": "openzl-generic6",
+          "saveMsMedian": 212.2766,
+          "restoreMsMedian": 20.2016,
+          "saveThreadCpuMsMedian": 203.125,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 6180543,
+          "compressionAdditionalPeakBytesMedian": 24394098,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 5.894225120544434,
+          "estimatedCheckpointMiB": 6.629824638366699
+        },
+        {
+          "method": 3,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 6936149,
+              "saveMs": 109.709,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 45.7881,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 68635286,
+              "restorationAdditionalPeakBytes": 36467632,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6936149,
+              "saveMs": 113.3967,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 39.0739,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 68635286,
+              "restorationAdditionalPeakBytes": 36467632,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6936149,
+              "saveMs": 110.3048,
+              "saveThreadCpuMs": 93.75,
+              "restoreMs": 37.3456,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 68635286,
+              "restorationAdditionalPeakBytes": 36467632,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6936149,
+              "saveMs": 111.7103,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 36.9093,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 68635286,
+              "restorationAdditionalPeakBytes": 36467632,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6936149,
+              "saveMs": 108.5769,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 44.6275,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 68635286,
+              "restorationAdditionalPeakBytes": 36467632,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 6936149,
+              "saveMs": 111.3104,
+              "saveThreadCpuMs": 109.375,
+              "restoreMs": 36.679,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 68635286,
+              "restorationAdditionalPeakBytes": 36467632,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 73609216,
+          "processPeakCommitBytes": 98152448,
+          "name": "openzl-numeric16-1",
+          "saveMsMedian": 111.3104,
+          "restoreMsMedian": 37.3456,
+          "saveThreadCpuMsMedian": 109.375,
+          "restoreThreadCpuMsMedian": 31.25,
+          "compressedBytesMedian": 6936149,
+          "compressionAdditionalPeakBytesMedian": 68635286,
+          "restorationAdditionalPeakBytesMedian": 36467632,
+          "imagePayloadMiB": 6.6148271560668945,
+          "estimatedCheckpointMiB": 7.35042667388916
+        },
+        {
+          "method": 3,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 5595903,
+              "saveMs": 433.4419,
+              "saveThreadCpuMs": 421.875,
+              "restoreMs": 39.9804,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 133627082,
+              "restorationAdditionalPeakBytes": 34816474,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5595903,
+              "saveMs": 481.262,
+              "saveThreadCpuMs": 484.375,
+              "restoreMs": 25.1702,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 133627082,
+              "restorationAdditionalPeakBytes": 34816474,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5595903,
+              "saveMs": 447.8985,
+              "saveThreadCpuMs": 437.5,
+              "restoreMs": 25.7265,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 133627082,
+              "restorationAdditionalPeakBytes": 34816474,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5595903,
+              "saveMs": 437.6428,
+              "saveThreadCpuMs": 437.5,
+              "restoreMs": 30.3897,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 133627082,
+              "restorationAdditionalPeakBytes": 34816474,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5595903,
+              "saveMs": 439.5941,
+              "saveThreadCpuMs": 437.5,
+              "restoreMs": 25.9203,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 133627082,
+              "restorationAdditionalPeakBytes": 34816474,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5595903,
+              "saveMs": 435.577,
+              "saveThreadCpuMs": 437.5,
+              "restoreMs": 26.2911,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 133627082,
+              "restorationAdditionalPeakBytes": 34816474,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 114110464,
+          "processPeakCommitBytes": 162697216,
+          "name": "openzl-numeric16-6",
+          "saveMsMedian": 439.5941,
+          "restoreMsMedian": 25.9203,
+          "saveThreadCpuMsMedian": 437.5,
+          "restoreThreadCpuMsMedian": 31.25,
+          "compressedBytesMedian": 5595903,
+          "compressionAdditionalPeakBytesMedian": 133627082,
+          "restorationAdditionalPeakBytesMedian": 34816474,
+          "imagePayloadMiB": 5.336668968200684,
+          "estimatedCheckpointMiB": 6.072268486022949
+        },
+        {
+          "method": 4,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 5343381,
+              "saveMs": 128.416,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 57.3181,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 78127616,
+              "restorationAdditionalPeakBytes": 37720595,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5343381,
+              "saveMs": 134.2334,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 59.0267,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 78127616,
+              "restorationAdditionalPeakBytes": 37720595,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5343381,
+              "saveMs": 127.6817,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 56.3673,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 78127616,
+              "restorationAdditionalPeakBytes": 37720595,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5343381,
+              "saveMs": 127.0161,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 60.9685,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 78127616,
+              "restorationAdditionalPeakBytes": 37720595,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5343381,
+              "saveMs": 124.8282,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 57.141,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 78127616,
+              "restorationAdditionalPeakBytes": 37720595,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 5343381,
+              "saveMs": 135.0289,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 62.7158,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 78127616,
+              "restorationAdditionalPeakBytes": 37720595,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 71987200,
+          "processPeakCommitBytes": 109101056,
+          "name": "openzl-delta-zigzag-numeric16-1",
+          "saveMsMedian": 127.6817,
+          "restoreMsMedian": 59.0267,
+          "saveThreadCpuMsMedian": 125.0,
+          "restoreThreadCpuMsMedian": 62.5,
+          "compressedBytesMedian": 5343381,
+          "compressionAdditionalPeakBytesMedian": 78127616,
+          "restorationAdditionalPeakBytesMedian": 37720595,
+          "imagePayloadMiB": 5.0958452224731445,
+          "estimatedCheckpointMiB": 5.83144474029541
+        },
+        {
+          "method": 4,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 4503250,
+              "saveMs": 375.8222,
+              "saveThreadCpuMs": 375.0,
+              "restoreMs": 40.9716,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 143517740,
+              "restorationAdditionalPeakBytes": 37800828,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4503250,
+              "saveMs": 399.1117,
+              "saveThreadCpuMs": 390.625,
+              "restoreMs": 50.5853,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 143517740,
+              "restorationAdditionalPeakBytes": 37800828,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4503250,
+              "saveMs": 406.6442,
+              "saveThreadCpuMs": 375.0,
+              "restoreMs": 37.0835,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 143517740,
+              "restorationAdditionalPeakBytes": 37800828,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4503250,
+              "saveMs": 382.0881,
+              "saveThreadCpuMs": 359.375,
+              "restoreMs": 48.6351,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 143517740,
+              "restorationAdditionalPeakBytes": 37800828,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4503250,
+              "saveMs": 364.4528,
+              "saveThreadCpuMs": 359.375,
+              "restoreMs": 37.7855,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 143517740,
+              "restorationAdditionalPeakBytes": 37800828,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4503250,
+              "saveMs": 357.5484,
+              "saveThreadCpuMs": 343.75,
+              "restoreMs": 40.5087,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 143517740,
+              "restorationAdditionalPeakBytes": 37800828,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 123498496,
+          "processPeakCommitBytes": 173424640,
+          "name": "openzl-delta-zigzag-numeric16-6",
+          "saveMsMedian": 382.0881,
+          "restoreMsMedian": 40.5087,
+          "saveThreadCpuMsMedian": 359.375,
+          "restoreThreadCpuMsMedian": 46.875,
+          "compressedBytesMedian": 4503250,
+          "compressionAdditionalPeakBytesMedian": 143517740,
+          "restorationAdditionalPeakBytesMedian": 37800828,
+          "imagePayloadMiB": 4.294633865356445,
+          "estimatedCheckpointMiB": 5.030233383178711
+        },
+        {
+          "method": 5,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 4397242,
+              "saveMs": 60.6599,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 23.1908,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 25780893,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4397242,
+              "saveMs": 56.5694,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 22.474,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 25780893,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4397242,
+              "saveMs": 55.3559,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.224,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 25780893,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4397242,
+              "saveMs": 62.5809,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 22.3386,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 25780893,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4397242,
+              "saveMs": 55.7596,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.0359,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 25780893,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 4397242,
+              "saveMs": 55.76,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 22.561,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 25780893,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 64053248,
+          "processPeakCommitBytes": 60104704,
+          "name": "row-delta-shuffle-openzl-generic1",
+          "saveMsMedian": 55.76,
+          "restoreMsMedian": 22.561,
+          "saveThreadCpuMsMedian": 62.5,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 4397242,
+          "compressionAdditionalPeakBytesMedian": 25780893,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 4.193536758422852,
+          "estimatedCheckpointMiB": 4.929136276245117
+        }
+      ]
+    },
+    {
+      "checkpointSeconds": 30.297,
+      "images": [
+        {
+          "file": "0.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "1aabd92ac31ca6eb676fcc5e96c75a68a9f9cb89043239af96633f7dd81b221b"
+        },
+        {
+          "file": "1.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "d749f97f697438b3c9e11f64fdb332a77791bf7f87182e998ff474142ed8049d"
+        },
+        {
+          "file": "2.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "09ceda0bb742148f4c743951fd4036632b442fe95cd76adc49b4e7dd060e20bd"
+        },
+        {
+          "file": "3.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "47757718e858a2c37e0a251437da2dc143b2b0ce0b578dece16319fb87a3a66f"
+        },
+        {
+          "file": "4.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "7650e88acbeb4668c6e27a5081f88febc2b540bda4bcfa66ddcbb7dbcec2be4f"
+        }
+      ],
+      "rawImageBytes": 26911040,
+      "otherCheckpointBytes": 771332,
+      "case": "six-second-gop",
+      "methods": [
+        {
+          "method": 1,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 7728209,
+              "saveMs": 63.3214,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 21.6064,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 17518832,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7728209,
+              "saveMs": 63.1653,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 21.3624,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 17518832,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7728209,
+              "saveMs": 63.507,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 21.4303,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 17518832,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7728209,
+              "saveMs": 63.5966,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 21.5907,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 17518832,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7728209,
+              "saveMs": 67.501,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 27.3192,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 17518832,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7728209,
+              "saveMs": 70.1815,
+              "saveThreadCpuMs": 78.125,
+              "restoreMs": 22.8606,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 17518832,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 66707456,
+          "processPeakCommitBytes": 63377408,
+          "name": "row-delta-shuffle-zstd1",
+          "saveMsMedian": 63.5966,
+          "restoreMsMedian": 21.5907,
+          "saveThreadCpuMsMedian": 62.5,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 7728209,
+          "compressionAdditionalPeakBytesMedian": 17518832,
+          "restorationAdditionalPeakBytesMedian": 27007008,
+          "imagePayloadMiB": 7.370194435119629,
+          "estimatedCheckpointMiB": 8.105793952941895
+        },
+        {
+          "method": 2,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 11548715,
+              "saveMs": 57.43,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 25.2341,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 26060861,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 11548715,
+              "saveMs": 54.9008,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 24.6551,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 26060861,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 11548715,
+              "saveMs": 55.7292,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 24.8268,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 26060861,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 11548715,
+              "saveMs": 55.3531,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 26.1183,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 26060861,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 11548715,
+              "saveMs": 58.121,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 25.4497,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 26060861,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 11548715,
+              "saveMs": 58.9554,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 25.6333,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 26060861,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 71233536,
+          "processPeakCommitBytes": 67256320,
+          "name": "openzl-generic1",
+          "saveMsMedian": 55.7292,
+          "restoreMsMedian": 25.4497,
+          "saveThreadCpuMsMedian": 62.5,
+          "restoreThreadCpuMsMedian": 31.25,
+          "compressedBytesMedian": 11548715,
+          "compressionAdditionalPeakBytesMedian": 26060861,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 11.013712882995605,
+          "estimatedCheckpointMiB": 11.749312400817871
+        },
+        {
+          "method": 2,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 9958613,
+              "saveMs": 235.4806,
+              "saveThreadCpuMs": 234.375,
+              "restoreMs": 23.5708,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 27354705,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 9958613,
+              "saveMs": 234.1232,
+              "saveThreadCpuMs": 234.375,
+              "restoreMs": 23.9184,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 27354705,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 9958613,
+              "saveMs": 249.5254,
+              "saveThreadCpuMs": 234.375,
+              "restoreMs": 24.1807,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 27354705,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 9958613,
+              "saveMs": 238.9472,
+              "saveThreadCpuMs": 218.75,
+              "restoreMs": 23.2529,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 27354705,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 9958613,
+              "saveMs": 235.1343,
+              "saveThreadCpuMs": 234.375,
+              "restoreMs": 23.784,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 27354705,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 9958613,
+              "saveMs": 234.9348,
+              "saveThreadCpuMs": 234.375,
+              "restoreMs": 23.921,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 27354705,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 69607424,
+          "processPeakCommitBytes": 65458176,
+          "name": "openzl-generic6",
+          "saveMsMedian": 235.1343,
+          "restoreMsMedian": 23.9184,
+          "saveThreadCpuMsMedian": 234.375,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 9958613,
+          "compressionAdditionalPeakBytesMedian": 27354705,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 9.497273445129395,
+          "estimatedCheckpointMiB": 10.23287296295166
+        },
+        {
+          "method": 3,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 10017577,
+              "saveMs": 129.2615,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 44.3682,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 71047277,
+              "restorationAdditionalPeakBytes": 38156291,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 10017577,
+              "saveMs": 127.2224,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 43.2821,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 71047277,
+              "restorationAdditionalPeakBytes": 38156291,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 10017577,
+              "saveMs": 127.5326,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 43.4058,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 71047277,
+              "restorationAdditionalPeakBytes": 38156291,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 10017577,
+              "saveMs": 127.9768,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 43.5074,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 71047277,
+              "restorationAdditionalPeakBytes": 38156291,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 10017577,
+              "saveMs": 126.8855,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 43.6957,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 71047277,
+              "restorationAdditionalPeakBytes": 38156291,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 10017577,
+              "saveMs": 126.5795,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 43.7336,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 71047277,
+              "restorationAdditionalPeakBytes": 38156291,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 77488128,
+          "processPeakCommitBytes": 101724160,
+          "name": "openzl-numeric16-1",
+          "saveMsMedian": 127.2224,
+          "restoreMsMedian": 43.5074,
+          "saveThreadCpuMsMedian": 125.0,
+          "restoreThreadCpuMsMedian": 46.875,
+          "compressedBytesMedian": 10017577,
+          "compressionAdditionalPeakBytesMedian": 71047277,
+          "restorationAdditionalPeakBytesMedian": 38156291,
+          "imagePayloadMiB": 9.553505897521973,
+          "estimatedCheckpointMiB": 10.289105415344238
+        },
+        {
+          "method": 3,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 9278705,
+              "saveMs": 615.2893,
+              "saveThreadCpuMs": 593.75,
+              "restoreMs": 35.3227,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 136512780,
+              "restorationAdditionalPeakBytes": 36911049,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 9278705,
+              "saveMs": 619.0916,
+              "saveThreadCpuMs": 625.0,
+              "restoreMs": 34.3552,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 136512780,
+              "restorationAdditionalPeakBytes": 36911049,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 9278705,
+              "saveMs": 615.6931,
+              "saveThreadCpuMs": 625.0,
+              "restoreMs": 34.6187,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 136512780,
+              "restorationAdditionalPeakBytes": 36911049,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 9278705,
+              "saveMs": 587.5736,
+              "saveThreadCpuMs": 578.125,
+              "restoreMs": 35.884,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 136512780,
+              "restorationAdditionalPeakBytes": 36911049,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 9278705,
+              "saveMs": 599.6661,
+              "saveThreadCpuMs": 593.75,
+              "restoreMs": 34.2046,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 136512780,
+              "restorationAdditionalPeakBytes": 36911049,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 9278705,
+              "saveMs": 578.1357,
+              "saveThreadCpuMs": 578.125,
+              "restoreMs": 34.3537,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 136512780,
+              "restorationAdditionalPeakBytes": 36911049,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 124485632,
+          "processPeakCommitBytes": 165810176,
+          "name": "openzl-numeric16-6",
+          "saveMsMedian": 599.6661,
+          "restoreMsMedian": 34.3552,
+          "saveThreadCpuMsMedian": 593.75,
+          "restoreThreadCpuMsMedian": 31.25,
+          "compressedBytesMedian": 9278705,
+          "compressionAdditionalPeakBytesMedian": 136512780,
+          "restorationAdditionalPeakBytesMedian": 36911049,
+          "imagePayloadMiB": 8.848862648010254,
+          "estimatedCheckpointMiB": 9.58446216583252
+        },
+        {
+          "method": 4,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 9474337,
+              "saveMs": 142.779,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 57.0613,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 81382341,
+              "restorationAdditionalPeakBytes": 38322789,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 9474337,
+              "saveMs": 149.4845,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 59.5119,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 81382341,
+              "restorationAdditionalPeakBytes": 38322789,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 9474337,
+              "saveMs": 143.3133,
+              "saveThreadCpuMs": 156.25,
+              "restoreMs": 58.3133,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 81382341,
+              "restorationAdditionalPeakBytes": 38322789,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 9474337,
+              "saveMs": 141.2518,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 56.313,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 81382341,
+              "restorationAdditionalPeakBytes": 38322789,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 9474337,
+              "saveMs": 145.6774,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 58.5949,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 81382341,
+              "restorationAdditionalPeakBytes": 38322789,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 9474337,
+              "saveMs": 143.3344,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 57.1174,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 81382341,
+              "restorationAdditionalPeakBytes": 38322789,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 77295616,
+          "processPeakCommitBytes": 110792704,
+          "name": "openzl-delta-zigzag-numeric16-1",
+          "saveMsMedian": 143.3344,
+          "restoreMsMedian": 58.3133,
+          "saveThreadCpuMsMedian": 140.625,
+          "restoreThreadCpuMsMedian": 62.5,
+          "compressedBytesMedian": 9474337,
+          "compressionAdditionalPeakBytesMedian": 81382341,
+          "restorationAdditionalPeakBytesMedian": 38322789,
+          "imagePayloadMiB": 9.035431861877441,
+          "estimatedCheckpointMiB": 9.771031379699707
+        },
+        {
+          "method": 4,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 8743245,
+              "saveMs": 617.5162,
+              "saveThreadCpuMs": 609.375,
+              "restoreMs": 50.0065,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 146856376,
+              "restorationAdditionalPeakBytes": 37719207,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 8743245,
+              "saveMs": 601.1638,
+              "saveThreadCpuMs": 593.75,
+              "restoreMs": 47.6002,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 146856376,
+              "restorationAdditionalPeakBytes": 37719207,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 8743245,
+              "saveMs": 639.122,
+              "saveThreadCpuMs": 593.75,
+              "restoreMs": 49.0402,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 146856376,
+              "restorationAdditionalPeakBytes": 37719207,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 8743245,
+              "saveMs": 567.7258,
+              "saveThreadCpuMs": 562.5,
+              "restoreMs": 45.5993,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 146856376,
+              "restorationAdditionalPeakBytes": 37719207,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 8743245,
+              "saveMs": 581.5552,
+              "saveThreadCpuMs": 578.125,
+              "restoreMs": 44.777,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 146856376,
+              "restorationAdditionalPeakBytes": 37719207,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 8743245,
+              "saveMs": 563.7219,
+              "saveThreadCpuMs": 562.5,
+              "restoreMs": 44.6585,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 146856376,
+              "restorationAdditionalPeakBytes": 37719207,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 133935104,
+          "processPeakCommitBytes": 176955392,
+          "name": "openzl-delta-zigzag-numeric16-6",
+          "saveMsMedian": 581.5552,
+          "restoreMsMedian": 45.5993,
+          "saveThreadCpuMsMedian": 578.125,
+          "restoreThreadCpuMsMedian": 46.875,
+          "compressedBytesMedian": 8743245,
+          "compressionAdditionalPeakBytesMedian": 146856376,
+          "restorationAdditionalPeakBytesMedian": 37719207,
+          "imagePayloadMiB": 8.338208198547363,
+          "estimatedCheckpointMiB": 9.073807716369629
+        },
+        {
+          "method": 5,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 7728349,
+              "saveMs": 68.3845,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 24.0132,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 28408001,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7728349,
+              "saveMs": 68.2188,
+              "saveThreadCpuMs": 78.125,
+              "restoreMs": 23.315,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 28408001,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7728349,
+              "saveMs": 66.8051,
+              "saveThreadCpuMs": 78.125,
+              "restoreMs": 22.9824,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 28408001,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7728349,
+              "saveMs": 67.8749,
+              "saveThreadCpuMs": 78.125,
+              "restoreMs": 23.453,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 28408001,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7728349,
+              "saveMs": 66.9015,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 23.1802,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 28408001,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 7728349,
+              "saveMs": 67.3203,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 23.5559,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 28408001,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 67403776,
+          "processPeakCommitBytes": 63426560,
+          "name": "row-delta-shuffle-openzl-generic1",
+          "saveMsMedian": 67.3203,
+          "restoreMsMedian": 23.315,
+          "saveThreadCpuMsMedian": 78.125,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 7728349,
+          "compressionAdditionalPeakBytesMedian": 28408001,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 7.370327949523926,
+          "estimatedCheckpointMiB": 8.105927467346191
+        },
+        {
+          "method": 0,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 11548570,
+              "saveMs": 50.2523,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 23.2359,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 15171688,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 11548570,
+              "saveMs": 50.3674,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 22.7935,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 15171688,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 11548570,
+              "saveMs": 50.7096,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 22.9386,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 15171688,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 11548570,
+              "saveMs": 50.4184,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 22.6786,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 15171688,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 11548570,
+              "saveMs": 50.3186,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 22.6732,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 15171688,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 11548570,
+              "saveMs": 50.2716,
+              "saveThreadCpuMs": 31.25,
+              "restoreMs": 22.8251,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 15171688,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 70590464,
+          "processPeakCommitBytes": 67182592,
+          "name": "raw-zstd1",
+          "saveMsMedian": 50.3674,
+          "restoreMsMedian": 22.7935,
+          "saveThreadCpuMsMedian": 46.875,
+          "restoreThreadCpuMsMedian": 31.25,
+          "compressedBytesMedian": 11548570,
+          "compressionAdditionalPeakBytesMedian": 15171688,
+          "restorationAdditionalPeakBytesMedian": 27007008,
+          "imagePayloadMiB": 11.013574600219727,
+          "estimatedCheckpointMiB": 11.749174118041992
+        }
+      ]
+    },
+    {
+      "checkpointSeconds": 60.327,
+      "images": [
+        {
+          "file": "0.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "ba406cf0cc7e1862d0c627d4b448fe341b27eda97850674410a57cc662b27f3a"
+        },
+        {
+          "file": "1.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "6e048cf4ea002532fc94df65f8b0ea06215afdfb2b9b17ff192af1760d5ab318"
+        },
+        {
+          "file": "2.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "f41a88771a1ceb04a4078d5edada01bc50327bf84aac8e4d799a4fc95df2afbd"
+        },
+        {
+          "file": "3.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "dae98c27fb0f637df225e488b5096912489dc5ae9a4ac681a61936593a85e8bb"
+        },
+        {
+          "file": "4.bin",
+          "bytes": 5382208,
+          "width": 1440,
+          "height": 1080,
+          "bpc": 10,
+          "stride": [
+            3136,
+            1536
+          ],
+          "offset": [
+            0,
+            3612672,
+            4497408
+          ],
+          "sha256": "02f39c2acca74a51e20cc0f50ff9a7fa715e321ee339eb9de8324d548787abb2"
+        }
+      ],
+      "rawImageBytes": 26911040,
+      "otherCheckpointBytes": 771332,
+      "case": "six-second-gop",
+      "methods": [
+        {
+          "method": 2,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 3466871,
+              "saveMs": 31.5709,
+              "saveThreadCpuMs": 31.25,
+              "restoreMs": 18.0324,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 19629412,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3466871,
+              "saveMs": 31.2825,
+              "saveThreadCpuMs": 31.25,
+              "restoreMs": 17.713,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 19629412,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3466871,
+              "saveMs": 31.0918,
+              "saveThreadCpuMs": 31.25,
+              "restoreMs": 17.653,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 19629412,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3466871,
+              "saveMs": 31.897,
+              "saveThreadCpuMs": 31.25,
+              "restoreMs": 18.6157,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 19629412,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3466871,
+              "saveMs": 31.4256,
+              "saveThreadCpuMs": 31.25,
+              "restoreMs": 17.5368,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 19629412,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3466871,
+              "saveMs": 31.6027,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 18.0788,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 19629412,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 63115264,
+          "processPeakCommitBytes": 59166720,
+          "name": "openzl-generic1",
+          "saveMsMedian": 31.4256,
+          "restoreMsMedian": 17.713,
+          "saveThreadCpuMsMedian": 31.25,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 3466871,
+          "compressionAdditionalPeakBytesMedian": 19629412,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 3.3062658309936523,
+          "estimatedCheckpointMiB": 4.041865348815918
+        },
+        {
+          "method": 2,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 3060813,
+              "saveMs": 129.0457,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 16.0318,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 21861432,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3060813,
+              "saveMs": 128.5139,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 16.0011,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 21861432,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3060813,
+              "saveMs": 143.1278,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 16.0198,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 21861432,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3060813,
+              "saveMs": 130.8367,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 16.6549,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 21861432,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3060813,
+              "saveMs": 132.6062,
+              "saveThreadCpuMs": 140.625,
+              "restoreMs": 16.1441,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 21861432,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3060813,
+              "saveMs": 130.2632,
+              "saveThreadCpuMs": 125.0,
+              "restoreMs": 16.3597,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 21861432,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 62685184,
+          "processPeakCommitBytes": 58548224,
+          "name": "openzl-generic6",
+          "saveMsMedian": 130.8367,
+          "restoreMsMedian": 16.1441,
+          "saveThreadCpuMsMedian": 125.0,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 3060813,
+          "compressionAdditionalPeakBytesMedian": 21861432,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 2.9190187454223633,
+          "estimatedCheckpointMiB": 3.654618263244629
+        },
+        {
+          "method": 3,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 3339140,
+              "saveMs": 70.2079,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 28.7658,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 65724879,
+              "restorationAdditionalPeakBytes": 34364851,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3339140,
+              "saveMs": 63.7957,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 26.2051,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 65724879,
+              "restorationAdditionalPeakBytes": 34364851,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3339140,
+              "saveMs": 64.5914,
+              "saveThreadCpuMs": 78.125,
+              "restoreMs": 25.6585,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 65724879,
+              "restorationAdditionalPeakBytes": 34364851,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3339140,
+              "saveMs": 63.8592,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 25.5901,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 65724879,
+              "restorationAdditionalPeakBytes": 34364851,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3339140,
+              "saveMs": 65.3311,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 25.7281,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 65724879,
+              "restorationAdditionalPeakBytes": 34364851,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3339140,
+              "saveMs": 64.6335,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 27.0664,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 65724879,
+              "restorationAdditionalPeakBytes": 34364851,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 69681152,
+          "processPeakCommitBytes": 95748096,
+          "name": "openzl-numeric16-1",
+          "saveMsMedian": 64.5914,
+          "restoreMsMedian": 25.7281,
+          "saveThreadCpuMsMedian": 62.5,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 3339140,
+          "compressionAdditionalPeakBytesMedian": 65724879,
+          "restorationAdditionalPeakBytesMedian": 34364851,
+          "imagePayloadMiB": 3.1844520568847656,
+          "estimatedCheckpointMiB": 3.9200515747070312
+        },
+        {
+          "method": 3,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 2818253,
+              "saveMs": 285.7394,
+              "saveThreadCpuMs": 281.25,
+              "restoreMs": 20.1725,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 131369906,
+              "restorationAdditionalPeakBytes": 33732900,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2818253,
+              "saveMs": 279.5573,
+              "saveThreadCpuMs": 281.25,
+              "restoreMs": 19.5453,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 131369906,
+              "restorationAdditionalPeakBytes": 33732900,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2818253,
+              "saveMs": 278.8002,
+              "saveThreadCpuMs": 281.25,
+              "restoreMs": 19.0294,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 131369906,
+              "restorationAdditionalPeakBytes": 33732900,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2818253,
+              "saveMs": 298.6924,
+              "saveThreadCpuMs": 296.875,
+              "restoreMs": 21.9667,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 131369906,
+              "restorationAdditionalPeakBytes": 33732900,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2818253,
+              "saveMs": 310.4394,
+              "saveThreadCpuMs": 296.875,
+              "restoreMs": 20.4797,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 131369906,
+              "restorationAdditionalPeakBytes": 33732900,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2818253,
+              "saveMs": 291.9919,
+              "saveThreadCpuMs": 296.875,
+              "restoreMs": 19.9099,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 131369906,
+              "restorationAdditionalPeakBytes": 33732900,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 107667456,
+          "processPeakCommitBytes": 161480704,
+          "name": "openzl-numeric16-6",
+          "saveMsMedian": 291.9919,
+          "restoreMsMedian": 19.9099,
+          "saveThreadCpuMsMedian": 296.875,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 2818253,
+          "compressionAdditionalPeakBytesMedian": 131369906,
+          "restorationAdditionalPeakBytesMedian": 33732900,
+          "imagePayloadMiB": 2.6876955032348633,
+          "estimatedCheckpointMiB": 3.423295021057129
+        },
+        {
+          "method": 4,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 3182224,
+              "saveMs": 92.8899,
+              "saveThreadCpuMs": 93.75,
+              "restoreMs": 59.8096,
+              "restoreThreadCpuMs": 62.5,
+              "compressionAdditionalPeakBytes": 76368003,
+              "restorationAdditionalPeakBytes": 37704860,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3182224,
+              "saveMs": 77.7274,
+              "saveThreadCpuMs": 62.5,
+              "restoreMs": 39.9212,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 76368003,
+              "restorationAdditionalPeakBytes": 37704860,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3182224,
+              "saveMs": 76.1868,
+              "saveThreadCpuMs": 78.125,
+              "restoreMs": 39.652,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 76368003,
+              "restorationAdditionalPeakBytes": 37704860,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3182224,
+              "saveMs": 78.8422,
+              "saveThreadCpuMs": 78.125,
+              "restoreMs": 40.0182,
+              "restoreThreadCpuMs": 46.875,
+              "compressionAdditionalPeakBytes": 76368003,
+              "restorationAdditionalPeakBytes": 37704860,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3182224,
+              "saveMs": 78.8796,
+              "saveThreadCpuMs": 78.125,
+              "restoreMs": 39.7647,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 76368003,
+              "restorationAdditionalPeakBytes": 37704860,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3182224,
+              "saveMs": 77.5655,
+              "saveThreadCpuMs": 78.125,
+              "restoreMs": 39.6989,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 76368003,
+              "restorationAdditionalPeakBytes": 37704860,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 69472256,
+          "processPeakCommitBytes": 105820160,
+          "name": "openzl-delta-zigzag-numeric16-1",
+          "saveMsMedian": 77.7274,
+          "restoreMsMedian": 39.7647,
+          "saveThreadCpuMsMedian": 78.125,
+          "restoreThreadCpuMsMedian": 46.875,
+          "compressedBytesMedian": 3182224,
+          "compressionAdditionalPeakBytesMedian": 76368003,
+          "restorationAdditionalPeakBytesMedian": 37704860,
+          "imagePayloadMiB": 3.0348052978515625,
+          "estimatedCheckpointMiB": 3.770404815673828
+        },
+        {
+          "method": 4,
+          "level": 6,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 2774822,
+              "saveMs": 297.6202,
+              "saveThreadCpuMs": 312.5,
+              "restoreMs": 35.5001,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 142103830,
+              "restorationAdditionalPeakBytes": 37701445,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2774822,
+              "saveMs": 317.9202,
+              "saveThreadCpuMs": 296.875,
+              "restoreMs": 31.1597,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 142103830,
+              "restorationAdditionalPeakBytes": 37701445,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2774822,
+              "saveMs": 300.9666,
+              "saveThreadCpuMs": 296.875,
+              "restoreMs": 30.8163,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 142103830,
+              "restorationAdditionalPeakBytes": 37701445,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2774822,
+              "saveMs": 317.9795,
+              "saveThreadCpuMs": 296.875,
+              "restoreMs": 33.4822,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 142103830,
+              "restorationAdditionalPeakBytes": 37701445,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2774822,
+              "saveMs": 294.4376,
+              "saveThreadCpuMs": 296.875,
+              "restoreMs": 30.825,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 142103830,
+              "restorationAdditionalPeakBytes": 37701445,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2774822,
+              "saveMs": 295.1307,
+              "saveThreadCpuMs": 296.875,
+              "restoreMs": 30.8015,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 142103830,
+              "restorationAdditionalPeakBytes": 37701445,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 118538240,
+          "processPeakCommitBytes": 172716032,
+          "name": "openzl-delta-zigzag-numeric16-6",
+          "saveMsMedian": 300.9666,
+          "restoreMsMedian": 30.825,
+          "saveThreadCpuMsMedian": 296.875,
+          "restoreThreadCpuMsMedian": 31.25,
+          "compressedBytesMedian": 2774822,
+          "compressionAdditionalPeakBytesMedian": 142103830,
+          "restorationAdditionalPeakBytesMedian": 37701445,
+          "imagePayloadMiB": 2.6462764739990234,
+          "estimatedCheckpointMiB": 3.381875991821289
+        },
+        {
+          "method": 5,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 2519236,
+              "saveMs": 42.8438,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 20.6378,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 24259649,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2519236,
+              "saveMs": 42.2572,
+              "saveThreadCpuMs": 31.25,
+              "restoreMs": 20.3135,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 24259649,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2519236,
+              "saveMs": 41.7773,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 19.8991,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 24259649,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2519236,
+              "saveMs": 44.0598,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 20.6916,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 24259649,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2519236,
+              "saveMs": 43.7483,
+              "saveThreadCpuMs": 31.25,
+              "restoreMs": 19.5064,
+              "restoreThreadCpuMs": 31.25,
+              "compressionAdditionalPeakBytes": 24259649,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2519236,
+              "saveMs": 42.5389,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 20.4936,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 24259649,
+              "restorationAdditionalPeakBytes": 27019004,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 62169088,
+          "processPeakCommitBytes": 58220544,
+          "name": "row-delta-shuffle-openzl-generic1",
+          "saveMsMedian": 42.5389,
+          "restoreMsMedian": 20.3135,
+          "saveThreadCpuMsMedian": 46.875,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 2519236,
+          "compressionAdditionalPeakBytesMedian": 24259649,
+          "restorationAdditionalPeakBytesMedian": 27019004,
+          "imagePayloadMiB": 2.4025306701660156,
+          "estimatedCheckpointMiB": 3.1381301879882812
+        },
+        {
+          "method": 0,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 3466731,
+              "saveMs": 29.44,
+              "saveThreadCpuMs": 31.25,
+              "restoreMs": 16.409,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 8740243,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3466731,
+              "saveMs": 28.2094,
+              "saveThreadCpuMs": 15.625,
+              "restoreMs": 16.5856,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 8740243,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3466731,
+              "saveMs": 28.121,
+              "saveThreadCpuMs": 15.625,
+              "restoreMs": 16.3707,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 8740243,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3466731,
+              "saveMs": 28.7829,
+              "saveThreadCpuMs": 31.25,
+              "restoreMs": 16.2227,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 8740243,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3466731,
+              "saveMs": 28.6805,
+              "saveThreadCpuMs": 31.25,
+              "restoreMs": 16.4854,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 8740243,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 3466731,
+              "saveMs": 28.5386,
+              "saveThreadCpuMs": 31.25,
+              "restoreMs": 16.3731,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 8740243,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 62439424,
+          "processPeakCommitBytes": 59088896,
+          "name": "raw-zstd1",
+          "saveMsMedian": 28.5386,
+          "restoreMsMedian": 16.3731,
+          "saveThreadCpuMsMedian": 31.25,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 3466731,
+          "compressionAdditionalPeakBytesMedian": 8740243,
+          "restorationAdditionalPeakBytesMedian": 27007008,
+          "imagePayloadMiB": 3.3061323165893555,
+          "estimatedCheckpointMiB": 4.041731834411621
+        },
+        {
+          "method": 1,
+          "level": 1,
+          "rawImageBytes": 26911040,
+          "images": 5,
+          "rounds": [
+            {
+              "warmup": true,
+              "compressedBytes": 2519096,
+              "saveMs": 40.3228,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 18.6811,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 13370480,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2519096,
+              "saveMs": 40.0918,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 18.6966,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 13370480,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2519096,
+              "saveMs": 40.8447,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 18.8327,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 13370480,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2519096,
+              "saveMs": 41.4265,
+              "saveThreadCpuMs": 46.875,
+              "restoreMs": 18.7822,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 13370480,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2519096,
+              "saveMs": 40.0322,
+              "saveThreadCpuMs": 31.25,
+              "restoreMs": 19.2441,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 13370480,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            },
+            {
+              "warmup": false,
+              "compressedBytes": 2519096,
+              "saveMs": 39.8025,
+              "saveThreadCpuMs": 31.25,
+              "restoreMs": 18.985,
+              "restoreThreadCpuMs": 15.625,
+              "compressionAdditionalPeakBytes": 13370480,
+              "restorationAdditionalPeakBytes": 27007008,
+              "exactBytes": true
+            }
+          ],
+          "trackedLiveBytesAfterFree": 121,
+          "trackedPreCompressionNonImageBytes": 121,
+          "processPeakWorkingSetBytes": 61489152,
+          "processPeakCommitBytes": 58163200,
+          "name": "row-delta-shuffle-zstd1",
+          "saveMsMedian": 40.0918,
+          "restoreMsMedian": 18.8327,
+          "saveThreadCpuMsMedian": 46.875,
+          "restoreThreadCpuMsMedian": 15.625,
+          "compressedBytesMedian": 2519096,
+          "compressionAdditionalPeakBytesMedian": 13370480,
+          "restorationAdditionalPeakBytesMedian": 27007008,
+          "imagePayloadMiB": 2.4023971557617188,
+          "estimatedCheckpointMiB": 3.1379966735839844
+        }
+      ]
+    }
+  ],
+  "sourceSHA256": {
+    "bench.c": "33d2dfa64c96b8ba92f4b2032cab722ec5413c0ae716433d53acb1fea0a13318",
+    "export.c": "7f7b3ea0cbc161d80b8d052af85eed576def0b53a624bb8c042ea1d1ed2cbbf4",
+    "prepare.py": "9b203b8c20ab5d1a067a963515644ce2d174dab349f3182f773791b0be4157bc",
+    "run.py": "b9cf3253eb0b115e3f09f17713154b9eb628c2529bd447e207b49136bb6debab"
+  },
+  "librarySHA256": {
+    "openzl-0.3.0\\libopenzl.a": "270e1fcf7555f7fda551f75766c8c75508139db96a958d4c28bc4c6dd99b87e5",
+    "zstd-single.a": "6ece741836350482cb07a771fbb0ce0b87c0044104df39538d878f7de548b059",
+    "openzl-0.3.0\\deps\\lz4\\lib\\liblz4.a": "745f57da4d1782599b2b7e09312b5cb3114ac39291abf27d5fe3410c6dc5854f"
+  },
+  "summary": [
+    {
+      "name": "raw-zstd1",
+      "imagePayloadMiB": 7.346277713775635,
+      "estimatedCheckpointMiB": 8.0818772315979,
+      "saveMsMedian": 48.732600000000005,
+      "restoreMsMedian": 22.78665,
+      "compressionAdditionalPeakMiBMax": 14.468849182128906
+    },
+    {
+      "name": "row-delta-shuffle-zstd1",
+      "imagePayloadMiB": 4.403840065002441,
+      "estimatedCheckpointMiB": 5.139439582824707,
+      "saveMsMedian": 55.66615,
+      "restoreMsMedian": 21.58155,
+      "compressionAdditionalPeakMiBMax": 16.707260131835938
+    },
+    {
+      "name": "openzl-generic1",
+      "imagePayloadMiB": 7.346411228179932,
+      "estimatedCheckpointMiB": 8.082010746002197,
+      "saveMsMedian": 52.9075,
+      "restoreMsMedian": 24.634050000000002,
+      "compressionAdditionalPeakMiBMax": 24.8535737991333
+    },
+    {
+      "name": "openzl-generic6",
+      "imagePayloadMiB": 6.065555095672607,
+      "estimatedCheckpointMiB": 6.801154613494873,
+      "saveMsMedian": 207.6258,
+      "restoreMsMedian": 20.6607,
+      "compressionAdditionalPeakMiBMax": 26.08747959136963
+    },
+    {
+      "name": "openzl-numeric16-1",
+      "imagePayloadMiB": 6.723478317260742,
+      "estimatedCheckpointMiB": 7.459077835083008,
+      "saveMsMedian": 110.36305,
+      "restoreMsMedian": 38.42365,
+      "compressionAdditionalPeakMiBMax": 67.75596332550049
+    },
+    {
+      "name": "openzl-numeric16-6",
+      "imagePayloadMiB": 5.532009601593018,
+      "estimatedCheckpointMiB": 6.267609119415283,
+      "saveMsMedian": 471.67915000000005,
+      "restoreMsMedian": 27.170900000000003,
+      "compressionAdditionalPeakMiBMax": 130.1887321472168
+    },
+    {
+      "name": "openzl-delta-zigzag-numeric16-1",
+      "imagePayloadMiB": 5.355911731719971,
+      "estimatedCheckpointMiB": 6.091511249542236,
+      "saveMsMedian": 130.2646,
+      "restoreMsMedian": 57.8292,
+      "compressionAdditionalPeakMiBMax": 77.61224842071533
+    },
+    {
+      "name": "openzl-delta-zigzag-numeric16-6",
+      "imagePayloadMiB": 4.556461334228516,
+      "estimatedCheckpointMiB": 5.292060852050781,
+      "saveMsMedian": 399.17539999999997,
+      "restoreMsMedian": 38.3594,
+      "compressionAdditionalPeakMiBMax": 140.05315399169922
+    },
+    {
+      "name": "row-delta-shuffle-openzl-generic1",
+      "imagePayloadMiB": 4.403973579406738,
+      "estimatedCheckpointMiB": 5.139573097229004,
+      "saveMsMedian": 57.920249999999996,
+      "restoreMsMedian": 23.040999999999997,
+      "compressionAdditionalPeakMiBMax": 27.091980934143066
+    }
+  ]
+}

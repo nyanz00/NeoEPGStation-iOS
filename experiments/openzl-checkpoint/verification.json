@@ -1,0 +1,398 @@
+{
+  "passed": true,
+  "realReferenceReports": [
+    {
+      "file": "results.json",
+      "sha256": "5967a11b625aa95b77afda0ed93ba9ee955a0bf3406e02eb70b5c80a0e051471",
+      "sets": 324,
+      "imageByteVerifications": 1620,
+      "originalRawReportSHA256": "3aaf00ca5ffc73771bc52df6e9472281188d47c3ca4e9620952c597cc726de38"
+    },
+    {
+      "file": "native-lz-results.json",
+      "sha256": "c746d3c895e5041df3bdc783133fe39e9b6e0f8c5caf3cda0701bc9e504c32bc",
+      "sets": 144,
+      "imageByteVerifications": 720,
+      "originalRawReportSHA256": "e7907ef6978e8e5344d356bf7ca599f3356e1fcaadf61ddc91fcdaefbe1deb84"
+    },
+    {
+      "file": "native-cpu-results.json",
+      "sha256": "1ff6246dd7dee241f9413fa3820999ba0ae75a411858b796966fcd5c34ab84bf",
+      "sets": 468,
+      "imageByteVerifications": 2340,
+      "originalRawReportSHA256": "65c72c32eeb7586bab63fd6e38d035555296806ded63d5b0655f6eacd23262dc"
+    }
+  ],
+  "realCheckpointSets": 936,
+  "realImageByteVerifications": 4680,
+  "syntheticCases": [
+    {
+      "pattern": "zero",
+      "method": "raw-zstd1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "zero",
+      "method": "row-delta-shuffle-zstd1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "zero",
+      "method": "openzl-generic1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "zero",
+      "method": "openzl-generic6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "zero",
+      "method": "openzl-numeric16-1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "zero",
+      "method": "openzl-numeric16-6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "zero",
+      "method": "openzl-delta-zigzag-numeric16-1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "zero",
+      "method": "openzl-delta-zigzag-numeric16-6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "zero",
+      "method": "row-delta-shuffle-openzl-generic1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "zero",
+      "method": "openzl-native-lz1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "zero",
+      "method": "openzl-native-lz6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "zero",
+      "method": "row-delta-shuffle-openzl-native-lz1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "zero",
+      "method": "row-delta-shuffle-openzl-native-lz6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "max10",
+      "method": "raw-zstd1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "max10",
+      "method": "row-delta-shuffle-zstd1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "max10",
+      "method": "openzl-generic1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "max10",
+      "method": "openzl-generic6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "max10",
+      "method": "openzl-numeric16-1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "max10",
+      "method": "openzl-numeric16-6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "max10",
+      "method": "openzl-delta-zigzag-numeric16-1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "max10",
+      "method": "openzl-delta-zigzag-numeric16-6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "max10",
+      "method": "row-delta-shuffle-openzl-generic1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "max10",
+      "method": "openzl-native-lz1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "max10",
+      "method": "openzl-native-lz6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "max10",
+      "method": "row-delta-shuffle-openzl-native-lz1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "max10",
+      "method": "row-delta-shuffle-openzl-native-lz6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "random10",
+      "method": "raw-zstd1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "random10",
+      "method": "row-delta-shuffle-zstd1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "random10",
+      "method": "openzl-generic1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "random10",
+      "method": "openzl-generic6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "random10",
+      "method": "openzl-numeric16-1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "random10",
+      "method": "openzl-numeric16-6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "random10",
+      "method": "openzl-delta-zigzag-numeric16-1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "random10",
+      "method": "openzl-delta-zigzag-numeric16-6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "random10",
+      "method": "row-delta-shuffle-openzl-generic1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "random10",
+      "method": "openzl-native-lz1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "random10",
+      "method": "openzl-native-lz6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "random10",
+      "method": "row-delta-shuffle-openzl-native-lz1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "random10",
+      "method": "row-delta-shuffle-openzl-native-lz6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "ramp10",
+      "method": "raw-zstd1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "ramp10",
+      "method": "row-delta-shuffle-zstd1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "ramp10",
+      "method": "openzl-generic1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "ramp10",
+      "method": "openzl-generic6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "ramp10",
+      "method": "openzl-numeric16-1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "ramp10",
+      "method": "openzl-numeric16-6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "ramp10",
+      "method": "openzl-delta-zigzag-numeric16-1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "ramp10",
+      "method": "openzl-delta-zigzag-numeric16-6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "ramp10",
+      "method": "row-delta-shuffle-openzl-generic1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "ramp10",
+      "method": "openzl-native-lz1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "ramp10",
+      "method": "openzl-native-lz6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "ramp10",
+      "method": "row-delta-shuffle-openzl-native-lz1",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    },
+    {
+      "pattern": "ramp10",
+      "method": "row-delta-shuffle-openzl-native-lz6",
+      "rounds": 2,
+      "exact": true,
+      "trackedNoCodecLeak": true
+    }
+  ],
+  "syntheticSetRounds": 104,
+  "syntheticImageByteVerifications": 208,
+  "scope": "CPU reference allocations including padding; not decoder suffix replay, iOS or simultaneous playback",
+  "reportPublication": "JSON line endings normalized to LF; original raw report hashes retained; measurements unchanged"
+}
