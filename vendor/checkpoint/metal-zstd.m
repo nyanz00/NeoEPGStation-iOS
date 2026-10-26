@@ -106,13 +106,35 @@ void neo_mzstd_debug_last(void) {
         NzWork *g=all+b,c={0};c.ns=g->ns;NzU *expected=calloc(NZ_BLOCK,sizeof(NzU));if(!expected)return;
         fprintf(stderr,"debug block=%u ns=%u nl=%u\n",b,g->ns,g->nl);
         NzSeq *seq=seqs+b*16384;
+        NzB *src=(NzB*)s->inputs[slot].contents+b*NZ_BLOCK,*lit=(NzB*)s->buffers[5].contents+b*NZ_BLOCK;
+        unsigned at=0,literal=0;
+        for(unsigned j=0;j<g->ns;j++) {NzSeq q=seq[j];
+            if(memcmp(src+at,lit+literal,q.ll))fprintf(stderr,"debug parse literal mismatch seq=%u at=%u ll=%u literal=%u\n",j,at,q.ll,literal);
+            at+=q.ll;literal+=q.ll;unsigned off=q.off-3;
+            if(!off || off>at || memcmp(src+at,src+at-off,q.ml+3))fprintf(stderr,"debug parse match mismatch seq=%u at=%u off=%u length=%u\n",j,at,off,q.ml+3);
+            at+=q.ml+3;
+        }
+        unsigned tail=g->nl-literal;if(memcmp(src+at,lit+literal,tail))fprintf(stderr,"debug parse tail mismatch at=%u literal=%u tail=%u\n",at,literal,tail);
         for(unsigned j=0;j<c.ns;j++)for(unsigned f=0;f<3;f++)c.seqhist[f][nzp_code(seq[j],f)]++;
         for(unsigned f=0;c.ns && f<3;f++) {
             unsigned mode;c.tableSize[f]=nz_seqtable(c.tableHeader[f],c.fse+f,c.seqhist[f],c.ns,&mode);c.mode[f]=mode;
             if(g->mode[f]!=mode || g->tableSize[f]!=c.tableSize[f] || memcmp(g->tableHeader[f],c.tableHeader[f],c.tableSize[f]))fprintf(stderr,"debug table mismatch family=%u mode GPU=%u CPU=%u size GPU=%u CPU=%u\n",f,g->mode[f],mode,g->tableSize[f],c.tableSize[f]);
             nzp_chain(&c,seq,expected,f);
             for(unsigned j=0;j<c.ns;j++)if(tokens[b*NZ_BLOCK+j*4+f]!=expected[j*4+f]) {fprintf(stderr,"debug token mismatch family=%u seq=%u GPU=%08x CPU=%08x log=%u GPUstate=%u CPUstate=%u\n",f,j,tokens[b*NZ_BLOCK+j*4+f],expected[j*4+f],c.fse[f].log,g->state[f],c.state[f]);break;}
-        }free(expected);
+        }
+        NzB *bytes=(NzB*)expected;unsigned encoded=nz_sequences(bytes,seq,g->ns),head=g->ns<128?1:2;
+        if(g->ns)head+=1+g->tableSize[0]+g->tableSize[1]+g->tableSize[2];
+        NzB *gb=(NzB*)s->buffers[1].contents+b*NZ_HASH*4;
+        if(g->ns && encoded-head!=g->bytes[0])fprintf(stderr,"debug sequence size GPU=%u CPU=%u\n",g->bytes[0],encoded-head);
+        for(unsigned j=0;g->ns && j<encoded-head;j++)if(bytes[head+j]!=gb[j]) {fprintf(stderr,"debug sequence payload mismatch byte=%u GPU=%02x CPU=%02x\n",j,gb[j],bytes[head+j]);break;}
+        if(g->hvalid)for(unsigned stream=0;stream<4;stream++) {
+            unsigned quarter=(g->nl+3)/4,begin=stream*quarter,end=begin+quarter;if(end>g->nl)end=g->nl;NzBits bits={bytes,0,0,0};
+            for(unsigned j=end;j>begin;) {unsigned symbol=lit[--j];nz_bits(&bits,g->code[symbol],g->length[symbol]);}
+            unsigned n=nz_end(&bits,1);NzB *h=(NzB*)s->buffers[6].contents+b*NZ_BLOCK*2+stream*NZ_STREAM_SLOT;
+            if(n!=g->bytes[stream+1])fprintf(stderr,"debug Huffman size stream=%u GPU=%u CPU=%u\n",stream,g->bytes[stream+1],n);
+            for(unsigned j=0;j<n;j++)if(bytes[j]!=h[j]) {fprintf(stderr,"debug Huffman payload mismatch stream=%u byte=%u GPU=%02x CPU=%02x\n",stream,j,h[j],bytes[j]);break;}
+        }
+        free(expected);
     }
 }
 #endif
