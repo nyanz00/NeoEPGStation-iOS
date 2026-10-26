@@ -47,7 +47,7 @@ int neo_checkpoint_storage_run(const NeoCheckpointPacket *packets,size_t count,d
     NeoPackedCheckpoint *gold=NULL;Timing t={0};int error=0;
     out->before_bytes=sample(&r);out->failure_stage=1;
     TRY(storage_input(&r,gop));
-    if((method!=0 && method!=4 && method!=7 && method!=9 && method!=10 && method!=11 && method!=12 && method!=13 && method!=14 && method!=15 && method!=16) || !isfinite(distance) || distance<=0) {error=1001;goto done;}
+    if((method!=0 && method!=4 && method!=7 && method!=9 && method!=10 && method!=11 && method!=12 && method!=13 && method!=14 && method!=15 && method!=16 && method!=17) || !isfinite(distance) || distance<=0) {error=1001;goto done;}
     if(neo_checkpoint_gpu_method(method)) {TRY(neo_checkpoint_gpu_begin(method,&result->gpu_setup_ms));}
     double wanted=gop*.9,position=wanted-fmin(distance,wanted*.5);
     while(r.cp<count && packets[r.cp].seconds<position)r.cp++;
@@ -76,7 +76,10 @@ int neo_checkpoint_storage_run(const NeoCheckpointPacket *packets,size_t count,d
             if(m.staging_bytes>result->gpu_staging_bytes)result->gpu_staging_bytes=m.staging_bytes;
             result->gpu_dispatches+=m.dispatches;
             result->gpu_stage_timed_batches+=m.stage_timing_available;
-            for(int stage=0;stage<7;stage++)result->gpu_stage_total_ms[stage]+=m.stage_ms[stage];
+            for(int stage=0;stage<8;stage++)result->gpu_stage_total_ms[stage]+=m.stage_ms[stage];
+            for(int h=0;h<5;h++)result->gpu_host_total_ms[h]+=m.host_ms[h];
+            result->gpu_input_bytes+=m.input_bytes;result->gpu_output_bytes+=m.output_bytes;result->gpu_wait_count+=m.wait_count;result->gpu_batch_count+=m.batch_count;
+            if(m.max_in_flight>result->gpu_max_in_flight)result->gpu_max_in_flight=m.max_in_flight;
         }
         neo_lossless_free(&temporary);out->temporary_save_free_count++;
     }

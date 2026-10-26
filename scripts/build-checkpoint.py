@@ -55,6 +55,7 @@ def prepare():
                      ('vendor/checkpoint/lscomp-format.c','src/neo_lscomp_format.c'),
                      ('vendor/checkpoint/rcomp-format.c','src/neo_rcomp_format.c'),
                      ('vendor/checkpoint/metal-zstd-core.h','include/metal-zstd-core.h'),
+                     ('vendor/checkpoint/metal-zstd-input.h','include/metal-zstd-input.h'),
                      ('vendor/checkpoint/metal-zstd-parallel.h','include/metal-zstd-parallel.h'),
                      ('vendor/checkpoint/metal-zstd-format.c','src/neo_metal_zstd_format.c'),
                      ('vendor/checkpoint/lab.c','src/neo_checkpoint_lab.c'),
@@ -116,7 +117,7 @@ def main():
         run(cc,*flags,'-fobjc-arc','-fblocks','-std=gnu11','-Wall','-Werror=implicit-function-declaration',
             '-I',ROOT/'vendor/checkpoint','-I',output,'-c',ROOT/'vendor/checkpoint/lscomp-metal.m','-o',ls_bridge)
         run('/usr/bin/ar','r',library,ls_bridge)
-        mz_shader='#include <metal_stdlib>\nusing namespace metal;\n'+(ROOT/'vendor/checkpoint/metal-zstd-core.h').read_text()+'\n'+(ROOT/'vendor/checkpoint/metal-zstd-parallel.h').read_text()+'\n'+(ROOT/'vendor/checkpoint/metal-zstd.metal').read_text().replace('#include "metal-zstd-core.h"','').replace('#include "metal-zstd-parallel.h"','')
+        mz_shader='#include <metal_stdlib>\nusing namespace metal;\n'+(ROOT/'vendor/checkpoint/metal-zstd-core.h').read_text()+'\n'+(ROOT/'vendor/checkpoint/metal-zstd-parallel.h').read_text()+'\n'+(ROOT/'vendor/checkpoint/metal-zstd-input.h').read_text()+'\n'+(ROOT/'vendor/checkpoint/metal-zstd.metal').read_text().replace('#include "metal-zstd-core.h"','').replace('#include "metal-zstd-parallel.h"','').replace('#include "metal-zstd-input.h"','')
         write_changed(output/'metal-zstd-shader.h',('static const char neo_mzstd_shader_source[] = '+json.dumps(mz_shader)+';\n').encode())
         mz_bridge=output/'metal-zstd.o'
         run(cc,*flags,'-fobjc-arc','-fblocks','-std=gnu11','-Wall','-Werror=implicit-function-declaration',
@@ -142,7 +143,7 @@ def main():
                   'vendor/checkpoint/lscomp.h','vendor/checkpoint/lscomp-format.c',
                   'vendor/checkpoint/lscomp-metal.m','vendor/checkpoint/lscomp.metal','vendor/lscomp/source.json',
                   'vendor/checkpoint/metal-zstd-core.h','vendor/checkpoint/metal-zstd-format.c',
-                  'vendor/checkpoint/metal-zstd-parallel.h',
+                  'vendor/checkpoint/metal-zstd-parallel.h','vendor/checkpoint/metal-zstd-input.h',
                   'vendor/checkpoint/metal-zstd.m','vendor/checkpoint/metal-zstd.metal','vendor/checkpoint/MetalZstd-LICENSE')},
               'rcompMetal':rcomp_source,
               'lscomp':json.loads((ROOT/'vendor/lscomp/source.json').read_text()),

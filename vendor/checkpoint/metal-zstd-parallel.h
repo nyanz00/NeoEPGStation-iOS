@@ -7,6 +7,12 @@
 #define NZ_STREAM_SLOT 24576u
 #define NZ_REGIONS 5u
 #define NZ_TILES 128u
+#ifdef __METAL_VERSION__
+#define NZ_G threadgroup
+#else
+#define NZ_G
+#endif
+typedef struct NzRecord {NzSeq s;NzU literal;} NzRecord;
 typedef struct NzPart {NzU ns,nl,tail,so,lo,carry;} NzPart;
 typedef struct NzWork {
     NzPart part[16];
@@ -19,6 +25,40 @@ typedef struct NzWork {
     NzU hhsize,groupSum[5][128],groupBase[5][128],total[5],bytes[5];
     NzU frame,headerEnd,totalSize,raw,useHuff,litHeader,litBytes;
 } NzWork;
+
+static NzU nzp_word(NZ_D const NzB *p) {return (NzU)p[0]|((NzU)p[1]<<8)|((NzU)p[2]<<16)|((NzU)p[3]<<24);}
+static NzU nzp_match_length(NZ_D const NzB *src,NzU at,NzU off,NzU end) {
+    NzU len=4; /* The matcher already compared these four bytes. */
+    while(at+len+4<=end) {
+        NzU diff=nzp_word(src+at+len)^nzp_word(src+at+len-off);
+        if(diff) {
+#ifdef __METAL_VERSION__
+            return len+ctz(diff)/8;
+#else
+            return len+(NzU)__builtin_ctz(diff)/8;
+#endif
+        }len+=4;
+    }
+    while(at+len<end && src[at+len]==src[at+len-off])len++;return len;
+}
+/* The leader only decides sequences. Payload copying is cooperative after it
+ * finishes; records and their literal prefix positions stay in group memory. */
+static void nzp_records(NZ_D const NzB *src,NzU n,NZ_D const NzU *matches,
+                       NZ_G NzRecord *records,NZ_D NzPart *part,NzU begin) {
+    NzU end=begin+NZ_PART;if(end>n)end=n;NzU at=begin,anchor=begin,ns=0,nl=0;
+    while(at+4<=end) {
+        NzU off=matches[at];if(!off || off>at || off>65535) {at++;continue;}
+        NzU len=nzp_match_length(src,at,off,end),ll=at-anchor;nl+=ll;
+        records[ns++]=(NzRecord){{ll,len-3,off+3},(nl<<16)|anchor};at+=len;anchor=at;
+    }
+    NzU tail=end>anchor?end-anchor:0;part->ns=ns;part->nl=nl+tail;part->tail=tail;
+}
+static NzU nzp_literal_source(NZ_G const NzRecord *records,NzU ns,NzU tailStart,NzU nl,NzU tail,NzU ordinal) {
+    NzU low=0,high=ns;
+    while(low<high) {NzU mid=(low+high)/2;if((records[mid].literal>>16)<=ordinal)low=mid+1;else high=mid;}
+    if(low==ns)return tailStart+ordinal-(nl-tail);
+    NzRecord r=records[low];return (r.literal&65535)+ordinal-((r.literal>>16)-r.s.ll);
+}
 
 static void nzp_parse(NZ_D const NzB *src,NzU n,NZ_D const NzU *matches,
                      NZ_D NzSeq *seq,NZ_D NzB *lit,NZ_D NzPart *part,NzU begin) {

@@ -21,9 +21,9 @@ assert result.get('gpuUnavailable') or result.get('cases')==24 and result.get('i
 if not result.get('gpuUnavailable'):
     # Same input, same matcher and GPU; stop before the app build if the new
     # cooperative encoder regresses on the native correctness/performance probe.
-    assert result['parallelWallMs']<result['scalarWallMs'],result
-    assert result['parallelToScalarSize']<1.15,result
-    assert len(result['parallelStageMs'])==7
+    assert result['parallelWallMs']<result['legacy277WallMs'],result
+    assert result['parallelToLegacy277Size']<1.03,result
+    assert len(result['parallelStageMs'])==8 and result['preprocessingImages']==20
 result['devicePerformanceVerified']=False
 result['scope']='macOS Metal execution of shipping match/parse/Huffman/FSE/frame assembly; standard Zstd CPU decode'
 (root/'dist/metal-zstd-verification.json').write_text(json.dumps(result,indent=2)+'\n')

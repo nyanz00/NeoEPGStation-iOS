@@ -97,3 +97,8 @@ The parallel revision keeps the 64KiB match window, parses 4KiB parts, reuses
 device buffers, cooperatively builds Huffman codes, and packs independent
 FSE/Huffman tokens with GPU prefix sums. The scalar encoder is retained only
 as a native diagnostic control, not an automatic runtime fallback.
+The pipelined revision adds cooperative literal copies, threadgroup FSE
+tables/codes, CPU NEON and Metal lossless input preparation, and two bounded
+input/output slots. Original reference allocations remain borrowed/read-only
+until all GPU commands finish. These modifications are shipped as source in
+the same CheckpointDav1d notice directory.

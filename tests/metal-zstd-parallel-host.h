@@ -1,11 +1,16 @@
 /* Sequential scheduling oracle for the parallel buffer layout, bit offsets,
  * split-parse joins, FSE tokens and frame assembly. Not a performance result. */
 #include "metal-zstd-parallel.h"
-static NzU parallel_block(const NzB *src,NzU n,const NzU *matches,NzB *out) {
+static NzU parallel_block(const NzB *src,NzU n,const NzU *matches,NzB *out,bool fast=false) {
     NzWork w={};std::vector<NzSeq> partial(16384),seq(16384);
     std::vector<NzB> partialLit(NZ_BLOCK),lit(NZ_BLOCK),hb(NZ_BLOCK*2),sb(NZ_HASH*4);
     std::vector<NzU> tokens(NZ_BLOCK),offsets(NZ_BLOCK);
-    for(NzU p=0;p<16;p++)nzp_parse(src,n,matches,partial.data()+p*1024,partialLit.data()+p*4096,w.part+p,p*4096);
+    for(NzU p=0;p<16;p++) {
+        if(!fast)nzp_parse(src,n,matches,partial.data()+p*1024,partialLit.data()+p*4096,w.part+p,p*4096);
+        else {std::vector<NzRecord> records(1024);nzp_records(src,n,matches,records.data(),w.part+p,p*4096);NzPart a=w.part[p];NzU end=std::min(n,(p+1)*4096);
+            for(NzU j=0;j<a.ns;j++)partial[p*1024+j]=records[j].s;
+            for(NzU j=0;j<a.nl;j++)partialLit[p*4096+j]=src[nzp_literal_source(records.data(),a.ns,end-a.tail,a.nl,a.tail,j)];}
+    }
     nzp_compact_offsets(&w);
     for(NzU p=0;p<16;p++) {NzPart a=w.part[p];
         for(NzU j=0;j<a.ns;j++) {NzSeq s=partial[p*1024+j];if(!j)s.ll+=a.carry;seq[a.so+j]=s;}

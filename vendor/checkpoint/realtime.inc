@@ -41,7 +41,10 @@ static void *compression_worker(void *cookie) {
                 if(m.staging_bytes>w->out->gpu_staging_bytes)w->out->gpu_staging_bytes=m.staging_bytes;
                 w->out->gpu_dispatches+=m.dispatches;
                 w->out->gpu_stage_timed_batches+=m.stage_timing_available;
-                for(int stage=0;stage<7;stage++)w->out->gpu_stage_total_ms[stage]+=m.stage_ms[stage];
+                for(int stage=0;stage<8;stage++)w->out->gpu_stage_total_ms[stage]+=m.stage_ms[stage];
+                for(int h=0;h<5;h++)w->out->gpu_host_total_ms[h]+=m.host_ms[h];
+                w->out->gpu_input_bytes+=m.input_bytes;w->out->gpu_output_bytes+=m.output_bytes;w->out->gpu_wait_count+=m.wait_count;w->out->gpu_batch_count+=m.batch_count;
+                if(m.max_in_flight>w->out->gpu_max_in_flight)w->out->gpu_max_in_flight=m.max_in_flight;
             }
             while(w->count && (w->out->retained_bytes+stats.held_bytes>w->out->memory_budget_bytes || w->count==NEO_REALTIME_MAX_SAVES)) {
                 w->out->retained_bytes-=w->retained[0].bytes;neo_lossless_free(&w->retained[0].state);
@@ -124,7 +127,7 @@ int neo_checkpoint_realtime_run(const NeoCheckpointPacket *packets,size_t count,
     Dav1dContext *c=NULL;StorageWorker worker={0};Pace pace={0};pace.out=out;
     Dav1dPicture golden={0};Timing target_time={0};int error=0,worker_ready=0;
     out->before_bytes=sample(&r);TRY(storage_input(&r,gop));
-    if(method!=-1 && method!=0 && method!=4 && method!=7 && method!=9 && method!=10 && method!=11 && method!=12 && method!=13 && method!=14 && method!=15 && method!=16) {error=1001;goto done;}
+    if(method!=-1 && method!=0 && method!=4 && method!=7 && method!=9 && method!=10 && method!=11 && method!=12 && method!=13 && method!=14 && method!=15 && method!=16 && method!=17) {error=1001;goto done;}
     TRY(open_decoder(&c,6,NULL));
     size_t warm=0,end=0;double until=fmin(gop*.9,24.0);
     while(warm<count && packets[warm].seconds<.5)warm++;

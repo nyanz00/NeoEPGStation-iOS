@@ -4,7 +4,11 @@
 using namespace metal;
 #include "metal-zstd-core.h"
 #include "metal-zstd-parallel.h"
-struct NzConfig {uint count,length[16];};
+#include "metal-zstd-input.h"
+struct NzConfig {uint count,length[16],offset[16];NeoRcompGeometry geometry;};
+kernel void nz_prepare(const device uchar *raw [[buffer(11)]],device uchar *input [[buffer(0)]],constant NzConfig &cfg [[buffer(9)]],uint i [[thread_position_in_grid]]) {
+    uint b=i/NZ_BLOCK,p=i%NZ_BLOCK;if(b<cfg.count && p<cfg.length[b])input[i]=nzi_byte(raw,&cfg.geometry,cfg.offset[b]+p);
+}
 kernel void nz_clear(device atomic_uint *head [[buffer(1)]],constant NzConfig &cfg [[buffer(9)]],uint i [[thread_position_in_grid]]) {
     if(i<cfg.count*NZ_HASH)atomic_store_explicit(head+i,~0u,memory_order_relaxed);
 }
@@ -34,6 +38,28 @@ kernel void nz_parse(const device uchar *input [[buffer(0)]],device NzSeq *parts
     uint b=i/16,p=i%16;if(b>=cfg.count)return;
     nzp_parse(input+b*NZ_BLOCK,cfg.length[b],matches+b*NZ_BLOCK,parts+b*16384+p*1024,lit+b*NZ_BLOCK*2+p*NZ_PART,work[b].part+p,p*NZ_PART);
 }
+kernel void nz_fast_parse(const device uchar *input [[buffer(0)]],device NzRecord *parts [[buffer(2)]],const device uint *matches [[buffer(3)]],device uchar *lit [[buffer(6)]],constant NzConfig &cfg [[buffer(9)]],device NzWork *work [[buffer(10)]],uint group [[threadgroup_position_in_grid]],uint t [[thread_index_in_threadgroup]]) {
+    uint b=group/16,p=group%16;if(b>=cfg.count)return;
+    threadgroup NzRecord records[1024];device NzPart *part=work[b].part+p;
+    if(!t)nzp_records(input+b*NZ_BLOCK,cfg.length[b],matches+b*NZ_BLOCK,records,part,p*NZ_PART);
+    threadgroup_barrier(mem_flags::mem_device|mem_flags::mem_threadgroup);
+    NzPart a=*part;uint end=min((p+1)*NZ_PART,cfg.length[b]);
+    for(uint j=t;j<a.ns;j+=128)parts[b*16384+p*1024+j]=records[j];
+    for(uint j=t;j<a.nl;j+=128) {
+        uint source=nzp_literal_source(records,a.ns,end-a.tail,a.nl,a.tail,j);
+        lit[b*NZ_BLOCK*2+p*NZ_PART+j]=input[b*NZ_BLOCK+source];
+    }
+}
+kernel void nz_fast_compact(const device NzRecord *parts [[buffer(2)]],device NzSeq *seq [[buffer(4)]],device uchar *lit [[buffer(5)]],const device uchar *partialLit [[buffer(6)]],constant NzConfig &cfg [[buffer(9)]],device NzWork *work [[buffer(10)]],uint b [[threadgroup_position_in_grid]],uint t [[thread_index_in_threadgroup]]) {
+    if(b>=cfg.count)return;device NzWork *w=work+b;
+    if(!t)nzp_compact_offsets(w);threadgroup_barrier(mem_flags::mem_device);
+    for(uint p=0;p<16;p++) {NzPart a=w->part[p];
+        for(uint j=t;j<a.ns;j+=128) {NzSeq s=parts[b*16384+p*1024+j].s;if(!j)s.ll+=a.carry;seq[b*16384+a.so+j]=s;}
+        for(uint j=t;j<a.nl;j+=128)lit[b*NZ_BLOCK+a.lo+j]=partialLit[b*NZ_BLOCK*2+p*NZ_PART+j];
+    }
+    for(uint j=t;j<256;j+=128)w->hist[j]=0;
+    for(uint j=t;j<192;j+=128)w->seqhist[j/64][j%64]=0;
+}
 kernel void nz_compact(const device NzSeq *parts [[buffer(2)]],device NzSeq *seq [[buffer(4)]],device uchar *lit [[buffer(5)]],const device uchar *partialLit [[buffer(6)]],constant NzConfig &cfg [[buffer(9)]],device NzWork *work [[buffer(10)]],uint b [[threadgroup_position_in_grid]],uint t [[thread_index_in_threadgroup]]) {
     if(b>=cfg.count)return;device NzWork *w=work+b;
     if(!t)nzp_compact_offsets(w);threadgroup_barrier(mem_flags::mem_device);
@@ -44,14 +70,14 @@ kernel void nz_compact(const device NzSeq *parts [[buffer(2)]],device NzSeq *seq
     for(uint j=t;j<256;j+=128)w->hist[j]=0;
     for(uint j=t;j<192;j+=128)w->seqhist[j/64][j%64]=0;
 }
-kernel void nz_hist(const device NzSeq *seq [[buffer(4)]],const device uchar *lit [[buffer(5)]],constant NzConfig &cfg [[buffer(9)]],device NzWork *work [[buffer(10)]],uint group [[threadgroup_position_in_grid]],uint t [[thread_index_in_threadgroup]]) {
+kernel void nz_hist(device uint *codes [[buffer(2)]],const device NzSeq *seq [[buffer(4)]],const device uchar *lit [[buffer(5)]],constant NzConfig &cfg [[buffer(9)]],device NzWork *work [[buffer(10)]],uint group [[threadgroup_position_in_grid]],uint t [[thread_index_in_threadgroup]]) {
     uint b=group/16,part=group%16;if(b>=cfg.count)return;device NzWork *w=work+b;
     threadgroup atomic_uint hist[448];
     for(uint j=t;j<448;j+=128)atomic_store_explicit(hist+j,0,memory_order_relaxed);
     threadgroup_barrier(mem_flags::mem_threadgroup);
     for(uint j=t;j<4096;j+=128) {uint p=part*4096+j;
         if(p<w->nl)atomic_fetch_add_explicit(hist+lit[b*NZ_BLOCK+p],1,memory_order_relaxed);
-        if(p<w->ns) {NzSeq s=seq[b*16384+p];for(uint f=0;f<3;f++)atomic_fetch_add_explicit(hist+256+f*64+nzp_code(s,f),1,memory_order_relaxed);}
+        if(p<w->ns) {NzSeq s=seq[b*16384+p];uint packed=0;for(uint f=0;f<3;f++) {uint code=nzp_code(s,f);packed|=code<<(8*f);atomic_fetch_add_explicit(hist+256+f*64+code,1,memory_order_relaxed);}codes[b*NZ_BLOCK+p]=packed;}
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
     for(uint j=t;j<448;j+=128) {uint count=atomic_load_explicit(hist+j,memory_order_relaxed);if(count) {
@@ -91,6 +117,33 @@ kernel void nz_tables(constant NzConfig &cfg [[buffer(9)]],device NzWork *work [
 }
 kernel void nz_chains(device uint *tokens [[buffer(3)]],const device NzSeq *seq [[buffer(4)]],constant NzConfig &cfg [[buffer(9)]],device NzWork *work [[buffer(10)]],uint i [[thread_position_in_grid]]) {
     uint b=i/3;if(b<cfg.count)nzp_chain(work+b,seq+b*16384,tokens+b*NZ_BLOCK,i%3);
+}
+kernel void nz_fast_fse(const device uint *codes [[buffer(2)]],device uint *tokens [[buffer(3)]],constant NzConfig &cfg [[buffer(9)]],device NzWork *work [[buffer(10)]],uint b [[threadgroup_position_in_grid]],uint t [[thread_index_in_threadgroup]]) {
+    if(b>=cfg.count || !work[b].ns)return;device NzWork *w=work+b;
+    threadgroup NzFse tables[3];threadgroup uint tile[4096];
+    if(t<3) {
+        uint hist[64],mode;NzFse table;for(uint j=0;j<64;j++)hist[j]=w->seqhist[t][j];
+        w->tableSize[t]=nz_seqtable(w->tableHeader[t],&table,hist,w->ns,&mode);w->mode[t]=mode;w->fse[t].log=table.log;tables[t].log=table.log;
+        if(table.log)for(uint j=0;j<64;j++) {tables[t].state[j]=table.state[j];tables[t].bits[j]=table.bits[j];tables[t].find[j]=table.find[j];}
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup|mem_flags::mem_device);
+    uint state=0,log=t<3?tables[t].log:0;
+    if(t<3) {uint c=(codes[b*NZ_BLOCK+w->ns-1]>>(8*t))&255;
+        if(log) {uint bits=(tables[t].bits[c]+32768)>>16,v=(bits<<16)-tables[t].bits[c];state=tables[t].state[(int)(v>>bits)+tables[t].find[c]];}
+        tokens[b*NZ_BLOCK+(w->ns-1)*4+t]=0;
+    }
+    for(uint end=w->ns-1;end;) {
+        uint begin=end>4096?end-4096:0,count=end-begin;
+        for(uint j=t;j<count;j+=128)tile[j]=codes[b*NZ_BLOCK+begin+j];
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        if(t<3)for(uint j=count;j>0;) {
+            uint c=(tile[--j]>>(8*t))&255,bits=log?(state+tables[t].bits[c])>>16:0;
+            tokens[b*NZ_BLOCK+(begin+j)*4+t]=(bits<<16)|(state&((1u<<bits)-1));
+            if(log)state=tables[t].state[(int)(state>>bits)+tables[t].find[c]];
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);end=begin;
+    }
+    if(t<3)w->state[t]=state;
 }
 kernel void nz_prefix(device uint *offsets [[buffer(2)]],device uint *tokens [[buffer(3)]],const device NzSeq *seq [[buffer(4)]],const device uchar *lit [[buffer(5)]],constant NzConfig &cfg [[buffer(9)]],device NzWork *work [[buffer(10)]],uint group [[threadgroup_position_in_grid]],uint t [[thread_index_in_threadgroup]]) {
     uint tile=group%128,r=(group/128)%5,b=group/(128*5);if(b>=cfg.count)return;

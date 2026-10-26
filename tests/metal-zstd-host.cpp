@@ -22,9 +22,9 @@ static unsigned cases=0,compressed=0;static uint64_t rawbytes=0,packedbytes=0;
 static void check(const NzB *data,NzU n) {
     std::vector<NzU> matches;matching(data,n,matches);std::vector<NzSeq> seq(16384);
     std::vector<NzB> literals(NZ_BLOCK),huff(NZ_BLOCK*2),out(NZ_SLOT+64,0xa5),restored(n+1);
-    for(unsigned parallel=0;parallel<2;parallel++) {
+    for(unsigned parallel=0;parallel<3;parallel++) {
     std::fill(out.begin(),out.end(),0xa5);
-    NzU size=parallel?parallel_block(data,n,matches.data(),out.data()):nz_block(data,n,matches.data(),seq.data(),literals.data(),huff.data(),out.data());
+    NzU size=parallel?parallel_block(data,n,matches.data(),out.data(),parallel==2):nz_block(data,n,matches.data(),seq.data(),literals.data(),huff.data(),out.data());
     size_t got=ZSTD_decompress(restored.data(),n,out.data(),size);
     if(!size || size>NZ_SLOT || ZSTD_isError(got) || got!=n || memcmp(data,restored.data(),n)) {
         fprintf(stderr,"case=%u raw=%u encoded=%u decoded=%zu error=%s\n",cases,n,size,got,ZSTD_getErrorName(got));

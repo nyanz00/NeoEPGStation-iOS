@@ -35,20 +35,20 @@ for depth in (8,10):
     assert report.get('status') in ('complete','partial','failed','cancelled'), 'Checkpoint tester did not finish'
     Path('dist',f'checkpoint-trial-{depth}.json').write_text(json.dumps(report,indent=2)+'\n')
     assert report['status'] in ('complete','partial'),report
-    assert report['schema']==8 and report['mode']=='metal-zstd-parallel-checkpoint'
+    assert report['schema']==9 and report['mode']=='metal-zstd-pipelined-checkpoint'
     assert report['metalZstdParseBytes']==4096 and report['metalZstdWindowBytes']==65536
-    assert report['gpuStageNames']==['match','parse','histogram','huffman','fse','packing','assembly']
+    assert report['gpuStageNames']==['match','parse','histogram','huffman','fse','packing','assembly','preprocessing']
     assert report['networkInDecodeTimer'] is False and report['gpuCompressionRequested'] is True
     assert report['renderingIncluded'] is False and report['audio'] is False
-    assert report['expectedConditions']==12 and report['processFootprintAfterInputReleaseBytes']>0
+    assert report['expectedConditions']==15 and report['processFootprintAfterInputReleaseBytes']>0
     assert report['sample']['gopSeconds']>=10
-    rows=report['checkpoint'];assert len(rows)==12
+    rows=report['checkpoint'];assert len(rows)==15
     storage=[r for r in rows if r['kind']=='storage']
     paced=[r for r in rows if r['kind']=='paced']
-    assert {(r['method'],r['requestedDistanceSeconds']) for r in storage}=={(m,d) for m in (7,14,15,16) for d in (2,.25)}
-    assert len(paced)==4 and {r['method'] for r in paced}=={-1,7,14,15}
-    unavailable=[r for r in rows if r['method'] in (14,15) and r['status']==1009]
-    assert len(unavailable) in (0,6), unavailable
+    assert {(r['method'],r['requestedDistanceSeconds']) for r in storage}=={(m,d) for m in (7,14,15,16,17) for d in (2,.25)}
+    assert len(paced)==5 and {r['method'] for r in paced}=={-1,7,14,15,17}
+    unavailable=[r for r in rows if r['method'] in (14,15,17) and r['status']==1009]
+    assert len(unavailable) in (0,9), unavailable
     assert report['gpuCompressionVerified']==(not unavailable)
     successful=[r for r in rows if r not in unavailable]
     for row in successful:
@@ -56,9 +56,9 @@ for depth in (8,10):
         assert row['threads']==6 and row['frameContexts']==3
         assert row['normalPlaybackUnchanged'] and row['processFootprintAfterBytes']>0
         assert row['restoreBackend']=='CPU'
-        assert len(row['gpuStageTotalMs'])==7 and all(v>=0 for v in row['gpuStageTotalMs'])
+        assert len(row['gpuStageTotalMs'])==8 and all(v>=0 for v in row['gpuStageTotalMs'])
         assert row['gpuStageTimedBatches']>=0
-        if row['method'] in (14,15):
+        if row['method'] in (14,15,17):
             assert row['gpuSetupMs']>0 and row['gpuStagingBytes']>0 and row['gpuDispatches']>0
             assert all(v>=0 for v in row['gpuCommandMs']) and all(v>0 for v in row['gpuWaitMs'])
         else:
@@ -108,19 +108,23 @@ for depth in (8,10):
         # identical inputs. Byte equality is tested on identical buffers by
         # tests/metal-zstd-metal.c; compare media conditions here, not stored size.
         if not unavailable:
-            for cpu,gpu in ((16,15),):
+            for cpu,gpu in ((16,15),(16,17)):
                 for field in ('checkpointSeconds','targetSeconds','width','height','bitDepth'):
                     assert group[cpu][field]==group[gpu][field],field
     for row in successful:
         if row['method']==14:
             assert row['gpuDispatches']==4*(5 if row['kind']=='storage' else row['completedSaves'])
-        elif row['method']==15:
-            assert row['gpuDispatches']%13==0 and row['gpuDispatches']>=13*(5 if row['kind']=='storage' else row['completedSaves'])
-            assert row['gpuStageTimedBatches']<=row['gpuDispatches']//13
+        elif row['method'] in (15,17):
+            passes=13 if row['method']==17 else 12
+            assert row['gpuDispatches']==passes*row['gpuBatchCount']
+            assert row['gpuWaitCount']==row['gpuBatchCount'] and 1<=row['gpuMaxInFlight']<=2
+            assert row['gpuInputBytes']>0 and row['gpuOutputBytes']>0
+            assert len(row['hostStageTotalMs'])==5 and all(v>=0 for v in row['hostStageTotalMs'])
+            assert row['gpuStageTimedBatches']<=row['gpuBatchCount']
             assert row['gpuStagingBytes']<=32*1024*1024 and row['entropyBackend']=='GPU'
     serialized=json.dumps(report)
     assert 'file://' not in serialized and '/api/' not in serialized
-    results.append({'bitDepth':depth,'cases':12,'success':True,'gpuVerified':not unavailable,'gpuUnavailable':len(unavailable)})
+    results.append({'bitDepth':depth,'cases':15,'success':True,'gpuVerified':not unavailable,'gpuUnavailable':len(unavailable)})
 Path('dist/checkpoint-trial-verification.json').write_text(json.dumps({
     'success':True,'cases':results,'devicePerformanceVerified':False,
     'scope':'Metal Zstandard match/parse/Huffman/FSE/frame assembly; official CPU Zstd and CPU reference; lsCOMP GPU control; pixel/allocation verification; paced saves; no rendering/audio'

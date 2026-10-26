@@ -16,7 +16,7 @@ const char *neo_lossless_name(int m) {
     static const char *names[9]={"packed10","raw-lz4","packed10-lz4",
         "horizontal-delta-lz4","shuffled-delta-lz4","raw-zstd1","packed10-zstd1",
         "shuffled-delta-zstd1","block32-min-bitpack"};
-    return m==15?"metal-zstd":m==16?"metal-zstd-cpu-reference":m==11?"lscomp-cpu-raw":m==12?"lscomp-metal-raw":m==13?"lscomp-cpu-delta":m==14?"lscomp-metal-delta":m==9?"cpu-lz4-64k":m==10?"rcomp-metal-lz4-64k":m>=0 && m<9?names[m]:"invalid";
+    return m==17?"metal-zstd-gpu-preprocess":m==15?"metal-zstd":m==16?"metal-zstd-cpu-reference":m==11?"lscomp-cpu-raw":m==12?"lscomp-metal-raw":m==13?"lscomp-cpu-delta":m==14?"lscomp-metal-delta":m==9?"cpu-lz4-64k":m==10?"rcomp-metal-lz4-64k":m>=0 && m<9?names[m]:"invalid";
 }
 static void geometry(PackedImage *im,const Dav1dPicture *p) {
     memset(im,0,sizeof(*im));im->w=p->p.w;im->h=p->p.h;im->bpc=p->p.bpc;im->layout=p->p.layout;
@@ -119,7 +119,7 @@ static int image_store(PackedImage *im,size_t *stage,const Dav1dPicture *p,int m
 }
 static int image_restore(const PackedImage *im,size_t stage,int method,uint8_t *raw) {
     if(method==0) {decode(im,raw);return 0;}
-    if(method==15 || method==16) {size_t n=ZSTD_decompress(raw,im->raw_size,im->bytes,im->size);if(n!=im->raw_size)return DAV1D_ERR(EINVAL);delta_rows(im,raw,1,1);return 0;}
+    if(method==15 || method==16 || method==17) {size_t n=ZSTD_decompress(raw,im->raw_size,im->bytes,im->size);if(n!=im->raw_size)return DAV1D_ERR(EINVAL);delta_rows(im,raw,1,1);return 0;}
     if(method>=11 && method<=14) {int e=neo_lscomp_unpack(im->bytes,im->size,raw,im->raw_size);if(!e && method>=13)delta_rows(im,raw,1,0);return e;}
     if(method==9 || method==10) {int e=neo_rcomp_unpack(im->bytes,im->size,raw,im->raw_size);if(!e)delta_rows(im,raw,1,1);return e;}
     if(method==8) {block_decode(im,im->bytes,raw);return 0;}
@@ -134,7 +134,7 @@ static int image_restore(const PackedImage *im,size_t stage,int method,uint8_t *
     if(packed)free(dest);return e;
 }
 int neo_lossless_capture(Dav1dContext *c,int method,NeoLosslessCheckpoint **out) {
-    if(!out || *out || (method!=0 && method!=4 && method!=7 && method!=9 && method!=10 && method!=11 && method!=12 && method!=13 && method!=14 && method!=15 && method!=16))return DAV1D_ERR(EINVAL);
+    if(!out || *out || (method!=0 && method!=4 && method!=7 && method!=9 && method!=10 && method!=11 && method!=12 && method!=13 && method!=14 && method!=15 && method!=16 && method!=17))return DAV1D_ERR(EINVAL);
     Stored *s=calloc(1,sizeof(*s));if(!s)return DAV1D_ERR(ENOMEM);s->method=method;
     s->shell=calloc(1,sizeof(*s->shell));if(!s->shell) {free(s);return DAV1D_ERR(ENOMEM);}
     for(int i=0;i<8;i++)s->shell->slots[i]=-1;
@@ -145,6 +145,7 @@ int neo_lossless_capture(Dav1dContext *c,int method,NeoLosslessCheckpoint **out)
 static int rcomp_store(Stored *s) {
     NeoPackedCheckpoint *p=s->shell;const void *original[8]={0};
     NeoRcompInput input[8]={{0}};NeoRcompOutput output[8]={{0}};int e=0;
+    NeoRcompGeometry input_geometry[8]={{0}};
     for(int i=0;i<8;i++) {
         const Dav1dPicture *pic=&p->meta->refs[i].p.p;if(!pic->data[0])continue;
         if(pic->p.w>1920 || pic->p.h>1080 || (pic->p.bpc!=8 && pic->p.bpc!=10) ||
@@ -152,29 +153,31 @@ static int rcomp_store(Stored *s) {
         unsigned j=0;for(;j<p->count;j++)if(original[j]==pic->allocator_data)break;
         if(j==p->count) {
             original[j]=pic->allocator_data;p->count++;geometry(&p->images[j],pic);
-            size_t n=p->images[j].raw_size;uint8_t *bytes=malloc(n);if(!bytes) {e=DAV1D_ERR(ENOMEM);goto done;}
-            memcpy(bytes,pic->allocator_data,n);
-            if(s->method<11 || s->method>=13)delta_rows(&p->images[j],bytes,0,s->method<11 || s->method>=15);
+            int borrowed=s->method==15 || s->method==17;
+            size_t n=p->images[j].raw_size;uint8_t *bytes=borrowed?pic->allocator_data:malloc(n);if(!bytes) {e=DAV1D_ERR(ENOMEM);goto done;}
+            if(!borrowed) {memcpy(bytes,pic->allocator_data,n);if(s->method<11 || s->method>=13)delta_rows(&p->images[j],bytes,0,s->method<11 || s->method>=15);}
             unsigned word=pic->p.bpc==8?1:2;
-            if(pic->stride[0]<=0 || pic->stride[0]/word>16384) {free(bytes);e=DAV1D_ERR(EINVAL);goto done;}
+            if(pic->stride[0]<=0 || pic->stride[0]/word>16384) {if(!borrowed)free(bytes);e=DAV1D_ERR(EINVAL);goto done;}
             input[j]=(NeoRcompInput){bytes,n,(uint32_t)(pic->stride[0]/word),word};
+            if(borrowed) {PackedImage *im=p->images+j;NeoRcompGeometry *g=input_geometry+j;g->planes=planes(im);g->word_bytes=word;
+                for(unsigned pl=0;pl<g->planes;pl++) {g->offset[pl]=(uint32_t)im->offset[pl];g->stride[pl]=(uint32_t)im->stride[pl?1:0];g->width[pl]=width(im,(int)pl);g->height[pl]=height(im,(int)pl);}input[j].geometry=g;}
         }
         p->slots[i]=(int)j;
     }
-    if(s->method==15 || s->method==16)e=s->method==15?neo_mzstd_gpu_pack(input,output,p->count):neo_mzstd_cpu_pack(input,output,p->count);
+    if(s->method==15 || s->method==16 || s->method==17) {neo_mzstd_preprocessing_control(s->method==17);e=s->method==16?neo_mzstd_cpu_pack(input,output,p->count):neo_mzstd_gpu_pack(input,output,p->count);}
     else if(s->method>=11)e=neo_checkpoint_gpu_method(s->method)?neo_lscomp_gpu_pack(input,output,p->count):neo_lscomp_cpu_pack(input,output,p->count);
     else e=s->method==10?neo_rcomp_gpu_pack(input,output,p->count):neo_rcomp_cpu_pack(input,output,p->count);
     if(!e)for(unsigned j=0;j<p->count;j++) {
         p->images[j].bytes=output[j].data;p->images[j].size=output[j].size;output[j].data=NULL;
     }
 done:
-    for(unsigned j=0;j<8;j++) {free((void*)input[j].data);free(output[j].data);}
+    for(unsigned j=0;j<8;j++) {if(!input[j].geometry)free((void*)input[j].data);free(output[j].data);}
     return e;
 }
 int neo_lossless_encode(NeoLosslessCheckpoint *s) {
     if(!s || !s->shell || !s->shell->meta || s->shell->count)return DAV1D_ERR(EINVAL);
     NeoPackedCheckpoint *p=s->shell;int e=0,method=s->method;
-    if(method>=9 && method<=16) {e=rcomp_store(s);if(e)return e;}
+    if(method>=9 && method<=17) {e=rcomp_store(s);if(e)return e;}
     else {
     const void *original[8]={0};
     for(int i=0;i<8;i++) {
