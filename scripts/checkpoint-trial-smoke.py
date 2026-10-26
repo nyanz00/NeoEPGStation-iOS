@@ -100,9 +100,13 @@ for depth in (8,10):
     assert report['quantization'] is False and report['pooling'] is False
     for distance in (2,.25):
         group={r['method']:r for r in storage if r['requestedDistanceSeconds']==distance}
+        # These are fresh decoder runs: internal allocations/padding are not
+        # identical inputs. Byte equality is tested on identical buffers by
+        # tests/lscomp-metal.c; compare media conditions here, not stored size.
         if not unavailable:
-            assert group[11]['retainedBytes']==group[12]['retainedBytes']
-            assert group[13]['retainedBytes']==group[14]['retainedBytes']
+            for cpu,gpu in ((11,12),(13,14)):
+                for field in ('checkpointSeconds','targetSeconds','width','height','bitDepth'):
+                    assert group[cpu][field]==group[gpu][field],field
     for row in successful:
         if row['method'] in (12,14):
             assert row['gpuDispatches']==4*(5 if row['kind']=='storage' else row['completedSaves'])

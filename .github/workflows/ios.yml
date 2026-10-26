@@ -402,6 +402,7 @@ jobs:
             python3 -u scripts/ts-resume-smoke.py
             python3 -u scripts/ts-resume-smoke.py mpeg2
           elif [ "$CHECK_SCOPE" = "checkpoint-trial" ]; then
+            python3 -u scripts/simulator-smoke.py --prepare
             python3 -u scripts/checkpoint-trial-smoke.py
           elif [ "$CHECK_SCOPE" = "decode-trial" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
