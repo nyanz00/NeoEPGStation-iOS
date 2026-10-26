@@ -1,0 +1,15 @@
+{
+  "revision": "d920dd9dc8ddbd2684c777d1e2ba27397212e59c",
+  "source": "https://github.com/szcompressor/lsCOMP/tree/d920dd9dc8ddbd2684c777d1e2ba27397212e59c",
+  "archiveSHA256": "3d352066ffd612531cff4d19b88848c1df96ab6c81256df635fd915ed17de83c",
+  "sourceSHA256": {
+    "LICENSE": "c4b8580ff3f5b08e885e1afbb3d518adf2575dc254176e43083a97374beb016c",
+    "README.md": "77268642c6234b696833b3cc0a97710c1b95c113fe96be493f656a6f6eb96345",
+    "src/lsCOMP_kernel.cu": "aed2e34bb531673babfd563292f186ca2b2842f1880ba8e46021d4772271b4e2",
+    "src/lsCOMP_entry.cu": "baf0862dd62afd5de3a5b6ecbc0158cf639881787f983f85c3c711547e332854",
+    "include/lsCOMP_kernel.h": "b77cf527863d4f6e2637432e5dd6e52d44fa78cb0d884c33cf860e7e13a01e24"
+  },
+  "license": "Upstream BSD-3-Clause-style license, included verbatim",
+  "mode": "lossless only: quantization bins=1; pooling disabled",
+  "adaptation": "New CPU and Metal lossless bit-plane implementation; 8x8 tiles; custom container; staged GPU scans replace CUDA global spin waits; CPU restore"
+}

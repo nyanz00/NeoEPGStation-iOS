@@ -6,29 +6,39 @@
 通常の視聴経路、TS、STREAMING、コメント、PiP、視聴履歴は変更しない。
 以前の「AV1復号比較」も別項目として残す。
 
-## 測定条件（schema 5）
+## 測定条件（schema 6）
 
 先頭の実キーフレームから次のキーフレームの約1秒後までの圧縮パケットを取得する。
 準備上限は96MiB・3,000パケット・65メディア秒・90秒。一時MP4はcodec copyで作り、
 終了時に削除する。通信・デマルチプレクス・MP4作成は復号タイマーに含めない。
 
-CPUによる現在方式・LZ4・Zstandard level 1と、rcomp-metalのGPU LZ4圧縮を比較する。
-rcomp-metal 0.4.0の公開crateをSHA-256で照合し、Metalカーネルは変更せず収録する。
-macOS専用Rustラッパーと同梱macOS用metallibは使わず、iOS Objective-Cブリッジから
-同じMetalソースを実行時コンパイルする。ライセンスは上流のApache-2.0選択肢を採用。
-入力の差分・バイト整形、保存コンテナー組み立て、復元・展開はCPUで行う。
-現在方式は10bit画素を16bit格納から10bit格納へ無損失で詰める方式（8bitは詰めない）。
-LZ4/Zstandardは水平方向の差分・zigzag変換、10bitではさらに行ごとの上下位バイト分離を行う。
-有効画素とアロケーション余白をすべて保存し、元画像への参照を圧縮完了時に解放する。
+現在の診断はCPU Zstandard level 1と、lsCOMPの可逆処理をCPU・Metalへ移植した方式を比較する。
+lsCOMP上流を固定revisionとSHA-256で照合し、元ソース・ライセンスを `vendor/lscomp/` に保持する。
+量子化・poolingは使用しない。8×8タイルの最大値から必要ビット数を求め、ビット面を詰める。
+8bitは1バイト、10bitは2バイトの整数として扱い、画像のallocation余白も含めて完全保存する。
+全allocationを輝度stride幅のラスタとして扱い、端の不足部分はゼロで埋める。
+復元時には元のallocationサイズのみ書き戻す。
+
+「補正なし」と「水平方向の差分・zigzagあり」の両方を比較する。
+lsCOMPでは上下位バイトの分離は行わない。Zstandardは従来の差分・バイト分離を使用する。
+CPU比較とGPU比較は同じ独自コンテナー `LSC1` を生成し、バイト数と全画素一致を確認する。
+上流CUDAカーネルのそのままの移植や、元のCUDA出力との互換形式ではない。
+入力コピー・前処理・コンテナー組み立て・復元はCPU。GPUで行うのは圧縮部分。
 
 復号は6ワーカー・フレーム並列度3、途中フレームスキップなし。合計14条件。
 
 | 種類 | 保存方式 | 条件数 |
 | --- | --- | --- |
-| 単独の保存・復元 | 現在方式・LZ4・Zstandard・CPU LZ4 64KiB・rcomp-metal | 各2：目的位置まで約2秒・0.25秒 |
-| 等速復号と定期保存 | 保存なし・Zstandard・CPU LZ4 64KiB・rcomp-metal | 各1：2秒ごと、保持上限64MiB |
+| 単独の保存・復元 | Zstandard・CPU lsCOMP補正なし・GPU lsCOMP補正なし・CPU lsCOMP差分あり・GPU lsCOMP差分あり | 各2：目的位置まで約2秒・0.25秒 |
+| 等速復号と定期保存 | 保存なし・Zstandard・GPU lsCOMP補正なし・GPU lsCOMP差分あり | 各1：2秒ごと、保持上限64MiB |
 
-### rcomp-metalの比較条件
+method=11/12がCPU/Metal補正なし、13/14がCPU/Metal差分あり。
+Metalはタイル解析、256タイル単位のprefix scan、グループ先頭位置の計算、ビット面出力の
+4回の順序付きdispatchで処理する。CUDA側のグループ間spin待ちは使わない。
+入力48MiB・Metal作業領域128MiBの上限と明示的な失敗は従来と同じ。
+従来のrcomp-metal方式はコードと過去の検証記録を残し、今回の14条件には含めない。
+
+### 以前のrcomp-metalの比較条件（schema 5）
 
 method=9はliblz4による独立64KiBブロック、method=10はrcomp-metalの同じ64KiB区切り。
 現在のmethod=4は画像全体でLZ4圧縮するため、そのままGPU差の比較対象にはしない。
@@ -103,7 +113,7 @@ GPU実行失敗をCPU成功へ置き換えない。1009はMetalデバイスな�
 ではない。開始/終了時のthermalStateも記録するが、消費電力は測定していない。
 
 同一プロセス・同一復号器・既定アロケーター限定。HDRメタデータ等の境界は未対応。
-以前のschema 3の16条件とschema 4の10条件は履歴として残す。schema 5はGPU比較の14条件。
+以前のschema 3の16条件とschema 4の10条件は履歴として残す。schema 5はrcomp-metal比較14条件、schema 6はlsCOMP比較14条件。
 複数地点を通常プレイヤーへ保持する機能は今回追加しない。
 
 ## ビルドと分離
@@ -211,3 +221,24 @@ IPA: `NeoEPGStation-build273.ipa`、SHA-256:
 artifact digest・ZIP CRC・ビルド番号・同梱ソース/ライセンス・元Metalコードのハッシュを照合。
 通常経路のFFmpegインポート146件も従来のAetherフレームワークへの結び付きを確認した。
 実機では以前と同じ診断項目とAV1入力を使い、`checkpoint-benchmark.json`を比較する。
+
+## lsCOMP追加時の事前検証
+
+上流revision `d920dd9dc8ddbd2684c777d1e2ba27397212e59c`、公開アーカイブSHA-256:
+`3d352066ffd612531cff4d19b88848c1df96ab6c81256df635fd915ed17de83c`。
+ライセンスは上流のBSD-3-Clause形式。元コード・ライセンスを同梱し、改造箇所を明示する。
+
+`tests/lscomp-host.cpp` は配布用Metalソースの解析・出力の整数処理をホストで実行する。
+256条件で8/16bit格納、タイル端、複数scanグループ、ゼロ・最大値・乱数・段階値を比較し、
+CPU参照との出力バイト一致・全allocation復元・出力番兵・短縮入力拒否を確認した。
+これはGPU上のscanや速度を測る試験ではない。
+
+配布用のprivateライブラリーを使ったネイティブ試験13条件も成功。
+8/10bit合成素材と1080p・10bit長GOP素材の単独12条件では、保存・復元各5回、
+全後続区間2回、allocation余白まで一致。実録画の等速保存1条件では保存10回、
+保持枠内3地点の復元が一致した。PCの結果はiPhone性能の結論には使わない。
+
+`scripts/lscomp-metal-smoke.py` はMac runnerで配布用Objective-Cブリッジと全4GPUパスを
+実行し、24条件・72画像についてCPU出力とのバイト一致を確認する。
+その後、シミュレーターの診断画面で8/10bit各14条件を確認する。
+iPhoneでの時間・負荷・保持数は、実機の同じAV1入力によるJSON結果で比較する。

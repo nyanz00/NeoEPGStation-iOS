@@ -16,8 +16,8 @@ static void *compression_worker(void *cookie) {
 #ifdef __APPLE__
     pthread_set_qos_class_self_np(QOS_CLASS_UTILITY,0);
 #endif
-    if(w->out->method==10) {
-        int e=neo_rcomp_begin(&w->out->gpu_setup_ms);
+    if(neo_checkpoint_gpu_method(w->out->method)) {
+        int e=neo_checkpoint_gpu_begin(w->out->method,&w->out->gpu_setup_ms);
         if(e) {pthread_mutex_lock(&w->lock);w->error=e;pthread_mutex_unlock(&w->lock);return NULL;}
     }
     for(;;) {
@@ -36,8 +36,8 @@ static void *compression_worker(void *cookie) {
             int i=w->out->completed_saves++;
             w->out->save_ms[i]=ms;w->out->capture_ms[i]=capture;
             w->out->save_cpu_ms[i]=cpu>=0 && after>=cpu?after-cpu:-1;
-            if(w->out->method==10) {
-                NeoRcompMetrics m;neo_rcomp_last_metrics(&m);w->out->gpu_ms[i]=m.gpu_ms;w->out->gpu_wait_ms[i]=m.wait_ms;
+            if(neo_checkpoint_gpu_method(w->out->method)) {
+                NeoRcompMetrics m;neo_checkpoint_gpu_metrics(w->out->method,&m);w->out->gpu_ms[i]=m.gpu_ms;w->out->gpu_wait_ms[i]=m.wait_ms;
                 if(m.staging_bytes>w->out->gpu_staging_bytes)w->out->gpu_staging_bytes=m.staging_bytes;
                 w->out->gpu_dispatches+=m.dispatches;
             }
@@ -52,7 +52,7 @@ static void *compression_worker(void *cookie) {
         neo_lossless_free(&state);w->error=e;w->active=0;
         pthread_mutex_unlock(&w->lock);
     }
-    if(w->out->method==10)neo_rcomp_end();
+    if(neo_checkpoint_gpu_method(w->out->method))neo_checkpoint_gpu_end(w->out->method);
     return NULL;
 }
 static int worker_init(StorageWorker *w,NeoRealtimeResult *out) {
@@ -122,7 +122,7 @@ int neo_checkpoint_realtime_run(const NeoCheckpointPacket *packets,size_t count,
     Dav1dContext *c=NULL;StorageWorker worker={0};Pace pace={0};pace.out=out;
     Dav1dPicture golden={0};Timing target_time={0};int error=0,worker_ready=0;
     out->before_bytes=sample(&r);TRY(storage_input(&r,gop));
-    if(method!=-1 && method!=0 && method!=4 && method!=7 && method!=9 && method!=10) {error=1001;goto done;}
+    if(method!=-1 && method!=0 && method!=4 && method!=7 && method!=9 && method!=10 && method!=11 && method!=12 && method!=13 && method!=14) {error=1001;goto done;}
     TRY(open_decoder(&c,6,NULL));
     size_t warm=0,end=0;double until=fmin(gop*.9,24.0);
     while(warm<count && packets[warm].seconds<.5)warm++;

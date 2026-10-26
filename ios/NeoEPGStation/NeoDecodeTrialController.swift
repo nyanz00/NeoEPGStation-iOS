@@ -26,7 +26,7 @@ final class NeoDecodeTrialController: UIViewController {
     let close = UIButton(type: .system); close.setTitle("閉じる", for: .normal)
     close.addAction(UIAction { [weak self] _ in self?.close() }, for: .touchUpInside)
     let title = NeoStyle.label(checkpointMode ? "AV1 状態復元診断" : "AV1 シーク診断", size: 21, bold: true)
-    if checkpointMode { status.text = "1080p以下のAV1動画で、CPU方式とrcomp-metalのGPU圧縮で容量と保存負荷を比較します。等速復号と定期保存を重ねる試験も行います。" }
+    if checkpointMode { status.text = "1080p以下のAV1動画で、CPU ZstandardとlsCOMP方式のCPU・GPU圧縮で容量と保存負荷を比較します。等速復号と定期保存を重ねる試験も行います。" }
     status.numberOfLines = 0
     start.setTitle("診断を開始", for: .normal); start.accessibilityIdentifier = "decode-trial-start"
     start.addAction(UIAction { [weak self] _ in self?.run() }, for: .touchUpInside)
@@ -57,12 +57,13 @@ final class NeoDecodeTrialController: UIViewController {
           "timing": "fresh-decoder-feed-to-target-output; initialization-separate; luma-check-after-timer",
           "audio": false, "networkInDecodeTimer": false]
         if checkpointMode {
-          report["schema"] = 5; report["mode"] = "rcomp-metal-checkpoint"
+          report["schema"] = 6; report["mode"] = "lscomp-metal-checkpoint"
           report["expectedConditions"] = 14
           report["gpuCompressionRequested"] = true; report["renderingIncluded"] = false
-          report["rcompMetalVersion"] = "0.4.0"; report["rcompShaderModified"] = false
+          report["lscompRevision"] = "d920dd9dc8ddbd2684c777d1e2ba27397212e59c"
+          report["lscompMetalAdaptation"] = true; report["quantization"] = false; report["pooling"] = false
           report["restoreBackend"] = "CPU"; report["preprocessingBackend"] = "CPU"
-          report["timing"] = "CPU versus rcomp-metal LZ4 compression; CPU preprocessing and restore; six decode workers; pixel checks outside timers"
+          report["timing"] = "lsCOMP lossless bitplanes: raw or CPU delta; CPU versus Metal compression; CPU restore; six decode workers; pixel checks outside timers"
           report["thermalStateStart"] = ProcessInfo.processInfo.thermalState.rawValue
         }
         status.text = "比較する映像データを準備中…"
@@ -84,7 +85,8 @@ final class NeoDecodeTrialController: UIViewController {
           report["processFootprintAfterInputReleaseBytes"] = result["processFootprintAfterInputReleaseBytes"]
           let passed = rows.filter { ($0["status"] as? Int) == 0 }.count
           report["status"] = passed == 14 ? "complete" : "partial"
-          report["gpuCompressionVerified"] = rows.filter { ($0["method"] as? Int) == 10 }.allSatisfy { ($0["status"] as? Int) == 0 }
+          let gpuRows = rows.filter { [12, 14].contains(($0["method"] as? Int) ?? -1) }
+          report["gpuCompressionVerified"] = gpuRows.count == 6 && gpuRows.allSatisfy { ($0["status"] as? Int) == 0 }
           report["thermalStateEnd"] = ProcessInfo.processInfo.thermalState.rawValue
           status.text = "状態復元診断が完了しました。\n全画素一致・復元試験：\(passed)/14条件\n診断結果を共有してください。等速復号の出力遅れも記録しました。画面表示・音声は測定に含みません。"
         } else {
@@ -166,9 +168,9 @@ private enum NeoCheckpointWorker {
     try await Task.detached(priority: .userInitiated) {
       defer { trial.releaseCheckpointPackets() }
       var rows: [[String: Any]] = []
-      let profiles: [(Int32, Double)] = [(0, 2), (4, 2), (7, 2), (9, 2), (10, 2), (10, 0.25), (9, 0.25), (7, 0.25), (4, 0.25), (0, 0.25)]
+      let profiles: [(Int32, Double)] = [(7, 2), (11, 2), (12, 2), (13, 2), (14, 2), (14, 0.25), (13, 0.25), (12, 0.25), (11, 0.25), (7, 0.25)]
       func name(_ method: Int32) -> String {
-        switch method { case -1: return "保存なし"; case 0: return "現在方式"; case 4: return "LZ4"; case 9: return "CPU LZ4・64KiB"; case 10: return "rcomp-metal・GPU LZ4"; default: return "Zstandard" }
+        switch method { case -1: return "保存なし"; case 0: return "現在方式"; case 4: return "LZ4"; case 9: return "CPU LZ4・64KiB"; case 10: return "rcomp-metal・GPU LZ4"; case 11: return "lsCOMP CPU・補正なし"; case 12: return "lsCOMP GPU・補正なし"; case 13: return "lsCOMP CPU・差分あり"; case 14: return "lsCOMP GPU・差分あり"; default: return "Zstandard" }
       }
       for (method, distance) in profiles {
         if Task.isCancelled || trial.checkpointCancelled { throw CancellationError() }
@@ -194,7 +196,7 @@ private enum NeoCheckpointWorker {
           let footprints = withUnsafeBytes(of: result.sampled_footprint_bytes) { Array($0.bindMemory(to: UInt64.self)) }
           let row: [String: Any] = [
             "kind": "storage", "method": Int(method), "status": Int(code),
-            "methodName": name(method), "gpuCompression": method == 10, "restoreBackend": "CPU",
+            "methodName": name(method), "preprocessing": method == -1 || method == 11 || method == 12 ? "none" : (method == 7 ? "CPU horizontal delta and byte shuffle" : "CPU horizontal delta"), "gpuCompression": [12, 14].contains(method), "restoreBackend": "CPU",
             "gpuSetupMs": output.gpu_setup_ms, "gpuCommandMs": gpu, "gpuWaitMs": gpuWait,
             "gpuStagingBytes": output.gpu_staging_bytes, "gpuDispatches": Int(output.gpu_dispatches),
             "decoderError": Int(result.decoder_error), "failureStage": Int(result.failure_stage),
@@ -219,7 +221,7 @@ private enum NeoCheckpointWorker {
         }
         if let row = try JSONSerialization.jsonObject(with: rowData) as? [String: Any] { rows.append(row) }
       }
-      for method in [Int32(-1), 7, 9, 10] {
+      for method in [Int32(-1), 7, 12, 14] {
         if Task.isCancelled || trial.checkpointCancelled { throw CancellationError() }
         let snapshot = try JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys])
         await progress(snapshot, rows.count, 14, "等速復号＋2秒ごとの保存：" + name(method))
@@ -245,7 +247,7 @@ private enum NeoCheckpointWorker {
           let used = withUnsafeBytes(of: result.used_checkpoint) { Array($0.bindMemory(to: Int32.self)).map { $0 != 0 } }
           let row: [String: Any] = [
             "kind": "paced", "method": Int(method), "status": Int(code), "decoderError": Int(result.decoder_error),
-            "methodName": name(method), "gpuCompression": method == 10, "restoreBackend": "CPU",
+            "methodName": name(method), "preprocessing": method == -1 || method == 11 || method == 12 ? "none" : (method == 7 ? "CPU horizontal delta and byte shuffle" : "CPU horizontal delta"), "gpuCompression": [12, 14].contains(method), "restoreBackend": "CPU",
             "gpuSetupMs": result.gpu_setup_ms, "gpuCommandMs": gpu, "gpuWaitMs": gpuWait,
             "gpuStagingBytes": result.gpu_staging_bytes, "gpuDispatches": Int(result.gpu_dispatches),
             "threads": 6, "frameContexts": 3, "saveIntervalSeconds": 2,

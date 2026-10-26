@@ -35,8 +35,9 @@ int neo_checkpoint_lab_run(const NeoCheckpointPacket *packets, size_t count,
     int (*cancelled)(void *), void *cookie);
 uint64_t neo_checkpoint_lab_footprint(void);
 
-/* CPU storage diagnostic: method 0=packed10, 4=delta/shuffle LZ4,
- * 7=delta/shuffle Zstd level 1; 9=CPU independent LZ4 64KiB; 10=rcomp-metal.
+/* Storage diagnostic: method 0=packed10, 4=delta/shuffle LZ4,
+ * 7=delta/shuffle Zstd level 1; 9=CPU independent LZ4 64KiB; 10=rcomp-metal;
+ * 11/12=CPU/Metal lsCOMP raw; 13/14=CPU/Metal lsCOMP delta (lossless only).
  * Preprocessing and restore remain on CPU. Never normal playback. */
 typedef struct NeoStorageResult {
     NeoCheckpointResult checkpoint;

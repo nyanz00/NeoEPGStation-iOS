@@ -51,6 +51,8 @@ def prepare():
                      ('vendor/checkpoint/packed.h','include/packed.h'),
                      ('vendor/checkpoint/lossless.h','include/lossless.h'),
                      ('vendor/checkpoint/rcomp.h','include/rcomp.h'),
+                     ('vendor/checkpoint/lscomp.h','include/lscomp.h'),
+                     ('vendor/checkpoint/lscomp-format.c','src/neo_lscomp_format.c'),
                      ('vendor/checkpoint/rcomp-format.c','src/neo_rcomp_format.c'),
                      ('vendor/checkpoint/lab.c','src/neo_checkpoint_lab.c'),
                      ('vendor/checkpoint/NeoCheckpointLab.h','include/NeoCheckpointLab.h')]:
@@ -62,7 +64,7 @@ def prepare():
         (ROOT/'vendor/checkpoint/lab.c').read_bytes()+b'\n'+(ROOT/'vendor/checkpoint/storage-profile.inc').read_bytes()+b'\n'+(ROOT/'vendor/checkpoint/realtime.inc').read_bytes())
     meson = run('git','-C',SOURCE,'show','HEAD:src/meson.build')+'\n'
     # packed.c includes core.c: compile it once, not as two translation units.
-    write_changed(SOURCE/'src/meson.build', meson.replace("'cdf.c',", "'cdf.c',\n    'neo_packed_checkpoint.c',\n    'neo_checkpoint_lab.c',\n    'neo_lz4.c',\n    'neo_zstd.c',\n    'neo_rcomp_format.c',", 1).encode())
+    write_changed(SOURCE/'src/meson.build', meson.replace("'cdf.c',", "'cdf.c',\n    'neo_packed_checkpoint.c',\n    'neo_checkpoint_lab.c',\n    'neo_lz4.c',\n    'neo_zstd.c',\n    'neo_rcomp_format.c',\n    'neo_lscomp_format.c',", 1).encode())
     picture = run('git','-C',SOURCE,'show','HEAD:src/picture.c')+'\n'
     write_changed(SOURCE/'src/picture.c',picture.encode()+(ROOT/'vendor/checkpoint/picture-helper.inc').read_bytes())
     return public,compression
@@ -93,6 +95,9 @@ def main():
     print(run('ninja','-C',work,'-j','8')[-1500:])
     library=output/'libneocheckpoint.a'
     shutil.copyfile(work/'src/libdav1d.a',library)
+    ls_source=json.loads((ROOT/'vendor/lscomp/source.json').read_text())
+    for name,digest in ls_source['sourceSHA256'].items():
+        assert hashlib.sha256((ROOT/'vendor/lscomp'/name).read_bytes()).hexdigest()==digest
     rcomp_source=json.loads((ROOT/'vendor/rcomp-metal/source.json').read_text())
     shader=(ROOT/'vendor/rcomp-metal/lz4.metal').read_bytes()
     assert hashlib.sha256(shader).hexdigest()==rcomp_source['shaderSHA256']
@@ -102,6 +107,12 @@ def main():
         run(cc,*flags,'-fobjc-arc','-fblocks','-std=gnu11','-Wall','-Werror=implicit-function-declaration',
             '-I',ROOT/'vendor/checkpoint','-I',output,'-c',ROOT/'vendor/checkpoint/rcomp-metal.m','-o',bridge)
         run('/usr/bin/ar','r',library,bridge)
+        ls_shader=(ROOT/'vendor/checkpoint/lscomp.metal').read_text()
+        write_changed(output/'lscomp-shader.h',('static const char neo_lscomp_shader_source[] = '+json.dumps(ls_shader)+';\n').encode())
+        ls_bridge=output/'lscomp-metal.o'
+        run(cc,*flags,'-fobjc-arc','-fblocks','-std=gnu11','-Wall','-Werror=implicit-function-declaration',
+            '-I',ROOT/'vendor/checkpoint','-I',output,'-c',ROOT/'vendor/checkpoint/lscomp-metal.m','-o',ls_bridge)
+        run('/usr/bin/ar','r',library,ls_bridge)
     symbols=run('nm','-g',library.relative_to(ROOT))
     assert '_neo_lab_dav1d_open' in symbols or ' neo_lab_dav1d_open' in symbols
     assert not re.search(r'\b[Tt] _?dav1d_(open|send_data|get_picture|close)\b',symbols), 'Public decoder namespace collision'
@@ -118,8 +129,11 @@ def main():
                   'vendor/checkpoint/storage-profile.inc','vendor/checkpoint/realtime.inc',
                   'scripts/checkpoint_compression_sources.py','vendor/checkpoint/rcomp.h',
                   'vendor/checkpoint/rcomp-format.c','vendor/checkpoint/rcomp-metal.m',
-                  'vendor/rcomp-metal/lz4.metal','vendor/rcomp-metal/source.json')},
+                  'vendor/rcomp-metal/lz4.metal','vendor/rcomp-metal/source.json',
+                  'vendor/checkpoint/lscomp.h','vendor/checkpoint/lscomp-format.c',
+                  'vendor/checkpoint/lscomp-metal.m','vendor/checkpoint/lscomp.metal','vendor/lscomp/source.json')},
               'rcompMetal':rcomp_source,
+              'lscomp':json.loads((ROOT/'vendor/lscomp/source.json').read_text()),
               'compression':compression,
               'normalPlaybackDecoderUnchanged':True}
     (output/'provenance.json').write_text(json.dumps(metadata,indent=2)+'\n')
@@ -130,6 +144,7 @@ def main():
         shutil.copyfile(ROOT/p,notice/Path(p).name)
     (notice/'upstream.json').write_text(json.dumps({'revision':PIN,'source':'https://github.com/videolan/dav1d/tree/'+PIN,'publicRenames':public},indent=2)+'\n')
     (ROOT/'dist/notices/CheckpointCompression/provenance.json').write_text(json.dumps(compression,indent=2)+'\n')
+    shutil.copytree(ROOT/'vendor/lscomp',ROOT/'dist/notices/LsCOMP',dirs_exist_ok=True)
     shutil.copytree(ROOT/'vendor/rcomp-metal',ROOT/'dist/notices/RcompMetal',dirs_exist_ok=True)
     dist=ROOT/'dist';dist.mkdir(exist_ok=True)
     shutil.copyfile(output/'provenance.json',dist/('checkpoint-'+args.sdk+'.json'))

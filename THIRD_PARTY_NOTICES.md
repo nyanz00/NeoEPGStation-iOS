@@ -74,3 +74,13 @@ Keep the archive's COPYING notices with distributed artifacts. Any modified
 VideoLAN components must be accompanied by the corresponding source and patches.
 The dependency and distribution requirements must be checked before a public
 App Store release.
+
+The diagnostic lsCOMP lossless adaptation is based on revision
+`d920dd9dc8ddbd2684c777d1e2ba27397212e59c` of
+https://github.com/szcompressor/lsCOMP . Copyright (c) 2025 UChicago Argonne
+and University of Iowa. Its upstream BSD-3-Clause-style license, pinned
+source files and source hashes are in `ThirdPartyNotices/LsCOMP`.
+The CPU reference, new container and four-stage Metal implementation are
+modified lossless-only code, with quantization and pooling disabled; they
+are included in `ThirdPartyNotices/CheckpointDav1d`. The original CUDA
+kernel is retained as source and is not executed on iOS.

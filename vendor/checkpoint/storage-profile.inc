@@ -47,8 +47,8 @@ int neo_checkpoint_storage_run(const NeoCheckpointPacket *packets,size_t count,d
     NeoPackedCheckpoint *gold=NULL;Timing t={0};int error=0;
     out->before_bytes=sample(&r);out->failure_stage=1;
     TRY(storage_input(&r,gop));
-    if((method!=0 && method!=4 && method!=7 && method!=9 && method!=10) || !isfinite(distance) || distance<=0) {error=1001;goto done;}
-    if(method==10) {TRY(neo_rcomp_begin(&result->gpu_setup_ms));}
+    if((method!=0 && method!=4 && method!=7 && method!=9 && method!=10 && method!=11 && method!=12 && method!=13 && method!=14) || !isfinite(distance) || distance<=0) {error=1001;goto done;}
+    if(neo_checkpoint_gpu_method(method)) {TRY(neo_checkpoint_gpu_begin(method,&result->gpu_setup_ms));}
     double wanted=gop*.9,position=wanted-fmin(distance,wanted*.5);
     while(r.cp<count && packets[r.cp].seconds<position)r.cp++;
     while(r.target<count && packets[r.target].seconds<wanted)r.target++;
@@ -71,8 +71,8 @@ int neo_checkpoint_storage_run(const NeoCheckpointPacket *packets,size_t count,d
         TRY(check(&r));double cpu=storage_cpu_ms();began=now();TRY(storage_save(c,method,&temporary));
         out->repeated_save_ms[k]=(now()-began)*1000;double after=storage_cpu_ms();
         result->save_cpu_ms[k]=cpu>=0 && after>=cpu?after-cpu:-1;
-        if(method==10) {
-            NeoRcompMetrics m;neo_rcomp_last_metrics(&m);result->gpu_ms[k]=m.gpu_ms;result->gpu_wait_ms[k]=m.wait_ms;
+        if(neo_checkpoint_gpu_method(method)) {
+            NeoRcompMetrics m;neo_checkpoint_gpu_metrics(method,&m);result->gpu_ms[k]=m.gpu_ms;result->gpu_wait_ms[k]=m.wait_ms;
             if(m.staging_bytes>result->gpu_staging_bytes)result->gpu_staging_bytes=m.staging_bytes;
             result->gpu_dispatches+=m.dispatches;
         }
@@ -102,7 +102,7 @@ done:
     dav1d_picture_unref(&t.picture);dav1d_picture_unref(&r.golden);
     if(negative)dav1d_close(&negative);if(c)dav1d_close(&c);
     neo_lossless_free(&temporary);neo_lossless_free(&saved);neo_packed_free(&gold);
-    if(method==10)neo_rcomp_end();
+    if(neo_checkpoint_gpu_method(method))neo_checkpoint_gpu_end(method);
     out->after_bytes=neo_checkpoint_lab_footprint();out->status=error<0?1008:error;out->decoder_error=error<0?error:0;
     return out->status;
 }

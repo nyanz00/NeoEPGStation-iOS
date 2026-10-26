@@ -193,12 +193,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/checkpoint
-          key: checkpoint-xcode26.6-v1-${{ hashFiles('scripts/build-checkpoint.py', 'scripts/checkpoint_compression_sources.py', 'vendor/checkpoint/**', 'vendor/rcomp-metal/**', 'experiments/dav1d-checkpoint/*.c', 'experiments/dav1d-checkpoint/*.h') }}
+          key: checkpoint-xcode26.6-v1-${{ hashFiles('scripts/build-checkpoint.py', 'scripts/checkpoint_compression_sources.py', 'vendor/checkpoint/**', 'vendor/rcomp-metal/**', 'vendor/lscomp/**', 'experiments/dav1d-checkpoint/*.c', 'experiments/dav1d-checkpoint/*.h') }}
       - name: Build private checkpoint decoder for device and simulator
         run: |
           command -v meson >/dev/null && command -v ninja >/dev/null || brew install meson ninja
           python3 scripts/build-checkpoint.py iphoneos
           python3 scripts/build-checkpoint.py iphonesimulator
+      - name: Check lsCOMP Metal kernels before application builds
+        if: ${{ inputs.check_scope == 'checkpoint-trial' }}
+        run: python3 -u scripts/lscomp-metal-smoke.py
       - name: Build device application
         id: device-build
         run: |

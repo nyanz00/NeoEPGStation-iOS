@@ -35,7 +35,7 @@ for depth in (8,10):
     assert report.get('status') in ('complete','partial','failed','cancelled'), 'Checkpoint tester did not finish'
     Path('dist',f'checkpoint-trial-{depth}.json').write_text(json.dumps(report,indent=2)+'\n')
     assert report['status'] in ('complete','partial'),report
-    assert report['schema']==5 and report['mode']=='rcomp-metal-checkpoint'
+    assert report['schema']==6 and report['mode']=='lscomp-metal-checkpoint'
     assert report['networkInDecodeTimer'] is False and report['gpuCompressionRequested'] is True
     assert report['renderingIncluded'] is False and report['audio'] is False
     assert report['expectedConditions']==14 and report['processFootprintAfterInputReleaseBytes']>0
@@ -43,10 +43,10 @@ for depth in (8,10):
     rows=report['checkpoint'];assert len(rows)==14
     storage=[r for r in rows if r['kind']=='storage']
     paced=[r for r in rows if r['kind']=='paced']
-    assert {(r['method'],r['requestedDistanceSeconds']) for r in storage}=={(m,d) for m in (0,4,7,9,10) for d in (2,.25)}
-    assert len(paced)==4 and {r['method'] for r in paced}=={-1,7,9,10}
-    unavailable=[r for r in rows if r['method']==10 and r['status']==1009]
-    assert len(unavailable) in (0,3), unavailable
+    assert {(r['method'],r['requestedDistanceSeconds']) for r in storage}=={(m,d) for m in (7,11,12,13,14) for d in (2,.25)}
+    assert len(paced)==4 and {r['method'] for r in paced}=={-1,7,12,14}
+    unavailable=[r for r in rows if r['method'] in (12,14) and r['status']==1009]
+    assert len(unavailable) in (0,6), unavailable
     assert report['gpuCompressionVerified']==(not unavailable)
     successful=[r for r in rows if r not in unavailable]
     for row in successful:
@@ -54,7 +54,7 @@ for depth in (8,10):
         assert row['threads']==6 and row['frameContexts']==3
         assert row['normalPlaybackUnchanged'] and row['processFootprintAfterBytes']>0
         assert row['restoreBackend']=='CPU'
-        if row['method']==10:
+        if row['method'] in (12,14):
             assert row['gpuSetupMs']>0 and row['gpuStagingBytes']>0 and row['gpuDispatches']>0
             assert all(v>=0 for v in row['gpuCommandMs']) and all(v>0 for v in row['gpuWaitMs'])
         else:
@@ -97,15 +97,20 @@ for depth in (8,10):
             assert not any(row['usedCheckpoint'])
         else:
             assert n>0 and row['retainedCount']>0 and any(row['usedCheckpoint'])
-    if depth==10:
-        for distance in (2,.25):
-            group={r['method']:r for r in storage if r['requestedDistanceSeconds']==distance}
-            assert group[4]['retainedBytes']<group[0]['retainedBytes'] and group[7]['retainedBytes']<group[0]['retainedBytes']
+    assert report['quantization'] is False and report['pooling'] is False
+    for distance in (2,.25):
+        group={r['method']:r for r in storage if r['requestedDistanceSeconds']==distance}
+        if not unavailable:
+            assert group[11]['retainedBytes']==group[12]['retainedBytes']
+            assert group[13]['retainedBytes']==group[14]['retainedBytes']
+    for row in successful:
+        if row['method'] in (12,14):
+            assert row['gpuDispatches']==4*(5 if row['kind']=='storage' else row['completedSaves'])
     serialized=json.dumps(report)
     assert 'file://' not in serialized and '/api/' not in serialized
     results.append({'bitDepth':depth,'cases':14,'success':True,'gpuVerified':not unavailable,'gpuUnavailable':len(unavailable)})
 Path('dist/checkpoint-trial-verification.json').write_text(json.dumps({
     'success':True,'cases':results,'devicePerformanceVerified':False,
-    'scope':'rcomp-metal 0.4.0 unmodified kernel; CPU preprocessing/restore; CPU LZ4 64KiB control and Zstd; pixel verification; paced compression; explicit GPU availability; no rendering/audio'
+    'scope':'lsCOMP lossless Metal adaptation; CPU raw/delta controls; Zstd; 8x8 bitplanes; four-stage GPU pipeline; full pixel and allocation verification; paced saves; no rendering/audio'
 },indent=2)+'\n')
 print(json.dumps(results),flush=True)
