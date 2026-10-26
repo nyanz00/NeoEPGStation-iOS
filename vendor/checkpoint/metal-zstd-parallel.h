@@ -26,17 +26,12 @@ typedef struct NzWork {
     NzU frame,headerEnd,totalSize,raw,useHuff,litHeader,litBytes;
 } NzWork;
 
-static NzU nzp_word(NZ_D const NzB *p) {return (NzU)p[0]|((NzU)p[1]<<8)|((NzU)p[2]<<16)|((NzU)p[3]<<24);}
 static NzU nzp_match_length(NZ_D const NzB *src,NzU at,NzU off,NzU end) {
-    NzU len=4; /* The matcher already compared these four bytes. */
-    while(at+len+4<=end) {
-        NzU diff=nzp_word(src+at+len)^nzp_word(src+at+len-off);
-        /* Select the first unequal byte explicitly. The native GPU oracle
-         * caught 1-2 excess bytes with the previous ctz-based selection. */
-        if(diff) {if(diff&255u)return len;if(diff&65280u)return len+1;if(diff&16711680u)return len+2;return len+3;}
-        len+=4;
-    }
-    while(at+len<end && src[at+len]==src[at+len-off])len++;return len;
+    /* Keep the established exact comparison. The native GPU oracle rejected
+     * the word-at-a-time prototype even after changing its byte selection.
+     * Literal copies and FSE remain cooperative; never trade correctness for
+     * an unverified match-length shortcut. */
+    NzU len=0;while(at+len<end && src[at+len]==src[at+len-off])len++;return len;
 }
 /* The leader only decides sequences. Payload copying is cooperative after it
  * finishes; records and their literal prefix positions stay in group memory. */
@@ -45,7 +40,8 @@ static void nzp_records(NZ_D const NzB *src,NzU n,NZ_D const NzU *matches,
     NzU end=begin+NZ_PART;if(end>n)end=n;NzU at=begin,anchor=begin,ns=0,nl=0;
     while(at+4<=end) {
         NzU off=matches[at];if(!off || off>at || off>65535) {at++;continue;}
-        NzU len=nzp_match_length(src,at,off,end),ll=at-anchor;nl+=ll;
+        NzU len=nzp_match_length(src,at,off,end);if(len<4) {at++;continue;}
+        NzU ll=at-anchor;nl+=ll;
         records[ns++]=(NzRecord){{ll,len-3,off+3},(nl<<16)|anchor};at+=len;anchor=at;
     }
     NzU tail=end>anchor?end-anchor:0;part->ns=ns;part->nl=nl+tail;part->tail=tail;
