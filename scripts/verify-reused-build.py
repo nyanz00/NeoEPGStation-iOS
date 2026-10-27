@@ -18,18 +18,25 @@ subprocess.run(['git', 'diff', '--exit-code', commit, 'HEAD', '--',
                 'App.tsx', 'src', 'ios', 'vendor/vlckit', 'vendor/aether', 'package.json', 'package-lock.json'], check=True, cwd=repository)
 # A checkpoint-only recheck must also retain the private native library,
 # compression sources and their build recipe; ordinary app paths are insufficient.
-if os.environ.get('CHECK_SCOPE') == 'checkpoint-trial':
+if os.environ.get('CHECK_SCOPE') in ('checkpoint-trial', 'checkpoint-player'):
     subprocess.run(['git', 'diff', '--exit-code', commit, 'HEAD', '--',
         'vendor/checkpoint', 'vendor/lscomp', 'vendor/rcomp-metal',
         'scripts/build-checkpoint.py', 'scripts/checkpoint_compression_sources.py',
-        'experiments/dav1d-checkpoint', 'tests/fixtures'], check=True, cwd=repository)
+        'experiments/dav1d-checkpoint'], check=True, cwd=repository)
+    if os.environ.get('CHECK_SCOPE') == 'checkpoint-trial':
+        subprocess.run(['git', 'diff', '--exit-code', commit, 'HEAD', '--', 'tests/fixtures'], check=True, cwd=repository)
+    else:
+        # Matcher/reference corrections can reuse the same app, but both video
+        # inputs must remain byte-identical to the original replay.
+        for fixture in ['av1-seek-10.mkv', 'av1-seek-10-gop6.mkv']:
+            subprocess.run(['git', 'diff', '--exit-code', commit, 'HEAD', '--', 'tests/fixtures/'+fixture], check=True, cwd=repository)
 required = ['storage-smoke', 'danmaku-smoke', 'pip-composition-smoke', 'pip-player-smoke',
             'ui-iphone-recorded', 'ui-iphone-menu', 'ui-iphone-settings']
 if Path('ios/NeoEPGStation/NeoPlayerChrome.swift').exists():
     required += ['player-ui-smoke', 'player-playback-smoke']
 full_recheck = os.environ.get('RECHECK_PLAYBACK') == 'true'
 network_probe = os.environ.get('NETWORK_PROBE') == 'true'
-focused = os.environ.get('CHECK_SCOPE') in ('zoom-font', 'ts-comments', 'recovery-ui', 'streaming', 'encoded-seek', 'av1-decoder', 'startup-preroll', 'aether-compare', 'avplayer-compare', 'aether-seek', 'decode-trial', 'checkpoint-trial')
+focused = os.environ.get('CHECK_SCOPE') in ('zoom-font', 'ts-comments', 'recovery-ui', 'streaming', 'encoded-seek', 'av1-decoder', 'startup-preroll', 'aether-compare', 'avplayer-compare', 'aether-seek', 'decode-trial', 'checkpoint-trial', 'checkpoint-player')
 for name in ([] if full_recheck or network_probe or focused else required):
     result = json.loads((artifact / f'{name}.json').read_text())
     if result.get('success') is not True:

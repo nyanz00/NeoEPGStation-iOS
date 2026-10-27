@@ -22,7 +22,12 @@ if CommandLine.arguments.count == 5 {
   let fixture = CommandLine.arguments[3], expected = Int(CommandLine.arguments[4])!
   // The source clips contain a burned-in counter. Consecutive requested
   // targets have different tens digits, so a retained old picture cannot pass.
-  let roi: [Double] = fixture.hasPrefix("av1") ? [0.145, 0, 0.185, 0.09] : [0.74, 0.33, 0.79, 0.67]
+  let shortGOP = fixture.contains("-gop6")
+  // This remuxed fixture has a 42ms timestamp origin. At target 40 the
+  // displayed counter can read 39.xxx or 40.xxx: a tens-only crop cannot
+  // distinguish it from target 34. Inspect both seconds digits and accept
+  // the two independently extracted sides of the integer boundary.
+  let roi: [Double] = fixture.hasPrefix("av1") ? (shortGOP ? [0.14, 0, 0.20, 0.09] : [0.145, 0, 0.185, 0.09]) : [0.74, 0.33, 0.79, 0.67]
   func mask(_ bitmap: NSBitmapImageRep) -> [Bool] {
     var pixels = [Bool]()
     for y in 0..<64 {
@@ -42,10 +47,14 @@ if CommandLine.arguments.count == 5 {
   let actual = mask(image)
   var scores = [Int: Double]()
   for target in (fixture.contains("-gop6") ? [22, 34, 40] : [20, 30, 40]) {
-    let data = try Data(contentsOf: directory.appendingPathComponent("\(fixture)-\(target).png"))
-    guard let reference = NSBitmapImageRep(data: data) else { fatalError("Invalid reference") }
-    let mismatch = zip(actual, mask(reference)).filter { $0.0 != $0.1 }.count
-    scores[target] = Double(mismatch)/Double(actual.count)
+    var distances = [Double]()
+    for suffix in (shortGOP ? ["", "-after"] : [""]) {
+      let data = try Data(contentsOf: directory.appendingPathComponent("\(fixture)-\(target)\(suffix).png"))
+      guard let reference = NSBitmapImageRep(data: data) else { fatalError("Invalid reference") }
+      let mismatch = zip(actual, mask(reference)).filter { $0.0 != $0.1 }.count
+      distances.append(Double(mismatch)/Double(actual.count))
+    }
+    scores[target] = distances.min()!
   }
   let wanted = scores[expected]!, other = scores.filter { $0.key != expected }.map { $0.value }.min()!
   report["targetMatches"] = wanted < 0.06 && wanted+0.008 < other

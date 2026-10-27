@@ -413,6 +413,13 @@ jobs:
             python3 -u scripts/streaming-smoke.py
             python3 -u scripts/ts-resume-smoke.py
             python3 -u scripts/ts-resume-smoke.py mpeg2
+          elif [ "$CHECK_SCOPE" = "checkpoint-player" ]; then
+            mkdir -p build/native-tests
+            swiftc scripts/check-aether-picture.swift -o dist/aether-picture-check
+            swiftc ios/NeoEPGStation/NeoCheckpointPlacement.swift tests/checkpoint-placement/main.swift -o build/native-tests/checkpoint-placement
+            build/native-tests/checkpoint-placement > dist/checkpoint-placement.txt
+            python3 -u scripts/simulator-smoke.py --prepare
+            python3 -u scripts/aether-comparison-smoke.py --checkpoint-player
           elif [ "$CHECK_SCOPE" = "checkpoint-trial" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
             python3 -u scripts/checkpoint-trial-smoke.py
