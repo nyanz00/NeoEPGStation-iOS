@@ -41,7 +41,7 @@ if CommandLine.arguments.count == 5 {
   }
   let actual = mask(image)
   var scores = [Int: Double]()
-  for target in [20, 30, 40] {
+  for target in (fixture.contains("-gop6") ? [22, 34, 40] : [20, 30, 40]) {
     let data = try Data(contentsOf: directory.appendingPathComponent("\(fixture)-\(target).png"))
     guard let reference = NSBitmapImageRep(data: data) else { fatalError("Invalid reference") }
     let mismatch = zip(actual, mask(reference)).filter { $0.0 != $0.1 }.count

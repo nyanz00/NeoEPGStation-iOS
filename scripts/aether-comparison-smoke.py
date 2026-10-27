@@ -1,5 +1,6 @@
 """Use the shipping comparison screen against a real synthetic Range origin."""
 import json
+import math
 import hashlib
 import os
 from pathlib import Path
@@ -81,9 +82,9 @@ if inspect:
 fixtures = (os.environ['AETHER_FIXTURE'],) if os.environ.get('AETHER_FIXTURE') else (('hevc-seek-10.mkv',) if inspect else ('encoded-seek-1080.mkv', 'hevc-seek-10.mkv', 'av1-seek-10.mkv'))
 assert set(fixtures) <= set(references), 'Unknown synthetic fixture'
 checkpoint_player = '--checkpoint-player' in sys.argv
-if checkpoint_player: fixtures = ('av1-seek-10.mkv',)
+if checkpoint_player: fixtures = ('av1-seek-10.mkv', 'av1-seek-10-gop6.mkv')
 seek_work = '--seek-work' in sys.argv
-cases = ([(fixtures[0], False), (fixtures[0], True)] if checkpoint_player else ([(fixtures[0], True)] if seek_work else []) + [(fixture, False) for fixture in fixtures])
+cases = ([(fixture, baseline) for fixture in fixtures for baseline in (False, True)] if checkpoint_player else ([(fixtures[0], True)] if seek_work else []) + [(fixture, False) for fixture in fixtures])
 print('Aether fixture scope:', cases, flush=True)
 try:
     for fixture, baseline in cases:
@@ -102,6 +103,7 @@ try:
             environment = dict(os.environ, SIMCTL_CHILD_NEO_EPG_AETHER_COMPARE=f'http://127.0.0.1:{server.server_port}', SIMCTL_CHILD_NEO_EPG_AETHER_UI_BASELINE='1' if baseline else '0')
             if checkpoint_player:
                 environment['SIMCTL_CHILD_NEO_EPG_CHECKPOINT_COMPARE'] = 'off' if baseline else 'on'
+                environment['SIMCTL_CHILD_NEO_EPG_CHECKPOINT_SHORT_GOP'] = '1' if '-gop6' in fixture else '0'
                 environment['SIMCTL_CHILD_NEO_EPG_AETHER_UI_BASELINE'] = '0'
             if inspect:
                 environment['SIMCTL_CHILD_DYLD_INSERT_LIBRARIES'] = str(Path('dist/aether-renderer-inspect.dylib').resolve())
@@ -141,7 +143,8 @@ try:
             assert all(e['verification'] in ('displayedPixelBuffer', 'nativePixelBuffer') for e in resumes)
             decoded = [e for e in events if e['event']=='aether.seekDecodedTarget']
             assert all(e['displayTimeVerified'] is False and 'durationMs' not in e for e in decoded)
-            targets = (20, 40, 30, 20, 30) + ((20, 40, 30, 20, 40, 30) if checkpoint_player else ())
+            a, b = (22, 34) if '-gop6' in fixture else (20, 30)
+            targets = (a, 40, b, a, b) + ((a, 40, b, a, 40, b) if checkpoint_player else ())
             assert len(resumes)+len(decoded) == len(targets)
             assert all(abs(e['mediaMs']-e['targetMs'])<500 for e in resumes)
             assert all(abs(e['decodedMs']-e['targetMs'])<500 for e in decoded)
@@ -187,6 +190,18 @@ try:
                     assert len(rejected)==len(recoveries)==1, (rejected, recoveries)
                     assert recoveries[0]['reason']==7 and recoveries[0]['action']=='ordinary-seek-once'
                     assert sum(e['elapsed']>recoveries[0]['elapsed'] for e in restored)>=2, restored
+                    placed = [e for e in events if e['event']=='checkpoint.saved' and e.get('stored') and e.get('provisional') is False]
+                    assert placed, 'No checkpoints placed using known bounding keyframes'
+                    for e in placed:
+                        span = (e['nextKeyframeMs']-e['keyframeMs'])/1000
+                        count = max(2, math.ceil((span-0.05)/6))
+                        ordinal = (e['plannedMs']-e['keyframeMs'])/(span*1000/count)
+                        assert 1<=round(ordinal)<count and abs(ordinal-round(ordinal))<0.001, e
+                        assert 0<=e['positionMs']-e['plannedMs']<=500, e
+                    if '-gop6' in fixture:
+                        assert any(5900<e['nextKeyframeMs']-e['keyframeMs']<6100 and abs(e['plannedMs']-(e['keyframeMs']+e['nextKeyframeMs'])/2)<1 for e in placed), placed
+                    for e in (e for e in events if e['event']=='checkpoint.seekPlan' and e['hit']):
+                        assert e['keyframeMs']<e['checkpointMs']<e['targetMs']-50, e
                     assert any(e['event']=='checkpoint.saved' and e['source']=='lookahead' for e in events)
                 else: assert not any(e['event'] in ('checkpoint.saved', 'checkpoint.recovery', 'checkpoint.probeRejection') for e in events)
             assert result['success'] and all(result['checks'].values()), result

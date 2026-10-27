@@ -1,0 +1,36 @@
+--- a/Sources/AetherEngine/Decoder/VideoDecoderTypes.swift
++++ b/Sources/AetherEngine/Decoder/VideoDecoderTypes.swift
+@@ -211,4 +211,6 @@
+     public let sourcePosition: Double
+     public let secondsPerTick: Double
+     public let packets: [NeoAV1PacketData]
+-}
++    /// Source timestamps from already retained packet metadata; no additional I/O.
++    public let keyframes: [Double]
++}
+--- a/Sources/AetherEngine/Native/SoftwarePacketReadAhead.swift
++++ b/Sources/AetherEngine/Native/SoftwarePacketReadAhead.swift
+@@ -363,6 +363,11 @@
+     func neoCheckpointKeyframe(at seconds: Double) -> Double? {
+         condition.lock(); defer { condition.unlock() }
+         return keyframes.filter { $0.seconds <= seconds }.map(\.seconds).max()
++    }
++    func neoCheckpointKeyframes(around seconds: Double) -> [Double] {
++        condition.lock(); defer { condition.unlock() }
++        guard !closed, !sourceRepositioning, !resetPending else { return [] }
++        return keyframes.map(\.seconds).filter { $0.isFinite && $0 >= seconds-180 && $0 <= seconds+120 }.sorted()
+     }
+     func neoCheckpointRun(from seconds: Double, through end: Double) -> [SoftwareStoredPacket] {
+         let deadline = ContinuousClock.now.advanced(by: .milliseconds(250))
+--- a/Sources/AetherEngine/Native/SoftwarePlaybackHost.swift
++++ b/Sources/AetherEngine/Native/SoftwarePlaybackHost.swift
+@@ -1988,7 +1988,8 @@
+         }.value
+         guard generation == seekGeneration, !stopRequested, !packets.isEmpty else { return nil }
+         return NeoAV1PacketRun(sourcePosition: position, secondsPerTick: videoTimeBaseSeconds,
+-                              packets: packets.map(NeoAV1PacketData.init))
++                              packets: packets.map(NeoAV1PacketData.init),
++                              keyframes: source.neoCheckpointKeyframes(around: position))
+     }
+ 
+     /// AE#595: the extractor, built on the first ask and kept for the rest of the session.

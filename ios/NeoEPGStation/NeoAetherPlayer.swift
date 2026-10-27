@@ -575,7 +575,9 @@ final class NeoAetherPlayer: UIViewController {
       var checks: [String: Bool] = ["startupVideo": startupReady, "seekable": engine?.canSeek == true,
         "productionChrome": chrome.comparisonControlsSealed(),
         "initialPosition": abs((engine?.currentTime ?? 0)-initialPosition) < 3]
-      for (index, target) in [20.0, 40.0, 30.0, 20.0].enumerated() {
+      let shortGOP = ProcessInfo.processInfo.environment["NEO_EPG_CHECKPOINT_SHORT_GOP"] == "1"
+      let firstTarget = shortGOP ? 22.0 : 20.0, thirdTarget = shortGOP ? 34.0 : 30.0
+      for (index, target) in [firstTarget, 40.0, thirdTarget, firstTarget].enumerated() {
         guard !closed else { break }
         if let checkpoints = checkpointPlayback, checkpoints.enabled {
           let fillDeadline = CACurrentMediaTime()+25
@@ -594,7 +596,7 @@ final class NeoAetherPlayer: UIViewController {
         try? await Task.sleep(for: .milliseconds(200))
       }
       wantsPlayback = false; engine?.pause()
-      let pausedCount = landedCount; seek(to: 30)
+      let pausedCount = landedCount; seek(to: thirdTarget)
       let pausedDeadline = CACurrentMediaTime()+13
       while pending != nil && CACurrentMediaTime()<pausedDeadline { try? await Task.sleep(for: .milliseconds(50)) }
       checks["pausedSeek"] = landedCount == pausedCount+1 && engine?.state == .paused
@@ -602,7 +604,7 @@ final class NeoAetherPlayer: UIViewController {
       if let checkpoints = checkpointPlayback {
         // Match repeated real-player reuse, and force one point-local failure.
         // Both on/off still traverse the same target images and software decoder.
-        for (index, target) in [20.0, 40.0, 30.0, 20.0, 40.0, 30.0].enumerated() {
+        for (index, target) in [firstTarget, 40.0, thirdTarget, firstTarget, 40.0, thirdTarget].enumerated() {
           if checkpoints.enabled && index == 1 { checkpoints.probeRejectNextRestore() }
           let count = landedCount; seek(to: target)
           let end = CACurrentMediaTime()+13

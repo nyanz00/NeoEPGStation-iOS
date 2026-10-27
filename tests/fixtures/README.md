@@ -21,6 +21,16 @@ ffmpeg -i av1-seek-8.mkv -map 0 -c copy -movflags +faststart av1-seek-8.mp4
 ffmpeg -i av1-seek-10.mkv -map 0 -c copy -movflags +faststart av1-seek-10.mp4
 ```
 
+`av1-seek-10-gop6.mkv`は上記の10bit合成素材から作った6秒GOP版。
+チェックポイントをキー間の中央に置いた実再生・失敗後の回復を比較する。実機アプリには同梱しない。
+
+```sh
+ffmpeg -i av1-seek-10.mkv -map 0:v:0 -map '0:a?' -c:v libaom-av1 -cpu-used 8 -crf 35 -g 144 -keyint_min 144 -pix_fmt yuv420p10le -c:a copy av1-seek-10-gop6.mkv
+```
+
+FFmpeg 7.1.1の出力をパケットのKフラグで確認し、キー時刻は0.042、6.042、12.042…66.042秒。
+`aether-seek-reference`の22・34・40秒の画像は、この新しい出力から同ディレクトリのmanifestのコマンドで取得した。
+
 `encoded-seek-1080.mkv` と `encoded-seek-1080.mp4` は72秒・1920×1080・24fps、
 H.264、3 Bフレーム、24秒間隔のキーフレームと440Hzの音声。
 同じバイナリでpreroll画像出力の有効・無効を比較する。

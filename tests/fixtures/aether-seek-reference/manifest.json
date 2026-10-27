@@ -25,6 +25,14 @@
         "30": "f8d30bd625a8a21824553f8c22703a102f9be72f4c8bdb0eeff3daabcab44c92",
         "40": "f103a8326884f43ca20eedb5bcfcd99f829a6cbc26f79130e8dfa64ed57323bc"
       }
+    },
+    "av1-seek-10-gop6.mkv": {
+      "sha256": "bc37f0594e60c875f079cc10be188b2adc08b6608dbb5f21e958d6c65c649478",
+      "references": {
+        "22": "b79cd38fbc3285a1e688f5affe4e5d35d076967ce587d170c2a2441852baa672",
+        "34": "9856b1d46a0d3e3fd59cb24beb5cc4aa9979bddab23ad0ac4b2f233010ef5128",
+        "40": "2ebfccf7d355d2ac751e396e016d83f3d02e6970447c32b5f4973a7bc629dd06"
+      }
     }
   }
 }

@@ -123,6 +123,12 @@ jobs:
           dist/aether-picture-check tests/fixtures/aether-seek-reference/av1-seek-10.mkv-20.png tests/fixtures/aether-seek-reference av1-seek-10.mkv 20 > dist/aether-picture-positive.json
           dist/aether-picture-check tests/fixtures/aether-seek-reference/av1-seek-10.mkv-20.png tests/fixtures/aether-seek-reference av1-seek-10.mkv 30 > dist/aether-picture-negative.json
           python3 -c "import json; assert json.load(open('dist/aether-picture-positive.json'))['targetMatches']; assert not json.load(open('dist/aether-picture-negative.json'))['targetMatches']"
+      - name: Check adaptive checkpoint placement policy
+        if: ${{ inputs.check_scope == 'checkpoint-player' }}
+        run: |
+          mkdir -p build/native-tests dist
+          swiftc ios/NeoEPGStation/NeoCheckpointPlacement.swift tests/checkpoint-placement/main.swift -o build/native-tests/checkpoint-placement
+          build/native-tests/checkpoint-placement > dist/checkpoint-placement.txt
       - name: Native ASS parser and playback clock tests
         id: native-tests
         run: |

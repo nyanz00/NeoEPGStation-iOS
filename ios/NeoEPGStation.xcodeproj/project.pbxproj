@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+    BDEF00000000000000000039 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000039; };
     BDEF00000000000000000038 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000038; };
     BDEF00000000000000000037 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000037; };
     BDEF00000000000000000035 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000035; };
@@ -59,6 +60,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+    ADEF00000000000000000039 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoCheckpointPlacement.swift; path = NeoEPGStation/NeoCheckpointPlacement.swift; sourceTree = "<group>"; };
     ADEF00000000000000000038 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoCheckpointPlayback.swift; path = NeoEPGStation/NeoCheckpointPlayback.swift; sourceTree = "<group>"; };
     ADEF00000000000000000037 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoDecodeTrialController.swift; path = NeoEPGStation/NeoDecodeTrialController.swift; sourceTree = "<group>"; };
     ADEF00000000000000000035 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoAVPlayerComparison.swift; path = NeoEPGStation/NeoAVPlayerComparison.swift; sourceTree = "<group>"; };
@@ -136,7 +138,7 @@
         ADEF00000000000000000035,
         ADEF00000000000000000036,
         ADEF00000000000000000037,
-        ADEF00000000000000000038,
+        ADEF00000000000000000038, ADEF00000000000000000039,
         ADEF00000000000000000030,
         ADEF00000000000000000029,
         ADEF00000000000000000031,
@@ -371,7 +373,7 @@
         BDEF00000000000000000032,
         BDEF00000000000000000035,
         BDEF00000000000000000034,
-        BDEF00000000000000000037, BDEF00000000000000000038,
+        BDEF00000000000000000037, BDEF00000000000000000038, BDEF00000000000000000039,
         BDEF00000000000000000030,
         BDEF00000000000000000029,
         BDEF00000000000000000031,
