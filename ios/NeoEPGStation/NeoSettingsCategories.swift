@@ -103,6 +103,11 @@ final class NeoSettingsCategoryPage: NeoPage {
         }
       })
       row("再生エンジン", explanation: "試験用はエンコード済みPLAYを先頭から開きます。コメント・字幕・PiP・視聴履歴の保存には未対応です。診断用はAV1動画の復号速度を自動比較します。次の再生から適用します。", control: engine)
+      if NeoPlaybackExperiment.selected == .checkpointPlayer {
+        toggle("チェックポイントを使用", explanation: "1080p以下のAV1で比較します。過去60秒・先読み20秒、保持上限128MiB。オフでも同じソフトウェア復号を使用します。次の再生から適用します。", on: NeoPlaybackExperiment.checkpointEnabled) {
+          NeoPlaybackExperiment.checkpointEnabled = $0
+        }
+      }
       button("接続先を変更") { [weak self, weak shell] in
         guard let shell else { return }; self?.navigationController?.pushViewController(NeoConnectionPage(shell: shell), animated: true)
       }

@@ -1,0 +1,207 @@
+--- a/Sources/AetherEngine/Decoder/VideoDecoderTypes.swift
++++ b/Sources/AetherEngine/Decoder/VideoDecoderTypes.swift
+@@ -4,6 +4,8 @@
+ import CoreGraphics
+ import AetherLibavformat
+ import AetherLibavcodec
++import AetherLibavutil
++import AetherLibavformat
+ 
+ /// Decoded frame callback. `hdr10PlusT35` carries HDR10+ dynamic metadata serialised to ITU-T T.35 bytes
+ /// (kCMSampleAttachmentKey_HDR10PlusPerFrameData format); nil for non-HDR10+ streams.
+@@ -176,3 +178,37 @@
+         trc == AVCOL_TRC_SMPTE2084 || trc == AVCOL_TRC_ARIB_STD_B67
+     }
+ }
++
++/// Host-installed experimental AV1 decoder. Packet/frame pointers are synchronous
++/// borrows; the regular software renderer and audio clock remain engine-owned.
++public protocol NeoAV1PlaybackDecoding: AnyObject, Sendable {
++    func open(stream: UnsafeMutablePointer<AVStream>) throws
++    func decode(packet: UnsafeMutablePointer<AVPacket>?, emit: @escaping @Sendable (UnsafeMutablePointer<AVFrame>) -> Void) -> Int32
++    func flush()
++    func prepareCheckpointSeek(to sourceSeconds: Double, afterKeyframe: Double)
++    func close()
++}
++public enum NeoAV1PlaybackBridge {
++    private static let lock = NSLock()
++    nonisolated(unsafe) private static var factory: (@Sendable () -> any NeoAV1PlaybackDecoding)?
++    public static func install(_ value: (@Sendable () -> any NeoAV1PlaybackDecoding)?) {
++        lock.lock(); factory = value; lock.unlock()
++    }
++    static func make() -> (any NeoAV1PlaybackDecoding)? {
++        lock.lock(); let value = factory; lock.unlock(); return value?()
++    }
++}
++public struct NeoAV1PacketData: Sendable {
++    public let bytes: Data
++    public let pts, dts, duration, position: Int64
++    public let flags: Int32
++    init(_ p: SoftwareStoredPacket) {
++        bytes = p.bytes; pts = p.pts; dts = p.dts; duration = p.duration
++        position = p.position; flags = p.flags
++    }
++}
++public struct NeoAV1PacketRun: Sendable {
++    public let sourcePosition: Double
++    public let secondsPerTick: Double
++    public let packets: [NeoAV1PacketData]
++}
+--- a/Sources/AetherEngine/Decoder/SoftwareVideoDecoder.swift
++++ b/Sources/AetherEngine/Decoder/SoftwareVideoDecoder.swift
+@@ -11,6 +11,7 @@
+ /// Uses sws_scale (SIMD/NEON-optimized) for YUV→NV12/P010 conversion; required to hit 24fps at 1080p for AV1.
+ final class SoftwareVideoDecoder: VideoDecodingPipeline, @unchecked Sendable {
+ 
++    private var neoBridge: (any NeoAV1PlaybackDecoding)?
+     private var codecContext: UnsafeMutablePointer<AVCodecContext>?
+     // FFmpeg 8.x exposes SwsContext as a real struct (7.x was OpaquePointer); pointer type must match or call sites miscompile.
+     private var swsContext: UnsafeMutablePointer<SwsContext>?
+@@ -191,6 +192,15 @@
+             container: stream.pointee.sample_aspect_ratio
+         )
+ 
++        if codecpar.pointee.codec_id == AV_CODEC_ID_AV1, let bridge = NeoAV1PlaybackBridge.make() {
++            try bridge.open(stream: stream)
++            neoBridge = bridge
++            containerColor = ColorDescription(codecpar: codecpar)
++            use10Bit = codecpar.pointee.bits_per_raw_sample > 8 || ColorAttachments.isHDRTransfer(codecpar.pointee.color_trc)
++            EngineLog.emit("[SWDecoder] checkpoint bridge opened", category: .swPlayback)
++            return
++        }
++
+         // FFmpeg's generic AV1 decoder is hardware-only on these builds. The
+         // software route must open dav1d, never retry the hardware decoder.
+         let selectedCodec = codecpar.pointee.codec_id == AV_CODEC_ID_AV1
+@@ -295,6 +305,16 @@
+         // epoch, so either the send happens first and the flush drops what it produced, or the flush
+         // happens first and the send never runs.
+         if let epoch, epoch != _feedEpoch { lock.unlock(); return }
++        if let bridge = neoBridge {
++            let result = bridge.decode(packet: packet) { [self] frame in
++                ColorDescription.backfill(frame: frame, container: containerColor)
++                decodedFormatKey = DecodedFormatKey(pixelFormat: frame.pointee.format, color: ColorDescription(frame: frame))
++                emit(frame, timeBase: timeBase)
++            }
++            lock.unlock()
++            if result < 0 { EngineLog.emit("[SWDecoder] checkpoint decode failed code=\(result)", category: .swPlayback) }
++            return
++        }
+         guard let ctx = codecContext else { lock.unlock(); return }
+         var sendRet = avcodec_send_packet(ctx, packet)
+         lock.unlock()
+@@ -506,6 +526,7 @@
+         _feedEpoch &+= 1
+         // Deinterlacer temporal references are stale across seeks; drop the graph (lazily rebuilt on next interlaced frame).
+         if resetFilterGraph { deinterlacer.teardown() }
++        if let bridge = neoBridge { bridge.flush(); return }
+         guard let ctx = codecContext else { return }
+         avcodec_flush_buffers(ctx)
+     }
+@@ -541,6 +562,7 @@
+ 
+     func close() {
+         lock.lock()
++        neoBridge?.close(); neoBridge = nil
+         deinterlacer.teardown()
+         if codecContext != nil {
+             avcodec_free_context(&codecContext)
+@@ -561,6 +583,18 @@
+         // Nil onFrame inside the lock: emit() reads it under the same lock; unsynchronized write is a data race.
+         onFrame = nil
+         lock.unlock()
++    }
++
++    func neoCheckpointSeek(to seconds: Double, afterKeyframe: Double) {
++        lock.lock(); defer { lock.unlock() }
++        neoBridge?.prepareCheckpointSeek(to: seconds, afterKeyframe: afterKeyframe)
++    }
++    func drainForEndOfStream() {
++        lock.lock(); defer { lock.unlock() }
++        _ = neoBridge?.decode(packet: nil) { [self] frame in
++            ColorDescription.backfill(frame: frame, container: containerColor)
++            emit(frame, timeBase: timeBase)
++        }
+     }
+ 
+     deinit {
+--- a/Sources/AetherEngine/Native/SoftwarePacketReadAhead.swift
++++ b/Sources/AetherEngine/Native/SoftwarePacketReadAhead.swift
+@@ -355,6 +355,34 @@
+         }
+         guard reached, !overflow, isCancelled?() != true else { return nil }
+         return run
++    }
++
++
++    /// Resident bytes only. Reads on a utility worker and never moves the feed
++    /// cursor or demuxer. Expired history is a miss, not another network fetch.
++    func neoCheckpointKeyframe(at seconds: Double) -> Double? {
++        condition.lock(); defer { condition.unlock() }
++        return keyframes.filter { $0.seconds <= seconds }.map(\.seconds).max()
++    }
++    func neoCheckpointRun(from seconds: Double, through end: Double) -> [SoftwareStoredPacket] {
++        let deadline = ContinuousClock.now.advanced(by: .milliseconds(250))
++        condition.lock()
++        let usable = !closed && !sourceRepositioning && !resetPending && retainedPacketsUsableLocked
++        let anchor = usable ? keyframes.filter { $0.seconds <= seconds }.max { $0.seconds < $1.seconds } : nil
++        condition.unlock()
++        guard let anchor, seconds - anchor.seconds <= 120 else { return [] }
++        var result: [SoftwareStoredPacket] = [], bytes = 0
++        do {
++            try fifo.readHistory(from: anchor.cursor) { data in
++                if ContinuousClock.now >= deadline || result.count >= 4096 || bytes >= 32*1024*1024 { return false }
++                let packet = try SoftwareStoredPacket.decode(data)
++                guard packet.streamIndex == video.index else { return true }
++                guard let position = videoSeconds(pts: packet.pts), position <= end else { return false }
++                if result.isEmpty && packet.flags & 1 == 0 { return false }
++                bytes += packet.bytes.count; result.append(packet); return true
++            }
++        } catch { return [] }
++        return result
+     }
+ 
+     func endSeek(_ token: UInt64, sourceClock: Double) {
+--- a/Sources/AetherEngine/Native/SoftwarePlaybackHost.swift
++++ b/Sources/AetherEngine/Native/SoftwarePlaybackHost.swift
+@@ -1911,6 +1911,9 @@
+                 return .stalled
+             }
+         }
++        if cacheHit, let key = packetSource?.neoCheckpointKeyframe(at: sourceSeconds) {
++            (videoDecoder as? SoftwareVideoDecoder)?.neoCheckpointSeek(to: sourceSeconds, afterKeyframe: key)
++        }
+         let outcome: Demuxer.RepositionOutcome
+         if cacheHit {
+             // The decode cursor now points at retained preroll. The source reader remains at its
+@@ -1974,6 +1977,18 @@
+         noteSeekSettled(generation)
+         if let cacheGeneration { packetSource?.endSeek(cacheGeneration, sourceClock: sourceSeconds) }
+         return outcome
++    }
++
++    func neoCheckpointPackets(fromSession seconds: Double) async -> NeoAV1PacketRun? {
++        guard let source = vodPacketReadAhead, !stopRequested, !seekWindowOpen else { return nil }
++        let generation = seekGeneration
++        let position = seconds + clockSessionZero
++        let packets = await BlockingWork.detached(priority: .utility) {
++            source.neoCheckpointRun(from: position, through: position + 20)
++        }.value
++        guard generation == seekGeneration, !stopRequested, !packets.isEmpty else { return nil }
++        return NeoAV1PacketRun(sourcePosition: position, secondsPerTick: videoTimeBaseSeconds,
++                              packets: packets.map(NeoAV1PacketData.init))
+     }
+ 
+     /// AE#595: the extractor, built on the first ask and kept for the rest of the session.
+--- a/Sources/AetherEngine/AetherEngine+FrameTimes.swift
++++ b/Sources/AetherEngine/AetherEngine+FrameTimes.swift
+@@ -53,3 +53,9 @@
+         softwareHost?.presentationTimebase
+     }
+ }
++
++extension AetherEngine {
++    public func neoCheckpointPackets(fromSession seconds: Double) async -> NeoAV1PacketRun? {
++        await softwareHost?.neoCheckpointPackets(fromSession: seconds)
++    }
++}

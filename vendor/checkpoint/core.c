@@ -91,8 +91,8 @@ int neo_checkpoint_save(Dav1dContext *c, NeoCheckpoint **out) {
     return 0;
 }
 
-int neo_checkpoint_restore(Dav1dContext *c, const NeoCheckpoint *p) {
-    if (!p || p->owner != c || !boundary(c) ||
+static int checkpoint_restore_internal(Dav1dContext *c, const NeoCheckpoint *p, int compatible) {
+    if (!p || (!compatible && p->owner != c) || !boundary(c) ||
         p->threads != c->n_tc || p->frame_contexts != c->n_fc) return DAV1D_ERR(EINVAL);
     /* Flush the CURRENT stream state, retaining reusable decoder workspace.
      * No keyframe or sequence header is replayed after this point. */
@@ -116,6 +116,10 @@ int neo_checkpoint_restore(Dav1dContext *c, const NeoCheckpoint *p) {
     c->max_spatial_id = p->max_spatial_id; c->drain = p->drain;
     c->frame_flags = p->frame_flags; c->event_flags = p->event_flags;
     return 0;
+}
+
+int neo_checkpoint_restore(Dav1dContext *c, const NeoCheckpoint *p) {
+    return checkpoint_restore_internal(c, p, 0);
 }
 
 void neo_checkpoint_free(NeoCheckpoint **saved) {

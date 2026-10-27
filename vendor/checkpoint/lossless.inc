@@ -194,11 +194,11 @@ int neo_lossless_encode(NeoLosslessCheckpoint *s) {
     }
     return 0;
 }
-int neo_lossless_restore(Dav1dContext *c,const NeoLosslessCheckpoint *s) {
+static int lossless_restore_internal(Dav1dContext *c,const NeoLosslessCheckpoint *s,int compatible) {
     if(!s)return DAV1D_ERR(EINVAL);
     NeoPackedCheckpoint *p=s->shell;
-    if(!p || !p->meta || p->meta->owner!=c || !boundary(c))return DAV1D_ERR(EINVAL);
-    Dav1dThreadPicture images[8]={0};int e=neo_checkpoint_restore(c,p->meta);if(e)return e;
+    if(!p || !p->meta || (!compatible && p->meta->owner!=c) || !boundary(c))return DAV1D_ERR(EINVAL);
+    Dav1dThreadPicture images[8]={0};int e=checkpoint_restore_internal(c,p->meta,compatible);if(e)return e;
     for(unsigned j=0;j<p->count;j++) {
         int slot=0;while(slot<8 && p->slots[slot]!=(int)j)slot++;
         e=neo_packed_picture_allocate(c,&images[j],&p->meta->refs[slot].p);if(e)goto done;
@@ -215,6 +215,16 @@ int neo_lossless_restore(Dav1dContext *c,const NeoLosslessCheckpoint *s) {
 done:
     for(unsigned j=0;j<p->count;j++)dav1d_thread_picture_unref(&images[j]);
     if(e)dav1d_flush(c);return e;
+}
+
+int neo_lossless_restore(Dav1dContext *c,const NeoLosslessCheckpoint *s) {
+    return lossless_restore_internal(c,s,0);
+}
+
+/* Only the playback bridge calls this, with a stream/session identity check.
+ * Existing diagnostic APIs continue rejecting different decoder owners. */
+int neo_lossless_restore_compatible(Dav1dContext *c,const NeoLosslessCheckpoint *s) {
+    return lossless_restore_internal(c,s,1);
 }
 
 void neo_lossless_free(NeoLosslessCheckpoint **ptr) {

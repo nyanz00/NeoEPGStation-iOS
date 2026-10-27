@@ -507,8 +507,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       player = controller; controller.onClose = { [weak self] in self?.player = nil }
       present(controller, animated: true); return
     }
-    if experiment == .aether, experiment.applies(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
+    if (experiment == .aether || experiment == .checkpointPlayer), experiment.applies(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
       let controller = NeoAetherPlayer(url: api.url("/videos/\(file.id)"), title: recording.name, initialPosition: 0,
+        checkpointMode: experiment == .checkpointPlayer ? NeoPlaybackExperiment.checkpointEnabled : nil,
         context: ["baseURL": api.base.absoluteString, "id": recording.id, "disableHistory": true,
           "channelId": recording.channelId ?? 0, "channelName": recording.channelName ?? "",
           "name": recording.name, "startAt": recording.startAt, "endAt": recording.endAt,

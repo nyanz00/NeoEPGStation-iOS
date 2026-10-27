@@ -80,12 +80,14 @@ if inspect:
     run('codesign', '--force', '--sign', '-', 'dist/aether-renderer-inspect.dylib')
 fixtures = (os.environ['AETHER_FIXTURE'],) if os.environ.get('AETHER_FIXTURE') else (('hevc-seek-10.mkv',) if inspect else ('encoded-seek-1080.mkv', 'hevc-seek-10.mkv', 'av1-seek-10.mkv'))
 assert set(fixtures) <= set(references), 'Unknown synthetic fixture'
+checkpoint_player = '--checkpoint-player' in sys.argv
+if checkpoint_player: fixtures = ('av1-seek-10.mkv',)
 seek_work = '--seek-work' in sys.argv
-cases = ([(fixtures[0], True)] if seek_work else []) + [(fixture, False) for fixture in fixtures]
+cases = ([(fixtures[0], False), (fixtures[0], True)] if checkpoint_player else ([(fixtures[0], True)] if seek_work else []) + [(fixture, False) for fixture in fixtures])
 print('Aether fixture scope:', cases, flush=True)
 try:
     for fixture, baseline in cases:
-        case_name = fixture + ('-ui-baseline' if baseline else '')
+        case_name = fixture + (('-checkpoint-off' if baseline else '-checkpoint-on') if checkpoint_player else ('-ui-baseline' if baseline else ''))
         try:
             video = Path('tests/fixtures', fixture).read_bytes(); transferred = requests = 0
             assert hashlib.sha256(video).hexdigest() == references[fixture]['sha256']
@@ -98,6 +100,9 @@ try:
             for name in names:
                 (documents/name).unlink(missing_ok=True)
             environment = dict(os.environ, SIMCTL_CHILD_NEO_EPG_AETHER_COMPARE=f'http://127.0.0.1:{server.server_port}', SIMCTL_CHILD_NEO_EPG_AETHER_UI_BASELINE='1' if baseline else '0')
+            if checkpoint_player:
+                environment['SIMCTL_CHILD_NEO_EPG_CHECKPOINT_COMPARE'] = 'off' if baseline else 'on'
+                environment['SIMCTL_CHILD_NEO_EPG_AETHER_UI_BASELINE'] = '0'
             if inspect:
                 environment['SIMCTL_CHILD_DYLD_INSERT_LIBRARIES'] = str(Path('dist/aether-renderer-inspect.dylib').resolve())
                 for extra in ('aether-renderer-inspection.json', 'aether-renderer-picture.png'):
@@ -110,7 +115,7 @@ try:
                     'subsystem == "de.superuser404.AetherEngine"'], stdout=log, stderr=log)
                 try:
                     subprocess.run(['xcrun', 'simctl', 'launch', device, bundle], env=environment, check=True, timeout=60)
-                    deadline = time.monotonic()+180
+                    deadline = time.monotonic()+(240 if checkpoint_player else 180)
                     while not all((documents/name).exists() for name in names) and time.monotonic()<deadline:
                         if inspect and (documents/'aether-renderer-inspection.json').exists(): break
                         time.sleep(.5)
@@ -153,7 +158,7 @@ try:
             if fixture.startswith('av1'):
                 decisions = [e.get('decision') for e in events if e['event']=='aether.engineDecision']
                 hardware = next(e['av1'] for e in events if e['event']=='aether.hardware')
-                assert ('av1-native-route' if hardware else 'decoder-libdav1d') in decisions, decisions
+                assert ('decoder-checkpoint-dav1d' if checkpoint_player else ('av1-native-route' if hardware else 'decoder-libdav1d')) in decisions, decisions
             ui = next((e for e in events if e['event']=='aether.uiSummary'), None)
             if seek_work:
                 assert ui and ui['ticks'] > 0 and ui['uiThrottled'] == (not baseline), ui
@@ -167,6 +172,17 @@ try:
                     assert native and all('targetResident' in e and 'serverRequests' in e and 'segmentOffsetMs' in e for e in native), samples
                 else: assert all(e.get('avSampleAvailable')==0 for e in samples), samples
                 assert len([e for e in events if e['event']=='aether.seekUIWork']) == 5
+            if checkpoint_player:
+                configurations = [e for e in events if e['event']=='checkpoint.configuration']
+                assert configurations and configurations[-1]['enabled'] == (not baseline)
+                caches = [e for e in events if e['event']=='checkpoint.cache']
+                assert caches and all(e['heldBytes'] <= 128*1024*1024 for e in caches)
+                assert not any(e['event']=='checkpoint.fallback' for e in events)
+                if not baseline:
+                    restored = [e for e in events if e['event']=='checkpoint.restored' and e['status']==0]
+                    assert len(restored)>=2, restored
+                    assert any(e['event']=='checkpoint.saved' and e['source']=='lookahead' for e in events)
+                else: assert not any(e['event']=='checkpoint.saved' for e in events)
             assert result['success'] and all(result['checks'].values()), result
             assert not any(e['event'] in ('aether.failure', 'aether.seekFailed', 'seek.timeout') for e in events), events[-10:]
             results.append({'fixture': fixture, 'uiBaseline': baseline, 'uiWork': ui, 'success': True, 'checks': result['checks'],

@@ -61,6 +61,9 @@ def prepare():
                      ('vendor/checkpoint/lab.c','src/neo_checkpoint_lab.c'),
                      ('vendor/checkpoint/NeoCheckpointLab.h','include/NeoCheckpointLab.h')]:
         write_changed(SOURCE/dst, (ROOT/src).read_bytes())
+    for src,dst in [('vendor/checkpoint/NeoCheckpointPlayback.h','include/NeoCheckpointPlayback.h'),
+                    ('vendor/checkpoint/playback.c','src/neo_checkpoint_playback.c')]:
+        write_changed(SOURCE/dst,(ROOT/src).read_bytes())
     compression=prepare_compression(ROOT,SOURCE,ROOT/'dist/notices/CheckpointCompression')
     write_changed(SOURCE/'src/neo_packed_checkpoint.c',
         (ROOT/'vendor/checkpoint/packed.c').read_bytes()+b'\n'+(ROOT/'vendor/checkpoint/lossless.inc').read_bytes())
@@ -68,7 +71,7 @@ def prepare():
         (ROOT/'vendor/checkpoint/lab.c').read_bytes()+b'\n'+(ROOT/'vendor/checkpoint/storage-profile.inc').read_bytes()+b'\n'+(ROOT/'vendor/checkpoint/realtime.inc').read_bytes())
     meson = run('git','-C',SOURCE,'show','HEAD:src/meson.build')+'\n'
     # packed.c includes core.c: compile it once, not as two translation units.
-    write_changed(SOURCE/'src/meson.build', meson.replace("'cdf.c',", "'cdf.c',\n    'neo_packed_checkpoint.c',\n    'neo_checkpoint_lab.c',\n    'neo_lz4.c',\n    'neo_zstd.c',\n    'neo_rcomp_format.c',\n    'neo_lscomp_format.c',\n    'neo_metal_zstd_format.c',", 1).encode())
+    write_changed(SOURCE/'src/meson.build', meson.replace("'cdf.c',", "'cdf.c',\n    'neo_packed_checkpoint.c',\n    'neo_checkpoint_playback.c',\n    'neo_checkpoint_lab.c',\n    'neo_lz4.c',\n    'neo_zstd.c',\n    'neo_rcomp_format.c',\n    'neo_lscomp_format.c',\n    'neo_metal_zstd_format.c',", 1).encode())
     picture = run('git','-C',SOURCE,'show','HEAD:src/picture.c')+'\n'
     write_changed(SOURCE/'src/picture.c',picture.encode()+(ROOT/'vendor/checkpoint/picture-helper.inc').read_bytes())
     return public,compression
@@ -132,6 +135,7 @@ def main():
               'librarySHA256':hashlib.sha256(library.read_bytes()).hexdigest(),
               'sourceSHA256':{p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in (
                   'scripts/build-checkpoint.py','vendor/checkpoint/core.c',
+                  'vendor/checkpoint/playback.c','vendor/checkpoint/NeoCheckpointPlayback.h',
                   'vendor/checkpoint/neo_checkpoint.h','vendor/checkpoint/packed.c',
                   'vendor/checkpoint/packed.h','vendor/checkpoint/picture-helper.inc',
                   'vendor/checkpoint/lab.c','vendor/checkpoint/NeoCheckpointLab.h',

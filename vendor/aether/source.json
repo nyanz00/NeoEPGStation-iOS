@@ -90,6 +90,37 @@
           "patchedSHA256": "69dd69ffeaef7220092b8f632e6315e0d0f64980ff2d418c61f22937e0bd54cb"
         }
       ]
+    },
+    {
+      "file": "0009-checkpoint-playback-bridge.patch",
+      "sha256": "0d46edc22080a7c5fd3d114283432ca6d574e8938cf93801cc08e665551bf7ab",
+      "sources": [
+        {
+          "path": "Sources/AetherEngine/Decoder/VideoDecoderTypes.swift",
+          "upstreamSHA256": "8d2ff0993ba07eb158dab8fed13275480e67bdf64838dca830a5c48de674ff47",
+          "patchedSHA256": "0656af4a8cfffeb7110102d84b212559fe75325c5dc3ee869923384e461dcafb"
+        },
+        {
+          "path": "Sources/AetherEngine/Decoder/SoftwareVideoDecoder.swift",
+          "upstreamSHA256": "3da19d1ba8fc42ce7cc803fedf31de1dbc7cc107fdb0680004a42b30371c9e05",
+          "patchedSHA256": "ffc659517e164213b28e89855ef8d51a53307f4f0dce897f39c3048ee9405d09"
+        },
+        {
+          "path": "Sources/AetherEngine/Native/SoftwarePacketReadAhead.swift",
+          "upstreamSHA256": "d8f4cd05ad4e68d50677a8828075dde5886c077226ebe32e7bf6e37c438f2dbd",
+          "patchedSHA256": "987d742e1c7b078f536889b4cb83615dbbb4a25744d713671dfb17636bf2d05e"
+        },
+        {
+          "path": "Sources/AetherEngine/Native/SoftwarePlaybackHost.swift",
+          "upstreamSHA256": "b6ce77a6072b82a7abcaaaed94da9b7a0c49ad594e42e755aad6df1fcf321689",
+          "patchedSHA256": "7cdf62f6d32ec545f9430ba3d222c66838218f1c5ade15f3e064048c9ce56b64"
+        },
+        {
+          "path": "Sources/AetherEngine/AetherEngine+FrameTimes.swift",
+          "upstreamSHA256": "5188f8b963947aaa3dfecb49ed3119a441121621e1a1f8238cad1753d43fe610",
+          "patchedSHA256": "aca40ce149cec1ed9efe1a189145b5b96d8458ae1123bdcdf234b4729cfdad29"
+        }
+      ]
     }
   ],
   "retiredHeaderCorrection": {

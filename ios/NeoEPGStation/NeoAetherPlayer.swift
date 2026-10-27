@@ -30,6 +30,7 @@ private final class NeoAetherLogCapture: @unchecked Sendable {
       ("[VTProbe] codec=av01 hwSupported=true", "av1-hardware-supported"),
       ("[VTProbe] codec=av01 hwSupported=false", "av1-hardware-unavailable"),
       ("codec=libdav1d,", "decoder-libdav1d"),
+      ("checkpoint bridge opened", "decoder-checkpoint-dav1d"),
       ("dispatch: codec=\(AV_CODEC_ID_AV1.rawValue) → software", "av1-software-route"),
       ("dispatch: codec=\(AV_CODEC_ID_AV1.rawValue) → native", "av1-native-route"),
       ("[SWDecoder] send_packet returned", "video-decode-error"),
@@ -69,6 +70,10 @@ final class NeoAetherPlayer: UIViewController {
   private var slider: UISlider { chrome.timeline }
   private var playButton: UIButton { chrome.playButton }
   private let context: [String: Any]
+  private let checkpointPlayback: NeoCheckpointPlayback?
+  private var checkpointTask: Task<Void, Never>?
+  private var checkpointLastTick = -Double.infinity
+  private var checkpointAxisOffset = 0.0
   private var hideControls: DispatchWorkItem?
   private var subscriptions = Set<AnyCancellable>()
   private var loading: Task<Void, Never>?, seekTask: Task<Void, Never>?, probeTask: Task<Void, Never>?
@@ -113,8 +118,9 @@ final class NeoAetherPlayer: UIViewController {
     var waitSampleLevel = 0
     var uiWorkAtStart = 0.0
   }
-  init(url: URL, title: String, initialPosition: Double, context: [String: Any] = [:]) {
+  init(url: URL, title: String, initialPosition: Double, checkpointMode: Bool? = nil, context: [String: Any] = [:]) {
     self.context = context
+    checkpointPlayback = checkpointMode.map { NeoCheckpointPlayback(enabled: $0) }
     source = url; recordingTitle = title
     self.initialPosition = initialPosition.isFinite ? max(0, initialPosition) : 0
     super.init(nibName: nil, bundle: nil)
@@ -154,6 +160,18 @@ final class NeoAetherPlayer: UIViewController {
       guard compatible else { throw NSError(domain: "NeoAetherBinaryABI", code: 1) }
       NeoPlaybackDiagnostics.record("aether.hardware", fields: ["av1": VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1)])
       EngineLog.handler = { [capture = engineLog] line in capture.receive(line) }
+      if let checkpointPlayback {
+        checkpointPlayback.onFailure { [weak self] _ in
+          Task { @MainActor [weak self] in
+            guard let self, !self.closed else { return }
+            self.seek(to: self.pending?.target ?? self.engine?.currentTime ?? 0)
+          }
+        }
+        NeoAV1PlaybackBridge.install { [checkpointPlayback] in checkpointPlayback.makeDecoder() }
+        AetherEngine.setForceSoftwarePathForTesting(true)
+        NeoPlaybackDiagnostics.record("checkpoint.configuration", fields: ["enabled": checkpointPlayback.enabled,
+          "historySeconds": 60, "futureSeconds": 20, "budgetBytes": NeoCheckpointPlayback.budget])
+      }
       let engine = try AetherEngine(); self.engine = engine
       engine.backgroundPlaybackEnabled = false; engine.bind(view: surface)
       engine.setSoftwareVideoFrameTimeObserver { [frames = decodedFrames] in frames.accept($0) }
@@ -174,8 +192,9 @@ final class NeoAetherPlayer: UIViewController {
         do {
           // Empty subtitle preferences and no host subtitle view: the comparison
           // measures the engine without comment/subtitle preparation or history writes.
-          _ = try await engine.load(url: self.source, startPosition: self.initialPosition,
-            options: LoadOptions(preferredSubtitleLanguages: [], autoplay: true))
+          var options = LoadOptions(preferredSubtitleLanguages: [], autoplay: true)
+          if self.checkpointPlayback != nil { options.forwardBufferSegments = 5 }
+          _ = try await engine.load(url: self.source, startPosition: self.initialPosition, options: options)
           guard !Task.isCancelled, !self.closed else { return }
           if let size = engine.softwareDisplaySize, size.height > 0 { self.chrome.videoAspectRatio = size.width/size.height }
           if !self.wantsPlayback { engine.pause() }
@@ -246,6 +265,22 @@ final class NeoAetherPlayer: UIViewController {
     if !scrubbing { slider.value = duration > 0 ? Float(position/duration) : 0 }
     uiTicks += 1
     let now = CACurrentMediaTime()
+    if let checkpoints = checkpointPlayback, now - checkpointLastTick >= 1 {
+      checkpointLastTick = now
+      checkpoints.updatePosition(position + checkpointAxisOffset)
+      NeoPlaybackDiagnostics.record("checkpoint.cache", fields: checkpoints.report())
+      if checkpointTask == nil, checkpoints.needsAheadRun, pending == nil {
+        let epoch = sequence
+        checkpointTask = Task { [weak self, engine, checkpoints] in
+          guard let self else { return }
+          defer { self.checkpointTask = nil }
+          guard let run = await engine.neoCheckpointPackets(fromSession: position),
+                !Task.isCancelled, !self.closed, self.sequence == epoch else { return }
+          self.checkpointAxisOffset = run.sourcePosition - position
+          checkpoints.offer(run)
+        }
+      }
+    }
     if pending != nil, lastTickAt > 0 { seekTickGapMs = max(seekTickGapMs, (now-lastTickAt)*1000) }
     lastTickAt = now
     slider.isEnabled = engine.canSeek && duration > 0
@@ -477,6 +512,11 @@ final class NeoAetherPlayer: UIViewController {
   }
   private func shutdown() {
     guard !closed else { return }; closed = true
+    checkpointTask?.cancel(); checkpointTask = nil
+    if let checkpointPlayback {
+      checkpointPlayback.stop(); NeoAV1PlaybackBridge.install(nil)
+      AetherEngine.setForceSoftwarePathForTesting(false)
+    }
     loading?.cancel(); seekTask?.cancel(); probeTask?.cancel(); timer?.invalidate(); timer = nil
     if let output = videoOutput { outputItem?.remove(output) }; outputItem = nil; videoOutput = nil
     diagnosticTask?.cancel(); queuedDiagnostic = nil
@@ -490,6 +530,9 @@ final class NeoAetherPlayer: UIViewController {
     shutdown()
     let completion = onClose; onClose = nil
     dismiss(animated: true) { completion?() }
+  }
+  override func didReceiveMemoryWarning() {
+    super.didReceiveMemoryWarning(); checkpointPlayback?.memoryWarning()
   }
   override func viewDidDisappear(_ animated: Bool) {
     super.viewDidDisappear(animated)
@@ -527,6 +570,15 @@ final class NeoAetherPlayer: UIViewController {
         "initialPosition": abs((engine?.currentTime ?? 0)-initialPosition) < 3]
       for (index, target) in [20.0, 40.0, 30.0, 20.0].enumerated() {
         guard !closed else { break }
+        if let checkpoints = checkpointPlayback, checkpoints.enabled {
+          let fillDeadline = CACurrentMediaTime()+25
+          while !closed, CACurrentMediaTime()<fillDeadline {
+            let state = checkpoints.report()
+            if (state["newestMs"] as? Double ?? 0) >= (target-6.5)*1000,
+               (state["lookaheadSaved"] as? Int ?? 0) > 0 { break }
+            try? await Task.sleep(for: .milliseconds(100))
+          }
+        }
         let count = landedCount; seek(to: target)
         let end = CACurrentMediaTime()+13
         while pending != nil && CACurrentMediaTime()<end { try? await Task.sleep(for: .milliseconds(50)) }
@@ -544,6 +596,21 @@ final class NeoAetherPlayer: UIViewController {
       while diagnosticBusy && CACurrentMediaTime()<sampleDeadline { try? await Task.sleep(for: .milliseconds(20)) }
       checks["noFailures"] = failedCount == 0
       checks["targetPictures"] = seekPictures.count == 5
+      if let checkpoints = checkpointPlayback {
+        let report = checkpoints.report()
+        checks["checkpointBudget"] = (report["heldBytes"] as? Int ?? Int.max) <= NeoCheckpointPlayback.budget
+        if checkpoints.enabled {
+          checks["checkpointHits"] = (report["hits"] as? Int ?? 0) >= 2
+          checks["lookaheadCreated"] = (report["lookaheadSaved"] as? Int ?? 0) > 0
+          checks["checkpointNoFallback"] = report["fallback"] as? Bool == false
+        } else {
+          checks["disabledCreatesNothing"] = (report["saved"] as? Int ?? -1) == 0
+        }
+        checkpoints.updatePosition(200)
+        checks["checkpointWindowEviction"] = checkpoints.report()["points"] as? Int == 0
+        checkpoints.memoryWarning()
+        checks["checkpointMemoryPressure"] = checkpoints.report()["heldBytes"] as? Int == 0
+      }
       for (picture, name) in seekPictures { saveComparisonPicture(picture, name: name) }; seekPictures.removeAll()
       if let picture = startupPicture { saveComparisonPicture(picture) }; startupPicture = nil
       shutdown(); checks["closed"] = engine == nil && timer == nil

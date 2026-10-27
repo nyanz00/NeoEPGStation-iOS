@@ -9,6 +9,7 @@ typedef struct NeoLosslessStats {size_t held_bytes,pixel_bytes;int detached;} Ne
 int neo_lossless_capture(Dav1dContext *,int,NeoLosslessCheckpoint **);
 int neo_lossless_encode(NeoLosslessCheckpoint *);
 int neo_lossless_restore(Dav1dContext *,const NeoLosslessCheckpoint *);
+int neo_lossless_restore_compatible(Dav1dContext *,const NeoLosslessCheckpoint *);
 void neo_lossless_free(NeoLosslessCheckpoint **);
 void neo_lossless_stats(const NeoLosslessCheckpoint *,NeoLosslessStats *);
 const char *neo_lossless_name(int);
