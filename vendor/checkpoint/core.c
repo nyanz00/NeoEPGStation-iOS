@@ -29,42 +29,42 @@ struct NeoCheckpoint {
 /* Caller exclusively owns the decoder API. No input may be submitted from
  * another thread. Do not drain/drop user frames here: a non-empty pipeline is
  * rejected. After full drain, synchronize with the existing worker idle park. */
-static int boundary(Dav1dContext *c) {
-    if (!c || !c->n_tc || !c->n_fc ||
-        c->allocator.alloc_picture_callback != dav1d_default_picture_alloc ||
-        c->in.data || c->out.p.data[0] || c->cache.p.data[0] ||
-        c->frame_hdr || c->n_tile_data || c->cached_error ||
-        c->content_light_ref || c->mastering_display_ref || c->itut_t35_ref)
-        return 0;
-    if (c->n_tc == 1) return c->n_fc == 1;
+static unsigned boundary_state(Dav1dContext *c) {
+    if (!c || !c->n_tc || !c->n_fc) return 1;
+    unsigned state = 0;
+    if (c->allocator.alloc_picture_callback != dav1d_default_picture_alloc) state |= 128;
+    if (c->in.data) state |= 2;
+    if (c->out.p.data[0] || c->cache.p.data[0]) state |= 4;
+    if (c->frame_hdr || c->n_tile_data || c->cached_error) state |= 8;
+    if (c->content_light_ref || c->mastering_display_ref || c->itut_t35_ref) state |= 64;
+    if (c->n_tc == 1) return state | (c->n_fc == 1 ? 0 : 16);
     struct TaskThreadData *ttd = &c->task_thread;
     pthread_mutex_lock(&ttd->lock);
-    int ok = !atomic_load(c->flush) && !ttd->delayed_fg.exec;
-    for (unsigned i = 0; i < c->n_fc && ok; i++) {
+    if (atomic_load(c->flush) || ttd->delayed_fg.exec) state |= 16;
+    for (unsigned i = 0; i < c->n_fc; i++) {
         Dav1dFrameContext *f = &c->fc[i];
         if (f->n_tile_data || atomic_load(&f->task_thread.task_counter) ||
             f->task_thread.retval || atomic_load(&f->task_thread.error) ||
-            (c->n_fc > 1 && c->frame_thread.out_delayed[i].p.frame_hdr)) ok = 0;
+            (c->n_fc > 1 && c->frame_thread.out_delayed[i].p.frame_hdr)) state |= 16;
     }
-    /* A completed frame can have just signaled completion while its worker
-     * still finishes bookkeeping. Wait until all existing workers are parked;
-     * this neither flushes references nor serializes their stacks/mutexes. */
-    for (unsigned i = 0; i < c->n_tc && ok; i++)
+    /* Preserve the original strict boundary. Only an empty pipeline waits for
+     * worker bookkeeping; readiness diagnostics never discard user frames. */
+    for (unsigned i = 0; i < c->n_tc && !state; i++)
         while (!c->tc[i].task_thread.flushed)
             pthread_cond_wait(&c->tc[i].task_thread.td.cond, &ttd->lock);
-    for (unsigned i = 0; i < c->n_fc && ok; i++)
-        if (c->fc[i].task_thread.task_head ||
-            c->fc[i].task_thread.pending_tasks.head) ok = 0;
-    for (int i = 0; i < 8 && ok; i++) {
+    for (unsigned i = 0; i < c->n_fc; i++)
+        if (c->fc[i].task_thread.task_head || c->fc[i].task_thread.pending_tasks.head) state |= 16;
+    for (int i = 0; i < 8; i++) {
         atomic_uint *progress = c->refs[i].p.progress;
-        if (c->n_fc > 1 && c->refs[i].p.p.data[0] && !progress) ok = 0;
+        if (c->n_fc > 1 && c->refs[i].p.p.data[0] && !progress) state |= 32;
         if (progress && (atomic_load(&progress[0]) != UINT_MAX ||
-                         atomic_load(&progress[1]) != UINT_MAX)) ok = 0;
-        if (c->cdf[i].progress && atomic_load(c->cdf[i].progress) != 1) ok = 0;
+                         atomic_load(&progress[1]) != UINT_MAX)) state |= 32;
+        if (c->cdf[i].progress && atomic_load(c->cdf[i].progress) != 1) state |= 32;
     }
     pthread_mutex_unlock(&ttd->lock);
-    return ok;
+    return state;
 }
+static int boundary(Dav1dContext *c) { return boundary_state(c) == 0; }
 
 int neo_checkpoint_save(Dav1dContext *c, NeoCheckpoint **out) {
     if (!out || *out || !boundary(c) || !c->seq_hdr_ref)

@@ -161,6 +161,13 @@ final class NeoAetherPlayer: UIViewController {
       NeoPlaybackDiagnostics.record("aether.hardware", fields: ["av1": VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1)])
       EngineLog.handler = { [capture = engineLog] line in capture.receive(line) }
       if let checkpointPlayback {
+        checkpointPlayback.onRecovery { [weak self] sourceTarget in
+          Task { @MainActor [weak self] in
+            guard let self, !self.closed, let pending = self.pending,
+                  abs(pending.target + self.checkpointAxisOffset-sourceTarget) < 0.05 else { return }
+            self.seek(to: pending.target)
+          }
+        }
         checkpointPlayback.onFailure { [weak self] _ in
           Task { @MainActor [weak self] in
             guard let self, !self.closed else { return }
@@ -592,10 +599,22 @@ final class NeoAetherPlayer: UIViewController {
       while pending != nil && CACurrentMediaTime()<pausedDeadline { try? await Task.sleep(for: .milliseconds(50)) }
       checks["pausedSeek"] = landedCount == pausedCount+1 && engine?.state == .paused
       await captureSeekPicture(4)
+      if let checkpoints = checkpointPlayback {
+        // Match repeated real-player reuse, and force one point-local failure.
+        // Both on/off still traverse the same target images and software decoder.
+        for (index, target) in [20.0, 40.0, 30.0, 20.0, 40.0, 30.0].enumerated() {
+          if checkpoints.enabled && index == 1 { checkpoints.probeRejectNextRestore() }
+          let count = landedCount; seek(to: target)
+          let end = CACurrentMediaTime()+13
+          while pending != nil && CACurrentMediaTime()<end { try? await Task.sleep(for: .milliseconds(50)) }
+          checks["reuseTarget\(index)"] = landedCount == count+1 && engine?.state == .paused
+          await captureSeekPicture(index+5)
+        }
+      }
       let sampleDeadline = CACurrentMediaTime()+0.5
       while diagnosticBusy && CACurrentMediaTime()<sampleDeadline { try? await Task.sleep(for: .milliseconds(20)) }
       checks["noFailures"] = failedCount == 0
-      checks["targetPictures"] = seekPictures.count == 5
+      checks["targetPictures"] = seekPictures.count == (checkpointPlayback == nil ? 5 : 11)
       if let checkpoints = checkpointPlayback {
         let report = checkpoints.report()
         checks["checkpointBudget"] = (report["heldBytes"] as? Int ?? Int.max) <= NeoCheckpointPlayback.budget
@@ -603,6 +622,8 @@ final class NeoAetherPlayer: UIViewController {
           checks["checkpointHits"] = (report["hits"] as? Int ?? 0) >= 2
           checks["lookaheadCreated"] = (report["lookaheadSaved"] as? Int ?? 0) > 0
           checks["checkpointNoFallback"] = report["fallback"] as? Bool == false
+          checks["checkpointRecovery"] = report["recoveries"] as? Int == 1 && report["rejected"] as? Int == 1
+          checks["checkpointHitsAfterRecovery"] = (report["hitsAfterRecovery"] as? Int ?? 0) >= 2
         } else {
           checks["disabledCreatesNothing"] = (report["saved"] as? Int ?? -1) == 0
         }

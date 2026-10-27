@@ -45,9 +45,23 @@ final class NeoCheckpointPlayback: @unchecked Sendable {
   private var lastAheadPacket: NeoCheckpointPacketID?
   private var runtimeDisabled = false
   private var failure: (@Sendable (Int32) -> Void)?
+  private var recovery: (@Sendable (Double) -> Void)?
+  private var skipNextSelection = false
+  private var recoveries = 0, rejected = 0, recreated = 0, hitsAfterRecovery = 0
+#if targetEnvironment(simulator)
+  private var probeRejectRestore = false
+  func probeRejectNextRestore() { lock.lock(); probeRejectRestore = true; lock.unlock() }
+  fileprivate func takeProbeRejection() -> Bool {
+    lock.lock(); defer { lock.unlock() }
+    let result = probeRejectRestore; probeRejectRestore = false; return result
+  }
+#endif
   init(enabled: Bool) { self.enabled = enabled }
   func onFailure(_ callback: @escaping @Sendable (Int32) -> Void) {
     lock.lock(); failure = callback; lock.unlock()
+  }
+  func onRecovery(_ callback: @escaping @Sendable (Double) -> Void) {
+    lock.lock(); recovery = callback; lock.unlock()
   }
   fileprivate func fail(_ code: Int32) {
     lock.lock()
@@ -115,6 +129,7 @@ final class NeoCheckpointPlayback: @unchecked Sendable {
     lock.lock(); defer { lock.unlock() }
     leased = nil; position = target; revision &+= 1; pruneLocked()
     guard enabled, !runtimeDisabled, !stopped else { return nil }
+    if skipNextSelection { skipNextSelection = false; misses += 1; return nil }
     // A real keyframe closer to the target wins. Captures are after the anchor
     // packet, so the target must follow every frame drained at that boundary.
     leased = points.filter { $0.seconds > keyframe && $0.seconds + 0.05 < target && target - $0.seconds <= 60 }
@@ -122,10 +137,30 @@ final class NeoCheckpointPlayback: @unchecked Sendable {
     if leased == nil { misses += 1 }
     return leased
   }
-  fileprivate func restored(_ point: NeoCheckpointPoint, result: Int32, elapsed: Double) {
-    lock.lock(); if result == 0 { hits += 1 }; leased = nil; pruneLocked(); lock.unlock()
+  fileprivate func restored(_ point: NeoCheckpointPoint, result: Int32, elapsed: Double, info: NeoAV1RestoreInfo) {
+    lock.lock()
+    if result == 0 { hits += 1; if recoveries > 0 { hitsAfterRecovery += 1 } }
+    recreated += Int(info.recreated); leased = nil; pruneLocked(); lock.unlock()
     NeoPlaybackDiagnostics.record("checkpoint.restored", fields: ["status": result,
-      "checkpointMs": point.seconds*1000, "restoreMs": elapsed])
+      "checkpointMs": point.seconds*1000, "restoreMs": elapsed, "reason": info.reason,
+      "stage": info.stage, "attempts": info.attempts, "decoderRecreated": info.recreated != 0,
+      "initialBoundary": info.initial_boundary, "preparedBoundary": info.prepared_boundary,
+      "retryBoundary": info.retry_boundary])
+  }
+  fileprivate func recover(_ point: NeoCheckpointPoint, target: Double, code: Int32, reason: Int32) {
+    // A bad snapshot is local to that point. Readiness/resource failures do not
+    // implicate other points, and the recovery seek must bypass checkpoints once.
+    lock.lock()
+    guard !stopped, !runtimeDisabled else { lock.unlock(); return }
+    if reason == Int32(NEO_AV1_RESTORE_SNAPSHOT) || reason == Int32(NEO_AV1_RESTORE_UNENCODED) ||
+       reason == Int32(NEO_AV1_RESTORE_ANCHOR) {
+      let old = points.count; points.removeAll { $0 === point }; rejected += old-points.count
+    }
+    leased = nil; skipNextSelection = true; revision &+= 1; recoveries += 1
+    let callback = recovery; lock.unlock()
+    NeoPlaybackDiagnostics.record("checkpoint.recovery", fields: ["code": code, "reason": reason,
+      "checkpointMs": point.seconds*1000, "targetMs": target*1000, "action": "ordinary-seek-once"])
+    callback?(target)
   }
   fileprivate func releaseLease() { lock.lock(); leased = nil; pruneLocked(); lock.unlock() }
   var needsAheadRun: Bool {
@@ -193,6 +228,7 @@ final class NeoCheckpointPlayback: @unchecked Sendable {
     return ["enabled": enabled, "points": points.count, "heldBytes": points.reduce(0) { $0+$1.bytes },
       "budgetBytes": Self.budget, "playheadMs": position*1000, "saved": saved, "lookaheadSaved": savedAhead,
       "hits": hits, "misses": misses, "evicted": evicted, "compressionBusy": compressionBusy,
+      "recoveries": recoveries, "rejected": rejected, "decoderRecreations": recreated, "hitsAfterRecovery": hitsAfterRecovery,
       "aheadBusy": aheadBusy, "fallback": runtimeDisabled, "oldestMs": (points.map(\.seconds).min() ?? position)*1000,
       "newestMs": (points.map(\.seconds).max() ?? position)*1000,
       "processFootprintBytes": neo_checkpoint_lab_footprint()]
@@ -216,6 +252,7 @@ private final class NeoCheckpointDecoder: NeoAV1PlaybackDecoding, @unchecked Sen
   private var extradata = Data()
   private var emit: (@Sendable (UnsafeMutablePointer<AVFrame>) -> Void)?
   private var planned: NeoCheckpointPoint?, skipped = 0
+  private var plannedTarget = 0.0, awaitingRecovery = false
   init(owner: NeoCheckpointPlayback, foreground: Bool) { self.owner = owner; self.foreground = foreground }
   func open(stream: UnsafeMutablePointer<AVStream>) throws {
     guard let par = stream.pointee.codecpar, par.pointee.codec_id == AV_CODEC_ID_AV1,
@@ -264,7 +301,11 @@ private final class NeoCheckpointDecoder: NeoAV1PlaybackDecoding, @unchecked Sen
   }
   func decode(packet: UnsafeMutablePointer<AVPacket>?, emit: @escaping @Sendable (UnsafeMutablePointer<AVFrame>) -> Void) -> Int32 {
     self.emit = emit; defer { self.emit = nil }
-    guard let packet else { return neo_av1_playback_drain(decoder, neoCheckpointOutput, Unmanaged.passUnretained(self).toOpaque()) }
+    if awaitingRecovery { return 0 }
+    guard let packet else {
+      if let point = planned { recoverMissingAnchor(point); return 0 }
+      return neo_av1_playback_drain(decoder, neoCheckpointOutput, Unmanaged.passUnretained(self).toOpaque())
+    }
     let result = feed(bytes: packet.pointee.data, count: Int(packet.pointee.size), pts: packet.pointee.pts,
                 duration: packet.pointee.duration, position: packet.pointee.pos, flags: packet.pointee.flags,
                 id: NeoCheckpointPacketID(packet))
@@ -284,12 +325,29 @@ private final class NeoCheckpointDecoder: NeoAV1PlaybackDecoding, @unchecked Sen
       skipped += 1
       if point.packet == id {
         let began = ProcessInfo.processInfo.systemUptime
-        let result = neo_av1_playback_restore(decoder, point.state)
-        owner.restored(point, result: result, elapsed: (ProcessInfo.processInfo.systemUptime-began)*1000)
+        var info = NeoAV1RestoreInfo()
+        var result: Int32
+#if targetEnvironment(simulator)
+        if owner.takeProbeRejection() {
+          result = -22; info.reason = Int32(NEO_AV1_RESTORE_SNAPSHOT)
+          NeoPlaybackDiagnostics.record("checkpoint.probeRejection", fields: ["checkpointMs": point.seconds*1000])
+        } else { result = neo_av1_playback_restore_detailed(decoder, point.state, &info) }
+#else
+        result = neo_av1_playback_restore_detailed(decoder, point.state, &info)
+#endif
+        owner.restored(point, result: result, elapsed: (ProcessInfo.processInfo.systemUptime-began)*1000, info: info)
         planned = nil; skipped = 0; largestOutput = point.seconds
-        return result
+        if result != 0 {
+          // Hold all obsolete packets until the host's single recovery seek
+          // flushes this decoder. Never decode a suffix with a failed state.
+          awaitingRecovery = true
+          if info.reason == Int32(NEO_AV1_RESTORE_ARGUMENT) || info.reason == Int32(NEO_AV1_RESTORE_SESSION) ||
+             info.reason == Int32(NEO_AV1_RESTORE_SETUP) { owner.fail(result) }
+          else { owner.recover(point, target: plannedTarget, code: result, reason: info.reason) }
+        }
+        return 0
       }
-      if skipped > 4096 { planned = nil; owner.releaseLease(); return -22 }
+      if skipped > 4096 { recoverMissingAnchor(point) }
       return 0
     }
     if flags & 1 != 0 { owner.key(Double(pts)*secondsPerTick) }
@@ -308,11 +366,15 @@ private final class NeoCheckpointDecoder: NeoAV1PlaybackDecoding, @unchecked Sen
     return 0
   }
   func prepareCheckpointSeek(to sourceSeconds: Double, afterKeyframe: Double) {
-    planned = owner.select(target: sourceSeconds, keyframe: afterKeyframe); skipped = 0
+    planned = owner.select(target: sourceSeconds, keyframe: afterKeyframe); plannedTarget = sourceSeconds; skipped = 0
     NeoPlaybackDiagnostics.record("checkpoint.seekPlan", fields: ["hit": planned != nil, "targetMs": sourceSeconds*1000])
   }
+  private func recoverMissingAnchor(_ point: NeoCheckpointPoint) {
+    planned = nil; skipped = 0; awaitingRecovery = true
+    owner.recover(point, target: plannedTarget, code: -22, reason: Int32(NEO_AV1_RESTORE_ANCHOR))
+  }
   func flush() {
-    planned = nil; skipped = 0; if foreground { owner.releaseLease() }
+    planned = nil; skipped = 0; awaitingRecovery = false; if foreground { owner.releaseLease() }
     largestOutput = -.infinity; lastCapture = -.infinity
     neo_av1_playback_flush(decoder); feedExtra()
   }

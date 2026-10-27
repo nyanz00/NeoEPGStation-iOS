@@ -9,13 +9,15 @@
 #include "NeoCheckpointPlayback.h"
 struct NeoAV1Playback { Dav1dContext *decoder; uint64_t session; };
 struct NeoAV1Saved { NeoLosslessCheckpoint *state; uint64_t session; int encoded; };
+static int open_decoder(Dav1dContext **out) {
+    Dav1dSettings settings;dav1d_default_settings(&settings);
+    settings.n_threads=6;settings.max_frame_delay=3;settings.logger.callback=NULL;
+    return dav1d_open(out,&settings);
+}
 NeoAV1Playback *neo_av1_playback_open(uint64_t session) {
     if(!session)return NULL;
     NeoAV1Playback *p=calloc(1,sizeof(*p));if(!p)return NULL;
-    Dav1dSettings settings;dav1d_default_settings(&settings);
-    settings.n_threads=6;settings.max_frame_delay=3;
-    settings.logger.callback=NULL;
-    if(dav1d_open(&p->decoder,&settings)<0) {free(p);return NULL;}
+    if(open_decoder(&p->decoder)<0) {free(p);return NULL;}
     p->session=session;return p;
 }
 static int take(NeoAV1Playback *p,NeoAV1Output output,void *cookie) {
@@ -71,9 +73,39 @@ int neo_av1_saved_encode(NeoAV1Saved *s) {
 size_t neo_av1_saved_bytes(const NeoAV1Saved *s) {
     if(!s)return 0;NeoLosslessStats stats={0};neo_lossless_stats(s->state,&stats);return stats.held_bytes+sizeof(*s);
 }
+int neo_av1_playback_restore_detailed(NeoAV1Playback *p,const NeoAV1Saved *s,NeoAV1RestoreInfo *info) {
+    NeoAV1RestoreInfo local={0};if(!info)info=&local;memset(info,0,sizeof(*info));
+    if(!p || !p->decoder || !s) {info->reason=NEO_AV1_RESTORE_ARGUMENT;return DAV1D_ERR(EINVAL);}
+    if(p->session!=s->session) {info->reason=NEO_AV1_RESTORE_SESSION;return DAV1D_ERR(EINVAL);}
+    if(!s->encoded) {info->reason=NEO_AV1_RESTORE_UNENCODED;return DAV1D_ERR(EINVAL);}
+    info->initial_boundary=neo_lossless_readiness(p->decoder);
+    /* A seek intentionally discards the recipient's old frames. Do this at
+     * the actual restore boundary, not only at the earlier host seek request. */
+    dav1d_flush(p->decoder);
+    for(int attempt=0;attempt<2;attempt++) {
+        info->attempts++;
+        info->prepared_boundary=neo_lossless_readiness(p->decoder);
+        int e;
+        if(info->prepared_boundary) {info->stage=2;e=DAV1D_ERR(EINVAL);}
+        else e=neo_lossless_restore_compatible_detailed(p->decoder,s->state,&info->stage,&info->prepared_boundary);
+        if(!e) {info->reason=0;return 0;}
+        if(info->stage==2 && attempt==0) {
+            /* dav1d_flush may leave frame-header/reference bookkeeping from
+             * an interrupted frame. Never weaken the snapshot boundary checks. */
+            info->retry_boundary=info->prepared_boundary;
+            dav1d_close(&p->decoder);info->recreated=1;
+            e=open_decoder(&p->decoder);
+            if(e) {info->reason=NEO_AV1_RESTORE_MEMORY;return e;}
+            continue;
+        }
+        info->reason=e==DAV1D_ERR(ENOMEM)?NEO_AV1_RESTORE_MEMORY:
+            info->stage==2?NEO_AV1_RESTORE_BUSY:info->stage==3?NEO_AV1_RESTORE_SETUP:NEO_AV1_RESTORE_SNAPSHOT;
+        dav1d_flush(p->decoder);return e;
+    }
+    info->reason=NEO_AV1_RESTORE_BUSY;return DAV1D_ERR(EINVAL);
+}
 int neo_av1_playback_restore(NeoAV1Playback *p,const NeoAV1Saved *s) {
-    if(!p || !s || !s->encoded || p->session!=s->session)return DAV1D_ERR(EINVAL);
-    return neo_lossless_restore_compatible(p->decoder,s->state);
+    return neo_av1_playback_restore_detailed(p,s,NULL);
 }
 void neo_av1_saved_free(NeoAV1Saved **ptr) {
     if(!ptr || !*ptr)return;NeoAV1Saved *s=*ptr;*ptr=NULL;neo_lossless_free(&s->state);free(s);

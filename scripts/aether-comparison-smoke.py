@@ -96,7 +96,7 @@ try:
             subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True)
             names = ['aether-comparison-smoke.json', 'aether-comparison-diagnostics.json']
             (documents/'aether-comparison-picture.png').unlink(missing_ok=True)
-            for index in range(5): (documents/f'aether-seek-{index}.png').unlink(missing_ok=True)
+            for index in range(11 if checkpoint_player else 5): (documents/f'aether-seek-{index}.png').unlink(missing_ok=True)
             for name in names:
                 (documents/name).unlink(missing_ok=True)
             environment = dict(os.environ, SIMCTL_CHILD_NEO_EPG_AETHER_COMPARE=f'http://127.0.0.1:{server.server_port}', SIMCTL_CHILD_NEO_EPG_AETHER_UI_BASELINE='1' if baseline else '0')
@@ -141,14 +141,15 @@ try:
             assert all(e['verification'] in ('displayedPixelBuffer', 'nativePixelBuffer') for e in resumes)
             decoded = [e for e in events if e['event']=='aether.seekDecodedTarget']
             assert all(e['displayTimeVerified'] is False and 'durationMs' not in e for e in decoded)
-            assert len(resumes)+len(decoded) == 5
+            targets = (20, 40, 30, 20, 30) + ((20, 40, 30, 20, 40, 30) if checkpoint_player else ())
+            assert len(resumes)+len(decoded) == len(targets)
             assert all(abs(e['mediaMs']-e['targetMs'])<500 for e in resumes)
             assert all(abs(e['decodedMs']-e['targetMs'])<500 for e in decoded)
-            for index in range(5):
+            for index in range(len(targets)):
                 captured = documents/f'aether-seek-{index}.png'
                 if captured.exists(): shutil.copyfile(captured, Path('dist', case_name+f'-seek-{index}.png'))
             picture_checks = []
-            for index, target in enumerate((20, 40, 30, 20, 30)):
+            for index, target in enumerate(targets):
                 captured = documents/f'aether-seek-{index}.png'
                 assert captured.exists(), 'No actual target image'
                 shutil.copyfile(captured, Path('dist', case_name+f'-seek-{index}.png'))
@@ -181,13 +182,18 @@ try:
                 if not baseline:
                     restored = [e for e in events if e['event']=='checkpoint.restored' and e['status']==0]
                     assert len(restored)>=2, restored
+                    rejected = [e for e in events if e['event']=='checkpoint.probeRejection']
+                    recoveries = [e for e in events if e['event']=='checkpoint.recovery']
+                    assert len(rejected)==len(recoveries)==1, (rejected, recoveries)
+                    assert recoveries[0]['reason']==7 and recoveries[0]['action']=='ordinary-seek-once'
+                    assert sum(e['elapsed']>recoveries[0]['elapsed'] for e in restored)>=2, restored
                     assert any(e['event']=='checkpoint.saved' and e['source']=='lookahead' for e in events)
-                else: assert not any(e['event']=='checkpoint.saved' for e in events)
+                else: assert not any(e['event'] in ('checkpoint.saved', 'checkpoint.recovery', 'checkpoint.probeRejection') for e in events)
             assert result['success'] and all(result['checks'].values()), result
             assert not any(e['event'] in ('aether.failure', 'aether.seekFailed', 'seek.timeout') for e in events), events[-10:]
             results.append({'fixture': fixture, 'uiBaseline': baseline, 'uiWork': ui, 'success': True, 'checks': result['checks'],
                             'seekMs': [e['durationMs'] for e in resumes], 'decodedTargetReadyMs': [e['decodeReadyMs'] for e in decoded],
-                            'displayTimingVerified': len(resumes)==5, 'targetImagesVerified': len(picture_checks), 'pictureChecks': picture_checks, 'originBytes': transferred, 'originRequests': requests})
+                            'displayTimingVerified': len(resumes)==len(targets), 'targetImagesVerified': len(picture_checks), 'pictureChecks': picture_checks, 'originBytes': transferred, 'originRequests': requests})
         except Exception as error:
             results.append({'fixture': fixture, 'uiBaseline': baseline, 'success': False, 'failure': type(error).__name__+': '+str(error)[:900]})
             print(fixture, 'FAIL', type(error).__name__, str(error)[:300], flush=True)

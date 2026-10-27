@@ -54,12 +54,21 @@ int main(int argc,char **argv) {
     NeoAV1Saved *saved=neo_av1_playback_capture(donor);need(saved!=NULL,"capture");
     need(!neo_av1_saved_encode(saved),"encode snapshot");size_t bytes=neo_av1_saved_bytes(saved);need(bytes>0,"held bytes");
     neo_av1_playback_close(&donor);need(donor==NULL,"donor closed before restore");
-    uint64_t compared=0,frames=0;
-    for(int repeat=0;repeat<3;repeat++) {
-        NeoAV1Playback *test=neo_av1_playback_open(42),*oracle=neo_av1_playback_open(777);
+    uint64_t compared=0,frames=0;unsigned recreated=0;
+    NeoAV1Playback *test=neo_av1_playback_open(42);
+    /* Reuse the recipient, including interrupted frame work. A fresh recipient
+     * on every iteration missed the real player's post-flush readiness failure. */
+    for(int repeat=0;repeat<12;repeat++) {
+        NeoAV1Playback *oracle=neo_av1_playback_open(777);
         need(test && oracle,"recipients");
-        need(neo_av1_playback_restore(oracle,saved)<0,"different session must refuse");
-        need(!neo_av1_playback_restore(test,saved),"compatible decoder restore");
+        NeoAV1RestoreInfo info={0};
+        need(neo_av1_playback_restore_detailed(oracle,saved,&info)<0 && info.reason==NEO_AV1_RESTORE_SESSION && !info.attempts,"different session must refuse before reset");
+        if(repeat) {
+            for(size_t i=cp+80;i<in.count && i<cp+81+(unsigned)repeat%9;i++)feed(test,&in,i,NULL);
+            neo_av1_playback_flush(test);
+        }
+        need(!neo_av1_playback_restore_detailed(test,saved,&info) && !info.reason,"compatible reused decoder restore");
+        recreated+=info.recreated;
         for(size_t i=0;i<cp;i++)feed(oracle,&in,i,NULL);
         need(!neo_av1_playback_drain(oracle,NULL,NULL),"oracle prefix drain");
         size_t end=cp+80<in.count?cp+80:in.count;
@@ -76,10 +85,19 @@ int main(int argc,char **argv) {
             }
             clear(&a);clear(&b);
         }
-        neo_av1_playback_close(&test);neo_av1_playback_close(&oracle);
+        neo_av1_playback_close(&oracle);
     }
+    /* The original failure reproduces after the host flush with short in-flight
+     * packet runs. Exercise it repeatedly without masking it by a full drain. */
+    for(int repeat=0;repeat<32;repeat++) {
+        NeoAV1RestoreInfo info={0};neo_av1_playback_flush(test);
+        need(!neo_av1_playback_restore_detailed(test,saved,&info),"interrupted-work restore");recreated+=info.recreated;
+        for(size_t i=cp;i<cp+1+(unsigned)repeat%23;i++)feed(test,&in,i,NULL);
+    }
+    need(recreated>0,"cancelled-worker readiness path exercised");
+    neo_av1_playback_close(&test);
     neo_av1_saved_free(&saved);need(saved==NULL,"snapshot released");
     for(size_t i=0;i<in.count;i++)free(in.packets[i].data);free(in.packets);
-    printf("{\"passed\":true,\"closedDonor\":true,\"wrongSessionRejected\":true,\"restores\":3,\"frames\":%llu,\"comparedBytes\":%llu,\"heldBytes\":%zu}\n",(unsigned long long)frames,(unsigned long long)compared,bytes);
+    printf("{\"passed\":true,\"closedDonor\":true,\"wrongSessionRejected\":true,\"restores\":44,\"recreated\":%u,\"frames\":%llu,\"comparedBytes\":%llu,\"heldBytes\":%zu}\n",recreated,(unsigned long long)frames,(unsigned long long)compared,bytes);
     return 0;
 }
