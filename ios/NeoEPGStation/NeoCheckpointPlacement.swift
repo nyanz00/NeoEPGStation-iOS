@@ -1,16 +1,22 @@
 import Foundation
 
-/// Uses source timestamps only. Planning never reads media or runs a decoder.
+/// Uses resident timestamps and bounded measurements from the existing ahead decoder.
 enum NeoCheckpointPlacement {
+  struct CostSample: Sendable {
+    let start, end, milliseconds: Double
+  }
   struct Slot: Equatable, Sendable {
     let seconds: Double
     let keyframe: Double
     let nextKeyframe: Double?
     let spacing: Double
+    var basis = "time"
+    var decodeMs = 0.0
     var provisional: Bool { nextKeyframe == nil }
   }
   static let targetGap = 6.0
   static let captureTolerance = 0.5
+  static let decodeBudgetMs = 100.0
 
   static func normalized(_ values: [Double]) -> [Double] {
     var result: [Double] = []
@@ -59,6 +65,30 @@ enum NeoCheckpointPlacement {
     return slots(keyframes: keyframes, in: (seconds-captureTolerance)...seconds).last { slot in
       !saved.contains { abs($0-slot.seconds) <= captureTolerance }
     }
+  }
+  static func adaptiveCandidate(at seconds: Double, keyframes: [Double], saved: [Double], costs: [CostSample]) -> Slot? {
+    let keys = normalized(keyframes)
+    guard seconds.isFinite, let key = keys.last(where: { $0 <= seconds }) else { return nil }
+    let next = keys.first(where: { $0 > seconds })
+    let anchor = max(key, saved.filter { $0 > key && $0 <= seconds }.max() ?? key)
+    let span = seconds-anchor
+    guard span >= 1, next.map({ $0-seconds >= 0.5 }) ?? true else { return nil }
+    // Samples are non-overlapping source ranges from one ahead decoder. Integrate
+    // only the portion after the most recent real key/snapshot, never queue waits.
+    var covered = 0.0, cost = 0.0
+    for sample in costs where sample.end > anchor && sample.start < seconds {
+      let length = min(seconds,sample.end)-max(anchor,sample.start)
+      guard length > 0, sample.end > sample.start, sample.milliseconds.isFinite, sample.milliseconds >= 0 else { continue }
+      covered += length; cost += sample.milliseconds*length/(sample.end-sample.start)
+    }
+    guard covered >= span*0.7 else { return candidate(at: seconds, keyframes: keys, saved: saved) }
+    let midpoint = next.map { ($0+key)/2 }
+    let initialMidpoint = anchor == key && midpoint.map { seconds >= $0 && seconds-$0 <= captureTolerance } == true
+    guard cost >= decodeBudgetMs || span >= 12 || initialMidpoint else { return nil }
+    var slot = Slot(seconds: seconds, keyframe: key, nextKeyframe: next, spacing: span)
+    slot.basis = cost >= decodeBudgetMs ? "decode-cost" : initialMidpoint ? "midpoint" : "maximum-gap"
+    slot.decodeMs = cost
+    return slot
   }
   static func canStore(_ slot: Slot, at seconds: Double, keyframes: [Double]) -> Bool {
     guard seconds.isFinite, seconds >= slot.seconds, seconds-slot.seconds <= captureTolerance else { return false }

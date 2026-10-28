@@ -473,6 +473,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     }
     preparingPlay = true
     let user = api.viewer, revision = api.identityRevision, origin = active?.topViewController
+    let experiment = NeoPlaybackExperiment.selected, checkpointMode = NeoPlaybackExperiment.checkpointMode
     Task { [weak self, weak origin] in
       guard let self else { return }
       defer { preparingPlay = false; onPrepared?() }
@@ -487,12 +488,19 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
           alert.addAction(UIAlertAction(title: "キャンセル", style: .cancel)); origin?.present(alert, animated: true); return
         }
       }
+      var decision: NeoCheckpointDecision?
+      if experiment == .checkpointPlayer, experiment.applies(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
+        // One bounded request; never poll or wait for background analysis to finish.
+        let info = checkpointMode == .automatic ? (try? await api.checkpointVideoInfo(file.id)) : nil
+        decision = NeoCheckpointDecision.choose(checkpointMode, info: info)
+      }
       guard self.api === api, api.accountReady, api.identityRevision == revision, active?.topViewController === origin, player == nil else { return }
-      presentPlayer(file, recording: recording, api: api, user: user, start: start, streaming: streaming, streamSubtitle: streamSubtitle)
+      presentPlayer(file, recording: recording, api: api, user: user, start: start, streaming: streaming, streamSubtitle: streamSubtitle,
+        experiment: experiment, checkpointDecision: decision)
     }
   }
-  private func presentPlayer(_ file: NeoVideoFile, recording: NeoRecording, api: NeoAPI, user: String, start: Double, streaming: Int?, streamSubtitle: Int?) {
-    let experiment = NeoPlaybackExperiment.selected
+  private func presentPlayer(_ file: NeoVideoFile, recording: NeoRecording, api: NeoAPI, user: String, start: Double, streaming: Int?, streamSubtitle: Int?,
+    experiment: NeoPlaybackExperiment, checkpointDecision: NeoCheckpointDecision?) {
     if (experiment == .decodeTrial || experiment == .checkpointTrial), experiment.applies(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
       let controller = NeoDecodeTrialController(source: api.url("/videos/\(file.id)"), checkpoint: experiment == .checkpointTrial)
       player = controller; controller.onClose = { [weak self] in self?.player = nil }
@@ -509,7 +517,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     }
     if (experiment == .aether || experiment == .checkpointPlayer), experiment.applies(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
       let controller = NeoAetherPlayer(url: api.url("/videos/\(file.id)"), title: recording.name, initialPosition: 0,
-        checkpointMode: experiment == .checkpointPlayer ? NeoPlaybackExperiment.checkpointEnabled : nil,
+        checkpointMode: checkpointDecision?.enabled == true ? true : nil, checkpointDecision: checkpointDecision,
         context: ["baseURL": api.base.absoluteString, "id": recording.id, "disableHistory": true,
           "channelId": recording.channelId ?? 0, "channelName": recording.channelName ?? "",
           "name": recording.name, "startAt": recording.startAt, "endAt": recording.endAt,

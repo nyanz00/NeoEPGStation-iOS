@@ -23,9 +23,10 @@ static Input load(const char *path) {
     fclose(f);return in;
 }
 typedef struct Image {uint8_t *pixels;size_t bytes;int64_t pts;int width,height,depth;} Image;
-typedef struct Images {Image images[128];size_t count;} Images;
+typedef struct Images {Image images[128];size_t count;int64_t minimum;} Images;
 static void collect(void *cookie,const NeoAV1Frame *frame) {
-    Images *list=cookie;need(list->count<128,"output bound");Image *im=&list->images[list->count++];
+    Images *list=cookie;if(frame->timestamp<list->minimum)return;
+    need(list->count<128,"output bound");Image *im=&list->images[list->count++];
     im->pts=frame->timestamp;im->width=frame->width;im->height=frame->height;im->depth=frame->depth;
     size_t n=0;for(int pl=0;pl<3;pl++) {
         int w=pl?(frame->width+1)/2:frame->width,h=pl?(frame->height+1)/2:frame->height;
@@ -54,7 +55,7 @@ int main(int argc,char **argv) {
     NeoAV1Saved *saved=neo_av1_playback_capture(donor);need(saved!=NULL,"capture");
     need(!neo_av1_saved_encode(saved),"encode snapshot");size_t bytes=neo_av1_saved_bytes(saved);need(bytes>0,"held bytes");
     neo_av1_playback_close(&donor);need(donor==NULL,"donor closed before restore");
-    uint64_t compared=0,frames=0;unsigned recreated=0;
+    uint64_t compared=0,frames=0,skipped=0;unsigned recreated=0;
     NeoAV1Playback *test=neo_av1_playback_open(42);
     /* Reuse the recipient, including interrupted frame work. A fresh recipient
      * on every iteration missed the real player's post-flush readiness failure. */
@@ -69,11 +70,13 @@ int main(int argc,char **argv) {
         }
         need(!neo_av1_playback_restore_detailed(test,saved,&info) && !info.reason,"compatible reused decoder restore");
         recreated+=info.recreated;
+        int64_t target=repeat%2?in.packets[cp+19].pts:INT64_MIN;
+        neo_av1_playback_set_target(test,target);
         for(size_t i=0;i<cp;i++)feed(oracle,&in,i,NULL);
         need(!neo_av1_playback_drain(oracle,NULL,NULL),"oracle prefix drain");
         size_t end=cp+80<in.count?cp+80:in.count;
         for(size_t begin=cp;begin<end;begin+=16) {
-            Images a={0},b={0};size_t stop=begin+16<end?begin+16:end;
+            Images a={.minimum=target},b={.minimum=target};size_t stop=begin+16<end?begin+16:end;
             for(size_t i=begin;i<stop;i++) {feed(test,&in,i,&a);feed(oracle,&in,i,&b);}
             need(!neo_av1_playback_drain(test,collect,&a),"restored drain");
             need(!neo_av1_playback_drain(oracle,collect,&b),"normal drain");
@@ -85,6 +88,8 @@ int main(int argc,char **argv) {
             }
             clear(&a);clear(&b);
         }
+        if(target!=INT64_MIN)skipped+=neo_av1_playback_skipped(test);
+        neo_av1_playback_set_target(test,INT64_MIN);
         neo_av1_playback_close(&oracle);
     }
     /* The original failure reproduces after the host flush with short in-flight
@@ -98,6 +103,7 @@ int main(int argc,char **argv) {
     neo_av1_playback_close(&test);
     neo_av1_saved_free(&saved);need(saved==NULL,"snapshot released");
     for(size_t i=0;i<in.count;i++)free(in.packets[i].data);free(in.packets);
-    printf("{\"passed\":true,\"closedDonor\":true,\"wrongSessionRejected\":true,\"restores\":44,\"recreated\":%u,\"frames\":%llu,\"comparedBytes\":%llu,\"heldBytes\":%zu}\n",recreated,(unsigned long long)frames,(unsigned long long)compared,bytes);
+    need(skipped>0,"actual non-reference reconstruction skip exercised");
+    printf("{\"passed\":true,\"closedDonor\":true,\"wrongSessionRejected\":true,\"restores\":44,\"recreated\":%u,\"frames\":%llu,\"skipped\":%llu,\"comparedBytes\":%llu,\"heldBytes\":%zu}\n",recreated,(unsigned long long)frames,(unsigned long long)skipped,(unsigned long long)compared,bytes);
     return 0;
 }

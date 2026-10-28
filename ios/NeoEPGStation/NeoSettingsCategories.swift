@@ -104,9 +104,15 @@ final class NeoSettingsCategoryPage: NeoPage {
       })
       row("再生エンジン", explanation: "試験用はエンコード済みPLAYを先頭から開きます。コメント・字幕・PiP・視聴履歴の保存には未対応です。診断用はAV1動画の復号速度を自動比較します。次の再生から適用します。", control: engine)
       if NeoPlaybackExperiment.selected == .checkpointPlayer {
-        toggle("チェックポイントを使用", explanation: "1080p以下のAV1で比較します。過去60秒・先読み20秒、保持上限128MiB。オフでも同じソフトウェア復号を使用します。次の再生から適用します。", on: NeoPlaybackExperiment.checkpointEnabled) {
-          NeoPlaybackExperiment.checkpointEnabled = $0
-        }
+        let checkpoint = UIButton(type: .system)
+        checkpoint.setTitle(NeoPlaybackExperiment.checkpointMode.title, for: .normal)
+        checkpoint.showsMenuAsPrimaryAction = true
+        checkpoint.menu = UIMenu(children: NeoCheckpointMode.allCases.map { value in
+          UIAction(title: value.title, state: NeoPlaybackExperiment.checkpointMode == value ? .on : .off) { [weak self] _ in
+            NeoPlaybackExperiment.checkpointMode = value; self?.render()
+          }
+        })
+        row("チェックポイント", explanation: "1080p以下のAV1が対象です。自動はサーバー解析の最大間隔が10秒以上の場合に使用します。未解析・オフでは通常経路で再生します。過去60秒・先読み20秒、保持上限128MiB。次の再生から適用します。", control: checkpoint)
       }
       button("接続先を変更") { [weak self, weak shell] in
         guard let shell else { return }; self?.navigationController?.pushViewController(NeoConnectionPage(shell: shell), animated: true)

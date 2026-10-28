@@ -71,6 +71,7 @@ final class NeoAetherPlayer: UIViewController {
   private var playButton: UIButton { chrome.playButton }
   private let context: [String: Any]
   private let checkpointPlayback: NeoCheckpointPlayback?
+  private let checkpointDecision: NeoCheckpointDecision?
   private var checkpointTask: Task<Void, Never>?
   private var checkpointLastTick = -Double.infinity
   private var checkpointAxisOffset = 0.0
@@ -118,8 +119,10 @@ final class NeoAetherPlayer: UIViewController {
     var waitSampleLevel = 0
     var uiWorkAtStart = 0.0
   }
-  init(url: URL, title: String, initialPosition: Double, checkpointMode: Bool? = nil, context: [String: Any] = [:]) {
+  init(url: URL, title: String, initialPosition: Double, checkpointMode: Bool? = nil,
+    checkpointDecision: NeoCheckpointDecision? = nil, context: [String: Any] = [:]) {
     self.context = context
+    self.checkpointDecision = checkpointDecision
     checkpointPlayback = checkpointMode.map { NeoCheckpointPlayback(enabled: $0) }
     source = url; recordingTitle = title
     self.initialPosition = initialPosition.isFinite ? max(0, initialPosition) : 0
@@ -159,6 +162,11 @@ final class NeoAetherPlayer: UIViewController {
         "dav1dAvailable": dav1d != nil, "avcodecVersion": avcodec_version()])
       guard compatible else { throw NSError(domain: "NeoAetherBinaryABI", code: 1) }
       NeoPlaybackDiagnostics.record("aether.hardware", fields: ["av1": VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1)])
+      if let choice = checkpointDecision {
+        NeoPlaybackDiagnostics.record("checkpoint.selection", fields: ["mode": choice.mode.rawValue, "enabled": choice.enabled,
+          "reason": choice.reason, "maximumInterval": choice.maximum ?? -1, "thresholdSeconds": 10,
+          "av1HardwareSupported": VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1)])
+      }
       EngineLog.handler = { [capture = engineLog] line in capture.receive(line) }
       if let checkpointPlayback {
         checkpointPlayback.onRecovery { [weak self] sourceTarget in

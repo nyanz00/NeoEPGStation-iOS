@@ -39,6 +39,7 @@ final class NeoCheckpointPlayback: @unchecked Sendable {
   private var position = 0.0, stopped = false, compressionBusy = false, aheadBusy = false
   private var pausedUntil = 0.0, revision: UInt64 = 0
   private var keys: [Double] = []
+  private var costs: [NeoCheckpointPlacement.CostSample] = []
   private var saved = 0, savedAhead = 0, hits = 0, misses = 0, evicted = 0
   private var extra = Data(), timeBase = 0.001
   // Owned exclusively by the ahead queue; shutdown is queued behind work.
@@ -97,7 +98,7 @@ final class NeoCheckpointPlayback: @unchecked Sendable {
     lock.lock(); defer { lock.unlock() }
     guard enabled, !runtimeDisabled, !stopped, !compressionBusy, ProcessInfo.processInfo.systemUptime >= pausedUntil,
           seconds >= position - 60, seconds <= position + 20,
-          let slot = NeoCheckpointPlacement.candidate(at: seconds, keyframes: keys, saved: points.map(\.seconds)) else { return nil }
+          let slot = NeoCheckpointPlacement.adaptiveCandidate(at: seconds, keyframes: keys, saved: points.map(\.seconds), costs: costs) else { return nil }
     compressionBusy = true; return slot
   }
   fileprivate func canStore(_ slot: NeoCheckpointPlacement.Slot, at seconds: Double) -> Bool {
@@ -106,6 +107,18 @@ final class NeoCheckpointPlayback: @unchecked Sendable {
       NeoCheckpointPlacement.canStore(slot, at: seconds, keyframes: keys)
   }
   fileprivate func cancelReservation() { lock.lock(); compressionBusy = false; lock.unlock() }
+  fileprivate func measuredCost(from start: Double, to end: Double, milliseconds: Double) {
+    guard start.isFinite, end.isFinite, end > start, milliseconds.isFinite, milliseconds >= 0 else { return }
+    lock.lock()
+    guard !stopped else { lock.unlock(); return }
+    // A rewind can measure the same interval again; replace overlapping old
+    // observations instead of counting the decoding work twice.
+    costs.removeAll { $0.end > start && $0.start < end || $0.end < position-180 || $0.start > position+120 }
+    costs.append(.init(start: start, end: end, milliseconds: milliseconds))
+    if costs.count > 640 { costs.removeFirst(costs.count-640) }
+    lock.unlock()
+    NeoPlaybackDiagnostics.record("checkpoint.decodeCost", fields: ["startMs": start*1000, "endMs": end*1000, "decodeMs": milliseconds])
+  }
   fileprivate func compress(_ point: NeoCheckpointPoint, foreground: Bool) {
     compression.async { [self, point] in
       let began = ProcessInfo.processInfo.systemUptime
@@ -130,7 +143,8 @@ final class NeoCheckpointPlayback: @unchecked Sendable {
         "heldBytes": point.bytes, "compressionMs": elapsed, "stored": stored,
         "plannedMs": point.slot.seconds*1000, "keyframeMs": point.slot.keyframe*1000,
         "nextKeyframeMs": point.slot.nextKeyframe.map { $0*1000 } ?? -1,
-        "provisional": point.slot.provisional])
+        "provisional": point.slot.provisional, "basis": point.slot.basis, "decodeMs": point.slot.decodeMs,
+        "decodeBudgetMs": NeoCheckpointPlacement.decodeBudgetMs])
     }
   }
   private func pruneLocked() {
@@ -283,6 +297,9 @@ private final class NeoCheckpointDecoder: NeoAV1PlaybackDecoding, @unchecked Sen
   private var emit: (@Sendable (UnsafeMutablePointer<AVFrame>) -> Void)?
   private var planned: NeoCheckpointPoint?, skipped = 0
   private var plannedTarget = 0.0, awaitingRecovery = false
+  private var costStart = -Double.infinity, costMilliseconds = 0.0
+  private var recentCostRates: [Double] = []
+  private var seekSkipCount: UInt64 = 0
   init(owner: NeoCheckpointPlayback, foreground: Bool) { self.owner = owner; self.foreground = foreground }
   func open(stream: UnsafeMutablePointer<AVStream>) throws {
     guard let par = stream.pointee.codecpar, par.pointee.codec_id == AV_CODEC_ID_AV1,
@@ -312,6 +329,12 @@ private final class NeoCheckpointDecoder: NeoAV1PlaybackDecoding, @unchecked Sen
   fileprivate func deliver(_ picture: NeoAV1Frame) {
     let seconds = Double(picture.timestamp) * secondsPerTick
     if picture.timestamp != Int64.min { largestOutput = max(largestOutput, seconds) }
+    if foreground, plannedTarget > 0, seconds >= plannedTarget {
+      let count = neo_av1_playback_skipped(decoder)
+      NeoPlaybackDiagnostics.record("checkpoint.preroll", fields: ["targetMs": plannedTarget*1000,
+        "firstOutputMs": seconds*1000, "skippedFrames": count >= seekSkipCount ? count-seekSkipCount : count])
+      plannedTarget = 0
+    }
     guard foreground, let frame, let emit else { return }
     frame.pointee.width = Int32(picture.width); frame.pointee.height = Int32(picture.height)
     frame.pointee.format = picture.depth > 8 ? AV_PIX_FMT_YUV420P10LE.rawValue : AV_PIX_FMT_YUV420P.rawValue
@@ -381,11 +404,26 @@ private final class NeoCheckpointDecoder: NeoAV1PlaybackDecoding, @unchecked Sen
       return 0
     }
     if flags & 1 != 0 { owner.key(Double(pts)*secondsPerTick) }
+    if !foreground, !costStart.isFinite, pts != Int64.min { costStart = Double(pts)*secondsPerTick }
+    let began = ProcessInfo.processInfo.systemUptime
     let result = neo_av1_playback_feed(decoder, bytes, count, pts, duration, position,
                                       neoCheckpointOutput, Unmanaged.passUnretained(self).toOpaque())
+    if !foreground {
+      costMilliseconds += (ProcessInfo.processInfo.systemUptime-began)*1000
+      if largestOutput-costStart >= 0.5 {
+        let span = largestOutput-costStart
+        recentCostRates.append(costMilliseconds/span)
+        if recentCostRates.count > 3 { recentCostRates.removeFirst() }
+        let rates = recentCostRates.sorted()
+        owner.measuredCost(from: costStart, to: largestOutput, milliseconds: rates[rates.count/2]*span)
+        costStart = largestOutput; costMilliseconds = 0
+      }
+    }
     guard result == 0, position >= 0, largestOutput.isFinite, largestOutput >= captureRetryAfter,
           let slot = owner.reserve(at: largestOutput) else { return result }
+    let drainBegan = ProcessInfo.processInfo.systemUptime
     let drained = neo_av1_playback_drain(decoder, neoCheckpointOutput, Unmanaged.passUnretained(self).toOpaque())
+    if !foreground { costMilliseconds += (ProcessInfo.processInfo.systemUptime-drainBegan)*1000 }
     guard drained == 0, owner.canStore(slot, at: largestOutput), let state = neo_av1_playback_capture(decoder) else {
       captureRetryAfter = largestOutput+0.5; owner.cancelReservation()
       NeoPlaybackDiagnostics.record("checkpoint.captureMiss", fields: ["status": drained])
@@ -397,6 +435,11 @@ private final class NeoCheckpointDecoder: NeoAV1PlaybackDecoding, @unchecked Sen
   }
   func prepareCheckpointSeek(to sourceSeconds: Double, afterKeyframe: Double) {
     planned = owner.select(target: sourceSeconds, keyframe: afterKeyframe); plannedTarget = sourceSeconds; skipped = 0
+    seekSkipCount = neo_av1_playback_skipped(decoder)
+    let ticks = ceil(sourceSeconds/secondsPerTick)
+    if ticks.isFinite, ticks >= Double(Int64.min)+2048, ticks < Double(Int64.max)-2048 {
+      neo_av1_playback_set_target(decoder, Int64(ticks))
+    }
     NeoPlaybackDiagnostics.record("checkpoint.seekPlan", fields: ["hit": planned != nil, "targetMs": sourceSeconds*1000,
       "keyframeMs": afterKeyframe*1000, "checkpointMs": planned.map { $0.seconds*1000 } ?? -1])
   }
@@ -407,6 +450,8 @@ private final class NeoCheckpointDecoder: NeoAV1PlaybackDecoding, @unchecked Sen
   func flush() {
     planned = nil; skipped = 0; awaitingRecovery = false; if foreground { owner.releaseLease() }
     largestOutput = -.infinity; captureRetryAfter = -.infinity
+    costStart = -.infinity; costMilliseconds = 0; plannedTarget = 0; seekSkipCount = 0
+    recentCostRates.removeAll(keepingCapacity: true)
     neo_av1_playback_flush(decoder); feedExtra()
   }
   func resetForAhead() { flush() }

@@ -136,8 +136,8 @@ jobs:
           task_checks_failed=0
           swiftc ios/NeoEPGStation/NeoASSComments.swift ios/NeoEPGStation/NeoCommentLoader.swift ios/NeoEPGStation/NeoCommentLayout.swift ios/NeoEPGStation/NeoMediaByteClock.swift ios/NeoEPGStation/NeoPlaybackHistory.swift ios/NeoEPGStation/NeoVideoRecovery.swift tests/native/main.swift -o build/native-tests/comments && build/native-tests/comments || task_checks_failed=1
           swiftc ios/NeoEPGStation/NeoPlaybackExperiment.swift tests/experiment/main.swift -o build/native-tests/experiment && build/native-tests/experiment || task_checks_failed=1
-          swiftc ios/NeoEPGStation/NeoModels.swift tests/ui/main.swift -o build/native-tests/ui && build/native-tests/ui || task_checks_failed=1
-          swiftc ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoHLSManifest.swift tests/streaming/main.swift -o build/native-tests/hls && build/native-tests/hls || task_checks_failed=1
+          swiftc ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift tests/ui/main.swift -o build/native-tests/ui && build/native-tests/ui || task_checks_failed=1
+          swiftc ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoHLSManifest.swift tests/streaming/main.swift -o build/native-tests/hls && build/native-tests/hls || task_checks_failed=1
           swiftc ios/NeoEPGStation/NeoHTTPByteStream.swift tests/progressive/main.swift -o build/native-tests/progressive && build/native-tests/progressive || task_checks_failed=1
           swiftc ios/NeoEPGStation/NeoPlaybackDiagnostics.swift tests/buffering/main.swift -o build/native-tests/buffering && build/native-tests/buffering || task_checks_failed=1
           exit "$task_checks_failed"

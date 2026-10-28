@@ -28,6 +28,10 @@ typedef struct NeoAV1RestoreInfo {
     unsigned initial_boundary, prepared_boundary, retry_boundary;
 } NeoAV1RestoreInfo;
 NeoAV1Playback *neo_av1_playback_open(uint64_t session);
+/* Source PTS in the same time base as feed(). INT64_MIN disables skipping.
+ * Only parsed non-reference frames strictly before target are skipped. */
+void neo_av1_playback_set_target(NeoAV1Playback *,int64_t target);
+uint64_t neo_av1_playback_skipped(const NeoAV1Playback *);
 int neo_av1_playback_feed(NeoAV1Playback *, const uint8_t *, size_t,
                           int64_t pts,int64_t duration,int64_t position,NeoAV1Output,void *);
 int neo_av1_playback_drain(NeoAV1Playback *,NeoAV1Output,void *);

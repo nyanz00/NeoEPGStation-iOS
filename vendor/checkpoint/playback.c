@@ -1,13 +1,15 @@
 /* BSD-2-Clause. Decode API is exclusively owned by its caller. Captured immutable
  * buffers may be compressed on one background worker; compressed states are
  * transferable only within the same player session and identical decoder setup. */
+#include "config.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include "dav1d/dav1d.h"
+#include "src/internal.h"
 #include "lossless.h"
 #include "NeoCheckpointPlayback.h"
-struct NeoAV1Playback { Dav1dContext *decoder; uint64_t session; };
+struct NeoAV1Playback { Dav1dContext *decoder; uint64_t session; int64_t target; };
 struct NeoAV1Saved { NeoLosslessCheckpoint *state; uint64_t session; int encoded; };
 static int open_decoder(Dav1dContext **out) {
     Dav1dSettings settings;dav1d_default_settings(&settings);
@@ -18,7 +20,15 @@ NeoAV1Playback *neo_av1_playback_open(uint64_t session) {
     if(!session)return NULL;
     NeoAV1Playback *p=calloc(1,sizeof(*p));if(!p)return NULL;
     if(open_decoder(&p->decoder)<0) {free(p);return NULL;}
-    p->session=session;return p;
+    p->session=session;p->target=INT64_MIN;return p;
+}
+void neo_av1_playback_set_target(NeoAV1Playback *p,int64_t target) {
+    if(!p || !p->decoder)return;
+    p->target=target;p->decoder->neo_preroll_target=target;
+    p->decoder->neo_preroll_enabled=target!=INT64_MIN;
+}
+uint64_t neo_av1_playback_skipped(const NeoAV1Playback *p) {
+    return p && p->decoder?p->decoder->neo_preroll_skipped:0;
 }
 static int take(NeoAV1Playback *p,NeoAV1Output output,void *cookie) {
     Dav1dPicture picture={0};int e=dav1d_get_picture(p->decoder,&picture);if(e)return e;
@@ -56,7 +66,9 @@ int neo_av1_playback_drain(NeoAV1Playback *p,NeoAV1Output output,void *cookie) {
     if(!p)return DAV1D_ERR(EINVAL);
     for(;;) {int e=take(p,output,cookie);if(e==DAV1D_ERR(EAGAIN))return 0;if(e)return e;}
 }
-void neo_av1_playback_flush(NeoAV1Playback *p) {if(p)dav1d_flush(p->decoder);}
+void neo_av1_playback_flush(NeoAV1Playback *p) {
+    if(p) {dav1d_flush(p->decoder);neo_av1_playback_set_target(p,INT64_MIN);p->decoder->neo_preroll_skipped=0;}
+}
 void neo_av1_playback_close(NeoAV1Playback **ptr) {
     if(!ptr || !*ptr)return;NeoAV1Playback *p=*ptr;*ptr=NULL;dav1d_close(&p->decoder);free(p);
 }
@@ -96,6 +108,7 @@ int neo_av1_playback_restore_detailed(NeoAV1Playback *p,const NeoAV1Saved *s,Neo
             dav1d_close(&p->decoder);info->recreated=1;
             e=open_decoder(&p->decoder);
             if(e) {info->reason=NEO_AV1_RESTORE_MEMORY;return e;}
+            neo_av1_playback_set_target(p,p->target);
             continue;
         }
         info->reason=e==DAV1D_ERR(ENOMEM)?NEO_AV1_RESTORE_MEMORY:

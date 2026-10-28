@@ -194,12 +194,17 @@ try:
                     assert placed, 'No checkpoints placed using known bounding keyframes'
                     for e in placed:
                         span = (e['nextKeyframeMs']-e['keyframeMs'])/1000
-                        count = max(2, math.ceil((span-0.05)/6))
-                        ordinal = (e['plannedMs']-e['keyframeMs'])/(span*1000/count)
-                        assert 1<=round(ordinal)<count and abs(ordinal-round(ordinal))<0.001, e
+                        assert e['keyframeMs'] < e['plannedMs'] < e['nextKeyframeMs']-50, e
                         assert 0<=e['positionMs']-e['plannedMs']<=500, e
-                    if '-gop6' in fixture:
-                        assert any(5900<e['nextKeyframeMs']-e['keyframeMs']<6100 and abs(e['plannedMs']-(e['keyframeMs']+e['nextKeyframeMs'])/2)<1 for e in placed), placed
+                        if e.get('basis') == 'time':
+                            count = max(2, math.ceil((span-0.05)/6))
+                            ordinal = (e['plannedMs']-e['keyframeMs'])/(span*1000/count)
+                            assert 1<=round(ordinal)<count and abs(ordinal-round(ordinal))<0.001, e
+                        else:
+                            assert e['basis'] in ('decode-cost','midpoint','maximum-gap'), e
+                            if e['basis']=='decode-cost': assert e['decodeMs'] >= e['decodeBudgetMs'], e
+                    assert any(e['event']=='checkpoint.decodeCost' and e['decodeMs']>0 for e in events)
+                    assert any(e['event']=='checkpoint.preroll' for e in events)
                     for e in (e for e in events if e['event']=='checkpoint.seekPlan' and e['hit']):
                         assert e['keyframeMs']<e['checkpointMs']<e['targetMs']-50, e
                     assert any(e['event']=='checkpoint.saved' and e['source']=='lookahead' for e in events)

@@ -396,6 +396,9 @@ final class NeoAPI {
     return try await request(parts.url!)
   }
   func configuration() async throws -> NeoServerConfig { try await request(url("/config")) }
+  func checkpointVideoInfo(_ id: Int) async throws -> NeoCheckpointVideoInfo {
+    try await request(url("/videos/\(id)/info"), timeout: 2)
+  }
   func dropLog(_ id: Int) async throws -> String {
     var request = URLRequest(url: url("/dropLogs/\(id)?maxsize=512")); request.timeoutInterval = 20
     request.setValue("text/plain", forHTTPHeaderField: "Accept")

@@ -45,6 +45,26 @@ def prepare():
     common = run('git', '-C', SOURCE, 'show', 'HEAD:include/dav1d/common.h')+'\n'
     common = common.replace('#ifndef DAV1D_API', prefix+'\n#ifdef _WIN32\n#define DAV1D_API\n#else\n#define DAV1D_API __attribute__((visibility("hidden")))\n#endif\n#ifndef DAV1D_API', 1)
     write_changed(SOURCE/'include/dav1d/common.h', common.encode())
+    # Private decoder only: skip a pre-target frame after parsing its complete
+    # header, and only when it refreshes no reference slots. Packet timestamps
+    # alone are not sufficient to decide whether reconstruction may be omitted.
+    internal = run('git','-C',SOURCE,'show','HEAD:src/internal.h')+'\n'
+    internal = internal.replace('    enum Dav1dDecodeFrameType decode_frame_type;',
+        '    enum Dav1dDecodeFrameType decode_frame_type;\n'
+        '    int neo_preroll_enabled;\n    int64_t neo_preroll_target;\n'
+        '    uint64_t neo_preroll_skipped;')
+    write_changed(SOURCE/'src/internal.h', internal.encode())
+    obu = run('git','-C',SOURCE,'show','HEAD:src/obu.c')+'\n'
+    needle = '        } else if (c->n_tiles == c->frame_hdr->tiling.cols * c->frame_hdr->tiling.rows) {\n'
+    assert obu.count(needle) == 1
+    obu = obu.replace(needle, needle+
+        '            /* Host-private accurate seek: retain every reference frame. */\n'
+        '            if (c->neo_preroll_enabled && in->m.timestamp != INT64_MIN &&\n'
+        '                in->m.timestamp < c->neo_preroll_target &&\n'
+        '                !c->frame_hdr->refresh_frame_flags &&\n'
+        '                c->frame_hdr->frame_type != DAV1D_FRAME_TYPE_KEY) {\n'
+        '                c->neo_preroll_skipped++;\n                goto skip;\n            }\n')
+    write_changed(SOURCE/'src/obu.c', obu.encode())
     for src, dst in [('vendor/checkpoint/core.c','src/neo_checkpoint.c'),
                      ('vendor/checkpoint/neo_checkpoint.h','include/neo_checkpoint.h'),
                      ('vendor/checkpoint/packed.c','src/neo_packed_checkpoint.c'),
