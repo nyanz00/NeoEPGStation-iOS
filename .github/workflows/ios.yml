@@ -195,6 +195,9 @@ jobs:
           xcodebuild -resolvePackageDependencies -workspace ios/NeoEPGStation.xcworkspace \
             -scheme NeoEPGStation -clonedSourcePackagesDirPath build/SourcePackages
           python3 scripts/aether-provenance.py
+      - name: Check cached AV1 key selection and independent audio preroll
+        if: ${{ inputs.check_scope == 'checkpoint-player' }}
+        run: python3 scripts/checkpoint-cache-test.py
       - name: Retain resolved dependencies before compiling the application
         if: ${{ success() && steps.spm-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4

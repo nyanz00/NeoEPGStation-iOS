@@ -16,7 +16,12 @@ enum NeoCheckpointPlacement {
   }
   static let targetGap = 6.0
   static let captureTolerance = 0.5
+  static let minimumSpacing = 1.0
   static let decodeBudgetMs = 100.0
+
+  static func isSeparated(at seconds: Double, saved: [Double]) -> Bool {
+    seconds.isFinite && !saved.contains { $0.isFinite && abs($0-seconds) < minimumSpacing }
+  }
 
   static func normalized(_ values: [Double]) -> [Double] {
     var result: [Double] = []
@@ -61,14 +66,14 @@ enum NeoCheckpointPlacement {
     return result
   }
   static func candidate(at seconds: Double, keyframes: [Double], saved: [Double]) -> Slot? {
-    guard seconds.isFinite else { return nil }
+    guard isSeparated(at: seconds, saved: saved) else { return nil }
     return slots(keyframes: keyframes, in: (seconds-captureTolerance)...seconds).last { slot in
       !saved.contains { abs($0-slot.seconds) <= captureTolerance }
     }
   }
   static func adaptiveCandidate(at seconds: Double, keyframes: [Double], saved: [Double], costs: [CostSample]) -> Slot? {
     let keys = normalized(keyframes)
-    guard seconds.isFinite, let key = keys.last(where: { $0 <= seconds }) else { return nil }
+    guard isSeparated(at: seconds, saved: saved), let key = keys.last(where: { $0 <= seconds }) else { return nil }
     let next = keys.first(where: { $0 > seconds })
     let anchor = max(key, saved.filter { $0 > key && $0 <= seconds }.max() ?? key)
     let span = seconds-anchor
@@ -90,8 +95,9 @@ enum NeoCheckpointPlacement {
     slot.decodeMs = cost
     return slot
   }
-  static func canStore(_ slot: Slot, at seconds: Double, keyframes: [Double]) -> Bool {
-    guard seconds.isFinite, seconds >= slot.seconds, seconds-slot.seconds <= captureTolerance else { return false }
+  static func canStore(_ slot: Slot, at seconds: Double, keyframes: [Double], saved: [Double] = []) -> Bool {
+    guard isSeparated(at: seconds, saved: saved), seconds >= slot.seconds,
+          seconds-slot.seconds <= captureTolerance else { return false }
     return !keyframes.contains { $0 > slot.keyframe+0.001 && $0 <= seconds+0.05 }
   }
 }

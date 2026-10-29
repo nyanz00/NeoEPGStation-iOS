@@ -182,6 +182,11 @@ try:
                 caches = [e for e in events if e['event']=='checkpoint.cache']
                 assert caches and all(e['heldBytes'] <= 128*1024*1024 for e in caches)
                 assert not any(e['event']=='checkpoint.fallback' for e in events)
+                anchors = [e for e in events if e['event']=='aether.cacheSeekAnchor']
+                assert len(anchors) >= 2 and any(e['videoKeyMs'] > 1000 for e in anchors), anchors
+                assert all(e['independent']==1 and e['videoKeyMs']<=e['targetMs'] for e in anchors), anchors
+                assert all(99<=e['videoKeyMs']-e['audioStartMs']<=600
+                           for e in anchors if e['videoKeyMs']>1000), anchors
                 if not baseline:
                     restored = [e for e in events if e['event']=='checkpoint.restored' and e['status']==0]
                     assert len(restored)>=2, restored
@@ -192,6 +197,8 @@ try:
                     assert sum(e['elapsed']>recoveries[0]['elapsed'] for e in restored)>=2, restored
                     placed = [e for e in events if e['event']=='checkpoint.saved' and e.get('stored') and e.get('provisional') is False]
                     assert placed, 'No checkpoints placed using known bounding keyframes'
+                    assert all(e['nearestSavedGapMs'] == -1 or e['nearestSavedGapMs'] >= e['minimumSpacingMs']
+                               for e in events if e['event']=='checkpoint.saved' and e.get('stored')), 'Crowded saved points'
                     for e in placed:
                         span = (e['nextKeyframeMs']-e['keyframeMs'])/1000
                         assert e['keyframeMs'] < e['plannedMs'] < e['nextKeyframeMs']-50, e

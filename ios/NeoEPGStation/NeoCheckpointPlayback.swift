@@ -104,7 +104,7 @@ final class NeoCheckpointPlayback: @unchecked Sendable {
   fileprivate func canStore(_ slot: NeoCheckpointPlacement.Slot, at seconds: Double) -> Bool {
     lock.lock(); defer { lock.unlock() }
     return !stopped && !runtimeDisabled && seconds >= position-60 && seconds <= position+20 &&
-      NeoCheckpointPlacement.canStore(slot, at: seconds, keyframes: keys)
+      NeoCheckpointPlacement.canStore(slot, at: seconds, keyframes: keys, saved: points.map(\.seconds))
   }
   fileprivate func cancelReservation() { lock.lock(); compressionBusy = false; lock.unlock() }
   fileprivate func measuredCost(from start: Double, to end: Double, milliseconds: Double) {
@@ -128,9 +128,11 @@ final class NeoCheckpointPlayback: @unchecked Sendable {
       lock.lock()
       compressionBusy = false
       var stored = false
+      let nearestSavedGap = points.map { abs($0.seconds-point.seconds) }.min()
       if !stopped, !runtimeDisabled, result == 0, point.bytes <= Self.budget,
          point.seconds >= position - 60, point.seconds <= position + 20,
          ProcessInfo.processInfo.systemUptime >= pausedUntil,
+         NeoCheckpointPlacement.canStore(point.slot, at: point.seconds, keyframes: keys, saved: points.map(\.seconds)),
          !points.contains(where: { $0.packet == point.packet }) {
         points.append(point); saved += 1
         stored = true
@@ -144,7 +146,9 @@ final class NeoCheckpointPlayback: @unchecked Sendable {
         "plannedMs": point.slot.seconds*1000, "keyframeMs": point.slot.keyframe*1000,
         "nextKeyframeMs": point.slot.nextKeyframe.map { $0*1000 } ?? -1,
         "provisional": point.slot.provisional, "basis": point.slot.basis, "decodeMs": point.slot.decodeMs,
-        "decodeBudgetMs": NeoCheckpointPlacement.decodeBudgetMs])
+        "decodeBudgetMs": NeoCheckpointPlacement.decodeBudgetMs,
+        "nearestSavedGapMs": nearestSavedGap.map { $0*1000 } ?? -1,
+        "minimumSpacingMs": NeoCheckpointPlacement.minimumSpacing*1000])
     }
   }
   private func pruneLocked() {

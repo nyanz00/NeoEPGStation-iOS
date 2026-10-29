@@ -142,6 +142,22 @@
           "patchedSHA256": "fb2128269b1fb4546126b88cb4acd5854d4c2e924193118ca798e6dd8ff4f7ce"
         }
       ]
+    },
+    {
+      "file": "0011-independent-av1-cache-seek.patch",
+      "sha256": "7c5a9ad686cc42b1a253e701e4824a9e277debb63147f8d4b1ea271ee224a060",
+      "sources": [
+        {
+          "path": "Sources/AetherEngine/Native/SoftwarePacketReadAhead.swift",
+          "upstreamSHA256": "d2b1ecefdb671f2fe82530df975fc4fd386480fb6688e417e8282acc868f973d",
+          "patchedSHA256": "a41eb8322f3f1da210d3a21244b0e3abf79a28b5fbf00b149d3dfd0a8a815f56"
+        },
+        {
+          "path": "Sources/AetherEngine/Native/SoftwarePlaybackHost.swift",
+          "upstreamSHA256": "fb2128269b1fb4546126b88cb4acd5854d4c2e924193118ca798e6dd8ff4f7ce",
+          "patchedSHA256": "6112e7b0855d0b83221e9bab58d9b696140967c02a32fa42407942714f3f8979"
+        }
+      ]
     }
   ],
   "retiredHeaderCorrection": {

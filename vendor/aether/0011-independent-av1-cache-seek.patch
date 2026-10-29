@@ -1,0 +1,211 @@
+--- a/Sources/AetherEngine/Native/SoftwarePacketReadAhead.swift
++++ b/Sources/AetherEngine/Native/SoftwarePacketReadAhead.swift
+@@ -34,6 +34,15 @@
+     private let beforeConsumerOperation: (@Sendable () -> Void)?
+     private let video: Stream
+     private let audio: Stream?
++    private let independentVideoKeys: Bool
++    private let audioSeekPrerollSeconds: Double?
++    private struct AudioBookmark {
++        let seconds: Double
++        let cursor: SoftwarePacketDiskFIFO.Cursor
++    }
++    // Metadata only. A bounded AAC warm-up bookmark is independent of GOP length.
++    private var recentAudio: [AudioBookmark] = []
++    private var seekVideoStartPTS: Int64?
+     private let byteBudget: Int
+     private let forwardSeconds: Double
+     /// Producer thread only. See `start()` for why this is a class the producer moves itself.
+@@ -91,6 +100,8 @@
+     private struct Keyframe {
+         let seconds: Double
+         let cursor: SoftwarePacketDiskFIFO.Cursor
++        let pts: Int64
++        let audioBookmark: AudioBookmark?
+     }
+     private var keyframes: [Keyframe] = []
+     private let maximumKeyframes = 65_536
+@@ -100,11 +111,16 @@
+     init(video: Stream, audio: Stream?, byteBudget: Int, forwardSeconds: Double,
+          initialSourceClock: Double, fifo: any SoftwarePacketStore,
+          videoReorderDepth: Int? = nil,
++         independentVideoKeys: Bool = false, audioSeekPrerollSeconds: Double? = nil,
+          coverageRangeCap: Int = 4096,
+          beforeConsumerOperation: (@Sendable () -> Void)? = nil,
+          readSource: @escaping @Sendable (@Sendable () -> Bool) throws -> SoftwareStoredPacket?) {
+         self.video = video
+         self.audio = audio
++        self.independentVideoKeys = independentVideoKeys
++        self.audioSeekPrerollSeconds = audioSeekPrerollSeconds.flatMap {
++            $0.isFinite && $0 >= 0 && $0 <= 1 ? $0 : nil
++        }
+         self.byteBudget = max(1, byteBudget)
+         self.forwardSeconds = max(1, forwardSeconds)
+         self.sourceClock = initialSourceClock
+@@ -242,6 +258,7 @@
+         condition.lock(); defer { condition.unlock() }
+         generation &+= 1
+         seeking = true
++        seekVideoStartPTS = nil
+         if seconds.isFinite { sourceClock = seconds }
+         condition.broadcast()
+         return generation
+@@ -259,18 +276,29 @@
+             && seconds.isFinite && (frontierLocked(at: seconds).map { $0 > seconds } ?? false)
+         let candidates = hasCoverage ? keyframes.filter { $0.seconds <= seconds }
+             .sorted { $0.seconds < $1.seconds } : []
+-        // A previous recovery/key picture supplies open-GOP/audio preroll when still retained.
+-        let anchor = candidates.isEmpty ? nil : candidates[max(0, candidates.count - 2)]
++        // Keep the conservative open-GOP policy for other codecs. AV1 key packets
++        // independently restart video. Audio warm-up selects its own earlier cursor;
++        // it must not force an extra GOP through the video decoder.
++        let legacy = candidates.isEmpty ? nil : candidates[max(0, candidates.count - 2)]
++        let videoKey = independentVideoKeys ? candidates.last : legacy
++        let audioBookmark = videoKey?.audioBookmark
++        let anchor = independentVideoKeys
++            ? (audio == nil ? videoKey?.cursor : audioBookmark?.cursor ?? legacy?.cursor)
++            : legacy?.cursor
+         condition.unlock()
+ 
+         if let anchor {
+             do {
+-                try fifo.restore(to: anchor.cursor)
++                try fifo.restore(to: anchor)
+                 let state = fifo.snapshot
+                 condition.lock(); defer { condition.unlock() }
+                 guard token == generation, !closed else { throw ReadError.interrupted }
+                 copyDiskStateLocked(state)
+                 sourceClock = seconds
++                seekVideoStartPTS = independentVideoKeys ? videoKey?.pts : nil
++                EngineLog.emit("[NeoCacheSeek] target=\(seconds) videoKey=\(videoKey?.seconds ?? -1) "
++                    + "audioStart=\(audio == nil ? -1 : audioBookmark?.seconds ?? legacy?.seconds ?? -1) "
++                    + "independent=\(independentVideoKeys ? 1 : 0)", category: .swPlayback)
+                 // The cursor moved, so the reservoir is measured from the target again. Left at
+                 // the old high-water mark, a backward hit would read as a full reservoir and a
+                 // forward one as an empty one.
+@@ -416,8 +444,17 @@
+ 
+     /// Consumer thread only. nil means true EOF; a seek wake is explicitly different from EOF.
+     func read(isCurrent: @Sendable () -> Bool = { true }) throws -> SoftwareStoredPacket? {
+-        condition.lock()
+-        let token = generation
++        condition.lock(); let token = generation; condition.unlock()
++        while true {
++            let result = try readOne(token: token, isCurrent: isCurrent)
++            if result.discardVideo { continue }
++            return result.packet
++        }
++    }
++
++    private func readOne(token: UInt64, isCurrent: @Sendable () -> Bool)
++        throws -> (packet: SoftwareStoredPacket?, discardVideo: Bool) {
++        condition.lock()
+         var waitStart: DispatchTime?
+         var starvationLine: String?
+         while count == 0, !ended, failure == nil, !closed, !seeking,
+@@ -456,7 +493,7 @@
+             let error = failure
+             condition.unlock()
+             if let error { throw error }
+-            return nil
++            return (nil, false)
+         }
+         condition.unlock()
+         guard let data = try fifo.pop() else { throw ReadError.corruptFIFO }
+@@ -469,11 +506,18 @@
+         defer { condition.unlock() }
+         guard !closed, !seeking, token == generation, isCurrent() else { throw ReadError.interrupted }
+         copyDiskStateLocked(state)
+-        if packet.streamIndex == video.index, let seconds = videoSeconds(pts: packet.pts) {
+-            consumedVideoSeconds = seconds
++        var discardVideo = false
++        if packet.streamIndex == video.index {
++            if let start = seekVideoStartPTS {
++                if packet.pts == start && packet.flags & 1 != 0 { seekVideoStartPTS = nil }
++                else { discardVideo = true }
++            }
++            if !discardVideo, let seconds = videoSeconds(pts: packet.pts) {
++                consumedVideoSeconds = seconds
++            }
+         }
+         condition.broadcast()
+-        return packet
++        return (packet, discardVideo)
+     }
+ 
+     private func frontierLocked(at seconds: Double? = nil) -> Double? {
+@@ -515,6 +559,7 @@
+         videoCoverage.reset(); audioCoverage.reset(); presentationCoverage?.reset()
+         storedVideoSeconds = nil; consumedVideoSeconds = nil
+         keyframes.removeAll(keepingCapacity: true)
++        recentAudio.removeAll(keepingCapacity: true); seekVideoStartPTS = nil
+         residency = SoftwarePacketResidency()
+     }
+ 
+@@ -531,8 +576,12 @@
+         residentBytes = state.residentByteCount
+         if let floor = state.oldestRetainedChunkID {
+             keyframes.removeAll { $0.cursor.chunkID < floor }
++            recentAudio.removeAll { $0.cursor.chunkID < floor }
+             residency.evict(before: floor)
+-        } else { keyframes.removeAll(keepingCapacity: true) }
++        } else {
++            keyframes.removeAll(keepingCapacity: true)
++            recentAudio.removeAll(keepingCapacity: true)
++        }
+     }
+ 
+     private func produce() {
+@@ -631,12 +680,24 @@
+                             }
+                             if let seconds = videoSeconds(pts: packet.pts) { storedVideoSeconds = seconds }
+                             if packet.flags & 1 != 0, let seconds = videoSeconds(pts: packet.pts) {
+-                                keyframes.append(Keyframe(seconds: seconds, cursor: cursor))
++                                let bookmark = audioSeekPrerollSeconds.flatMap { preroll in
++                                    recentAudio.last { $0.seconds <= seconds-preroll && seconds-$0.seconds <= preroll+0.5 }
++                                }
++                                keyframes.append(Keyframe(seconds: seconds, cursor: cursor,
++                                                          pts: packet.pts, audioBookmark: bookmark))
+                                 if keyframes.count > maximumKeyframes {
+                                     keyframes.removeFirst(min(1024, keyframes.count))
+                                 }
+                             }
+                         } else if let audio, packet.streamIndex == audio.index {
++                            if independentVideoKeys, audioSeekPrerollSeconds != nil,
++                               packet.pts != Int64.min, audio.numerator > 0, audio.denominator > 0 {
++                                let seconds = Double(packet.pts)*Double(audio.numerator)/Double(audio.denominator)
++                                if seconds.isFinite {
++                                    recentAudio.append(AudioBookmark(seconds: seconds, cursor: cursor))
++                                    if recentAudio.count > 512 { recentAudio.removeFirst(recentAudio.count-512) }
++                                }
++                            }
+                             if audioCoverage.isFull, let tick = playheadTick(audio) {
+                                 audioCoverage.prune(before: tick)
+                             }
+--- a/Sources/AetherEngine/Native/SoftwarePlaybackHost.swift
++++ b/Sources/AetherEngine/Native/SoftwarePlaybackHost.swift
+@@ -1455,6 +1455,14 @@
+                           denominator: $0.pointee.time_base.den,
+                           audioTiming: Self.audioPacketTiming($0.pointee.codecpar))
+                 } : nil
++            // AAC needs a few packets of decoder warm-up, not the preceding video
++            // GOP. Unknown/reservoir-dependent audio retains the legacy read cursor.
++            let audioPreroll = dem.stream(at: audioStreamIndex).flatMap { stream -> Double? in
++                let p = stream.pointee.codecpar.pointee
++                guard p.codec_id == AV_CODEC_ID_AAC, p.sample_rate > 0 else { return nil }
++                return max(0.1, 4096.0/Double(p.sample_rate))
++            }
++            let independentVideoKeys = vCodecID == AV_CODEC_ID_AV1.rawValue
+             let initialSourceClock = initialClockTime.seconds
+             let videoReorderDepth = Self.presentationReorderDepth(codecID: vCodecID)
+             let cacheResult = await BlockingWork.detached(priority: .utility) { () throws -> (SoftwarePacketReadAhead, RetentionClaims.Claim?)? in
+@@ -1466,7 +1474,8 @@
+                     video: video, audio: audio, byteBudget: bytes,
+                     forwardSeconds: Double(segments) * 4,
+                     initialSourceClock: initialSourceClock, fifo: fifo,
+-                    videoReorderDepth: videoReorderDepth
++                    videoReorderDepth: videoReorderDepth,
++                    independentVideoKeys: independentVideoKeys, audioSeekPrerollSeconds: audioPreroll
+                 ) { isCurrent in
+                     guard let packet = try dem.readPacket(isCurrent: isCurrent) else { return nil }
+                     defer { av_packet_unref(packet); av_packet_free_safe(packet) }

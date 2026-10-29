@@ -13,6 +13,17 @@ private final class NeoAetherLogCapture: @unchecked Sendable {
   private let lock = NSLock()
   private var seen = Set<String>()
   func receive(_ line: String) {
+    if let prefix = line.range(of: "[NeoCacheSeek] ") {
+      var values: [String: Any] = [:]
+      for part in line[prefix.upperBound...].split(separator: " ") {
+        let pair = part.split(separator: "=", maxSplits: 1)
+        guard pair.count == 2, ["target", "videoKey", "audioStart", "independent"].contains(String(pair[0])),
+              let value = Double(pair[1]), value.isFinite else { return }
+        values[String(pair[0]) + (pair[0] == "independent" ? "" : "Ms")] = pair[0] == "independent" ? value : value*1000
+      }
+      if values.count == 4 { NeoPlaybackDiagnostics.record("aether.cacheSeekAnchor", fields: values) }
+      return
+    }
     if let prefix = line.range(of: "[NeoSeekSegment] "), NeoPlaybackDiagnostics.seekID > 0 {
       let parts = line[prefix.upperBound...].split(separator: " ")
       var values: [String: Any] = [:]

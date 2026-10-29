@@ -47,3 +47,20 @@ let fallback = NeoCheckpointPlacement.adaptiveCandidate(at: 5.1, keyframes: [0,2
 assert(fallback.basis == "time" && fallback.seconds == 5)
 assert(NeoCheckpointPlacement.adaptiveCandidate(at: .nan, keyframes: [0,25], saved: [], costs: heavy) == nil)
 print("Adaptive decode-cost placement: heavy/light regions, minimum spacing, real-key boundaries, sparse-data fallback passed")
+
+// Foreground decoding trails the ahead worker: an already saved point may lie
+// AFTER the current output, so checking only the preceding anchor misses it.
+for (current, future) in [(2.669, 3.036), (6.231, 6.648), (9.026, 9.193)] {
+  let costs = [NeoCheckpointPlacement.CostSample(start: 0, end: current, milliseconds: 200)]
+  assert(NeoCheckpointPlacement.adaptiveCandidate(at: current, keyframes: [0,25], saved: [future], costs: costs) == nil)
+  assert(NeoCheckpointPlacement.adaptiveCandidate(at: future, keyframes: [0,25], saved: [current], costs: costs) == nil)
+}
+assert(NeoCheckpointPlacement.candidate(at: 5.1, keyframes: [0,25], saved: [5.9]) == nil, "Time fallback also checks the future neighbour")
+assert(NeoCheckpointPlacement.isSeparated(at: 4, saved: [3,5]), "An exact one-second gap is allowed")
+assert(!NeoCheckpointPlacement.isSeparated(at: 4, saved: [3.001]))
+let delayed = NeoCheckpointPlacement.Slot(seconds: 4, keyframe: 0, nextKeyframe: 25, spacing: 4)
+assert(NeoCheckpointPlacement.canStore(delayed, at: 4, keyframes: [0,25], saved: [5.2]))
+assert(!NeoCheckpointPlacement.canStore(delayed, at: 4.3, keyframes: [0,25], saved: [5.2]), "Recheck actual drained position before saving")
+assert(NeoCheckpointPlacement.adaptiveCandidate(at: 8, keyframes: [0,25], saved: [3,11],
+  costs: [.init(start: 3, end: 8, milliseconds: 120)]) != nil, "Keep useful points in a genuine gap")
+print("Checkpoint separation: ahead/foreground neighbours, fallback, capture drift and useful gaps passed")
