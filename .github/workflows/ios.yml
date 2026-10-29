@@ -21,6 +21,11 @@ on:
         default: h264
         type: choice
         options: [h264, av1]
+      native_pixel_probe:
+        description: 'Diagnostic A/B only: allow polling a paused HLS pixel without hasNew'
+        required: false
+        default: false
+        type: boolean
       network_probe:
         description: 'Recheck only controlled network faults on an unchanged built simulator app'
         required: false
@@ -420,6 +425,7 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       REUSE_RUN: ${{ inputs.reuse_run }}
+      NATIVE_PIXEL_PROBE: ${{ inputs.native_pixel_probe }}
       UI_STAGE: ${{ inputs.ui_stage }}
       RECHECK_PLAYBACK: ${{ inputs.recheck_playback }}
       CHECK_SCOPE: ${{ inputs.check_scope }}

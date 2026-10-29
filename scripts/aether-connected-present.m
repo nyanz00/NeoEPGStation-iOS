@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#import <AVFoundation/AVFoundation.h>
 #include <stdlib.h>
 
 static __weak UIViewController *neoConnectedPlayer;
@@ -9,6 +10,23 @@ static NSInteger neoOutput(id backend) { return [[[backend valueForKey:@"snapsho
 static void neoSetIntent(UIViewController *player, BOOL playing) {
   ((void(*)(id,SEL,BOOL))objc_msgSend)(player,NSSelectorFromString(@"setPlaybackIntent:"),playing);
 }
+
+// Diagnostic-only A/B: test whether AVFoundation's hasNew flag suppresses an
+// already decoded paused picture. Never enabled for final validation or the IPA.
+@implementation AVPlayerItemVideoOutput (NeoPausedPixelProbe)
++ (void)load {
+  if (![NSProcessInfo.processInfo.environment[@"NEO_EPG_NATIVE_PIXEL_PROBE"] isEqual:@"1"]) { return; }
+  method_exchangeImplementations(class_getInstanceMethod(self,@selector(hasNewPixelBufferForItemTime:)),
+    class_getInstanceMethod(self,@selector(neo_pausedHasNewPixelBufferForItemTime:)));
+}
+- (BOOL)neo_pausedHasNewPixelBufferForItemTime:(CMTime)time {
+  BOOL available = [self neo_pausedHasNewPixelBufferForItemTime:time];
+  id backend = [neoConnectedPlayer valueForKey:@"aether"];
+  BOOL diagnostic = backend && ![[backend valueForKey:@"ready"] boolValue] &&
+    ![[neoConnectedPlayer valueForKey:@"wantsPlayback"] boolValue];
+  return available || diagnostic;
+}
+@end
 
 // The original probe paused only the backend while the controller still wanted
 // to play. Exercise production intent handling on the already-built app instead.

@@ -27,7 +27,7 @@ documents = Path(run('xcrun','simctl','get_app_container',device,bundle,'data'))
 checker = (dist/'aether-picture-check').resolve()
 presentation_harness=(dist/'aether-connected-present.dylib').resolve()
 subprocess.run(['xcrun','--sdk','iphonesimulator','clang','-target','arm64-apple-ios18.0-simulator',
-                '-dynamiclib','-fobjc-arc','-framework','UIKit','scripts/aether-connected-present.m',
+                '-dynamiclib','-fobjc-arc','-framework','UIKit','-framework','AVFoundation','scripts/aether-connected-present.m',
                 '-o',str(presentation_harness)],check=True,timeout=60)
 subprocess.run(['codesign','--force','--sign','-',str(presentation_harness)],check=True,timeout=30)
 reference = Path('tests/fixtures/aether-seek-reference')
@@ -55,6 +55,8 @@ cases = [('encoded-seek-1080.mkv',False,False),('encoded-seek-1080.mkv',True,Fal
          ('hevc-seek-10.mkv',False,False),('av1-seek-10.mkv',False,True),('encoded-seek-1080.mkv',False,True)]
 recovery = '--recovery' in sys.argv
 if recovery: cases = [cases[3], cases[1]]
+pixel_probe = os.environ.get('NATIVE_PIXEL_PROBE') == 'true'
+if pixel_probe: cases = [('encoded-seek-1080.mkv',True,False)]
 for fixture,streaming,checkpoint in cases:
     case_began=time.monotonic()
     label = fixture+('-hls' if streaming else '-play')+('-checkpoint' if checkpoint else '')
@@ -132,6 +134,7 @@ for fixture,streaming,checkpoint in cases:
         subprocess.run(['xcrun','simctl','terminate',device,bundle],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         env=os.environ.copy()
         env.update(SIMCTL_CHILD_NEO_EPG_RECOVERY_CHECKS='1' if recovery else '0',
+                   SIMCTL_CHILD_NEO_EPG_NATIVE_PIXEL_PROBE='1' if pixel_probe else '0',
                    SIMCTL_CHILD_NEO_EPG_AETHER_CONNECTED=f'http://127.0.0.1:{server.server_port}',
                    SIMCTL_CHILD_NEO_EPG_CONNECTED_STREAM='1' if streaming else '0',
                    SIMCTL_CHILD_NEO_EPG_CONNECTED_CHECKPOINT='1' if checkpoint else '0',
