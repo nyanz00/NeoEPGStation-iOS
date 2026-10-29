@@ -24,6 +24,11 @@ run('xcrun','simctl','bootstatus',device,'-b',timeout=600)
 run('xcrun','simctl','install',device,'build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app',timeout=300)
 documents = Path(run('xcrun','simctl','get_app_container',device,bundle,'data'))/'Documents'
 checker = (dist/'aether-picture-check').resolve()
+presentation_harness=(dist/'aether-connected-present.dylib').resolve()
+subprocess.run(['xcrun','--sdk','iphonesimulator','clang','-target','arm64-apple-ios18.0-simulator',
+                '-dynamiclib','-fobjc-arc','-framework','UIKit','scripts/aether-connected-present.m',
+                '-o',str(presentation_harness)],check=True,timeout=60)
+subprocess.run(['codesign','--force','--sign','-',str(presentation_harness)],check=True,timeout=30)
 reference = Path('tests/fixtures/aether-seek-reference')
 manifest = json.loads((reference/'manifest.json').read_text())['fixtures']
 header = '''[Script Info]
@@ -120,7 +125,8 @@ for fixture,streaming,checkpoint in cases:
         env=os.environ.copy()
         env.update(SIMCTL_CHILD_NEO_EPG_AETHER_CONNECTED=f'http://127.0.0.1:{server.server_port}',
                    SIMCTL_CHILD_NEO_EPG_CONNECTED_STREAM='1' if streaming else '0',
-                   SIMCTL_CHILD_NEO_EPG_CONNECTED_CHECKPOINT='1' if checkpoint else '0')
+                   SIMCTL_CHILD_NEO_EPG_CONNECTED_CHECKPOINT='1' if checkpoint else '0',
+                   SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=str(presentation_harness))
         launched=subprocess.check_output(['xcrun','simctl','launch',device,bundle],text=True,env=env)
         print(launched.strip(),flush=True)
         pid=re.search(r': (\d+)',launched)
