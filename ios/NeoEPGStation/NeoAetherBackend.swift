@@ -29,6 +29,7 @@ final class NeoAetherBackend: NSObject {
   private var timer: Timer?, output: AVPlayerItemVideoOutput?
   private weak var outputItem: AVPlayerItem?
   private var epoch = 0, closed = false, loaded = false, wantsPlayback = true
+  private var primingPausedFrame = false
   private var lastPTS = -Double.infinity, lastFrameHost = 0.0, openedAt = 0.0
   private var lastTick = 0.0, lastCheckpointTick = -Double.infinity, checkpointOffset = 0.0
   private var samples = 0, outputID = 0, pendingTarget: Double?, pendingBegan = 0.0
@@ -59,7 +60,7 @@ final class NeoAetherBackend: NSObject {
   @objc nonisolated private(set) var ended: Bool { get { transport.access { $0.ended } } set { transport.access { $0.ended = newValue } } }
   @objc nonisolated private(set) var failed: Bool { get { transport.access { $0.failed } } set { transport.access { $0.failed = newValue } } }
   @objc private(set) var videoSize = CGSize.zero
-  @objc var muted = false { didSet { engine?.volume = muted ? 0 : 1 } }
+  @objc var muted = false { didSet { engine?.volume = muted || primingPausedFrame ? 0 : 1 } }
   @objc var pipActive = false {
     didSet {
       engine?.pictureInPictureActive = pipActive
@@ -94,7 +95,7 @@ final class NeoAetherBackend: NSObject {
     checkpoints?.stop(); checkpoints = nil; NeoAV1PlaybackBridge.install(nil)
     AetherEngine.setForceSoftwarePathForTesting(false)
     engine?.stop(); detachOutput(); snapshotPixel = nil
-    loaded = false; ready = false; ended = false; failed = false; buffering = true; recovering = false
+    loaded = false; ready = false; ended = false; failed = false; buffering = true; recovering = false; primingPausedFrame = false
     wantsPlayback = playing; self.playing = false; timeMs = max(0,startMilliseconds)
     lastPTS = -.infinity; lastFrameHost = 0; openedAt = CACurrentMediaTime(); lastCheckpointTick = -.infinity
     outputID += 1; samples = 0; pendingTarget = nil; settleSeek(false)
@@ -143,10 +144,17 @@ final class NeoAetherBackend: NSObject {
             self.checkpoints?.stop(); self.checkpoints = nil; NeoAV1PlaybackBridge.install(nil)
           }
           next.setRate(self.rate)
-          // Opening a paused transport need not publish a target picture.
-          // Use the same paused seek that already prepares a single picture
-          // during normal seeking, without ever starting audible playback.
-          if !self.wantsPlayback { await next.seek(to:Double(startMilliseconds)/1000) }
+          if !self.wantsPlayback {
+            if next.videoRoute == .software {
+              // PausedFirstFrame in SWHost keeps already-started loops reading
+              // at a stopped clock. It cannot start loops that never ran.
+              // Start then pause while muted, so that policy can prepare the
+              // first picture without starting audible playback or our UI clock.
+              self.primingPausedFrame = true; next.volume = 0
+              next.play(); next.pause()
+              NeoPlaybackDiagnostics.record("aether.pausedPicturePrime",fields:["targetMs":startMilliseconds])
+            } else { await next.seek(to:Double(startMilliseconds)/1000) }
+          }
           guard !Task.isCancelled, !self.closed, self.epoch == generation else { return }
           self.loaded = true
           self.applyIntent(); next.clearSubtitle()
@@ -166,7 +174,9 @@ final class NeoAetherBackend: NSObject {
   }
   private func applyIntent() {
     guard let engine, loaded, !recovering else { return }
-    if wantsPlayback { engine.play() } else { engine.pause() }
+    if wantsPlayback {
+      primingPausedFrame = false; engine.volume = muted ? 0 : 1; engine.play()
+    } else { engine.pause() }
   }
   @objc func play() { wantsPlayback = true; applyIntent() }
   @objc func pause() { wantsPlayback = false; engine?.pause(); playing = false }
@@ -243,6 +253,11 @@ final class NeoAetherBackend: NSObject {
     let frame = picture()
     if let (pixel,pts,generation,displayTimeVerified) = frame, pts != lastPTS || generation != lastGeneration {
       lastPTS = pts; lastGeneration = generation; snapshotPixel = pixel; lastFrameHost = now; samples += 1
+      if primingPausedFrame {
+        engine.pause()
+        NeoPlaybackDiagnostics.record("aether.pausedPictureReady",fields:["mediaMs":pts*1000,"volume":engine.volume,"intent":wantsPlayback])
+        primingPausedFrame = false; engine.volume = muted ? 0 : 1
+      }
       if videoSize == .zero { videoSize = CGSize(width:CVPixelBufferGetWidth(pixel),height:CVPixelBufferGetHeight(pixel)) }
       if pendingTarget == nil || abs(pts-(pendingTarget ?? pts)) <= 0.5 {
         timeMs = Int64(max(0,pts)*1000)
@@ -375,7 +390,7 @@ final class NeoAetherBackend: NSObject {
   @objc var surfaceProbe: [String:Any] {
     ["inWindow":surface.window != nil,"width":surface.bounds.width,"height":surface.bounds.height,
      "sampleFailure":sampleFailure,"frames":samples,"hasSink":frameSink != nil,
-     "loaded":loaded,"intent":wantsPlayback,"recovering":recovering,"state":String(describing:engine?.state),
+     "loaded":loaded,"intent":wantsPlayback,"recovering":recovering,"primingPausedFrame":primingPausedFrame,"state":String(describing:engine?.state),
      "layers":layers(surface.layer).map { String(describing:type(of:$0)) }]
   }
   @objc var renderSurfaceReadyForProbe: Bool {

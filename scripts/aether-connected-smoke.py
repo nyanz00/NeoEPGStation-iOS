@@ -149,6 +149,9 @@ for fixture,streaming,checkpoint in cases:
         events=json.loads((documents/names[1]).read_text())['events']
         connected=[e for e in events if e['event']=='aether.connected']
         assert connected and all(e['hlsDirect']==streaming for e in connected),connected
+        if not streaming:
+            primed=[e for e in events if e['event']=='aether.pausedPictureReady']
+            assert primed and all(e['volume']==0 and not e['intent'] for e in primed),'Paused first picture was not prepared silently'
         if checkpoint and fixture.startswith('av1'):
             assert any(e['event']=='checkpoint.restored' and e['status']==0 for e in events),'No actual AV1 state restore'
         if checkpoint and not fixture.startswith('av1'):
