@@ -312,6 +312,7 @@ final class NeoAetherBackend: NSObject {
     seekTask = Task { [weak self, engine] in
       await engine.seek(to:target)
       guard let self, !self.closed, self.epoch == token else { return }
+      if self.pipActive, engine.videoRoute != .software { self.configurePiPFrames() }
       self.applyIntent()
     }
   }
@@ -337,7 +338,11 @@ final class NeoAetherBackend: NSObject {
   private func layers(_ layer: CALayer) -> [CALayer] { [layer]+(layer.sublayers ?? []).flatMap { layers($0) } }
   private func picture() -> (CVPixelBuffer,Double,UInt64?,Bool)? {
     guard let engine else { return nil }
-    if pipActive { return pipFrames.latest.map { ($0.pixel,$0.pts,$0.generation,false) } }
+    if pipActive {
+      return pipFrames.latest.map {
+        ($0.pixel,$0.pts,engine.videoRoute == .software ? $0.generation : nil,false)
+      }
+    }
     if engine.videoRoute == .software {
       for layer in layers(surface.layer).compactMap({ $0 as? AVSampleBufferDisplayLayer }) {
         guard layer.isReadyForDisplay, let pixel = layer.sampleBufferRenderer.displayedPixelBuffer() else { continue }
@@ -541,10 +546,14 @@ final class NeoAetherBackend: NSObject {
       try? await Task.sleep(nanoseconds:6_200_000_000)
       let progressed = timeMs-start > 4500 && !recovering && outputID == oldOutput
       let fed = pipFrames.latest != nil || engine?.videoRoute != .software
+      let target = timeMs+3000
+      let sought: Bool = await withCheckedContinuation { done in seek(milliseconds:target) { done.resume(returning:$0) } }
+      let soughtInPiP = sought && abs(timeMs-target) < 500 && outputID == oldOutput
       surface.isHidden = false; pipActive = false
       pause(); background(); foreground()
       try? await Task.sleep(nanoseconds:2_000_000_000)
       completion(["detachedPiPVideoAdvances":progressed,"independentPiPFeed":fed,
+        "detachedPiPSeekReachesTarget":soughtInPiP,
         "presentationRestoreDoesNotReopenInput":outputID == oldOutput && !recovering,
         "presentationRestoreKeepsPause":!wantsPlayback && !playing && engine?.volume == (muted ? 0 : 1)])
     }

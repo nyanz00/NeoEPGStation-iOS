@@ -40,7 +40,9 @@ final class Origin: @unchecked Sendable {
       let code = playlist && failed ? 503 : 200
       let body: Data
       if playlist {
-        body = Data("#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nsegments/0.ts\n#EXTINF:4,\nsegments/1.ts\n#EXT-X-ENDLIST\n".utf8)
+        let path = request.split(separator:" ").dropFirst().first.map(String.init) ?? "/"
+        let start = URLComponents(string:"http://localhost"+path)?.queryItems?.first(where: { $0.name == "ss" })?.value ?? "0"
+        body = Data("#EXTM3U\n#EXT-X-START:TIME-OFFSET=\(start),PRECISE=YES\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nsegments/0.ts\n#EXTINF:4,\nsegments/1.ts\n#EXT-X-ENDLIST\n".utf8)
       } else if request.hasPrefix("GET ") { body = payload }
       else { body = Data() }
       var response = Data("HTTP/1.1 \(code) OK\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n".utf8)

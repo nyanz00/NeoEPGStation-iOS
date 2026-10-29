@@ -454,10 +454,10 @@ print("Comment viewport, independent PiP coordinates and stable glyph scale: pas
 var authoritative = CommentPresentationClock()
 _ = authoritative.time(media: 1, running: true, now: 10)
 _ = authoritative.time(media: 1.1, running: true, now: 10.1)
-let moving = authoritative.time(media: 1.1, running: true, now: 10.5)
-check(abs(moving-1.5) < 0.00001, "Authoritative comments keep moving across stale native clock notifications")
+let authoritativeMoving = authoritative.time(media: 1.1, running: true, now: 10.5)
+check(abs(authoritativeMoving-1.5) < 0.00001, "Authoritative comments keep authoritativeMoving across stale native clock notifications")
 let held = authoritative.time(media: 1.5, running: false, now: 11)
-check(held == moving && authoritative.time(media: 4, running: false, now: 14) == held,
+check(held == authoritativeMoving && authoritative.time(media: 4, running: false, now: 14) == held,
       "Explicit player pause or confirmed buffering hold freezes comments")
 _ = authoritative.time(media: 4, running: true, now: 14.01)
 let resumed = authoritative.time(media: 4.1, running: true, now: 14.11)
