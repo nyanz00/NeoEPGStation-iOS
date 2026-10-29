@@ -356,8 +356,15 @@ final class NeoAetherBackend: NSObject {
       }
     } else if let item = outputItem, let output {
       let current = item.currentTime(); var shown = CMTime.invalid
-      if output.hasNewPixelBuffer(forItemTime:current), let pixel = output.copyPixelBuffer(forItemTime:current,itemTimeForDisplay:&shown), shown.isNumeric {
+      // A paused HLS replacement can already have a decoded picture while
+      // hasNew remains false. During initial readiness, ask for that picture
+      // directly; normal playback retains the new-frame optimisation.
+      let fresh = output.hasNewPixelBuffer(forItemTime:current)
+      if (fresh || !ready), let pixel = output.copyPixelBuffer(forItemTime:current,itemTimeForDisplay:&shown), shown.isNumeric {
         let pts = engine.presentationAxisMap.sourceSeconds(forItemSeconds:shown.seconds) ?? shown.seconds
+        if !fresh && !ready {
+          NeoPlaybackDiagnostics.record("aether.initialPicturePolled",fields:["mediaMs":pts*1000,"paused":!wantsPlayback])
+        }
         return (pixel,pts,nil,true)
       }
     }
