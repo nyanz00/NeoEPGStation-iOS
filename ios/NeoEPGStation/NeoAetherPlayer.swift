@@ -165,6 +165,9 @@ final class NeoAetherPlayer: UIViewController {
       if let choice = checkpointDecision {
         NeoPlaybackDiagnostics.record("checkpoint.selection", fields: ["mode": choice.mode.rawValue, "enabled": choice.enabled,
           "reason": choice.reason, "maximumInterval": choice.maximum ?? -1, "thresholdSeconds": 10,
+          "analysisStatus": choice.analysisStatus, "analysisVersion": choice.analysisVersion,
+          "analysisCurrentVersion": choice.analysisCurrentVersion, "analysisStale": choice.analysisStale,
+          "analysisRequests": choice.analysisRequests, "analysisWaitMs": choice.analysisWaitMs,
           "av1HardwareSupported": VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1)])
       }
       EngineLog.handler = { [capture = engineLog] line in capture.receive(line) }

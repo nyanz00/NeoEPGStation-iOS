@@ -7,6 +7,7 @@ final class NeoDetailPage: NeoPage {
   private var wide = false
   private var thumbnailSize: [NSLayoutConstraint] = []
   private var task: Task<Void, Never>?
+  private var analysisTask: Task<Void, Never>?
   private let dropStatus = NeoStyle.label(size: 14, muted: true)
   private lazy var playButton = NeoStyle.recordingButton("PLAY", icon: "PlayArrowOutlined") { [weak self] in self?.selectFile() }
   private lazy var streamingButton = NeoStyle.recordingButton("STREAMING", icon: "PlayCircleOutlineOutlined") { [weak self] in self?.selectStreamingFile() }
@@ -44,10 +45,26 @@ final class NeoDetailPage: NeoPage {
 #endif
         guard let api else { return }
         let item = try await api.recording(id); try Task.checkCancellation()
-        self.item = item; self.render()
+        self.item = item; self.render(); self.prefetchCheckpointAnalysis(api: api)
       } catch { if !Task.isCancelled { self.alert(error.localizedDescription) } }
       self.loading.stopAnimating()
     }
+  }
+  private func prefetchCheckpointAnalysis(api: NeoAPI) {
+    guard NeoPlaybackExperiment.selected == .checkpointPlayer, NeoPlaybackExperiment.checkpointMode == .automatic,
+      !item.isRecording else { return }
+    let files = (item.videoFiles ?? []).filter { $0.type == "encoded" }
+    let revision = api.identityRevision
+    analysisTask?.cancel()
+    analysisTask = Task { [weak self] in
+      for file in files {
+        guard !Task.isCancelled, self?.shell?.api === api, api.identityRevision == revision else { return }
+        _ = try? await api.checkpointVideoInfo(file.id)
+      }
+    }
+  }
+  override func viewDidDisappear(_ animated: Bool) {
+    super.viewDidDisappear(animated); analysisTask?.cancel(); analysisTask = nil
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews(); scroll.frame = body.bounds; loading.center = CGPoint(x: body.bounds.midX, y: 30)
@@ -153,7 +170,7 @@ final class NeoDetailPage: NeoPage {
   func smokeOpenDropLog() { showDropLog() }
   var smokeDropDialogVisible: Bool { (presentedViewController as? NeoDropLogDialog)?.smokeReady == true }
 #endif
-  deinit { task?.cancel() }
+  deinit { task?.cancel(); analysisTask?.cancel() }
 }
 
 // Web RecordedDetailPage action row: spacing=8, height=36. The requested

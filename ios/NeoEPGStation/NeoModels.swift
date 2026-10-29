@@ -273,6 +273,7 @@ private final class NeoAPIRedirectPolicy: NSObject, URLSessionTaskDelegate {
 }
 final class NeoAPI {
   let base: URL; let session: URLSession
+  @MainActor private var checkpointRequests: [String: Task<NeoCheckpointVideoInfo, Error>] = [:]
   private let headersLock = NSLock()
   private var authenticationHeaders: [String: String] = [:]
   var profileHeaders: [String: String] {
@@ -396,8 +397,15 @@ final class NeoAPI {
     return try await request(parts.url!)
   }
   func configuration() async throws -> NeoServerConfig { try await request(url("/config")) }
-  func checkpointVideoInfo(_ id: Int) async throws -> NeoCheckpointVideoInfo {
-    try await request(url("/videos/\(id)/info"), timeout: 2)
+  @MainActor func checkpointVideoInfo(_ id: Int) async throws -> NeoCheckpointVideoInfo {
+    let key = "\(identityRevision):\(id)"
+    if let active = checkpointRequests[key] { return try await active.value }
+    let active = Task { try await self.request(self.url("/videos/\(id)/info"), timeout: 10) as NeoCheckpointVideoInfo }
+    checkpointRequests[key] = active
+    defer { checkpointRequests.removeValue(forKey: key) }
+    // A detail prefetch and a play request share the in-flight GET. Cancelling
+    // one waiter must not cancel the other's request; the HTTP timeout bounds it.
+    return try await active.value
   }
   func dropLog(_ id: Int) async throws -> String {
     var request = URLRequest(url: url("/dropLogs/\(id)?maxsize=512")); request.timeoutInterval = 20

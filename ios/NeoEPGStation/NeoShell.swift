@@ -250,6 +250,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private(set) var api: NeoAPI?
   private(set) var account: NeoAccountCoordinator?
   private var preparingPlay = false
+  private var playPreparationTask: Task<Void, Never>?
+  private weak var preparationOrigin: UIViewController?
+#if targetEnvironment(simulator)
+  private var checkpointAnalysisProbe: ((NeoCheckpointDecision?) -> Void)?
+#endif
   private(set) var channels: [Int: String] = [:]
   private(set) var serverConfig: NeoServerConfig?
   private(set) var route = "recorded"
@@ -474,9 +479,14 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     preparingPlay = true
     let user = api.viewer, revision = api.identityRevision, origin = active?.topViewController
     let experiment = NeoPlaybackExperiment.selected, checkpointMode = NeoPlaybackExperiment.checkpointMode
-    Task { [weak self, weak origin] in
+    preparationOrigin = origin
+    playPreparationTask = Task { [weak self, weak origin] in
       guard let self else { return }
-      defer { preparingPlay = false; onPrepared?() }
+      var analysisAlert: UIAlertController?
+      defer {
+        if let alert = analysisAlert, alert.presentingViewController != nil, !alert.isBeingDismissed { alert.dismiss(animated: false) }
+        preparingPlay = false; playPreparationTask = nil; preparationOrigin = nil; onPrepared?()
+      }
       var start = 0.0
       if !fromBeginning, api.resumePlayback, Int(user).map({ $0 > 0 }) == true {
         do { start = try await api.playback(recording.id, user: user).resumePosition ?? 0 }
@@ -490,11 +500,27 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       }
       var decision: NeoCheckpointDecision?
       if experiment == .checkpointPlayer, experiment.applies(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
-        // One bounded request; never poll or wait for background analysis to finish.
-        let info = checkpointMode == .automatic ? (try? await api.checkpointVideoInfo(file.id)) : nil
-        decision = NeoCheckpointDecision.choose(checkpointMode, info: info)
+        if checkpointMode == .automatic {
+          do {
+            let result = try await NeoCheckpointAnalysis.resolve(fetch: { try await api.checkpointVideoInfo(file.id) },
+              isCurrent: { self.viewIfLoaded?.window != nil && self.api === api && api.accountReady && api.identityRevision == revision && self.active?.topViewController === origin },
+              progress: { _ in
+                guard analysisAlert == nil, let origin, origin.presentedViewController == nil else { return }
+                let alert = UIAlertController(title: "解析中", message: "再生方法を選択しています。解析が完了するまでお待ちください。", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "キャンセル", style: .cancel) { [weak self] _ in self?.playPreparationTask?.cancel() })
+                analysisAlert = alert; origin.present(alert, animated: true)
+              })
+            decision = result.decision
+          } catch { return }
+          if let alert = analysisAlert, alert.presentingViewController != nil, !alert.isBeingDismissed {
+            await withCheckedContinuation { continuation in alert.dismiss(animated: true) { continuation.resume() } }
+          }
+        } else { decision = NeoCheckpointDecision.choose(checkpointMode, info: nil) }
       }
-      guard self.api === api, api.accountReady, api.identityRevision == revision, active?.topViewController === origin, player == nil else { return }
+      guard !Task.isCancelled, self.api === api, api.accountReady, api.identityRevision == revision, active?.topViewController === origin, player == nil else { return }
+#if targetEnvironment(simulator)
+      if let probe = checkpointAnalysisProbe { probe(decision); return }
+#endif
       presentPlayer(file, recording: recording, api: api, user: user, start: start, streaming: streaming, streamSubtitle: streamSubtitle,
         experiment: experiment, checkpointDecision: decision)
     }
@@ -727,6 +753,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     return popInteraction
   }
   func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
+    if navigationController === active, preparingPlay, viewController !== preparationOrigin { playPreparationTask?.cancel() }
     popInteraction = nil; viewController.view.setNeedsLayout()
   }
   private func acceptsSidebarBack(start: CGPoint) -> Bool {
@@ -802,6 +829,44 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
 
 #if targetEnvironment(simulator)
   private var backSmokeDetails: [String: Any] = [:]
+  func runCheckpointAnalysisProbe(base: URL, scenario: String) {
+    let oldEngine = NeoPlaybackExperiment.selected, oldMode = NeoPlaybackExperiment.checkpointMode
+    NeoPlaybackExperiment.selected = .checkpointPlayer; NeoPlaybackExperiment.checkpointMode = .automatic
+    let api = NeoAPI(base: base); smokeUseAPI(api)
+    let payload = #"{"id":1,"name":"Synthetic analysis","startAt":0,"endAt":120000,"isRecording":false,"videoFiles":[{"id":17,"name":"AV1","type":"encoded","size":1024}]}"#
+    let item = try! JSONDecoder().decode(NeoRecording.self, from: Data(payload.utf8))
+    let page = NeoDetailPage(item: item, shell: self)
+    let nav = UINavigationController(rootViewController: page); nav.setNavigationBarHidden(true, animated: false); nav.delegate = self
+    route = "recorded"; controllers[route] = nav; attach(nav)
+    Task { [weak self] in
+      guard let self else { return }
+      defer { NeoPlaybackExperiment.selected = oldEngine; NeoPlaybackExperiment.checkpointMode = oldMode; checkpointAnalysisProbe = nil }
+      try? await Task.sleep(for: .milliseconds(700))
+      var choice: NeoCheckpointDecision?, prepared = false, sawWaiting = false
+      checkpointAnalysisProbe = { choice = $0 }
+      play(item.videoFiles![0], recording: item, fromBeginning: true) { prepared = true }
+      let deadline = ProcessInfo.processInfo.systemUptime+18
+      while !prepared && ProcessInfo.processInfo.systemUptime < deadline {
+        if let alert = page.presentedViewController as? UIAlertController, alert.title == "解析中" {
+          sawWaiting = true
+          if scenario == "cancel", !alert.isBeingPresented { playPreparationTask?.cancel() }
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+      }
+      try? await Task.sleep(for: .milliseconds(500))
+      var checks: [String: Bool] = ["finished": prepared && !preparingPlay, "noPlayerBeforeChoice": player == nil,
+        "waitingDialogDismissed": page.presentedViewController == nil]
+      if scenario == "cancel" {
+        checks["cancelledWithoutChoice"] = choice == nil && sawWaiting
+      } else {
+        checks["currentVersionAccepted"] = choice?.analysisVersion == 2 && choice?.analysisCurrentVersion == 2 && choice?.analysisStale == false
+        checks["correctRoute"] = choice?.enabled == (scenario == "stale")
+        checks["completionWaited"] = scenario == "stale" ? sawWaiting && (choice?.analysisRequests ?? 0) >= 2 && (choice?.analysisWaitMs ?? 0) >= 2500 : !sawWaiting
+      }
+      NeoPiPSmoke.save("checkpoint-analysis-smoke", ["success": checks.values.allSatisfy { $0 }, "checks": checks,
+        "scenario": scenario, "reason": choice?.reason ?? "cancelled", "requests": choice?.analysisRequests ?? 0])
+    }
+  }
   static func reflowSmoke(in host: UIView) -> [String: Bool] {
     let drawer = NeoSidebar(frame: CGRect(x: 0, y: 0, width: 300, height: 650)); host.addSubview(drawer)
     var aligned = true

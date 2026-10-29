@@ -18,7 +18,7 @@ subprocess.run(['git', 'diff', '--exit-code', commit, 'HEAD', '--',
                 'App.tsx', 'src', 'ios', 'vendor/vlckit', 'vendor/aether', 'package.json', 'package-lock.json'], check=True, cwd=repository)
 # A checkpoint-only recheck must also retain the private native library,
 # compression sources and their build recipe; ordinary app paths are insufficient.
-if os.environ.get('CHECK_SCOPE') in ('checkpoint-trial', 'checkpoint-player'):
+if os.environ.get('CHECK_SCOPE') in ('checkpoint-trial', 'checkpoint-player', 'checkpoint-analysis'):
     subprocess.run(['git', 'diff', '--exit-code', commit, 'HEAD', '--',
         'vendor/checkpoint', 'vendor/lscomp', 'vendor/rcomp-metal',
         'scripts/build-checkpoint.py', 'scripts/checkpoint_compression_sources.py',
@@ -36,7 +36,7 @@ if Path('ios/NeoEPGStation/NeoPlayerChrome.swift').exists():
     required += ['player-ui-smoke', 'player-playback-smoke']
 full_recheck = os.environ.get('RECHECK_PLAYBACK') == 'true'
 network_probe = os.environ.get('NETWORK_PROBE') == 'true'
-focused = os.environ.get('CHECK_SCOPE') in ('zoom-font', 'ts-comments', 'recovery-ui', 'streaming', 'encoded-seek', 'av1-decoder', 'startup-preroll', 'aether-compare', 'avplayer-compare', 'aether-seek', 'decode-trial', 'checkpoint-trial', 'checkpoint-player')
+focused = os.environ.get('CHECK_SCOPE') in ('zoom-font', 'ts-comments', 'recovery-ui', 'streaming', 'encoded-seek', 'av1-decoder', 'startup-preroll', 'aether-compare', 'avplayer-compare', 'aether-seek', 'decode-trial', 'checkpoint-trial', 'checkpoint-player', 'checkpoint-analysis')
 for name in ([] if full_recheck or network_probe or focused else required):
     result = json.loads((artifact / f'{name}.json').read_text())
     if result.get('success') is not True:

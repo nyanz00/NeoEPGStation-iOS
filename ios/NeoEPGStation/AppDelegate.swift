@@ -20,6 +20,13 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     let window = UIWindow(frame: UIScreen.main.bounds)
     window.rootViewController = NeoShell(); self.window = window; window.makeKeyAndVisible()
 #if targetEnvironment(simulator)
+    if let base = ProcessInfo.processInfo.environment["NEO_EPG_CHECKPOINT_ANALYSIS"], let url = URL(string: base) {
+      DispatchQueue.main.asyncAfter(deadline: .now()+1) {
+        (window.rootViewController as? NeoShell)?.runCheckpointAnalysisProbe(base: url,
+          scenario: ProcessInfo.processInfo.environment["NEO_EPG_ANALYSIS_CASE"] ?? "stale")
+      }
+      return true
+    }
     if let path = ProcessInfo.processInfo.environment["NEO_EPG_CHECKPOINT_TRIAL"], let url = URL(string: path) {
       DispatchQueue.main.asyncAfter(deadline: .now()+1) {
         let controller = NeoDecodeTrialController(source: url, checkpoint: true)
