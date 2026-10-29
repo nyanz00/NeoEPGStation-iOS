@@ -3,6 +3,7 @@ import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -121,12 +122,23 @@ for fixture,streaming,checkpoint in cases:
         env.update(SIMCTL_CHILD_NEO_EPG_AETHER_CONNECTED=f'http://127.0.0.1:{server.server_port}',
                    SIMCTL_CHILD_NEO_EPG_CONNECTED_STREAM='1' if streaming else '0',
                    SIMCTL_CHILD_NEO_EPG_CONNECTED_CHECKPOINT='1' if checkpoint else '0')
-        subprocess.run(['xcrun','simctl','launch',device,bundle],check=True,env=env)
+        launched=subprocess.check_output(['xcrun','simctl','launch',device,bundle],text=True,env=env)
+        print(launched.strip(),flush=True)
+        pid=re.search(r': (\d+)',launched)
         deadline=time.monotonic()+180
         while time.monotonic()<deadline and not (documents/names[0]).exists():time.sleep(.5)
-        assert (documents/names[0]).exists(),'No result from the common production player'
         for name in names:
             if (documents/name).exists():shutil.copyfile(documents/name,dist/(label+'-'+name))
+        if not (documents/names[0]).exists():
+            if pid:
+                subprocess.run(['sample',pid[1],'1','-file',str(dist/(label+'-process.txt'))],timeout=30,check=False)
+            crashdir=Path.home()/'Library/Logs/DiagnosticReports'
+            for report in crashdir.glob('NeoEPGStation*.ips'):
+                shutil.copyfile(report,dist/(label+'-'+report.stem+'.log'))
+            with (dist/(label+'-system.log')).open('w') as log:
+                subprocess.run(['xcrun','simctl','spawn',device,'log','show','--last','4m','--style','compact',
+                                '--predicate','process == "NeoEPGStation"'],stdout=log,stderr=subprocess.STDOUT,timeout=40,check=False)
+            raise AssertionError('No result from the common production player; process evidence saved')
         result=json.loads((documents/names[0]).read_text())
         assert result['success'] and all(result['checks'].values()),result
         pictures=[]
@@ -158,6 +170,9 @@ for fixture,streaming,checkpoint in cases:
     except Exception as error:
         results.append({'case':label,'success':False,'error':type(error).__name__+': '+str(error)[:1800]})
         print(label,'FAIL',repr(error)[:1800],flush=True)
+        # Diagnose the first failed integration before spending three minutes
+        # on every remaining codec with the same unexamined failure.
+        break
     finally:
         (dist/(label+'-connected-requests.json')).write_text(json.dumps(rows,indent=2))
         server.shutdown();server.server_close()
