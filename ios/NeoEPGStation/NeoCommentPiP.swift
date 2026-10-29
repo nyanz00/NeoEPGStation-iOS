@@ -145,6 +145,7 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   @objc var capturingForPiP: Bool { frameLock.lock(); defer { frameLock.unlock() }; return capturing }
   @objc var videoDecodeHostTime: Double { frameLock.lock(); defer { frameLock.unlock() }; return lastDecodedHost }
   @objc var videoActivityHostTime: Double {
+    let presented = videoPresentationHostTime
     return presented > 0 ? max(presented, videoDecodeHostTime) : presented
   }
   // VLC samples carry scheduled host presentation times, not arrival times.
