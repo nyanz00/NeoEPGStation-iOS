@@ -32,6 +32,7 @@ final class NeoAetherBackend: NSObject {
   private var lastPTS = -Double.infinity, lastFrameHost = 0.0, openedAt = 0.0
   private var lastTick = 0.0, lastCheckpointTick = -Double.infinity, checkpointOffset = 0.0
   private var samples = 0, outputID = 0, pendingTarget: Double?, pendingBegan = 0.0
+  private var sampleFailure: OSStatus = noErr
   private var seekCompletion: ((Bool) -> Void)?
   private var recovering = false, stalledSince = 0.0, lastReportedState = ""
   private var snapshotPixel: CVPixelBuffer?
@@ -282,15 +283,23 @@ final class NeoAetherBackend: NSObject {
   private func makeSample(_ pixel: CVPixelBuffer, pts: Double) -> CMSampleBuffer? {
     var format: CMVideoFormatDescription?
     let pixelRatio = videoSize.width/max(1,videoSize.height)*Double(CVPixelBufferGetHeight(pixel))/Double(CVPixelBufferGetWidth(pixel))
-    let extensions: [CFString:Any] = [kCMFormatDescriptionExtension_PixelAspectRatio:
-      [kCMFormatDescriptionKey_PixelAspectRatioHorizontalSpacing:Int((max(0.01,pixelRatio)*10000).rounded()),kCMFormatDescriptionKey_PixelAspectRatioVerticalSpacing:10000]]
-    CMVideoFormatDescriptionCreate(allocator:kCFAllocatorDefault,codecType:CVPixelBufferGetPixelFormatType(pixel),width:Int32(CVPixelBufferGetWidth(pixel)),height:Int32(CVPixelBufferGetHeight(pixel)),extensions:extensions as CFDictionary,formatDescriptionOut:&format)
-    guard let format else { return nil }
+    // The format must include the actual buffer's color/aperture attachments.
+    // A generic codec/size description can fail the image-buffer compatibility
+    // check even when its pixel format and dimensions match.
+    CVBufferSetAttachment(pixel,kCVImageBufferPixelAspectRatioKey,
+      [kCVImageBufferPixelAspectRatioHorizontalSpacingKey:Int((max(0.01,pixelRatio)*10000).rounded()),
+       kCVImageBufferPixelAspectRatioVerticalSpacingKey:10000] as CFDictionary,.shouldPropagate)
+    let formatStatus = CMVideoFormatDescriptionCreateForImageBuffer(allocator:kCFAllocatorDefault,imageBuffer:pixel,formatDescriptionOut:&format)
+    guard formatStatus == noErr, let format else { sampleFailure = formatStatus; return nil }
     // NeoCommentPiP consumes HOST-scheduled frames, just like the VLC frame tap.
     // This pixel is already displayed; source PTS remains on the separate media clock.
     var timing = CMSampleTimingInfo(duration:.invalid,presentationTimeStamp:CMTime(seconds:CACurrentMediaTime(),preferredTimescale:1000000),decodeTimeStamp:.invalid)
     var sample: CMSampleBuffer?
-    CMSampleBufferCreateReadyWithImageBuffer(allocator:kCFAllocatorDefault,imageBuffer:pixel,formatDescription:format,sampleTiming:&timing,sampleBufferOut:&sample)
+    let status = CMSampleBufferCreateReadyWithImageBuffer(allocator:kCFAllocatorDefault,imageBuffer:pixel,formatDescription:format,sampleTiming:&timing,sampleBufferOut:&sample)
+    if status != noErr && status != sampleFailure {
+      NeoPlaybackDiagnostics.record("aether.sampleFailure",fields:["status":status])
+    }
+    sampleFailure = status
     return sample
   }
   @objc(addSubtitleURL:selected:)
@@ -355,6 +364,11 @@ final class NeoAetherBackend: NSObject {
   }
   @objc func foreground() { applyIntent(); stalledSince = 0; openedAt = CACurrentMediaTime() }
 #if targetEnvironment(simulator)
+  @objc var surfaceProbe: [String:Any] {
+    ["inWindow":surface.window != nil,"width":surface.bounds.width,"height":surface.bounds.height,
+     "sampleFailure":sampleFailure,"frames":samples,"hasSink":frameSink != nil,
+     "layers":layers(surface.layer).map { String(describing:type(of:$0)) }]
+  }
   @objc var renderSurfaceReadyForProbe: Bool {
     surface.window != nil && surface.bounds.width > 0 && layers(surface.layer).contains {
       ($0 as? AVPlayerLayer)?.isReadyForDisplay == true || ($0 as? AVSampleBufferDisplayLayer)?.isReadyForDisplay == true

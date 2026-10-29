@@ -25,6 +25,8 @@ documents = Path(run('xcrun','simctl','get_app_container',device,bundle,'data'))
 checker = (dist/'aether-picture-check').resolve()
 reference = Path('tests/fixtures/aether-seek-reference')
 manifest = json.loads((reference/'manifest.json').read_text())['fixtures']
+if not shutil.which('ffmpeg'):
+    subprocess.run(['brew','install','ffmpeg'],check=True,timeout=600)
 header = '''[Script Info]
 ScriptType: v4.00+
 PlayResX: 1280

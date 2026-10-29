@@ -2242,7 +2242,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   __weak typeof(self) owner = self;
   if (CACurrentMediaTime()-began > 35) {
     completion(@{@"success":@NO,@"phase":@(phase),@"checks":checks,@"ready":@(self.aether.ready),@"positionMs":@([self mediaTime]),
-      @"commentsReady":@(self.comments.ready),@"subtitleTracks":self.aether.subtitleTracks ?: @[]}); return;
+      @"commentsReady":@(self.comments.ready),@"subtitleTracks":self.aether.subtitleTracks ?: @[],
+      @"surface":self.aether.surfaceProbe,@"capturedFrames":@(self.commentPiP.capturedFrameCount)}); return;
   }
   if (phase == 0 && self.aether.ready && self.aether.renderSurfaceReadyForProbe && self.comments.ready && self.commentPiP.capturedFrameCount > 2 && self.aether.subtitleTracks.count > 0) {
     if (!checks[@"resumePosition"]) { checks[@"resumePosition"] = @(llabs([self mediaTime]-20000)<2000); [self setPlaybackIntent:NO]; }
