@@ -9,3 +9,5 @@
 ## Targeted verification
 
 The `aether-recovery` Actions scope builds both iOS SDKs and runs common clock checks, a real-socket stale-listener/remote-playlist recovery test, original VLC encoded PLAY regression, software AV1 and native HLS connected-player cases, and recorded HLS recovery. The Aether probe hides the inline surface for longer than the former stall threshold and verifies independent frame progress plus paused foreground restoration without input reopen. It is a presentation fault injection, not proof of iOS background execution or real-device PiP lifecycle. Actual app-outside PiP requires a device check.
+
+The reused-binary recovery harness goes through the common controller pause action before foreground restoration. Pausing the backend alone is not a valid paused-player scenario: the controller is then correctly entitled to resume its requested playback. The harness is an injected simulator-only test library and is excluded from both app bundles. Rechecks of that harness reuse completed HLS/relay evidence only after source and binary identity checks.

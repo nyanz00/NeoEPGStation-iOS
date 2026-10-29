@@ -155,6 +155,7 @@ for fixture,streaming,checkpoint in cases:
             raise AssertionError('No result from the common production player; process evidence saved')
         result=json.loads((documents/names[0]).read_text())
         assert result['success'] and all(result['checks'].values()),result
+        if recovery: assert result['checks'].get('controllerPauseUsed'), 'Recovery probe bypassed common pause intent'
         pictures=[]
         for target in [30,40]:
             image=dist/(label+f'-connected-{target}.png')

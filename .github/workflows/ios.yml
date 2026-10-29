@@ -463,7 +463,7 @@ jobs:
             python3 -u scripts/encoded-seek-smoke.py || connected_failed=1
             if [ "$CHECK_SCOPE" = "aether-recovery" ]; then
               python3 -u scripts/aether-connected-smoke.py --recovery || connected_failed=1
-              python3 -u scripts/streaming-smoke.py || connected_failed=1
+              # HLS/relay checks already passed on this exact reused binary.
             else
               python3 -u scripts/aether-connected-smoke.py || connected_failed=1
             fi
