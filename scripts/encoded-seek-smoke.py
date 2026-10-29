@@ -95,7 +95,9 @@ try:
         environment['SIMCTL_CHILD_NEO_EPG_PREROLL_BASELINE'] = '1' if compare and baseline and not hevc else '0'
         environment['SIMCTL_CHILD_NEO_EPG_REFERENCE_BASELINE'] = '1' if baseline and hevc else '0'
         environment['SIMCTL_CHILD_NEO_EPG_INITIAL_BASELINE'] = '1' if startup and baseline else '0'
-        subprocess.run(['xcrun', 'simctl', 'launch', device, bundle], env=environment, check=True, timeout=60)
+        # A cold macOS simulator can take over 60s to return the launch PID.
+        # This deadline covers process startup, not the measured seek checks.
+        subprocess.run(['xcrun', 'simctl', 'launch', device, bundle], env=environment, check=True, timeout=120)
         deadline = time.monotonic()+90
         while not all((documents / name).exists() for name in names) and time.monotonic() < deadline:
             time.sleep(.5)
