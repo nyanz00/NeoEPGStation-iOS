@@ -1,0 +1,11 @@
+# Aether PiP and shared playback recovery
+
+- Software PiP takes decoded, reordered pictures before the inline display queue. A bounded eight-picture queue is consumed on the audio master timebase, independently of the main run loop. Native HLS uses its AVPlayerItemVideoOutput on the same worker. Both feed the existing comments/ASS compositor with host-timed samples.
+- Entering/leaving PiP swaps the presentation consumer without reopening the input or resetting audio. Seek generations retire obsolete pictures. Foreground return re-primes video at the current audio position; an intentionally torn-down engine reloads explicitly on return. Pause, background audio-only and presentation transitions reset stall evidence. Recovery diagnostics distinguish engine failure, seek timeout and video presentation stall.
+- Inline and PiP comments share the controller's confirmed holds. Temporary native playing/buffering notifications and missing display callbacks no longer independently pause comment motion. User pause, seeking, terminal state, confirmed buffering and network/presentation recovery still hold it.
+- Reopening recorded HLS retires old loopback sockets and binds a new listener while preserving retained segments and the server lease. Listener/relay response failures and remote playlist failures have separate diagnostic events. Failed replacement VLC inputs enter the existing backed-off reconnect flow immediately instead of waiting for TS positioning timeout. TS ARIB remains on VLC.
+- HUD dimming covers the comment viewport, including landscape margins. Controls stay above the dim layer.
+
+## Targeted verification
+
+The `aether-recovery` Actions scope builds both iOS SDKs and runs common clock checks, a real-socket stale-listener/remote-playlist recovery test, original VLC encoded PLAY regression, software AV1 and native HLS connected-player cases, and recorded HLS recovery. The Aether probe hides the inline surface for longer than the former stall threshold and verifies independent frame progress plus paused foreground restoration without input reopen. It is a presentation fault injection, not proof of iOS background execution or real-device PiP lifecycle. Actual app-outside PiP requires a device check.

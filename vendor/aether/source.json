@@ -174,6 +174,27 @@
           "patchedSHA256": "e89c916abcc16b3734b430e740a024a93ba90eb80b7c2756f3d207ff0682ef59"
         }
       ]
+    },
+    {
+      "file": "0013-independent-pip-frames.patch",
+      "sources": [
+        {
+          "path": "Sources/AetherEngine/AetherEngine+FrameTimes.swift",
+          "upstreamSHA256": "aca40ce149cec1ed9efe1a189145b5b96d8458ae1123bdcdf234b4729cfdad29",
+          "patchedSHA256": "c03498f39df66abdfcf3fae6f73450156f65c3ef5c9e4d5bff7026e70889a021"
+        },
+        {
+          "path": "Sources/AetherEngine/Native/SoftwarePlaybackHost.swift",
+          "upstreamSHA256": "6112e7b0855d0b83221e9bab58d9b696140967c02a32fa42407942714f3f8979",
+          "patchedSHA256": "04a6afc0afc70702003346c64c2165ca9c71bbd87b96ddbdf9bf675d7bb5470e"
+        },
+        {
+          "path": "Sources/AetherEngine/Renderer/SampleBufferRenderer.swift",
+          "upstreamSHA256": "ef91563588523cc06ffad3e081f122763e76988ca07493c0a1e50dd0c2c10042",
+          "patchedSHA256": "f54e487fa1a68afc2d262814a8ef189f0d63030d2d64698e10228d5ef3ca92f1"
+        }
+      ],
+      "sha256": "e2141ed14e888816dc3bff20fd0bcafc254c4a1251ba5f22eeebebca8bd010ae"
     }
   ],
   "retiredHeaderCorrection": {

@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 import re
+import sys
 from pathlib import Path
 import shutil
 import subprocess
@@ -52,6 +53,8 @@ captions = header.replace(',1,2,0,2,',',3,2,0,2,')+''.join(f'Dialogue: 0,{stamp(
 results = []
 cases = [('encoded-seek-1080.mkv',False,False),('encoded-seek-1080.mkv',True,False),
          ('hevc-seek-10.mkv',False,False),('av1-seek-10.mkv',False,True),('encoded-seek-1080.mkv',False,True)]
+recovery = '--recovery' in sys.argv
+if recovery: cases = [cases[3], cases[1]]
 for fixture,streaming,checkpoint in cases:
     case_began=time.monotonic()
     label = fixture+('-hls' if streaming else '-play')+('-checkpoint' if checkpoint else '')
@@ -128,7 +131,8 @@ for fixture,streaming,checkpoint in cases:
         for name in names:(documents/name).unlink(missing_ok=True)
         subprocess.run(['xcrun','simctl','terminate',device,bundle],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         env=os.environ.copy()
-        env.update(SIMCTL_CHILD_NEO_EPG_AETHER_CONNECTED=f'http://127.0.0.1:{server.server_port}',
+        env.update(SIMCTL_CHILD_NEO_EPG_RECOVERY_CHECKS='1' if recovery else '0',
+                   SIMCTL_CHILD_NEO_EPG_AETHER_CONNECTED=f'http://127.0.0.1:{server.server_port}',
                    SIMCTL_CHILD_NEO_EPG_CONNECTED_STREAM='1' if streaming else '0',
                    SIMCTL_CHILD_NEO_EPG_CONNECTED_CHECKPOINT='1' if checkpoint else '0',
                    SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=str(presentation_harness))

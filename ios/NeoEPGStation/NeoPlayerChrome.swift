@@ -396,7 +396,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     normalVideoFrame = videoView.frame
     commentViewport.frame = wide ? CGRect(x: 0, y: 0, width: videoWidth, height: bounds.height) : normalVideoFrame
     if videoZoom > 1 { videoView.frame = bounds }
-    videoDim.frame = videoView.frame; pipCover.frame = videoView.frame
+    videoDim.frame = commentViewport.frame; pipCover.frame = videoView.frame
     pipMessage.frame = pipCover.bounds.insetBy(dx: 20, dy: 20)
     let rightInset = panelOpen && wide ? 8 : safe.right + 8
     header.frame = CGRect(x: safe.left + 8, y: wide ? safe.top + 4 : videoView.frame.minY + 2,
@@ -1465,10 +1465,13 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     chrome.holdRotationInsets(UIEdgeInsets(top: 0, left: 47, bottom: 21, right: 47)); chrome.layoutIfNeeded()
     var checks = chrome.runDoubleTapChecks()
     checks["landscapeCommentViewportIncludesBlackMargins"] = chrome.commentViewport.frame == chrome.bounds && chrome.normalVideoFrame.minX == 47
+    checks["landscapeDimCoversCommentMargins"] = chrome.videoDim.frame == chrome.commentViewport.frame
+    checks["controlsRemainAboveDim"] = chrome.subviews.firstIndex(of:chrome.videoDim)! < chrome.subviews.firstIndex(of:chrome.controls)!
     checks["blackMarginOutsideVideoAcceptsDoubleTap"] = !chrome.videoView.frame.contains(CGPoint(x: 1, y: 195)) &&
       chrome.acceptsVideoTap(CGPoint(x: 1, y: 195), target: chrome, includeLetterbox: true)
     chrome.frame = CGRect(x: 0, y: 0, width: 390, height: 844); chrome.releaseRotationInsets(); chrome.layoutIfNeeded()
     checks["portraitCommentsStayInVideo"] = chrome.commentViewport.frame == chrome.normalVideoFrame
+    checks["portraitDimMatchesCommentViewport"] = chrome.videoDim.frame == chrome.commentViewport.frame
     return checks
   }
   private func panelTabRowsAligned() -> Bool {

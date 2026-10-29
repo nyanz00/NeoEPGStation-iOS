@@ -539,15 +539,13 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.comments.timeProvider = ^double { return weakSelf.initialPosition > 0 ? weakSelf.initialPosition : (double)[weakSelf mediaTime] / 1000.0; };
   self.comments.wantsPlaybackProvider = ^BOOL { return weakSelf.wantsPlayback && !weakSelf.playbackEnded && !weakSelf.closing; };
   self.comments.runningProvider = ^BOOL {
-    // Brief buffering/state notifications must not interrupt already moving
-    // comments while due video frames keep arriving. The presentation clock
-    // freezes on actual video inactivity; explicit pause remains immediate.
-    double due = weakSelf.commentPiP.videoPresentationHostTime;
-    BOOL videoStillAdvancing = due > 0 && CACurrentMediaTime()-due < 0.1;
-    return weakSelf.inputBufferReady && weakSelf.transportPlaying && weakSelf.wantsPlayback &&
-      (!weakSelf.buffering || videoStillAdvancing) && !weakSelf.networkFlow.holding && !weakSelf.networkFlow.verifying &&
+    // Only the controller's confirmed holds stop comments in both renderers.
+    // Transient native states and frame cadence are not stop notifications.
+    return weakSelf.inputBufferReady && weakSelf.wantsPlayback && !weakSelf.playbackEnded && !weakSelf.playbackFailed &&
+      !weakSelf.networkFlow.holding && !weakSelf.networkFlow.verifying &&
       !weakSelf.seeking && !weakSelf.scrubbing && !weakSelf.closing && !weakSelf.reloading && !weakSelf.tsPositionPending &&
-      !weakSelf.networkReloadWaiting && !weakSelf.videoReloadRecovery;
+      !weakSelf.networkReloadWaiting && !weakSelf.videoReloadRecovery && !weakSelf.videoResuming &&
+      !(weakSelf.aether && weakSelf.aether.buffering);
   };
   self.comments.onChange = ^{ [weakSelf updateCommentState]; [weakSelf updateLoadingState]; };
   [self.chrome bindCommentSettings:self.comments];
@@ -1941,6 +1939,12 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     }
     if (self.reloading && state == VLCMediaPlayerStateStopped && !self.restoringReload && !self.awaitingEndpoint) { [self restartMedia]; return; }
     if (state == VLCMediaPlayerStateError && (self.transportSuspended || self.awaitingEndpoint || self.transportState != state)) { return; }
+    if ([self isStreaming] && self.reloading && self.restoringReload && !self.awaitingEndpoint &&
+        (state == VLCMediaPlayerStateError || state == VLCMediaPlayerStateStopped)) {
+      // A failed newly opened input cannot satisfy the TS positioning gate.
+      [NeoPlaybackDiagnostics record:@"hls.inputStartFailed" fields:@{@"state": @(state), @"targetMs": @(self.reloadTime)}];
+      [self waitForStreamingNetwork]; return;
+    }
     if ([self isStreaming] && !self.reloading && !self.playbackFailed &&
         (state == VLCMediaPlayerStateError || (state == VLCMediaPlayerStateStopped && self.lastObservedTime < [self mediaLength]-1500))) {
       int64_t retained = self.networkFlow.holding || self.networkFlow.verifying ? self.flowHoldTime : self.lastObservedTime;
@@ -2072,6 +2076,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.backgroundTime = self.reloading ? self.reloadTime : MAX(0, [self mediaTime]);
   self.backgroundPositionValid = YES;
   [self.commentPiP enterBackground];
+  [self.aether background];
   // A paused app can be suspended by iOS without destroying its input.
   // Keep the listener, retained data and VLC demux/decoder state intact.
 }
@@ -2285,6 +2290,13 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     }]; return;
   }
   if (phase == 2 && CACurrentMediaTime()-began > 1 && self.aether.subtitleVisible && self.commentPiP.composedFrameCount > 3) {
+    if ([NSProcessInfo.processInfo.environment[@"NEO_EPG_RECOVERY_CHECKS"] isEqual:@"1"] && !checks[@"detachedPiPVideoAdvances"]) {
+      [checks addEntriesFromDictionary:[NeoPlayerChrome runSeekPresentationChecks]];
+      [self.aether runDetachedPiPFeedProbe:^(NSDictionary *result) {
+        [checks addEntriesFromDictionary:result]; [owner setPlaybackIntent:YES];
+        [owner waitAetherPhase:2 began:CACurrentMediaTime() checks:checks completion:completion];
+      }]; return;
+    }
     checks[@"ordinaryASSVisible"] = @YES;
     checks[@"subtitleFeedsPiP"] = @(self.commentPiP.hasSubtitleImageForProbe);
     checks[@"compositedPiP"] = @(self.commentPiP.composedFrameCount > 3);

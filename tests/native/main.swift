@@ -448,3 +448,18 @@ let pipCanvas = CommentCanvasGeometry(viewport: CGSize(width: 640, height: 360),
   video: CGSize(width: 1920, height: 1080), source: CGSize(width: 1280, height: 720), expanded: false)
 check(pipCanvas.scale == 0.5 && pipCanvas.logicalSize == CGSize(width: 1280, height: 720), "PiP never inherits landscape coordinates")
 print("Comment viewport, independent PiP coordinates and stable glyph scale: passed")
+
+// The app uses one player-authoritative running signal for inline and PiP.
+// Lack of a fresh frame callback does not itself turn that signal into pause.
+var authoritative = CommentPresentationClock()
+_ = authoritative.time(media: 1, running: true, now: 10)
+_ = authoritative.time(media: 1.1, running: true, now: 10.1)
+let moving = authoritative.time(media: 1.1, running: true, now: 10.5)
+check(abs(moving-1.5) < 0.00001, "Authoritative comments keep moving across stale native clock notifications")
+let held = authoritative.time(media: 1.5, running: false, now: 11)
+check(held == moving && authoritative.time(media: 4, running: false, now: 14) == held,
+      "Explicit player pause or confirmed buffering hold freezes comments")
+_ = authoritative.time(media: 4, running: true, now: 14.01)
+let resumed = authoritative.time(media: 4.1, running: true, now: 14.11)
+check(resumed >= held && resumed < held+0.2, "Resume does not jump by time spent stopped")
+print("Player-authoritative comment motion and confirmed holds: passed")

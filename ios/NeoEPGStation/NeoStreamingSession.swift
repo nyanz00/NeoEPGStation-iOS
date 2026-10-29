@@ -63,19 +63,32 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
       loadPlaylist { [weak self] error in
         guard let self else { return }
         if let error { DispatchQueue.main.async { completion(nil, error) }; return }
-        do {
+        self.openRelay(completion)
+      }
+    }
+  }
+  // A listener's non-nil URL is not proof that its backgrounded socket lives.
+  // Reopening always creates a new generation; late old callbacks are ignored.
+  private func openRelay(_ completion: @escaping (URL?, String?) -> Void) {
+    let generation = epoch
+    do {
           let parameters = NWParameters.tcp
           parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
           let listener = try NWListener(using: parameters); self.listener = listener
-          listener.newConnectionHandler = { [weak self] in self?.accept($0) }
+          listener.newConnectionHandler = { [weak self, weak listener] connection in
+            guard let self, let listener, self.listener === listener, self.epoch == generation else { connection.cancel(); return }
+            self.accept(connection)
+          }
           var reported = false
           listener.stateUpdateHandler = { [weak self, weak listener] state in
-            guard let self, let listener, self.listener === listener, !self.closed else { return }
+            guard let self, let listener, self.listener === listener, !self.closed, self.epoch == generation else { return }
             if case .ready = state, !reported, let port = listener.port {
               reported = true; self.localURL = URL(string: "http://127.0.0.1:\(port.rawValue)\(self.route)/playlist.m3u8")
+              NeoPlaybackDiagnostics.record("hls.relayReady", fields:["generation":generation])
               self.keepAlive(); self.prefetch()
               DispatchQueue.main.async { completion(self.localURL, nil) }
             } else if case .failed = state {
+              NeoPlaybackDiagnostics.record("hls.relayFailure",fields:["generation":generation,"kind":"listener"])
               self.localURL = nil
               if !reported { reported = true; DispatchQueue.main.async { completion(nil, "STREAMINGを開始できません。") } }
               else { DispatchQueue.main.async { self.onTransportFailure?() } }
@@ -83,8 +96,13 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
           }
           listener.start(queue: queue)
         } catch { DispatchQueue.main.async { completion(nil, "STREAMINGを開始できません。") } }
-      }
-    }
+  }
+  private func retireRelay() {
+    localURL = nil
+    let old = listener; listener = nil; old?.cancel()
+    let retired = Array(connections.values); connections.removeAll()
+    retired.forEach { $0.cancel() }
+    flowLock.lock(); pending.removeAll(); flowLock.unlock()
   }
   private func loadPlaylist(_ completion: @escaping (String?) -> Void) {
     let id = source.lastPathComponent
@@ -101,6 +119,7 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
         self.retryableFailure = error != nil || code == 0 || code == 408 || code == 429 || (500..<600).contains(code)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200, let data,
           data.count <= 16*1024*1024, let text = String(data: data, encoding: .utf8) else {
+          NeoPlaybackDiagnostics.record("hls.playlistFailure",fields:["status":code,"transportFailed":error != nil,"generation":generation])
           completion("配信に接続できませんでした。再読み込みで再試行してください。"); return
         }
         do {
@@ -150,11 +169,11 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
       readers.values.flatMap { $0.values }.forEach { $0.finish(false) }; readers.removeAll(); partial.removeAll()
       byteStream.renew()
       let previous = waiters.values.flatMap { $0 }; waiters.removeAll(); previous.forEach { $0(nil) }
-      if localURL == nil { listener?.cancel(); start(at: time, completion: completion); return }
+      retireRelay()
       loadPlaylist { [weak self] error in
-        guard let self else { return }; self.keepAlive()
-        if error == nil { self.evict(); self.prefetch() }
-        DispatchQueue.main.async { completion(error == nil ? self.localURL : nil, error) }
+        guard let self else { return }
+        if let error { DispatchQueue.main.async { completion(nil, error) }; return }
+        self.evict(); self.openRelay(completion)
       }
     }
   }
@@ -350,10 +369,21 @@ final class NeoStreamingSession: NSObject, URLSessionTaskDelegate {
     if waiting { pending.insert(ObjectIdentifier(connection)) } else { pending.remove(ObjectIdentifier(connection)) }
   }
   private func respond(_ connection: NWConnection, code: Int = 200, data: Data = Data(), type: String = "text/plain", head: Bool = false) {
+    if code >= 400 { NeoPlaybackDiagnostics.record("hls.relayResponse", fields:["status":code,"generation":epoch]) }
     var output = Data("HTTP/1.1 \(code) \(code == 200 ? "OK" : "Error")\r\nContent-Type: \(type)\r\nContent-Length: \(data.count)\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n".utf8)
     if !head { output.append(data) }
     connection.send(content: output, completion: .contentProcessed { _ in connection.cancel() })
   }
+#if NEO_RELAY_PROBE
+  // Fault injection compiled only into the macOS network test, never the app.
+  func loseListenerForProbe(_ completion: @escaping () -> Void) {
+    queue.async {
+      self.listener?.stateUpdateHandler = nil; self.listener?.cancel()
+      // Deliberately retain the stale URL, as in a suspended listener.
+      DispatchQueue.main.async(execute:completion)
+    }
+  }
+#endif
   @objc func close() {
     queue.async { [self] in
       guard !closed else { return }; closed = true; epoch += 1; heartbeat?.cancel(); heartbeat = nil

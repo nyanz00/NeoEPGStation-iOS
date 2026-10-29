@@ -5,6 +5,94 @@ import AetherEngine
 import CoreImage
 import IOSurface
 
+// PiP consumes due decoded pictures on the audio master clock. It never reads
+// the inline layer and never depends on the main run loop being displayed.
+private final class NeoAetherPiPFrames: @unchecked Sendable {
+  struct Picture {
+    let pixel: CVPixelBuffer, pts: Double, generation: UInt64, host: Double
+  }
+  private let lock = NSLock()
+  private let work = DispatchQueue(label:"neo.aether.pip.frames")
+  private var timer: DispatchSourceTimer?
+  private var clock: CMTimebase?, frames: [Picture] = [], shown: Picture?
+  private var nativeItem: AVPlayerItem?, nativeOutput: AVPlayerItemVideoOutput?
+  private var sourceTime: (@Sendable (Double) -> Double)?
+  private var generation: UInt64?, minimumGeneration: UInt64 = 0, revision = 0
+  private weak var sink: (any NeoVideoFrameSink)?
+  private var onTime: (@Sendable (Double) -> Void)?, pixelRatio = 1.0
+  init() {
+    let timer = DispatchSource.makeTimerSource(queue:work); self.timer = timer
+    timer.schedule(deadline:.now(), repeating:1.0/60, leeway:.milliseconds(1))
+    timer.setEventHandler { [weak self] in autoreleasepool { self?.pump() } }; timer.resume()
+  }
+  func configure(timebase: CMTimebase?, sink: (any NeoVideoFrameSink)?, pixelRatio: Double = 1,
+                 onTime: (@Sendable (Double) -> Void)? = nil) {
+    lock.lock(); defer { lock.unlock() }
+    revision += 1; clock = timebase; self.sink = sink; self.onTime = onTime; self.pixelRatio = pixelRatio
+    nativeItem = nil; nativeOutput = nil; sourceTime = nil
+    frames.removeAll(); shown = nil; generation = nil; minimumGeneration = 0
+  }
+  func configureNative(item: AVPlayerItem, output: AVPlayerItemVideoOutput, sink: (any NeoVideoFrameSink)?,
+                       pixelRatio: Double, map: @escaping @Sendable (Double) -> Double, onTime: @escaping @Sendable (Double) -> Void) {
+    configure(timebase:nil,sink:sink,pixelRatio:pixelRatio,onTime:onTime)
+    lock.lock(); nativeItem = item; nativeOutput = output; sourceTime = map; lock.unlock()
+  }
+  var hasCapacity: Bool { lock.lock(); defer { lock.unlock() }; return clock == nil || frames.count < 8 }
+  var latest: Picture? { lock.lock(); defer { lock.unlock() }; return shown }
+  func discontinuity() {
+    lock.lock(); defer { lock.unlock() }
+    minimumGeneration = (generation ?? 0)+1
+    revision += 1; frames.removeAll(); shown = nil
+  }
+  func accept(_ pixel: CVPixelBuffer, pts: CMTime, generation: UInt64) {
+    guard pts.seconds.isFinite else { return }
+    lock.lock(); defer { lock.unlock() }
+    guard clock != nil, generation >= minimumGeneration, self.generation == nil || generation >= self.generation! else { return }
+    if self.generation != generation { frames.removeAll(); shown = nil; self.generation = generation; revision += 1 }
+    frames.append(Picture(pixel:pixel, pts:pts.seconds, generation:generation, host:0))
+    // Backpressure normally keeps this below eight, including paused preroll.
+    if frames.count > 8 { frames.removeLast(frames.count-8) }
+  }
+  private func pump() {
+    lock.lock()
+    guard let sink else { lock.unlock(); return }
+    let version = revision, ratio = pixelRatio
+    let item = nativeItem, output = nativeOutput, map = sourceTime
+    var picture: Picture?
+    if let clock, let due = frames.lastIndex(where: { $0.pts <= CMTimebaseGetTime(clock).seconds+0.001 }) {
+      picture = frames[due]; frames.removeFirst(due+1)
+    }
+    lock.unlock()
+    if let item, let output {
+      let current = item.currentTime(); var displayed = CMTime.invalid
+      if output.hasNewPixelBuffer(forItemTime:current),
+        let pixel = output.copyPixelBuffer(forItemTime:current,itemTimeForDisplay:&displayed), displayed.isNumeric {
+        picture = Picture(pixel:pixel,pts:map?(displayed.seconds) ?? displayed.seconds,generation:0,host:0)
+      }
+    }
+    guard let frame = picture else { return }
+    CVBufferSetAttachment(frame.pixel,kCVImageBufferPixelAspectRatioKey,
+      [kCVImageBufferPixelAspectRatioHorizontalSpacingKey:ratio*10000,
+       kCVImageBufferPixelAspectRatioVerticalSpacingKey:10000] as CFDictionary,.shouldPropagate)
+    var format: CMVideoFormatDescription?
+    guard CMVideoFormatDescriptionCreateForImageBuffer(allocator:kCFAllocatorDefault,imageBuffer:frame.pixel,
+      formatDescriptionOut:&format) == noErr, let format else { return }
+    let now = CACurrentMediaTime()
+    var timing = CMSampleTimingInfo(duration:.invalid,presentationTimeStamp:CMTime(seconds:now,preferredTimescale:1000000),decodeTimeStamp:.invalid)
+    var sample: CMSampleBuffer?
+    guard CMSampleBufferCreateReadyWithImageBuffer(allocator:kCFAllocatorDefault,imageBuffer:frame.pixel,
+      formatDescription:format,sampleTiming:&timing,sampleBufferOut:&sample) == noErr, let sample else { return }
+    lock.lock(); defer { lock.unlock() }
+    guard version == revision else { return }
+    // Serialise delivery with teardown/seek so a retired picture cannot arrive
+    // after the consumer has discarded that generation.
+    shown = Picture(pixel:frame.pixel,pts:frame.pts,generation:frame.generation,host:now)
+    onTime?(frame.pts); sink.receiveVideoSampleBuffer(sample)
+  }
+  func stop() { configure(timebase:nil,sink:nil); timer?.cancel(); timer = nil }
+  deinit { timer?.cancel() }
+}
+
 private final class NeoAetherTransportClock: @unchecked Sendable {
   struct Value {
     var timeMs: Int64 = 0, durationMs: Int64 = 0
@@ -24,6 +112,7 @@ final class NeoAetherBackend: NSObject {
   private let caption = UIImageView()
   private let ass = NeoASSSubtitleRenderer()
   private var engine: AetherEngine?
+  private var sourceURL: URL?
   private var subscriptions = Set<AnyCancellable>()
   private var task: Task<Void, Never>?, seekTask: Task<Void, Never>?, aheadTask: Task<Void, Never>?
   private var timer: Timer?, output: AVPlayerItemVideoOutput?
@@ -36,6 +125,8 @@ final class NeoAetherBackend: NSObject {
   private var sampleFailure: OSStatus = noErr
   private var seekCompletion: ((Bool) -> Void)?
   private var recovering = false, stalledSince = 0.0, lastReportedState = ""
+  private var inBackground = false
+  private var pipClock: CMTimebase?
   private var snapshotPixel: CVPixelBuffer?
   private var lastGeneration: UInt64?, pendingGeneration: UInt64?
   private var checkpoints: NeoCheckpointPlayback?
@@ -43,6 +134,7 @@ final class NeoAetherBackend: NSObject {
   private var nativeSubtitle = false
   private var logCapture = NeoAetherLogCapture()
   private let decodedFrames = NeoAetherDecodedFrames()
+  private let pipFrames = NeoAetherPiPFrames()
   private var rate: Float = 1
   // Comment/PiP workers sample these synchronously off-main. Never cross a
   // MainActor ObjC thunk from their time/running providers or dispatch_sync(main).
@@ -64,6 +156,7 @@ final class NeoAetherBackend: NSObject {
   @objc var pipActive = false {
     didSet {
       engine?.pictureInPictureActive = pipActive
+      configurePiPFrames(); resetStallEvidence()
       lastReportedState = ""; updateCaption()
     }
   }
@@ -90,11 +183,12 @@ final class NeoAetherBackend: NSObject {
   @objc(loadURL:startMilliseconds:playing:)
   func load(url: URL, startMilliseconds: Int64, playing: Bool) {
     guard !closed else { return }
+    sourceURL = url
     epoch += 1; let generation = epoch
     task?.cancel(); seekTask?.cancel(); aheadTask?.cancel(); subscriptions.removeAll()
     checkpoints?.stop(); checkpoints = nil; NeoAV1PlaybackBridge.install(nil)
     AetherEngine.setForceSoftwarePathForTesting(false)
-    engine?.stop(); detachOutput(); snapshotPixel = nil
+    pipFrames.configure(timebase:nil, sink:nil); pipClock = nil; engine?.stop(); detachOutput(); snapshotPixel = nil
     loaded = false; ready = false; ended = false; failed = false; buffering = true; recovering = false; primingPausedFrame = false
     wantsPlayback = playing; self.playing = false; timeMs = max(0,startMilliseconds)
     lastPTS = -.infinity; lastFrameHost = 0; openedAt = CACurrentMediaTime(); lastCheckpointTick = -.infinity
@@ -125,7 +219,10 @@ final class NeoAetherBackend: NSObject {
         if case .error = state { self.requestRecovery() }
       }.store(in:&subscriptions)
       next.$currentAVPlayerItem.sink { [weak self] in self?.attachOutput($0) }.store(in:&subscriptions)
-      next.$videoRoute.sink { route in NeoPlaybackDiagnostics.record("aether.route",fields:["route":route.rawValue]) }.store(in:&subscriptions)
+      next.$videoRoute.sink { [weak self] route in
+        NeoPlaybackDiagnostics.record("aether.route",fields:["route":route.rawValue])
+        Task { @MainActor [weak self] in self?.configurePiPFrames() }
+      }.store(in:&subscriptions)
       next.diagnostics.$liveTelemetry.sink { value in
         guard let value else { return }
         NeoPlaybackDiagnostics.record("aether.telemetry",fields:["sourceBytes":value.demuxerBytesFetched,"producerRestarts":value.producerRestartCount,
@@ -157,6 +254,7 @@ final class NeoAetherBackend: NSObject {
           }
           guard !Task.isCancelled, !self.closed, self.epoch == generation else { return }
           self.loaded = true
+          self.configurePiPFrames()
           self.applyIntent(); next.clearSubtitle()
           for font in next.fontAttachments { self.ass.addFont(font.data,name:font.filename) }
           self.refreshTracks(); self.onChange?()
@@ -178,8 +276,28 @@ final class NeoAetherBackend: NSObject {
       primingPausedFrame = false; engine.volume = muted ? 0 : 1; engine.play()
     } else { engine.pause() }
   }
-  @objc func play() { wantsPlayback = true; applyIntent() }
-  @objc func pause() { wantsPlayback = false; engine?.pause(); playing = false }
+  private func resetStallEvidence() { stalledSince = 0; openedAt = CACurrentMediaTime() }
+  private func configurePiPFrames() {
+    guard let engine, loaded else { return }
+    if pipActive, engine.videoRoute == .software, let clock = engine.softwarePresentationTimebase {
+      if let pipClock, pipClock === clock { return }; pipClock = clock
+      pipFrames.configure(timebase:clock, sink:frameSink, pixelRatio:engine.sourceVideoPixelAspectRatio,
+        onTime: { [transport] time in transport.access { $0.timeMs = Int64(max(0,time)*1000) } })
+      engine.setSoftwarePiPFrames(consumer: { [pipFrames] in pipFrames.accept($0, pts:$1, generation:$2) },
+        ready: { [pipFrames] in pipFrames.hasCapacity })
+    } else {
+      engine.setSoftwarePiPFrames(consumer:nil, ready:nil)
+      pipFrames.configure(timebase:nil, sink:nil); pipClock = nil
+      if pipActive, let item = outputItem, let output {
+        let map = engine.presentationAxisMap
+        pipFrames.configureNative(item:item,output:output,sink:frameSink,pixelRatio:engine.sourceVideoPixelAspectRatio,
+          map: { map.sourceSeconds(forItemSeconds:$0) ?? $0 },
+          onTime: { [transport] time in transport.access { $0.timeMs = Int64(max(0,time)*1000) } })
+      }
+    }
+  }
+  @objc func play() { if !wantsPlayback { resetStallEvidence() }; wantsPlayback = true; applyIntent() }
+  @objc func pause() { wantsPlayback = false; stalledSince = 0; engine?.pause(); playing = false }
   @objc func setPlaybackRate(_ value: Float) { if value.isFinite && value > 0 { rate = value; engine?.setRate(value) } }
   @objc func suspend() { engine?.pause(); playing = false }
   @objc(seekMilliseconds:completion:)
@@ -188,6 +306,7 @@ final class NeoAetherBackend: NSObject {
     settleSeek(false); seekTask?.cancel()
     let target = min(max(0,Double(milliseconds)/1000),max(0,engine.duration-0.01))
     pendingTarget = target; pendingGeneration = lastGeneration; pendingBegan = CACurrentMediaTime()
+    pipFrames.discontinuity()
     seekCompletion = completion; stalledSince = 0; ended = false
     let token = epoch
     seekTask = Task { [weak self, engine] in
@@ -200,11 +319,11 @@ final class NeoAetherBackend: NSObject {
     let done = seekCompletion; seekCompletion = nil; pendingTarget = nil
     done?(ok)
   }
-  private func requestRecovery(target: Int64? = nil) {
+  private func requestRecovery(target: Int64? = nil, reason: String = "engineFailure") {
     guard !closed, !recovering, !ended else { return }
     recovering = true; buffering = true; playing = false; ready = false
     engine?.volume = 0; engine?.pause(); settleSeek(false)
-    NeoPlaybackDiagnostics.record("aether.recoveryRequested",fields:["targetMs":timeMs])
+    NeoPlaybackDiagnostics.record("aether.recoveryRequested",fields:["targetMs":timeMs,"reason":reason,"pip":pipActive,"background":inBackground])
     onChange?(); onRecovery?(target ?? timeMs)
   }
   private func attachOutput(_ item: AVPlayerItem?) {
@@ -218,6 +337,7 @@ final class NeoAetherBackend: NSObject {
   private func layers(_ layer: CALayer) -> [CALayer] { [layer]+(layer.sublayers ?? []).flatMap { layers($0) } }
   private func picture() -> (CVPixelBuffer,Double,UInt64?,Bool)? {
     guard let engine else { return nil }
+    if pipActive { return pipFrames.latest.map { ($0.pixel,$0.pts,$0.generation,false) } }
     if engine.videoRoute == .software {
       for layer in layers(surface.layer).compactMap({ $0 as? AVSampleBufferDisplayLayer }) {
         guard layer.isReadyForDisplay, let pixel = layer.sampleBufferRenderer.displayedPixelBuffer() else { continue }
@@ -252,7 +372,9 @@ final class NeoAetherBackend: NSObject {
     }
     let frame = picture()
     if let (pixel,pts,generation,displayTimeVerified) = frame, pts != lastPTS || generation != lastGeneration {
-      lastPTS = pts; lastGeneration = generation; snapshotPixel = pixel; lastFrameHost = now; samples += 1
+      lastPTS = pts; lastGeneration = generation; snapshotPixel = pixel
+      lastFrameHost = pipActive ? (pipFrames.latest?.host ?? now) : now
+      samples += 1
       if primingPausedFrame {
         engine.pause()
         NeoPlaybackDiagnostics.record("aether.pausedPictureReady",fields:["mediaMs":pts*1000,"volume":engine.volume,"intent":wantsPlayback])
@@ -272,16 +394,19 @@ final class NeoAetherBackend: NSObject {
         }
         settleSeek(true)
       }
-      if let sample = makeSample(pixel,pts:pts) { frameSink?.receiveVideoSampleBuffer(sample) }
+      if !pipActive, let sample = makeSample(pixel,pts:pts) { frameSink?.receiveVideoSampleBuffer(sample) }
     }
     playing = wantsPlayback && loaded && !ended && !recovering && engine.state == .playing
-    buffering = !ended && !failed && (!ready || engine.isBuffering || recovering)
-    if let target = pendingTarget, now-pendingBegan > 12 { requestRecovery(target:Int64(target*1000)) }
+    // Confirm an actual presentation hold here, once, for every consumer.
+    // Transient engine buffering while pictures still arrive is not a stop.
+    buffering = !ended && !failed && (!ready || recovering ||
+      (engine.isBuffering && lastFrameHost > 0 && now-lastFrameHost > 0.35))
+    if let target = pendingTarget, now-pendingBegan > 12 { requestRecovery(target:Int64(target*1000),reason:"seekVideoTimeout") }
     // Confirmed frame timestamps, not image differences: static scenes remain valid.
     // Keep the last displayed position while output is stale, including audio-only progress.
-    if loaded, wantsPlayback, !ended, !recovering, pendingTarget == nil, now-openedAt > 5 {
+    if loaded, wantsPlayback, (!inBackground || pipActive), !ended, !recovering, pendingTarget == nil, now-openedAt > 5 {
       let stale = lastFrameHost > 0 ? now-lastFrameHost : now-openedAt
-      if stale > 3 { if stalledSince == 0 { stalledSince = now }; if now-stalledSince > 2 { requestRecovery() } }
+      if stale > 3 { if stalledSince == 0 { stalledSince = now }; if now-stalledSince > 2 { requestRecovery(reason:"videoPresentationStall") } }
       else { stalledSince = 0 }
     }
     updateCaption()
@@ -385,8 +510,45 @@ final class NeoAetherBackend: NSObject {
       frameSink?.receiveSubtitleImage(pipActive && engine?.videoRoute == .software ? nil : image)
     }
   }
-  @objc func foreground() { applyIntent(); stalledSince = 0; openedAt = CACurrentMediaTime() }
+  @objc func background() { inBackground = true; stalledSince = 0 }
+  @objc func foreground() {
+    let returning = inBackground; inBackground = false; resetStallEvidence(); applyIntent()
+    guard returning, !pipActive, let engine else { return }
+    // The engine's background-audio policy flushes video and otherwise waits
+    // for the NEXT keyframe. Re-prime at the current audio position instead,
+    // also restoring the paused picture without reopening the network input.
+    Task { @MainActor [weak self, engine] in
+      await Task.yield()
+      guard let self, self.engine === engine, !self.closed, !self.inBackground, !self.pipActive,
+        self.loaded, !self.recovering, self.pendingTarget == nil else { return }
+      if engine.state == .idle, let url = self.sourceURL {
+        NeoPlaybackDiagnostics.record("aether.presentationReload",fields:["targetMs":self.timeMs])
+        self.load(url:url,startMilliseconds:self.timeMs,playing:self.wantsPlayback); return
+      }
+      guard engine.canSeek else { return }
+      let target = engine.currentTime
+      NeoPlaybackDiagnostics.record("aether.presentationRestore",fields:["targetMs":target*1000,"playing":self.wantsPlayback])
+      self.seek(milliseconds:Int64(max(0,target)*1000)) { _ in }
+    }
+  }
 #if targetEnvironment(simulator)
+  @objc func runDetachedPiPFeedProbe(_ completion: @escaping ([String:Bool]) -> Void) {
+    Task { @MainActor in
+      let start = timeMs, oldOutput = outputID
+      pipActive = true; surface.isHidden = true
+      // Longer than the former five-second stall/reopen threshold. The inline
+      // renderer is deliberately unavailable; only the independent feed works.
+      try? await Task.sleep(nanoseconds:6_200_000_000)
+      let progressed = timeMs-start > 4500 && !recovering && outputID == oldOutput
+      let fed = pipFrames.latest != nil || engine?.videoRoute != .software
+      surface.isHidden = false; pipActive = false
+      pause(); background(); foreground()
+      try? await Task.sleep(nanoseconds:2_000_000_000)
+      completion(["detachedPiPVideoAdvances":progressed,"independentPiPFeed":fed,
+        "presentationRestoreDoesNotReopenInput":outputID == oldOutput && !recovering,
+        "presentationRestoreKeepsPause":!wantsPlayback && !playing && engine?.volume == (muted ? 0 : 1)])
+    }
+  }
   @objc var surfaceProbe: [String:Any] {
     ["inWindow":surface.window != nil,"width":surface.bounds.width,"height":surface.bounds.height,
      "sampleFailure":sampleFailure,"frames":samples,"hasSink":frameSink != nil,
@@ -416,7 +578,7 @@ final class NeoAetherBackend: NSObject {
     guard !closed else { return }; closed = true; epoch += 1
     task?.cancel(); seekTask?.cancel(); aheadTask?.cancel(); settleSeek(false)
     timer?.invalidate(); timer = nil; detachOutput(); subscriptions.removeAll()
-    checkpoints?.stop(); checkpoints = nil; engine?.stop(); engine = nil
+    pipFrames.stop(); checkpoints?.stop(); checkpoints = nil; engine?.stop(); engine = nil
     NeoAV1PlaybackBridge.install(nil); AetherEngine.setForceSoftwarePathForTesting(false); EngineLog.handler = nil
     ass.clear(); frameSink = nil; snapshotPixel = nil; onChange = nil; onRecovery = nil
   }

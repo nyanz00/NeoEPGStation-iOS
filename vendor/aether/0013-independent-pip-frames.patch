@@ -1,0 +1,85 @@
+--- a/Sources/AetherEngine/AetherEngine+FrameTimes.swift
++++ b/Sources/AetherEngine/AetherEngine+FrameTimes.swift
+@@ -1,5 +1,6 @@
+ import Foundation
+ import CoreMedia
++import CoreVideo
+ 
+ extension AetherEngine {
+ 
+@@ -59,3 +60,14 @@
+         await softwareHost?.neoCheckpointPackets(fromSession: seconds)
+     }
+ }
++
++// The app composites comments/ASS into its own sample-buffer PiP. An inline
++// display layer is not a frame source once iOS backgrounds that layer.
++extension AetherEngine {
++    public func setSoftwarePiPFrames(
++        consumer: (@Sendable (CVPixelBuffer, CMTime, UInt64) -> Void)?,
++        ready: (@Sendable () -> Bool)?
++    ) {
++        softwareHost?.setPiPFrames(consumer: consumer, ready: ready)
++    }
++}
+--- a/Sources/AetherEngine/Native/SoftwarePlaybackHost.swift
++++ b/Sources/AetherEngine/Native/SoftwarePlaybackHost.swift
+@@ -517,6 +517,14 @@
+     /// #311: forwarded to the renderer, which is where a frame is actually handed over. Set through
+     /// the host rather than on the renderer directly so the engine has one place to re-arm it across
+     /// a `load()`, the same shape the native path uses for its own observer.
++    func setPiPFrames(consumer: (@Sendable (CVPixelBuffer, CMTime, UInt64) -> Void)?,
++                      ready: (@Sendable () -> Bool)?) {
++        // The external consumer supplies its own bounded queue on the same
++        // master clock. An empty, backgrounded inline queue must not gate audio.
++        audioOutput?.synchronizer.delaysRateChangeUntilHasSufficientMediaData = consumer == nil
++        renderer.setPiPFrames(consumer: consumer, ready: ready)
++    }
++
+     func setVideoFrameTimeObserver(_ observer: SoftwareVideoFrameTimeObserver?) {
+         renderer.setFrameEnqueuedObserver(observer)
+     }
+--- a/Sources/AetherEngine/Renderer/SampleBufferRenderer.swift
++++ b/Sources/AetherEngine/Renderer/SampleBufferRenderer.swift
+@@ -251,6 +251,20 @@
+     /// #311: fires for every frame handed to the queue target, on the decode thread. Guarded by
+     /// `reorderLock` for the swap only; the call itself happens with no lock held, so a host that
+     /// re-enters the renderer from it cannot deadlock.
++    private var pipConsumer: (@Sendable (CVPixelBuffer, CMTime, UInt64) -> Void)?
++    private var pipReady: (@Sendable () -> Bool)?
++    func setPiPFrames(consumer: (@Sendable (CVPixelBuffer, CMTime, UInt64) -> Void)?,
++                      ready: (@Sendable () -> Bool)?) {
++        reorderLock.lock()
++        let changed = (pipConsumer == nil) != (consumer == nil)
++        pipConsumer = consumer; pipReady = ready
++        reorderLock.unlock()
++        guard changed else { return }
++        // Retire pictures belonging to the outgoing presentation surface.
++        // The decoder, audio clock and source position remain untouched.
++        queueTarget.flush()
++    }
++
+     private var _frameEnqueuedObserver: SoftwareVideoFrameTimeObserver?
+     func setFrameEnqueuedObserver(_ observer: SoftwareVideoFrameTimeObserver?) {
+         reorderLock.lock()
+@@ -477,7 +491,8 @@
+     /// isReadyForMoreMediaData stays optimistically true even when the renderer queue is full, causing
+     /// FigVideoQueueRemote -12080 on over-enqueue.
+     var isReadyForMoreMediaData: Bool {
+-        queueTarget.isReadyForMoreMediaData
++        reorderLock.lock(); let external = pipReady; reorderLock.unlock()
++        return external?() ?? queueTarget.isReadyForMoreMediaData
+     }
+ 
+     private var queueStatus: AVQueuedSampleBufferRenderingStatus { videoRenderer.status }
+@@ -780,7 +795,9 @@
+             IOSurfaceSetValue(backing, "NeoAetherSourcePTS" as CFString, NSNumber(value: pts.seconds))
+             IOSurfaceSetValue(backing, "NeoAetherPictureGeneration" as CFString, NSNumber(value: pictureGeneration))
+         }
+-        target.enqueue(sampleBuffer)
++        reorderLock.lock(); let external = pipConsumer; reorderLock.unlock()
++        if let external { external(outputBuffer, pts, pictureGeneration) }
++        else { target.enqueue(sampleBuffer) }
+         reorderLock.lock()
+         _lastEnqueuedFrame = pixelBuffer
+         reorderLock.unlock()

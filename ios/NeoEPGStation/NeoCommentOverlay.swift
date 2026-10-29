@@ -495,7 +495,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
       clock.reset()
     }
     let wasAnchored = clock.ready
-    let time = clock.time(media: media, running: running, now: now, rate: rateProvider?() ?? 1, videoHost: videoHostProvider?())
+    let time = clock.time(media: media, running: running, now: now, rate: rateProvider?() ?? 1)
     if !wasAnchored && clock.ready {
       NeoPlaybackDiagnostics.record("comments.initialAnchor", fields: ["media": media, "motion": time])
     }
