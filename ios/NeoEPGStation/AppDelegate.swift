@@ -20,6 +20,29 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     let window = UIWindow(frame: UIScreen.main.bounds)
     window.rootViewController = NeoShell(); self.window = window; window.makeKeyAndVisible()
 #if targetEnvironment(simulator)
+    if let base = ProcessInfo.processInfo.environment["NEO_EPG_AETHER_CONNECTED"], let url = URL(string:base+"/api/videos/1") {
+      NeoCommentOverlay.waitBeforePlayback = true
+      UserDefaults.standard.set(true,forKey:"player.comments.enabled")
+      NeoSubtitlePreference.save("")
+      let streaming = ProcessInfo.processInfo.environment["NEO_EPG_CONNECTED_STREAM"] == "1"
+      DispatchQueue.main.asyncAfter(deadline:.now()+1) {
+        let controller = NeoPlayerController(url:url,title:"Synthetic connected player",username:"",password:"",networkCaching:5000)
+        controller.initialPosition = 20
+        controller.aetherOptions = ["checkpointEnabled":ProcessInfo.processInfo.environment["NEO_EPG_CONNECTED_CHECKPOINT"] == "1"]
+        var context: [String:Any] = ["baseURL":base,"id":1,"user":"1","videoFileType":"encoded","disableHistory":false]
+        if streaming { context["streaming"] = true; context["streamMode"] = 0; context["streamQualities"] = ["Synthetic A","Synthetic B"] }
+        controller.recordingContext = context
+        window.rootViewController?.present(controller,animated:false) {
+          controller.runAetherConnectedProbe { result in
+            NeoPiPSmoke.save("aether-connected-smoke",result)
+            if let source = NeoPlaybackDiagnostics.exportURL(), let bytes = try? Data(contentsOf:source) {
+              try? bytes.write(to:NeoPiPSmoke.directory.appendingPathComponent("aether-connected-diagnostics.json"))
+            }
+          }
+        }
+      }
+      return true
+    }
     if let base = ProcessInfo.processInfo.environment["NEO_EPG_CHECKPOINT_ANALYSIS"], let url = URL(string: base) {
       DispatchQueue.main.asyncAfter(deadline: .now()+1) {
         (window.rootViewController as? NeoShell)?.runCheckpointAnalysisProbe(base: url,

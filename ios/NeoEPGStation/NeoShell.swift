@@ -499,7 +499,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         }
       }
       var decision: NeoCheckpointDecision?
-      if experiment == .checkpointPlayer, experiment.applies(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
+      if experiment == .checkpointPlayer, streaming == nil, experiment.applies(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
         if checkpointMode == .automatic {
           do {
             let result = try await NeoCheckpointAnalysis.resolve(fetch: { try await api.checkpointVideoInfo(file.id) },
@@ -541,20 +541,13 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       player = controller; controller.onClose = { [weak self] in self?.player = nil }
       present(controller, animated: true); return
     }
-    if (experiment == .aether || experiment == .checkpointPlayer), experiment.applies(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
-      let controller = NeoAetherPlayer(url: api.url("/videos/\(file.id)"), title: recording.name, initialPosition: 0,
-        checkpointMode: checkpointDecision?.enabled == true ? true : nil, checkpointDecision: checkpointDecision,
-        context: ["baseURL": api.base.absoluteString, "id": recording.id, "disableHistory": true,
-          "channelId": recording.channelId ?? 0, "channelName": recording.channelName ?? "",
-          "name": recording.name, "startAt": recording.startAt, "endAt": recording.endAt,
-          "description": recording.description ?? "", "extended": recording.extended ?? ""])
-      player = controller
-      controller.onClose = { [weak self] in self?.player = nil }
-      present(controller, animated: true)
-      return
-    }
     let controller = NeoPlayerController(url: api.url("/videos/\(file.id)"), title: recording.name, username: "", password: "", networkCaching: 5000)
     controller.initialPosition = start
+    if (experiment == .aether || experiment == .checkpointPlayer), experiment.applies(fileType:file.type, streaming:streaming != nil, recording:recording.isRecording) {
+      var options: [String:Any] = ["checkpointEnabled":streaming == nil && checkpointDecision?.enabled == true]
+      if let checkpointDecision { options["checkpointSelection"] = checkpointDecision.diagnosticFields }
+      controller.aetherOptions = options
+    }
     controller.recordingContext = ["baseURL": api.base.absoluteString, "id": recording.id, "user": user,
       "disableHistory": api.disablePlaybackHistory, "videoFileType": file.type,
       "channelId": recording.channelId ?? 0, "channelName": recording.channelName ?? recording.channelId.flatMap { channels[$0] } ?? "",

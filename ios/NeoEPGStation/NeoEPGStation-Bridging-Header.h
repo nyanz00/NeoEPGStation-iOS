@@ -1,4 +1,5 @@
 #import "NeoPlayerController.h"
 #import "NeoVLCFrameTap.h"
+#import "NeoASSSubtitleRenderer.h"
 #include "../../vendor/checkpoint/NeoCheckpointLab.h"
 #include "../../vendor/checkpoint/NeoCheckpointPlayback.h"

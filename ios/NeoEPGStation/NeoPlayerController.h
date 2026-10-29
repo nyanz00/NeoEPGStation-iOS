@@ -9,10 +9,12 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) void (^onRecording)(NSInteger recordingID);
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *recordingContext;
 @property (nonatomic) double initialPosition;
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *aetherOptions;
 - (instancetype)initWithURL:(NSURL *)url title:(NSString *)title
                   username:(NSString *)username password:(NSString *)password
             networkCaching:(NSInteger)networkCaching;
 #if TARGET_OS_SIMULATOR
+- (void)runAetherConnectedProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runAetherConnectedProbe(completion:));
 - (void)runEncodedSeekProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runEncodedSeekProbe(completion:));
 - (void)runStreamingProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runStreamingProbe(completion:));
 - (void)runTSResumeProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runTSResumeProbe(completion:));

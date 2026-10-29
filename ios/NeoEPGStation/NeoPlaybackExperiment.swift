@@ -35,7 +35,8 @@ enum NeoPlaybackExperiment: String, CaseIterable {
     return defaults.bool(forKey: "player.experiment.aether") ? .aether : .vlc
   }
   func applies(fileType: String, streaming: Bool, recording: Bool) -> Bool {
-    self != .vlc && fileType == "encoded" && !streaming && !recording
+    guard self != .vlc, fileType == "encoded", !recording else { return false }
+    return !streaming || self == .aether || self == .checkpointPlayer
   }
 }
 
@@ -86,6 +87,11 @@ struct NeoCheckpointDecision {
   var analysisVersion = -1, analysisCurrentVersion = -1
   var analysisStale = false
   var analysisRequests = 0, analysisWaitMs = 0.0
+  var diagnosticFields: [String:Any] {
+    ["mode":mode.rawValue,"enabled":enabled,"reason":reason,"maximumInterval":maximum ?? -1,"thresholdSeconds":10,
+     "analysisStatus":analysisStatus,"analysisVersion":analysisVersion,"analysisCurrentVersion":analysisCurrentVersion,
+     "analysisStale":analysisStale,"analysisRequests":analysisRequests,"analysisWaitMs":analysisWaitMs]
+  }
   func recording(_ result: NeoCheckpointAnalysis.Result) -> Self {
     var value = self
     value.analysisStatus = result.info?.keyframes?.status ?? "missing"

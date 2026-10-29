@@ -293,6 +293,9 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
     }
   }
 #if targetEnvironment(simulator)
+  @objc var hasSubtitleImageForProbe: Bool {
+    work.sync { subtitleImage != nil }
+  }
   @objc func beginCompositionSmoke() {
     work.async { [weak self] in self?.composing = true; self?.dirty = true }
   }

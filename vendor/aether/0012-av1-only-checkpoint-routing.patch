@@ -1,0 +1,21 @@
+--- a/Sources/AetherEngine/Decoder/VideoDecoderTypes.swift
++++ b/Sources/AetherEngine/Decoder/VideoDecoderTypes.swift
+@@ -191,6 +191,7 @@
+ public enum NeoAV1PlaybackBridge {
+     private static let lock = NSLock()
+     nonisolated(unsafe) private static var factory: (@Sendable () -> any NeoAV1PlaybackDecoding)?
++    static var isInstalled: Bool { lock.lock(); defer { lock.unlock() }; return factory != nil }
+     public static func install(_ value: (@Sendable () -> any NeoAV1PlaybackDecoding)?) {
+         lock.lock(); factory = value; lock.unlock()
+     }
+--- a/Sources/AetherEngine/Decoder/VideoRoutingPolicy.swift
++++ b/Sources/AetherEngine/Decoder/VideoRoutingPolicy.swift
+@@ -57,6 +57,8 @@
+         canHardwareDecode: (() -> Bool)? = nil,
+         elType: String? = nil
+     ) -> Bool {
++        // The host checkpoint bridge is AV1-only; never force HEVC/H.264 to software.
++        if codecID == AV_CODEC_ID_AV1, NeoAV1PlaybackBridge.isInstalled { return true }
+         // Profile 7 FEL dual-layer Metal reconstruction routes to the software host pipeline
+         // when preferDualLayerDolbyVision is enabled, dolbyVisionHandling is .automatic, and hardware decode is confirmed (or assumed true if closure
+         // not provided).

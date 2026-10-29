@@ -158,6 +158,22 @@
           "patchedSHA256": "6112e7b0855d0b83221e9bab58d9b696140967c02a32fa42407942714f3f8979"
         }
       ]
+    },
+    {
+      "file": "0012-av1-only-checkpoint-routing.patch",
+      "sha256": "3590cd2c644b3e0d23024775a49c371d83799ab7e946fcfc2950884b3fb9c726",
+      "sources": [
+        {
+          "path": "Sources/AetherEngine/Decoder/VideoDecoderTypes.swift",
+          "upstreamSHA256": "7f7656b63a7c84ffbda5507920af14f0cf6e8e0e50e6912c41781804c2d3d361",
+          "patchedSHA256": "19ead3798c9c0c04bfed21a1dafd02017d96ac525192ef5e839f8d8bc9f42c2c"
+        },
+        {
+          "path": "Sources/AetherEngine/Decoder/VideoRoutingPolicy.swift",
+          "upstreamSHA256": "2836637629a944fcca53f5d3fa9835064039fc1b1a934ae8212088048b8dedd4",
+          "patchedSHA256": "e89c916abcc16b3734b430e740a024a93ba90eb80b7c2756f3d207ff0682ef59"
+        }
+      ]
     }
   ],
   "retiredHeaderCorrection": {

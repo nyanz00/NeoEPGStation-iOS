@@ -102,7 +102,7 @@ final class NeoSettingsCategoryPage: NeoPage {
           NeoPlaybackExperiment.selected = value; self?.render()
         }
       })
-      row("再生エンジン", explanation: "試験用はエンコード済みPLAYを先頭から開きます。コメント・字幕・PiP・視聴履歴の保存には未対応です。診断用はAV1動画の復号速度を自動比較します。次の再生から適用します。", control: engine)
+      row("再生エンジン", explanation: "Aetherはエンコード済みPLAY・STREAMINGに使用します。コメント・字幕・PiP・視聴履歴は共通のプレイヤー機能を使います。TSはARIB字幕対応のVLCで再生します。診断用はAV1動画を比較します。次の再生から適用します。", control: engine)
       if NeoPlaybackExperiment.selected == .checkpointPlayer {
         let checkpoint = UIButton(type: .system)
         checkpoint.setTitle(NeoPlaybackExperiment.checkpointMode.title, for: .normal)

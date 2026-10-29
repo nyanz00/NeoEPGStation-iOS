@@ -220,6 +220,11 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 @property (nonatomic) NSString *password;
 @property (nonatomic) NSInteger networkCaching;
 @property (nonatomic) NeoObservedMediaPlayer *player;
+@property (nonatomic) NeoAetherBackend *aether;
+@property (nonatomic) NSInteger aetherRecoveryAttempts;
+@property (nonatomic, readonly) BOOL transportPlaying, transportSeekable;
+@property (nonatomic, readonly) VLCMediaPlayerState transportState;
+@property (nonatomic, readonly) CGSize transportVideoSize;
 @property (nonatomic) VLCDialogProvider *dialogs;
 @property (nonatomic) NSValue *loginReference;
 @property (nonatomic) UIAlertController *loginAlert;
@@ -372,6 +377,52 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 @end
 
 @implementation NeoPlayerController
+- (BOOL)transportPlaying { return self.aether ? self.aether.playing : self.player.isPlaying; }
+- (BOOL)transportSeekable { return self.aether ? self.aether.seekable : self.player.isSeekable; }
+- (CGSize)transportVideoSize { return self.aether ? self.aether.videoSize : self.player.videoSize; }
+- (VLCMediaPlayerState)transportState {
+  if (!self.aether) { return self.player.state; }
+  if (self.aether.failed) { return VLCMediaPlayerStateError; }
+  if (self.aether.ended) { return VLCMediaPlayerStateStopped; }
+  if (!self.aether.ready) { return VLCMediaPlayerStateOpening; }
+  return self.aether.playing ? VLCMediaPlayerStatePlaying : VLCMediaPlayerStatePaused;
+}
+- (void)playTransport { if (self.aether) { [self.aether play]; } else { [self.player play]; } }
+- (void)pauseTransport { if (self.aether) { [self.aether pause]; } else { [self.player pause]; } }
+- (void)stopTransport { if (self.aether) { [self.aether suspend]; } else { [self.player stop]; } }
+- (void)aetherChanged {
+  if (self.closing || !self.aether) { return; }
+  self.buffering = self.aether.buffering;
+  if (self.aether.durationMs > 0) { self.lastObservedLength = self.aether.durationMs; self.hasInputLength = YES; }
+  if (self.aether.videoSize.height > 0) { self.chrome.videoAspectRatio = self.aether.videoSize.width/self.aether.videoSize.height; }
+  if (self.aether.ready) {
+    BOOL firstReady = !self.inputBufferReady;
+    self.aetherRecoveryAttempts = 0;
+    self.inputBufferReady = YES; self.tsPositionPending = NO;
+    if (self.reloading) { self.videoReloadRecovery = NO; [self finishReload:NO]; }
+    else if (firstReady) { [self.comments endSeek]; }
+    if (!self.buffering) { self.statusLabel.text = self.wantsPlayback ? @"PLAY · 再生中" : @"PLAY · 一時停止"; }
+  }
+  self.playbackEnded = self.aether.ended; self.playbackFailed = self.aether.failed;
+  if (self.playbackEnded) { self.lastObservedTime = self.lastObservedLength; [self.history flush]; }
+  [self updateControls];
+}
+- (void)restartAether {
+  int64_t target = self.reloading ? self.reloadTime : llround(self.initialPosition*1000);
+  self.initialPosition = 0; self.inputStartTime = 0; self.initialPositionInput = NO;
+  self.lastObservedTime = target; self.playbackEnded = NO; self.playbackFailed = NO;
+  self.inputBufferReady = NO; self.buffering = YES; self.tsPositionPending = NO;
+  self.restoringReload = self.reloading; self.awaitingEndpoint = NO;
+  self.videoReloadRecovery = NO; self.awaitingSeekVideo = NO;
+  NSMutableDictionary *options = [self.aetherOptions mutableCopy] ?: [NSMutableDictionary new];
+  options[@"streaming"] = @([self isStreaming]); options[@"networkCachingMs"] = @(self.networkCaching);
+  if (self.recordingContext[@"streamSubtitleIndex"]) { options[@"streamSubtitleIndex"] = self.recordingContext[@"streamSubtitleIndex"]; }
+  self.aether.options = options; [self.aether setPlaybackRate:self.playbackRate];
+  [self.rewindCache beginSeek:target/1000.0]; [self.streamingSession beginSeek:target/1000.0];
+  [self.comments beginSeek:target/1000.0]; [self.commentPiP seekDiscontinuity:target/1000.0];
+  [self.aether loadURL:self.playbackURL ?: self.sourceURL startMilliseconds:target playing:self.wantsPlayback];
+  [self updateLoadingState];
+}
 - (instancetype)initWithURL:(NSURL *)url title:(NSString *)title username:(NSString *)username
                   password:(NSString *)password networkCaching:(NSInteger)networkCaching {
   self = [super initWithNibName:nil bundle:nil];
@@ -390,7 +441,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.initialPosition = isfinite(self.initialPosition) ? MAX(0, self.initialPosition) : 0;
   self.lastObservedTime = (int64_t)llround(self.initialPosition * 1000);
   [NeoPlaybackDiagnostics begin];
-  [NeoPlaybackDiagnostics record:@"player.engine" fields:@{@"engine": @"vlc"}];
+  [NeoPlaybackDiagnostics record:@"player.engine" fields:@{@"engine": self.aetherOptions ? @"aether" : @"vlc"}];
   [NeoPlaybackDiagnostics record:@"player.start" fields:@{@"networkCachingMs": @(self.networkCaching)}];
   self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
   self.chrome = [[NeoPlayerChrome alloc] initWithTitle:self.mediaTitle];
@@ -422,6 +473,30 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       ![audio setActive:YES error:&error]) {
     self.statusLabel.text = @"音声セッションを開始できませんでした。"; return;
   }
+  if (self.aetherOptions) {
+    self.aether = [NeoAetherBackend new]; self.aether.options = self.aetherOptions;
+    self.videoOutputView = self.aether.view;
+    [self.movieView addSubview:self.aether.view];
+    __weak typeof(self) owner = self;
+    self.aether.onChange = ^{ [owner aetherChanged]; };
+    self.aether.onRecovery = ^(int64_t position) {
+      if (!owner || owner.closing || owner.networkReloadWaiting) { return; }
+      dispatch_block_t pendingReload = owner.reloadCompletion;
+      owner.reloadCompletion = nil;
+      if (owner.reloading) {
+        [owner.reloadTimer invalidate]; owner.reloadTimer = nil;
+        owner.reloading = NO; owner.restoringReload = NO; owner.awaitingEndpoint = NO;
+      }
+      owner.reloadTime = position; owner.networkReloadWaiting = YES;
+      NSTimeInterval delay = MIN(15,pow(2,MIN(4,owner.aetherRecoveryAttempts++)));
+      [owner updateLoadingState]; [owner.history flush];
+      owner.networkRetryTimer = [NSTimer scheduledTimerWithTimeInterval:delay repeats:NO block:^(NSTimer *timer) {
+        if (!owner || owner.closing) { return; }
+        owner.networkReloadWaiting = NO; owner.networkRetryTimer = nil;
+        [owner reloadPlaybackAtTime:position completion:pendingReload];
+      }];
+    };
+  } else {
   self.player = [[NeoObservedMediaPlayer alloc] initWithOptions:@[]];
   [NeoNativePlaybackLogger install];
   self.dialogs = [[VLCDialogProvider alloc] initWithLibrary:self.player.libraryInstance customUI:YES];
@@ -429,6 +504,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.player.delegate = self; self.player.drawable = self;
   // The comment display link samples VLC's native clock, not the 0.5s UI timer.
   self.player.timeChangeUpdateInterval = 1.0 / 60.0;
+  }
   self.playbackURL = self.sourceURL;
   self.wantsPlayback = YES;
   self.nowPlaying = [[NeoNowPlaying alloc] initWithTitle:self.mediaTitle channel:self.recordingContext[@"channelName"] ?: @""];
@@ -437,12 +513,12 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.nowPlaying.pauseAction = ^{ [remoteSelf setPlaybackIntent:NO]; };
   self.nowPlaying.toggleAction = ^{ [remoteSelf setPlaybackIntent:!remoteSelf.wantsPlayback]; };
   self.nowPlaying.seekAction = ^BOOL(double seconds) {
-    if (!remoteSelf || remoteSelf.closing || remoteSelf.reloading || remoteSelf.reloadTimedOut || !remoteSelf.player.isSeekable || !isfinite(seconds)) { return NO; }
+    if (!remoteSelf || remoteSelf.closing || remoteSelf.reloading || remoteSelf.reloadTimedOut || !remoteSelf.transportSeekable || !isfinite(seconds)) { return NO; }
     double bounded = fmin(fmax(0, seconds), [remoteSelf mediaLength] / 1000.0);
     [remoteSelf seekBy:(int64_t)(bounded*1000)-[remoteSelf mediaTime] completion:^{}]; return YES;
   };
   self.nowPlaying.skipAction = ^BOOL(double seconds) {
-    if (!remoteSelf || remoteSelf.closing || remoteSelf.reloading || remoteSelf.reloadTimedOut || !remoteSelf.player.isSeekable || !isfinite(seconds)) { return NO; }
+    if (!remoteSelf || remoteSelf.closing || remoteSelf.reloading || remoteSelf.reloadTimedOut || !remoteSelf.transportSeekable || !isfinite(seconds)) { return NO; }
     double bounded = fmin(fmax(-[remoteSelf mediaLength] / 1000.0, seconds), [remoteSelf mediaLength] / 1000.0);
     [remoteSelf seekBy:(int64_t)(bounded*1000) completion:^{}]; return YES;
   };
@@ -468,7 +544,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     // freezes on actual video inactivity; explicit pause remains immediate.
     double due = weakSelf.commentPiP.videoPresentationHostTime;
     BOOL videoStillAdvancing = due > 0 && CACurrentMediaTime()-due < 0.1;
-    return weakSelf.inputBufferReady && weakSelf.player.isPlaying && weakSelf.wantsPlayback &&
+    return weakSelf.inputBufferReady && weakSelf.transportPlaying && weakSelf.wantsPlayback &&
       (!weakSelf.buffering || videoStillAdvancing) && !weakSelf.networkFlow.holding && !weakSelf.networkFlow.verifying &&
       !weakSelf.seeking && !weakSelf.scrubbing && !weakSelf.closing && !weakSelf.reloading && !weakSelf.tsPositionPending &&
       !weakSelf.networkReloadWaiting && !weakSelf.videoReloadRecovery;
@@ -476,9 +552,10 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.comments.onChange = ^{ [weakSelf updateCommentState]; [weakSelf updateLoadingState]; };
   [self.chrome bindCommentSettings:self.comments];
   [self.chrome.commentViewport addSubview:self.comments];
-  self.frameTapInstalled = [NeoVLCFrameTap install];
+  self.frameTapInstalled = self.aether != nil || [NeoVLCFrameTap install];
   if (self.frameTapInstalled) { self.comments.videoHostProvider = ^double { return weakSelf.commentPiP.videoActivityHostTime; }; }
   self.commentPiP = [NeoCommentPiP new];
+  self.aether.frameSink = self.commentPiP;
   self.commentPiP.view.frame = self.movieView.bounds;
   self.commentPiP.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   [self.movieView insertSubview:self.commentPiP.view atIndex:0];
@@ -527,6 +604,11 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     self.history.onDiagnostic = ^(NSDictionary *fields) { [NeoPlaybackDiagnostics record:@"history.sendFailure" fields:fields]; };
   }
   [self showControls];
+  if (self.aether && ![self isStreaming]) {
+    self.streamingSubtitles = [[NeoStreamingSubtitles alloc] initWithSource:self.sourceURL username:self.username password:self.password];
+    self.streamingSubtitles.onChange = ^{ [weakSelf attachStreamingSubtitles]; };
+    [self.streamingSubtitles start];
+  }
   if ([self isStreaming]) {
     if (![self.recordingContext[@"videoFileType"] isEqual:@"ts"]) {
       self.streamingSubtitles = [[NeoStreamingSubtitles alloc] initWithSource:self.sourceURL username:self.username password:self.password];
@@ -581,7 +663,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     NSNumber *chosen = self.recordingContext[@"streamSubtitleIndex"];
     BOOL selected = !self.streamSubtitleUserSelected && chosen && chosen.integerValue >= 0 &&
       [[url.lastPathComponent componentsSeparatedByString:@"-"].firstObject integerValue] == chosen.integerValue;
-    if ([self.player addPlaybackSlave:url type:VLCMediaPlaybackSlaveTypeSubtitle enforce:selected] == 0) { [self.attachedSubtitles addObject:url]; }
+    if (self.aether) { [self.aether addSubtitleURL:url selected:selected]; [self.attachedSubtitles addObject:url]; }
+    else if ([self.player addPlaybackSlave:url type:VLCMediaPlaybackSlaveTypeSubtitle enforce:selected] == 0) { [self.attachedSubtitles addObject:url]; }
   }
 }
 - (void)armStreamingClockAt:(int64_t)time {
@@ -590,9 +673,10 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self.streamClock resetAt:time host:CACurrentMediaTime()];
 }
 - (int64_t)guardStreamingTime:(int64_t)time {
+  if (self.aether) { return time; }
   if (!self.streamClock || ![self isStreaming]) { return time; }
   return [self.streamClock positionAt:time host:CACurrentMediaTime()
-    running:self.wantsPlayback && self.player.isPlaying && !self.reloading && !self.tsPositionPending rate:self.playbackRate];
+    running:self.wantsPlayback && self.transportPlaying && !self.reloading && !self.tsPositionPending rate:self.playbackRate];
 }
 - (BOOL)isStreaming { return [self.recordingContext[@"streaming"] boolValue]; }
 - (BOOL)wholeFileClock { return [self isStreaming] || [self.recordingContext[@"videoFileType"] isEqual:@"ts"]; }
@@ -792,6 +876,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     [self seekBy:target - [self mediaTime] completion:^{}];
   } else if ([action hasPrefix:@"rate:"]) {
     self.playbackRate = [action substringFromIndex:5].floatValue; self.player.rate = self.playbackRate;
+    [self.aether setPlaybackRate:self.playbackRate];
   } else if ([action hasPrefix:@"cache:"]) { self.networkCaching = MAX(1000, MIN(30000, [action substringFromIndex:6].integerValue * 1000)); }
   else if ([action hasPrefix:@"retention:"]) {
     NSInteger value = [action substringFromIndex:10].integerValue;
@@ -819,6 +904,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   else if ([action hasPrefix:@"subtitle:"]) {
     self.streamSubtitleUserSelected = YES;
     NSInteger index = [action substringFromIndex:9].integerValue;
+    if (self.aether) { [self.aether selectSubtitle:index]; [self updateSubtitleSettings]; return; }
     if (index < 0) {
       [NeoSubtitlePreference save:@""]; self.subtitleSignature = nil;
       for (VLCMediaPlayerTrack *track in self.player.textTracks) {
@@ -919,7 +1005,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self armReloadDeadline];
   __weak typeof(self) weakSelf = self;
   if ([self isStreaming]) {
-    self.awaitingEndpoint = YES; [self.player stop];
+    self.awaitingEndpoint = YES; [self stopTransport];
     [self prepareStreamingAt:self.reloadTime/1000.0 completion:^(NSURL *url, NSString *message) {
       if (!weakSelf || weakSelf.closing || !weakSelf.reloading || weakSelf.reloadGeneration != generation) { return; }
       if (!url) {
@@ -932,7 +1018,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     }];
   } else if (self.rewindCache) {
     self.awaitingEndpoint = YES;
-    [self.player stop];
+    [self stopTransport];
     [self.rewindCache reopen:^(NSURL *url, NSString *message) {
       if (!weakSelf || weakSelf.closing || !weakSelf.reloading || weakSelf.reloadGeneration != generation) { return; }
       weakSelf.playbackURL = url ?: weakSelf.sourceURL;
@@ -951,18 +1037,19 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     else if (self.seeking || self.awaitingSeekVideo || self.tsPositionPending) { message = @"シーク先を読み込み中"; }
     else if (self.networkFlow.holding) { message = @"通信を待機中"; }
     else if (self.networkFlow.verifying) { message = @"映像を再開中"; }
-    else if (self.awaitingEndpoint || self.player.state == VLCMediaPlayerStateOpening ||
+    else if (self.awaitingEndpoint || self.transportState == VLCMediaPlayerStateOpening ||
       (self.wantsPlayback && self.commentPiP.capturedFrameCount == 0)) { message = @"動画を読み込み中"; }
   }
   if (self.playbackEnded || self.playbackFailed || self.closing) { [self.chrome updateBuffering:NO progress:1]; }
   [self.chrome updateLoading:message];
 }
 - (void)checkVideoRecovery {
+  if (self.aether) { return; }
   if (self.networkReloadWaiting) { return; }
   NSTimeInterval now = CACurrentMediaTime();
   if (self.videoReloadRecovery && !self.reloading && !self.inputInBackground) {
     NSDictionary *stats = [NeoVLCFrameTap snapshot:self.movieView];
-    VLCMediaPlayerState state = self.player.state;
+    VLCMediaPlayerState state = self.transportState;
     BOOL positioned = self.wantsPlayback || llabs([self mediaTime]-self.reloadTime) < 1000;
     BOOL fresh = [stats[@"outputID"] integerValue] > 0 && [stats[@"outputID"] integerValue] != self.videoResumeOldOutput &&
       [stats[@"samples"] integerValue] > 0 && ![stats[@"resourceInterrupted"] boolValue] &&
@@ -989,7 +1076,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   BOOL selectedVideo = NO;
   for (VLCMediaPlayerTrack *track in self.player.videoTracks) { selectedVideo |= track.isSelected; }
   if (!selectedVideo || self.closing || self.inputInBackground || self.pipActive || self.reloading || self.tsPositionPending || self.videoResuming || self.seeking ||
-      self.buffering || self.networkFlow.holding || !self.wantsPlayback || !self.player.isPlaying) {
+      self.buffering || self.networkFlow.holding || !self.wantsPlayback || !self.transportPlaying) {
     [self.videoRecovery hold:now]; return;
   }
   if (self.videoWatchPending) {
@@ -1044,7 +1131,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if (self.videoResuming || self.closing || self.reloading || self.inputInBackground || self.pipActive) { return; }
   VLCMediaPlayerTrack *selected = nil;
   for (VLCMediaPlayerTrack *track in self.player.videoTracks) { if (track.isSelected) { selected = track; break; } }
-  if (!selected || !self.player.isSeekable) { return; }
+  if (!selected || !self.transportSeekable) { return; }
   // Read the retained paused position before enabling the repair path, which
   // intentionally bypasses the ordinary paused-clock guard.
   int64_t retained = [self mediaTime];
@@ -1065,14 +1152,14 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   NSInteger generation = ++self.videoResumeGeneration;
   self.videoResumeDeadline = CACurrentMediaTime()+4;
   [NeoPlaybackDiagnostics record:@"video.resumeRebuild" fields:@{@"mediaMs": @(self.videoResumeTime), @"outputID": @(self.videoResumeOldOutput), @"wantsPlayback": @(self.wantsPlayback)}];
-  [self.player pause]; selected.selected = NO;
+  [self pauseTransport]; selected.selected = NO;
   [self updateLoadingState];
   [self pollVideoResume:generation];
 }
 - (void)pollVideoResume:(NSInteger)generation {
   if (!self.videoResuming || self.videoResumeGeneration != generation || self.closing ||
       self.inputInBackground || self.player.media != self.videoResumeMedia || self.reloading) { return; }
-  VLCMediaPlayerState state = self.player.state;
+  VLCMediaPlayerState state = self.transportState;
   if (state == VLCMediaPlayerStateStopped || state == VLCMediaPlayerStateError) {
     [self fallbackVideoResume:state == VLCMediaPlayerStateStopped ? 1 : 2]; return;
   }
@@ -1089,7 +1176,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if (self.videoResumeStage == 0 && !anySelected && [stats[@"outputID"] integerValue] == 0 && target) {
     self.videoResumeStage = 1; target.selected = YES;
     [NeoPlaybackDiagnostics record:@"video.resumeOutputRetired" fields:@{@"outputID": @(self.videoResumeOldOutput)}];
-  } else if (self.videoResumeStage == 1 && target.isSelected && self.player.state == VLCMediaPlayerStatePaused) {
+  } else if (self.videoResumeStage == 1 && target.isSelected && self.transportState == VLCMediaPlayerStatePaused) {
     self.videoResumeStage = 2; self.videoResumeDeadline = CACurrentMediaTime()+10;
     self.videoResumePriming = YES;
     __weak typeof(self) weakSelf = self;
@@ -1101,7 +1188,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     self.videoResumePriming = NO;
 #if TARGET_OS_SIMULATOR
     // Reproduce a terminal native input immediately after the priming seek.
-    if (self.smokeStopVideoResume) { self.smokeStopVideoResume = NO; [self.player stop]; }
+    if (self.smokeStopVideoResume) { self.smokeStopVideoResume = NO; [self stopTransport]; }
 #endif
   } else if (self.videoResumeStage == 2 && self.videoResumeSeekFinished &&
       [stats[@"outputID"] integerValue] > 0 && [stats[@"outputID"] integerValue] != self.videoResumeOldOutput &&
@@ -1136,16 +1223,16 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   int64_t time = self.videoResumeDeferredTime ? self.videoResumeDeferredTime.longLongValue : self.videoResumeTime;
   dispatch_block_t completion = self.videoResumeDeferredCompletion; self.videoResumeDeferredCompletion = nil;
   [NeoPlaybackDiagnostics record:@"video.resumeFallback" fields:@{@"reason": @(reason), @"stage": @(self.videoResumeStage),
-    @"targetMs": @(time), @"wantsPlayback": @(self.wantsPlayback), @"state": @(self.player.state)}];
+    @"targetMs": @(time), @"wantsPlayback": @(self.wantsPlayback), @"state": @(self.transportState)}];
   self.videoRecoveryFallbackAttempted = YES; self.videoReloadRecovery = YES;
   [self reloadPlaybackAtTime:time completion:completion];
 }
 - (void)failVideoRecovery {
-  [NeoPlaybackDiagnostics record:@"video.resumeFailed" fields:@{@"mediaMs": @([self mediaTime]), @"state": @(self.player.state)}];
+  [NeoPlaybackDiagnostics record:@"video.resumeFailed" fields:@{@"mediaMs": @([self mediaTime]), @"state": @(self.transportState)}];
   [self cancelVideoResume]; self.videoReloadRecovery = NO; self.awaitingSeekVideo = NO;
   [self.videoRecovery reset]; self.videoWatchPending = NO;
   self.playbackFailed = YES; [self setPlaybackIntent:NO];
-  if (self.player.state == VLCMediaPlayerStatePlaying) { [self.player pause]; }
+  if (self.transportState == VLCMediaPlayerStatePlaying) { [self pauseTransport]; }
   [self releaseRestoreMute];
   self.statusLabel.text = @"映像を復旧できませんでした。再読み込みをお試しください。";
   [self updateLoadingState]; [self.chrome updateDiagnostics]; [self showControls];
@@ -1163,11 +1250,13 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 - (void)restartInputAfterEndpointReady {
   if (self.closing) { return; }
+  if (self.aether) { [self restartAether]; return; }
   self.awaitingEndpoint = NO;
-  if (self.player.state == VLCMediaPlayerStateStopped || self.player.state == VLCMediaPlayerStateNothingSpecial) { [self restartMedia]; }
-  else { [self.player stop]; }
+  if (self.transportState == VLCMediaPlayerStateStopped || self.transportState == VLCMediaPlayerStateNothingSpecial) { [self restartMedia]; }
+  else { [self stopTransport]; }
 }
 - (void)restartMedia {
+  if (self.aether) { [self restartAether]; return; }
   [NeoVLCFrameTap clearARIBView:self.movieView];
   [self resetNetworkFlow];
   self.flowDecodedVideo = 0; self.flowDecodedAt = 0;
@@ -1258,7 +1347,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
   [NeoPlaybackDiagnostics record:@"input.startPosition" fields:@{@"targetMs": @(target),
     @"paused": @(pausedStart), @"absoluteTS": @(ts)}];
-  self.player.media = media; [self.player play];
+  self.player.media = media; [self playTransport];
   if (self.tsPositionPending) { [self armTSPosition]; }
 }
 - (void)armTSPosition {
@@ -1304,6 +1393,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [NSRunLoop.mainRunLoop addTimer:self.seekPresentationTimer forMode:NSRunLoopCommonModes];
 }
 - (void)updateSeekVideoReady {
+  if (self.aether) { return; }
   // A due target frame is stronger evidence than a queued input-buffering
   // notification. Preserve TS/HLS positioning checks and precise seeking.
   int64_t native = self.awaitingSeekVideo ? self.player.nativeTimeMs : -1;
@@ -1347,23 +1437,23 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     // seek, then for Playing before issuing it. A cached seek followed at once
     // by pause+seek must not let the earlier pause stop the new preparation.
     if (self.tsPositionWaitForPause) {
-      if (self.player.state != VLCMediaPlayerStatePaused) { return; }
+      if (self.transportState != VLCMediaPlayerStatePaused) { return; }
       self.tsPositionWaitForPause = NO;
     }
-    if (self.player.state == VLCMediaPlayerStatePaused) {
+    if (self.transportState == VLCMediaPlayerStatePaused) {
       if (CACurrentMediaTime()-self.tsPositionResumeAt >= 0.25) {
         self.tsPositionResumeAt = CACurrentMediaTime();
         [NeoPlaybackDiagnostics record:@"ts.positionPrimeResume" fields:@{@"targetMs": @(self.tsPositionTarget)}];
-        [self.player play];
+        [self playTransport];
       }
       return;
     }
   }
   if (!self.tsPositionIssued) {
     int64_t length = [self mediaLength];
-    BOOL stateReady = self.player.state == VLCMediaPlayerStatePaused ||
-      (([self positionNeedsPlaying] || self.seeking) && self.player.state == VLCMediaPlayerStatePlaying);
-    if (!self.inputBufferReady || self.buffering || !stateReady || !self.player.isSeekable || length <= 0) { return; }
+    BOOL stateReady = self.transportState == VLCMediaPlayerStatePaused ||
+      (([self positionNeedsPlaying] || self.seeking) && self.transportState == VLCMediaPlayerStatePlaying);
+    if (!self.inputBufferReady || self.buffering || !stateReady || !self.transportSeekable || length <= 0) { return; }
     BOOL bytes = ![self isStreaming] && !self.hasInputLength && self.player.media.length.value.longLongValue <= 0;
     if (bytes && !self.seeking) {
       // Opening announces Paused before MPEG-2's first picture/PCR origin is
@@ -1448,7 +1538,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self armStreamingClockAt:self.tsPositionTarget];
   self.lastObservedTime = [self guardStreamingTime:native];
   if ([self positionNeedsPlaying]) {
-    if (self.reloading || !self.wantsPlayback) { [self.player pause]; }
+    if (self.reloading || !self.wantsPlayback) { [self pauseTransport]; }
     else if (!self.videoReloadRecovery) { [self releaseRestoreMute]; }
   }
   self.videoOutputView.hidden = NO;
@@ -1467,7 +1557,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self.comments endSeek];
   if (failed) {
     self.videoReloadRecovery = NO; self.playbackFailed = YES; [self setPlaybackIntent:NO];
-    if (self.player.state == VLCMediaPlayerStatePlaying) { [self.player pause]; }
+    if (self.transportState == VLCMediaPlayerStatePlaying) { [self pauseTransport]; }
     [self releaseRestoreMute];
   }
   else {
@@ -1495,7 +1585,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if (completion) { completion(); }
 }
 - (void)restoreReloadIfReady {
-  VLCMediaPlayerState state = self.player.state;
+  VLCMediaPlayerState state = self.transportState;
   if (self.reloading && !self.restoringReload) { return; }
   if ((!self.reloading && !self.reloadTimedOut) || self.tsPositionPending || self.awaitingEndpoint || !self.inputBufferReady || self.buffering ||
       state != VLCMediaPlayerStatePaused) { return; }
@@ -1514,10 +1604,19 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self sampleHistory]; [self.history flush];
   if ([self isStreaming] && playing && !self.wantsPlayback && !self.reloading && !self.tsPositionPending) { [self armStreamingClockAt:[self mediaTime]]; }
   self.wantsPlayback = playing;
+  if (self.aether) {
+    if (playing && (self.playbackEnded || self.playbackFailed)) {
+      if (self.playbackEnded) { self.initialPosition = 0; [self restartAether]; }
+      else { [self reloadPlaybackAtTime:self.lastObservedTime completion:nil]; }
+    } else if (!self.awaitingComments && !self.awaitingEndpoint) {
+      if (playing) { [self.aether play]; } else { [self.aether pause]; }
+    }
+    [self.commentPiP updateAutomaticPlayback]; [self updateControls]; [self scheduleControlsHide]; return;
+  }
   if (self.networkReloadWaiting) { [self updateLoadingState]; [self updateNowPlaying]; return; }
   [NeoPlaybackDiagnostics record:@"playback.intent" fields:@{@"playing": @(playing), @"reloading": @(self.reloading)}];
   [self.commentPiP updateAutomaticPlayback];
-  if (self.reloadTimedOut && self.player.state != VLCMediaPlayerStateStopped && self.player.state != VLCMediaPlayerStateError) {
+  if (self.reloadTimedOut && self.transportState != VLCMediaPlayerStateStopped && self.transportState != VLCMediaPlayerStateError) {
     [self restoreReloadIfReady];
     if (self.reloadTimedOut) {
       if (playing) {
@@ -1529,7 +1628,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     }
   }
   if (!self.reloading && !self.awaitingComments && !self.awaitingEndpoint && playing &&
-      (self.transportSuspended || self.playbackEnded || self.playbackFailed || self.player.state == VLCMediaPlayerStateStopped)) {
+      (self.transportSuspended || self.playbackEnded || self.playbackFailed || self.transportState == VLCMediaPlayerStateStopped)) {
     if (self.playbackEnded) {
       self.backgroundPositionValid = NO; self.lastObservedTime = 0;
       [self.rewindCache beginSeek:self.initialPosition];
@@ -1542,38 +1641,45 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self applyPlaybackIntentForced:NO];
 }
 - (void)applyPlaybackIntentForced:(BOOL)force {
+  if (self.aether) {
+    if (!self.closing && !self.reloading && !self.awaitingComments && !self.awaitingEndpoint && !self.playbackEnded && !self.playbackFailed) {
+      if (self.wantsPlayback && !self.aether.playing) { [self.aether play]; }
+      else if (!self.wantsPlayback && self.aether.playing) { [self.aether pause]; }
+    }
+    return;
+  }
   if (self.closing || self.reloading || self.networkReloadWaiting || self.tsPositionPending || self.videoResuming || self.playbackEnded || self.playbackFailed) { return; }
   // Buffering/seek callbacks can arrive after EOF. Only reconcile an active
   // input; starting a stopped input belongs to an explicit play/reload action.
-  if (self.player.state != VLCMediaPlayerStatePlaying && self.player.state != VLCMediaPlayerStatePaused) { return; }
+  if (self.transportState != VLCMediaPlayerStatePlaying && self.transportState != VLCMediaPlayerStatePaused) { return; }
   // An input blocked in HTTP cannot process pause until the read returns.
   // Do not queue automatic pause/play pairs around that blocked operation.
   BOOL playing = self.wantsPlayback;
-  if (!force && self.player.isPlaying == playing) { return; }
+  if (!force && self.transportPlaying == playing) { return; }
   NSTimeInterval now = CACurrentMediaTime();
   if (!force && self.lastIssuedIntent == playing && now-self.lastIntentCommandAt < 1) { return; }
   self.lastIssuedIntent = playing; self.lastIntentCommandAt = now;
   [NeoPlaybackDiagnostics record:@"playback.command" fields:@{@"playing": @(playing), @"forced": @(force),
-    @"nativePlaying": @(self.player.isPlaying), @"state": @(self.player.state), @"reload": @(self.reloadGeneration)}];
+    @"nativePlaying": @(self.transportPlaying), @"state": @(self.transportState), @"reload": @(self.reloadGeneration)}];
   // VLC enqueues play/pause on its own serial queue. A preceding pause may
   // still be pending even when isPlaying is true. Explicit intent must always
   // enqueue the final command behind it, including paused reload completion.
   if (playing) {
     if (!self.videoReloadRecovery) { [self releaseRestoreMute]; }
-    [self.player play];
-  } else { [self.player pause]; }
+    [self playTransport];
+  } else { [self pauseTransport]; }
 }
 - (void)sampleHistory {
   [self.history sample:self.playbackEnded ? self.lastObservedLength / 1000.0 : MAX(0, (double)[self mediaTime] / 1000.0)
     duration:[self mediaLength] / 1000.0
-    running:self.player.isPlaying && self.wantsPlayback && !self.buffering && !self.networkFlow.holding && !self.networkFlow.verifying
+    running:self.transportPlaying && self.wantsPlayback && !self.buffering && !self.networkFlow.holding && !self.networkFlow.verifying
     seeking:self.seeking || self.scrubbing || self.reloading rate:self.playbackRate];
 }
 - (void)beginScrubbing { [self showControls]; self.scrubbing = YES; }
 - (void)cancelScrubbing { self.scrubbing = NO; [self.chrome finishSeekPreview]; [self showControls]; }
 - (void)endScrubbing {
   [NeoVLCFrameTap clearARIBView:self.movieView];
-  if (self.player.isSeekable) { [self seekBy:(int64_t)(self.timeline.value * [self mediaLength]) - [self mediaTime] completion:^{}]; }
+  if (self.transportSeekable) { [self seekBy:(int64_t)(self.timeline.value * [self mediaLength]) - [self mediaTime] completion:^{}]; }
   else { [self.chrome finishSeekPreview]; }
   self.scrubbing = NO; [self showControls];
 }
@@ -1609,6 +1715,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 - (void)updateSubtitleSettings {
   [self attachStreamingSubtitles];
+  if (self.aether) { [self.chrome updateSubtitleTracks:self.aether.subtitleTracks]; return; }
   [self restoreSubtitlePreference];
   NSMutableArray *tracks = [NSMutableArray new]; NSInteger index = 0;
   for (VLCMediaPlayerTrack *track in self.player.textTracks) {
@@ -1654,6 +1761,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if (self.flowMuted) { self.player.audio.muted = self.flowPreviousMute; self.flowMuted = NO; }
 }
 - (void)checkNetworkFlow {
+  if (self.aether) { return; }
   if (!self.rewindCache && !self.streamingSession) { return; }
   if (self.flowResyncing) { return; }
   BOOL videoSelected = NO;
@@ -1720,7 +1828,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     // Rebase the existing demux/decoders at the confirmed presentation point.
     // This discards late queued A/V and resets their native clock together,
     // without opening HTTP from zero or replacing the media/input.
-    if (!self.player.isSeekable) { [self resetNetworkFlow]; [self failVideoRecovery]; return; }
+    if (!self.transportSeekable) { [self resetNetworkFlow]; [self failVideoRecovery]; return; }
     self.flowResyncing = YES; self.flowVerifyDeadline = now+MAX(12, self.networkCaching/1000.0+10);
     VLCMedia *input = self.player.media; int64_t target = self.flowHoldTime;
     __weak typeof(self) weakSelf = self;
@@ -1738,21 +1846,22 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self updateLoadingState];
 }
 - (void)updateControls {
+  if (self.aether && self.reloading) { [self updateLoadingState]; [self updateNowPlaying]; return; }
   if (self.closing) { return; }
   [self checkNetworkFlow];
   [self restoreReloadIfReady];
   [self applyPlaybackIntent];
   [self updateNowPlaying];
   [self sampleHistory];
-  self.timeline.enabled = self.player.isSeekable && !self.reloading && !self.reloadTimedOut; self.playButton.enabled = YES;
+  self.timeline.enabled = self.transportSeekable && !self.reloading && !self.reloadTimedOut; self.playButton.enabled = YES;
   int64_t current = MAX(0, [self mediaTime] / 1000);
   int64_t length = [self mediaLength] / 1000;
   if (!self.scrubbing && length > 0) { self.timeline.value = self.playbackEnded ? 1 : MIN(1, MAX(0, (double)[self mediaTime] / [self mediaLength])); }
   [self rememberPlaybackTime];
   if (self.inputBufferReady && !self.tsPositionPending && !self.reloading && !self.networkReloadWaiting && !self.awaitingComments) {
-    [self.streamingSession observeTime:current running:self.player.isPlaying];
+    [self.streamingSession observeTime:current running:self.transportPlaying];
   }
-  [self.rewindCache observeTime:current running:self.player.isPlaying && !self.buffering && !self.seeking];
+  [self.rewindCache observeTime:current running:self.transportPlaying && !self.buffering && !self.seeking];
   [self.chrome updatePlayback:self.wantsPlayback && !self.playbackEnded current:self.playbackEnded ? self.lastObservedLength / 1000 : current duration:length > 0 ? length : self.lastObservedLength / 1000];
   [self.chrome updateDownloadedRanges:(self.streamingSession ? self.streamingSession.downloadedRanges : self.rewindCache.downloadedRanges) ?: @[]];
   NSString *cacheStatus = self.streamingSession ? self.streamingSession.status : self.rewindCache.status;
@@ -1764,7 +1873,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.lastPresentedWarning = warning;
   self.subtitleButton.enabled = !self.reloading;
   [self updateSubtitleSettings];
-  CGSize size = self.player.videoSize;
+  CGSize size = self.transportVideoSize;
   VLCMediaVideoTrack *video = self.player.media.videoTracks.firstObject.video;
   if (video.sourceAspectRatio > 0 && video.sourceAspectRatioDenominator > 0) {
     size.width *= (double)video.sourceAspectRatio / video.sourceAspectRatioDenominator;
@@ -1779,11 +1888,12 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self updateSeekVideoReady];
   if (now - self.lastDiagnosticSample >= 1) {
     self.lastDiagnosticSample = now;
-    [NeoPlaybackDiagnostics record:@"video.sample" fields:[NeoVLCFrameTap snapshot:self.movieView]];
+    [NeoPlaybackDiagnostics record:@"video.sample" fields:self.aether ? self.aether.snapshot : [NeoVLCFrameTap snapshot:self.movieView]];
+    if (self.aether) { return; }
     VLCMediaStats nativeStats = self.player.media.statistics;
     [NeoPlaybackDiagnostics record:@"player.sample" fields:@{@"mediaMs": @([self mediaTime]),
-      @"state": @(self.player.state), @"buffering": @(self.buffering), @"seeking": @(self.seeking),
-      @"nativePlaying": @(self.player.isPlaying), @"appState": @(UIApplication.sharedApplication.applicationState),
+      @"state": @(self.transportState), @"buffering": @(self.buffering), @"seeking": @(self.seeking),
+      @"nativePlaying": @(self.transportPlaying), @"appState": @(UIApplication.sharedApplication.applicationState),
       @"actualMute": @(libvlc_audio_get_mute(self.player.libVLCMediaPlayer)), @"preparationMuted": @(self.player.preparationMuted),
       @"decodedVideo": @(nativeStats.decodedVideo), @"decodedAudio": @(nativeStats.decodedAudio),
       @"readBytes": @(nativeStats.readBytes), @"demuxBytes": @(nativeStats.demuxReadBytes),
@@ -1808,15 +1918,15 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     }
     if (self.networkReloadWaiting) { [self updateLoadingState]; return; }
     if (self.restoreMuted) { self.player.audio.muted = YES; }
-    if (state == VLCMediaPlayerStatePaused && self.player.state == state && !self.tsPositionPending &&
+    if (state == VLCMediaPlayerStatePaused && self.transportState == state && !self.tsPositionPending &&
         !self.reloading && !self.videoReloadRecovery && !self.videoResuming) { [self releaseRestoreMute]; }
-    if (state == VLCMediaPlayerStatePaused && self.player.state == state && !self.seeking && !self.reloading &&
+    if (state == VLCMediaPlayerStatePaused && self.transportState == state && !self.seeking && !self.reloading &&
         !self.tsPositionPending && !self.videoResuming && [self wholeFileClock]) {
       int64_t paused = [self guardStreamingTime:self.player.nativeTimeMs];
       if (paused >= 0 && ([self mediaLength] <= 0 || paused <= [self mediaLength]+1500)) { self.lastObservedTime = paused; }
     }
-    if ((state == VLCMediaPlayerStateStopped || state == VLCMediaPlayerStateError) && self.player.state != state) {
-      [NeoPlaybackDiagnostics record:@"player.staleTerminalState" fields:@{@"state": @(state), @"currentState": @(self.player.state)}];
+    if ((state == VLCMediaPlayerStateStopped || state == VLCMediaPlayerStateError) && self.transportState != state) {
+      [NeoPlaybackDiagnostics record:@"player.staleTerminalState" fields:@{@"state": @(state), @"currentState": @(self.transportState)}];
       return;
     }
     if (state == VLCMediaPlayerStateStopped || state == VLCMediaPlayerStateError) {
@@ -1830,7 +1940,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       [self failVideoRecovery]; return;
     }
     if (self.reloading && state == VLCMediaPlayerStateStopped && !self.restoringReload && !self.awaitingEndpoint) { [self restartMedia]; return; }
-    if (state == VLCMediaPlayerStateError && (self.transportSuspended || self.awaitingEndpoint || self.player.state != state)) { return; }
+    if (state == VLCMediaPlayerStateError && (self.transportSuspended || self.awaitingEndpoint || self.transportState != state)) { return; }
     if ([self isStreaming] && !self.reloading && !self.playbackFailed &&
         (state == VLCMediaPlayerStateError || (state == VLCMediaPlayerStateStopped && self.lastObservedTime < [self mediaLength]-1500))) {
       int64_t retained = self.networkFlow.holding || self.networkFlow.verifying ? self.flowHoldTime : self.lastObservedTime;
@@ -1874,7 +1984,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       [self completeSeek:self.seekGeneration failed:YES]; [self.history flush]; [self showControls];
     }
 
-    if ((state == VLCMediaPlayerStatePlaying || state == VLCMediaPlayerStatePaused) && self.player.state == state) {
+    if ((state == VLCMediaPlayerStatePlaying || state == VLCMediaPlayerStatePaused) && self.transportState == state) {
       if (self.tsPositionPending) { [self advanceTSPosition]; }
       else { [self applyPlaybackIntent]; }
     }
@@ -1896,7 +2006,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     self.buffering = progress < 1;
     if (progress >= 1) { self.inputBufferReady = YES; }
     [NeoPlaybackDiagnostics record:@"player.buffering" fields:@{@"progress": @(progress), @"notifications": @(count),
-      @"nativePlaying": @(self.player.isPlaying), @"mediaMs": @([self mediaTime])}];
+      @"nativePlaying": @(self.transportPlaying), @"mediaMs": @([self mediaTime])}];
     [self.chrome updateBuffering:self.buffering progress:progress];
     [self updateLoadingState];
     if (!self.closing) {
@@ -1916,7 +2026,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   });
 }
 - (void)rememberPlaybackTime {
-  VLCMediaPlayerState state = self.player.state;
+  VLCMediaPlayerState state = self.transportState;
   if (self.playbackEnded || self.seeking || self.reloading ||
       (state != VLCMediaPlayerStatePlaying && state != VLCMediaPlayerStatePaused && state != VLCMediaPlayerStateStopping)) { return; }
   int64_t length = [self mediaLength];
@@ -1935,8 +2045,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 - (void)updateNowPlaying {
   [self.nowPlaying updateWithPosition:self.reloading ? self.reloadTime/1000.0 : (self.playbackEnded ? self.lastObservedLength/1000.0 : MAX(0, (double)[self mediaTime]/1000.0))
     duration:[self mediaLength]/1000.0 rate:self.playbackRate
-    playing:self.wantsPlayback && self.player.isPlaying && !self.buffering && !self.reloading && !self.networkReloadWaiting && !self.videoReloadRecovery && !self.playbackEnded
-    seekable:self.player.isSeekable && !self.reloading artwork:self.chrome.channelArtwork];
+    playing:self.wantsPlayback && self.transportPlaying && !self.buffering && !self.reloading && !self.networkReloadWaiting && !self.videoReloadRecovery && !self.playbackEnded
+    seekable:self.transportSeekable && !self.reloading artwork:self.chrome.channelArtwork];
 }
 
 - (void)interrupted:(NSNotification *)notification {
@@ -1967,6 +2077,10 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 - (void)foregrounded {
   if (self.closing) { return; }
+  if (self.aether) {
+    self.inputInBackground = NO; [self.rewindCache resumeFetching]; [self.streamingSession resumeFetching];
+    [self.commentPiP enterForeground]; [self.aether foreground]; [self updateControls]; return;
+  }
   BOOL returningFromBackground = self.inputInBackground;
   [NeoPlaybackDiagnostics record:@"lifecycle.foreground" fields:@{@"wantsPlayback": @(self.wantsPlayback), @"needsRecovery": @(self.transportSuspended), @"mediaMs": @([self mediaTime])}];
   if (self.inputInBackground) { [self.rewindCache resumeFetching]; [self.streamingSession resumeFetching]; }
@@ -1982,7 +2096,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self.videoRecovery reset]; self.videoWatchPending = YES;
   self.repairingVideo = NO;
   [NeoPlaybackDiagnostics record:@"video.foregroundFlush" fields:[NeoVLCFrameTap snapshot:self.movieView]];
-  VLCMediaPlayerState state = self.player.state;
+  VLCMediaPlayerState state = self.transportState;
   if (!self.reloading && !self.playbackEnded && self.backgroundPositionValid &&
       (self.transportSuspended || state == VLCMediaPlayerStateError || state == VLCMediaPlayerStateStopped)) {
     self.transportRecoveryAttempted = YES;
@@ -2097,6 +2211,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.videoOutputView.center = CGPointMake(CGRectGetMidX(self.movieView.bounds), CGRectGetMidY(self.movieView.bounds));
   [self.videoOutputView setNeedsLayout]; [self.videoOutputView layoutIfNeeded];
   [self applyVideoZoom:self.chrome.videoZoom];
+  [self.aether layout];
 }
 - (void)applyVideoZoom:(CGFloat)scale {
   // Scale only VLC's drawable. HUD, comments, program info and PiP stay at
@@ -2108,6 +2223,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 - (void)updatePiPState {
   if (self.closing) { return; }
   self.pipActive = self.commentPiP.active;
+  self.aether.pipActive = self.pipActive;
   [self.chrome updatePiP:self.pipActive];
   if (self.comments.coveredByPiP != self.pipActive) { self.comments.coveredByPiP = self.pipActive; }
   self.pipButton.enabled = self.frameTapInstalled && self.commentPiP.possible;
@@ -2117,6 +2233,90 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self showControls]; [self.commentPiP start];
 }
 #if TARGET_OS_SIMULATOR
+- (void)runAetherConnectedProbeWithCompletion:(void (^)(NSDictionary<NSString *,id> *))completion {
+  NSMutableDictionary *checks = [NSMutableDictionary new];
+  [self waitAetherPhase:0 began:CACurrentMediaTime() checks:checks completion:completion];
+}
+- (void)waitAetherPhase:(NSInteger)phase began:(double)began checks:(NSMutableDictionary *)checks
+             completion:(void (^)(NSDictionary<NSString *,id> *))completion {
+  __weak typeof(self) owner = self;
+  if (CACurrentMediaTime()-began > 35) {
+    completion(@{@"success":@NO,@"phase":@(phase),@"checks":checks,@"ready":@(self.aether.ready),@"positionMs":@([self mediaTime]),
+      @"commentsReady":@(self.comments.ready),@"subtitleTracks":self.aether.subtitleTracks ?: @[]}); return;
+  }
+  if (phase == 0 && self.aether.ready && self.aether.renderSurfaceReadyForProbe && self.comments.ready && self.commentPiP.capturedFrameCount > 2 && self.aether.subtitleTracks.count > 0) {
+    if (!checks[@"resumePosition"]) { checks[@"resumePosition"] = @(llabs([self mediaTime]-20000)<2000); [self setPlaybackIntent:NO]; }
+    if (!self.aether.checkpointReadyForProbe) {
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/10),dispatch_get_main_queue(),^{
+        [owner waitAetherPhase:phase began:began checks:checks completion:completion];
+      }); return;
+    }
+    checks[@"commonControls"] = @([self.chrome connectedControlsAvailable]);
+    checks[@"videoSurfaceLaidOut"] = @(self.aether.view.bounds.size.width > 0 && self.aether.renderSurfaceReadyForProbe);
+    checks[@"commentWorker"] = @(self.comments.enabled && self.comments.ready);
+    checks[@"historyConnected"] = @(self.history != nil);
+    [self setPlaybackIntent:NO];
+    [self seekBy:40000-[self mediaTime] completion:^{
+      checks[@"pausedTarget40"] = @(!owner.transportPlaying && llabs([owner mediaTime]-40000)<500);
+      checks[@"picture40"] = @([owner.aether saveProbePicture:@"connected-40.png"]);
+      [owner waitAetherPhase:1 began:CACurrentMediaTime() checks:checks completion:completion];
+    }]; return;
+  }
+  if (phase == 1) {
+    [self seekBy:30000-[self mediaTime] completion:^{
+      checks[@"backwardTarget30"] = @(llabs([owner mediaTime]-30000)<500 && !owner.transportPlaying);
+      checks[@"picture30"] = @([owner.aether saveProbePicture:@"connected-30.png"]);
+      NSInteger index = [owner.aether.subtitleTracks.firstObject[@"index"] integerValue];
+      [owner performPlayerAction:[NSString stringWithFormat:@"subtitle:%ld",(long)index]];
+      [owner.commentPiP beginCompositionSmoke]; [owner setPlaybackIntent:YES];
+      [owner waitAetherPhase:2 began:CACurrentMediaTime() checks:checks completion:completion];
+    }]; return;
+  }
+  if (phase == 2 && CACurrentMediaTime()-began > 1 && self.aether.subtitleVisible && self.commentPiP.composedFrameCount > 3) {
+    checks[@"ordinaryASSVisible"] = @YES;
+    checks[@"subtitleFeedsPiP"] = @(self.commentPiP.hasSubtitleImageForProbe);
+    checks[@"compositedPiP"] = @(self.commentPiP.composedFrameCount > 3);
+    NSDictionary *zoom = [self.chrome runZoomPanChecks];
+    checks[@"zoomAndDrag"] = @(![zoom.allValues containsObject:@NO]);
+    [self performPlayerAction:@"rate:1.25"]; [self performPlayerAction:@"cache:7"];
+    [self setPlaybackIntent:NO];
+    int64_t position = [self mediaTime];
+    [self reloadPlaybackAtTime:position completion:^{
+      checks[@"reloadKeepsPause"] = @(!owner.transportPlaying && llabs([owner mediaTime]-position)<1000);
+      NSURL *fault = [[NSURL URLWithString:owner.recordingContext[@"baseURL"]] URLByAppendingPathComponent:@"api/test-fault"];
+      [[NSURLSession.sharedSession dataTaskWithURL:fault completionHandler:^(NSData *data,NSURLResponse *response,NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+          [owner.aether simulateFailureForProbe];
+          checks[@"recoveryMuted"] = @(owner.aether.effectiveVolume == 0);
+          [owner setPlaybackIntent:YES]; [owner setPlaybackIntent:NO];
+          [owner waitAetherPhase:3 began:CACurrentMediaTime() checks:checks completion:completion];
+        });
+      }] resume];
+    }]; return;
+  }
+  if (phase == 3 && CACurrentMediaTime()-began > 8 && !self.reloading && !self.networkReloadWaiting && self.aether.ready) {
+    checks[@"outageKeepsLatestPause"] = @(!self.transportPlaying && !self.wantsPlayback);
+    checks[@"restoredVolume"] = @(self.aether.effectiveVolume > 0);
+    [self setPlaybackIntent:YES];
+    [self waitAetherPhase:4 began:CACurrentMediaTime() checks:checks completion:completion]; return;
+  }
+  if (phase == 4 && CACurrentMediaTime()-began > 1 && self.transportPlaying) {
+    checks[@"resumesAfterOutage"] = @YES;
+    [self setPlaybackIntent:NO]; [self.history flush];
+    [self.comments stop];
+    checks[@"noTerminalFailure"] = @(!self.playbackFailed);
+    BOOL success = ![checks.allValues containsObject:@NO];
+    NeoPlayerController *closingPlayer = self;
+    [self closePlayer];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC),dispatch_get_main_queue(),^{
+      checks[@"closed"] = @(closingPlayer.finishedClosing);
+      completion(@{@"success":@(success && closingPlayer.finishedClosing),@"checks":checks});
+    }); return;
+  }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/10),dispatch_get_main_queue(),^{
+    [owner waitAetherPhase:phase began:began checks:checks completion:completion];
+  });
+}
 - (void)runStreamingProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
   NSMutableDictionary *checks = [[NeoPlayerChrome runSeekPresentationChecks] mutableCopy];
   [checks addEntriesFromDictionary:[NeoStreamingDialog runLayoutChecksWithSource:self.sourceURL]];
@@ -2128,7 +2328,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   int64_t native = self.player.nativeTimeMs;
   BOOL ready = !self.tsPositionPending && !self.reloading && !self.networkReloadWaiting && !self.playbackFailed &&
     self.inputBufferReady && !self.lastSeekFailed && !self.seeking && llabs(native-target) < 3000 &&
-    self.player.state == (phase == 0 ? VLCMediaPlayerStatePlaying : VLCMediaPlayerStatePaused);
+    self.transportState == (phase == 0 ? VLCMediaPlayerStatePlaying : VLCMediaPlayerStatePaused);
   if (!ready && attempt < 450 && !self.playbackFailed) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.2*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [self waitStreamingPhase:phase target:target attempt:attempt+1 checks:checks completion:completion];
@@ -2136,7 +2336,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
   checks[[NSString stringWithFormat:@"phase%ld.arrived", (long)phase]] = @(ready);
   checks[[NSString stringWithFormat:@"phase%ld.wholeFileClock", (long)phase]] = @(self.inputStartTime == 0 && llabs([self mediaTime]-target) < 2000);
-  if (!ready) { completion(@{@"success": @NO, @"checks": checks, @"phase": @(phase), @"native": @(native), @"state": @(self.player.state)}); return; }
+  if (!ready) { completion(@{@"success": @NO, @"checks": checks, @"phase": @(phase), @"native": @(native), @"state": @(self.transportState)}); return; }
   checks[@"commentsPrepared"] = @(self.comments.ready);
   if (phase == 1) {
     checks[@"seekFinishesWithoutFallbackReload"] = @(self.reloadGeneration == 0 && !self.lastSeekFailed && CACurrentMediaTime()-self.seekStartedAt < 5);
@@ -2223,7 +2423,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   checks[[NSString stringWithFormat:@"phase%ld.absoluteClock", (long)phase]] = @(self.inputStartTime == 0 && llabs([self mediaTime]-native) < 100);
   if (phase) { [rows addObject:@{@"phase": @(phase), @"targetMs": @(target), @"nativeMs": @(native),
     @"videoReadyMs": @((CACurrentMediaTime()-self.seekStartedAt)*1000), @"networkBytes": self.rewindCache.seekMetrics[@"networkBytes"] ?: @(-1)}]; }
-  if (!ready) { completion(@{@"success": @NO, @"checks": checks, @"rows": rows, @"state": @(self.player.state)}); return; }
+  if (!ready) { completion(@{@"success": @NO, @"checks": checks, @"rows": rows, @"state": @(self.transportState)}); return; }
   if (phase == 0) {
     // Populate the small synthetic fixture through the real Range cache once.
     // All measured seeks must subsequently reuse those compressed bytes.
@@ -2284,7 +2484,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 - (void)waitEncodedPause:(NSInteger)attempt reload:(BOOL)reload checks:(NSMutableDictionary *)checks rows:(NSMutableArray *)rows
              completion:(void (^)(NSDictionary<NSString *, id> *))completion {
-  BOOL ready = self.player.state == VLCMediaPlayerStatePaused && !self.reloading && !self.tsPositionPending &&
+  BOOL ready = self.transportState == VLCMediaPlayerStatePaused && !self.reloading && !self.tsPositionPending &&
     !self.restoreMuted && !self.player.preparationMuted && !self.playbackFailed;
   if (!ready && attempt < 240) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -2314,11 +2514,11 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     uint64_t played = self.player.media.statistics.playedAudioBuffers;
     [rows addObject:@{@"pausedAudioSettledBuffers": @(played)}];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-      checks[@"pausedReloadClockStaysPaused"] = @(llabs([self mediaTime]-position) < 100 && self.player.state == VLCMediaPlayerStatePaused);
+      checks[@"pausedReloadClockStaysPaused"] = @(llabs([self mediaTime]-position) < 100 && self.transportState == VLCMediaPlayerStatePaused);
       [rows addObject:@{@"pausedReloadNativeAfterMs": @(self.player.nativeTimeMs), @"pausedReloadAppAfterMs": @([self mediaTime])}];
       uint64_t after = self.player.media.statistics.playedAudioBuffers;
       [rows addObject:@{@"pausedAudioAfterBuffers": @(after)}];
-      checks[@"pausedReloadAudioStaysPaused"] = @(after == played && self.player.state == VLCMediaPlayerStatePaused && !self.wantsPlayback);
+      checks[@"pausedReloadAudioStaysPaused"] = @(after == played && self.transportState == VLCMediaPlayerStatePaused && !self.wantsPlayback);
       BOOL passed = YES; for (NSNumber *value in checks.allValues) { passed &= value.boolValue; }
       completion(@{@"success": @(passed), @"checks": checks, @"rows": rows});
     });
@@ -2336,7 +2536,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   NSDictionary *clock = self.player.observedClock;
   BOOL ready = !self.tsPositionPending && !self.reloading && !self.playbackFailed && self.inputBufferReady &&
     llabs(native-target) < 2500 && llabs([clock[@"positionMs"] longLongValue]-target) < 2500 &&
-    self.player.state == (phase == 0 ? VLCMediaPlayerStatePlaying : VLCMediaPlayerStatePaused);
+    self.transportState == (phase == 0 ? VLCMediaPlayerStatePlaying : VLCMediaPlayerStatePaused);
   if (!ready && attempt < 125 && !self.playbackFailed) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.2*NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [self waitTSResumePhase:phase target:target attempt:attempt+1 checks:checks rows:rows completion:completion];
@@ -2346,7 +2546,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   checks[[prefix stringByAppendingString:@".nativeArrival"]] = @(ready);
   checks[[prefix stringByAppendingString:@".wholeFileClock"]] = @(self.inputStartTime == 0 && llabs([self mediaTime]-native) < 100);
   [rows addObject:@{@"phase": @(phase), @"targetMs": @(target), @"nativeMs": @(native),
-    @"observed": clock, @"appMs": @([self mediaTime]), @"state": @(self.player.state), @"commentsReady": @(self.comments.ready)}];
+    @"observed": clock, @"appMs": @([self mediaTime]), @"state": @(self.transportState), @"commentsReady": @(self.comments.ready)}];
   if (!ready) { completion(@{@"success": @NO, @"checks": checks, @"rows": rows}); return; }
   checks[[prefix stringByAppendingString:@".commentsPrepared"]] = @(self.comments.ready);
   int64_t start = native;
@@ -2470,7 +2670,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     @"arrivalAge": video[@"arrivalAge"] ?: @(-1), @"scheduledInMs": video[@"scheduledInMs"] ?: @(-1),
     @"changes": video[@"changes"] ?: @0, @"samples": video[@"samples"] ?: @0,
     @"commentTime": @(self.comments.renderedTime), @"waitingNetwork": @(self.networkReloadWaiting), @"restoreVerifying": @(self.videoReloadRecovery),
-    @"state": @(self.player.state), @"buffering": @(self.buffering), @"loading": @(self.chrome.loadingVisible),
+    @"state": @(self.transportState), @"buffering": @(self.buffering), @"loading": @(self.chrome.loadingVisible),
     @"reloading": @(self.reloading), @"reload": @(self.reloadGeneration)}];
   BOOL tunnel = [NSProcessInfo.processInfo.environment[@"NEO_EPG_NETWORK_MODE"] isEqual:@"tunnel"];
   if (!armed && [self mediaTime] >= (tunnel ? 94000 : 4000) && self.inputBufferReady && !self.buffering && native.decodedVideo > 10) {
@@ -2587,7 +2787,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     }); return;
   }
   if (attempt >= 50) { completion(@{@"success": @NO, @"error": @"natural end timed out",
-    @"state": @(self.player.state), @"time": @([self mediaTime]), @"mediaLength": @([self mediaLength]),
+    @"state": @(self.transportState), @"time": @([self mediaTime]), @"mediaLength": @([self mediaLength]),
     @"observedTime": @(self.lastObservedTime), @"seeking": @(self.seeking), @"buffering": @(self.buffering),
     @"wantsPlayback": @(self.wantsPlayback)}); return; }
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self pollEndedSmoke:attempt+1 completion:completion]; });
@@ -2629,7 +2829,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self pollInitialResumeSmoke:0 completion:completion];
 }
 - (void)pollInitialResumeSmoke:(NSInteger)attempt completion:(void (^)(NSDictionary<NSString *, id> *))completion {
-  if (self.player.isPlaying && [NeoVLCFrameTap videoViewInView:self.movieView]) {
+  if (self.transportPlaying && [NeoVLCFrameTap videoViewInView:self.movieView]) {
     NSDictionary *metrics = self.rewindCache.seekMetrics;
     BOOL startsAtTarget = !self.tsPositionPending && self.inputStartTime == 0 && [self mediaTime] >= 90000 && [self mediaTime] < 100000 && self.reloadGeneration == 0;
     BOOL indexed = [metrics[@"indexedRangeStart"] longLongValue] > 1024*1024 && self.rewindCache.hasMatroskaSeekIndex;
@@ -2644,7 +2844,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       }];
     }]; return;
   }
-  if (attempt >= 100) { completion(@{@"success": @NO, @"state": @(self.player.state), @"time": @([self mediaTime])}); return; }
+  if (attempt >= 100) { completion(@{@"success": @NO, @"state": @(self.transportState), @"time": @([self mediaTime])}); return; }
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self pollInitialResumeSmoke:attempt+1 completion:completion]; });
 }
 - (void)waitForInitialVideoSmoke:(NSInteger)attempt completion:(void (^)(BOOL, NSDictionary *))completion {
@@ -2683,7 +2883,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
         BOOL reset = notifications == 2001;
         // Queue pause then play without waiting for VLC's pause notification.
         // This reproduces the window in which isPlaying still reads true.
-        [self.player pause]; self.nowPlaying.playAction();
+        [self pauseTransport]; self.nowPlaying.playAction();
         [self pollLatestRecoveryIntent:0 completion:^(BOOL intentOrdered) {
         [self updateNowPlaying]; NSDictionary *metadata = [self.nowPlaying smokeMetadata];
         BOOL registered = [metadata[@"titleRegistered"] boolValue] && [metadata[@"targets"] integerValue] == 6 &&
@@ -2714,7 +2914,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
           BOOL monitored = [monitor[@"freshOutputMonitored"] boolValue] && [monitor[@"freshOutputContentChangesMeasured"] boolValue] && [monitor[@"interruptedResourceSurvivesDisplayFlush"] boolValue] && [monitor[@"subtitleSnapshotSurvivesVLCMutation"] boolValue];
           // Delayed terminal notifications after failure must not route back
           // through the older background-connection recovery path.
-          [self.player stop];
+          [self stopTransport];
           dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
           BOOL noLateReload = !self.reloading && self.reloadGeneration == reload && self.playbackFailed;
           checks[@"failedVideoRecoveryIgnoresLateStop"] = @(noLateReload);
@@ -2758,7 +2958,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 - (void)pollStoppedVideoResumeSmoke:(NSInteger)attempt playing:(BOOL)playing time:(int64_t)time
                             reload:(NSInteger)reload completion:(void (^)(NSDictionary *))completion {
   if (self.reloadGeneration > reload && !self.reloading && !self.videoReloadRecovery && !self.videoResuming &&
-      !self.playbackFailed && self.wantsPlayback == playing && self.player.state == (playing ? VLCMediaPlayerStatePlaying : VLCMediaPlayerStatePaused)) {
+      !self.playbackFailed && self.wantsPlayback == playing && self.transportState == (playing ? VLCMediaPlayerStatePlaying : VLCMediaPlayerStatePaused)) {
     BOOL position = llabs([self mediaTime]-time) < 2000;
     BOOL cleared = !self.repairingVideo && !self.chrome.loadingVisible;
     completion(@{@"success": @(position && cleared && self.reloadGeneration == reload+1),
@@ -2766,7 +2966,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       @"loadingCleared": @(cleared), @"playingIntent": @(playing), @"mediaMs": @([self mediaTime]), @"targetMs": @(time)}); return;
   }
   if (attempt >= 150) {
-    completion(@{@"success": @NO, @"state": @(self.player.state), @"reloading": @(self.reloading),
+    completion(@{@"success": @NO, @"state": @(self.transportState), @"reloading": @(self.reloading),
       @"videoResuming": @(self.videoResuming), @"videoReloadRecovery": @(self.videoReloadRecovery),
       @"mediaMs": @([self mediaTime]), @"targetMs": @(time), @"reloads": @(self.reloadGeneration-reload)}); return;
   }
@@ -2778,7 +2978,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
                           reload:(NSInteger)reload output:(NSInteger)output time:(int64_t)time preparing:(BOOL)preparing
                       completion:(void (^)(NSDictionary *))completion {
   NSDictionary *stats = [NeoVLCFrameTap snapshot:self.movieView];
-  if (!self.videoResuming && !self.seeking && !self.reloading && self.player.state == VLCMediaPlayerStatePaused &&
+  if (!self.videoResuming && !self.seeking && !self.reloading && self.transportState == VLCMediaPlayerStatePaused &&
       [stats[@"outputID"] integerValue] > 0 && [stats[@"outputID"] integerValue] != output) {
     BOOL sameInput = self.player.media == media && [endpoint isEqual:self.playbackURL] && self.reloadGeneration == reload;
     BOOL pausedPosition = !self.wantsPlayback && llabs([self mediaTime]-time) < 500;
@@ -2792,7 +2992,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       // every displayed frame. Read-ahead can leave that snapshot unchanged
       // while queued decoded pictures are correctly being displayed.
       // Require changing, due pictures, not repeated paused-frame delivery.
-      BOOL advancing = self.player.isPlaying && [self mediaTime] > time+1000 &&
+      BOOL advancing = self.transportPlaying && [self mediaTime] > time+1000 &&
         [current[@"samples"] integerValue] >= samples+24 && [current[@"changes"] integerValue] >= changes+3 &&
         [current[@"contentAge"] doubleValue] >= 0 && [current[@"contentAge"] doubleValue] < 0.5 &&
         fabs([current[@"scheduledInMs"] doubleValue]) < 100;
@@ -2810,7 +3010,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
   if (attempt >= 100) {
     completion(@{@"success": @NO, @"error": @"interrupted output did not prepare", @"videoResumeStage": @(self.videoResumeStage),
-      @"videoResuming": @(self.videoResuming), @"seeking": @(self.seeking), @"state": @(self.player.state), @"output": stats}); return;
+      @"videoResuming": @(self.videoResuming), @"seeking": @(self.seeking), @"state": @(self.transportState), @"output": stats}); return;
   }
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
     [self pollInterruptedVideoSmoke:attempt+1 media:media endpoint:endpoint reload:reload output:output time:time preparing:preparing completion:completion];
@@ -2850,7 +3050,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }];
 }
 - (void)pollRecoverySmoke:(NSInteger)attempt oldEndpoint:(NSURL *)oldEndpoint completion:(void (^)(NSDictionary<NSString *, id> *))completion {
-  if (!self.reloading && !self.restoringReload && !self.transportSuspended && self.player.isSeekable && self.player.state == VLCMediaPlayerStatePaused) {
+  if (!self.reloading && !self.restoringReload && !self.transportSuspended && self.transportSeekable && self.transportState == VLCMediaPlayerStatePaused) {
     BOOL position = llabs([self mediaTime]-self.backgroundTime) < 1000;
     BOOL endpoint = self.rewindCache != nil && [oldEndpoint isEqual:self.playbackURL];
     int64_t originalLength = [self mediaLength];
@@ -2858,11 +3058,11 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       NSInteger frames = self.commentPiP.capturedFrameCount;
       [self setPlaybackIntent:YES];
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        BOOL advancing = self.player.isPlaying && [self mediaTime] > 2500 && self.commentPiP.capturedFrameCount > frames;
+        BOOL advancing = self.transportPlaying && [self mediaTime] > 2500 && self.commentPiP.capturedFrameCount > frames;
         self.nowPlaying.pauseAction();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
           [self updateNowPlaying]; NSDictionary *metadata = [self.nowPlaying smokeMetadata];
-          BOOL paused = !self.player.isPlaying && !self.wantsPlayback && [metadata[@"rate"] doubleValue] == 0;
+          BOOL paused = !self.transportPlaying && !self.wantsPlayback && [metadata[@"rate"] doubleValue] == 0;
           [self backgrounded];
           // Simulate an actually failed transport, not ordinary backgrounding.
           [self.rewindCache suspendTransport]; self.transportSuspended = YES;
@@ -2889,19 +3089,19 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       });
     }]; return;
   }
-  if (attempt >= 100) { completion(@{@"success": @NO, @"error": @"recovery timed out", @"state": VLCMediaPlayerStateToString(self.player.state), @"reloading": @(self.reloading), @"restoring": @(self.restoringReload)}); return; }
+  if (attempt >= 100) { completion(@{@"success": @NO, @"error": @"recovery timed out", @"state": VLCMediaPlayerStateToString(self.transportState), @"reloading": @(self.reloading), @"restoring": @(self.restoringReload)}); return; }
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self pollRecoverySmoke:attempt+1 oldEndpoint:oldEndpoint completion:completion]; });
 }
 - (void)pollLatestRecoveryIntent:(NSInteger)attempt completion:(void (^)(BOOL))completion {
   if (attempt >= 100) { completion(NO); return; }
-  if (!self.reloading && !self.restoringReload && !self.buffering && self.player.isPlaying && self.wantsPlayback) {
+  if (!self.reloading && !self.restoringReload && !self.buffering && self.transportPlaying && self.wantsPlayback) {
     int64_t time = [self mediaTime];
     if (time < 0 || (self.lastObservedLength > 0 && time > self.lastObservedLength+1500)) { completion(NO); return; }
     NSInteger frames = self.commentPiP.capturedFrameCount;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-      BOOL advancing = self.player.isPlaying && [self mediaTime] > time+400 && self.commentPiP.capturedFrameCount > frames;
+      BOOL advancing = self.transportPlaying && [self mediaTime] > time+400 && self.commentPiP.capturedFrameCount > frames;
       [NeoPlaybackDiagnostics record:@"smoke.playbackProgress" fields:@{@"fromMs": @(time), @"mediaMs": @([self mediaTime]),
-        @"framesBefore": @(frames), @"framesAfter": @(self.commentPiP.capturedFrameCount), @"state": @(self.player.state), @"advancing": @(advancing)}];
+        @"framesBefore": @(frames), @"framesAfter": @(self.commentPiP.capturedFrameCount), @"state": @(self.transportState), @"advancing": @(advancing)}];
       if (advancing) { completion(YES); }
       else { [self pollLatestRecoveryIntent:attempt+5 completion:completion]; }
     }); return;
@@ -2910,9 +3110,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 - (void)waitForTapSmokePlayback:(NSInteger)attempt completion:(void (^)(NSDictionary<NSString *, id> *))completion {
   UIView *video = [NeoVLCFrameTap videoViewInView:self.movieView];
-  if (!self.player.isPlaying || !video) {
+  if (!self.transportPlaying || !video) {
     if (attempt >= 100) { completion(@{@"success": @NO, @"error": @"tap fixture playback did not start",
-      @"state": @(self.player.state), @"wantsPlayback": @(self.wantsPlayback), @"buffering": @(self.buffering)}); return; }
+      @"state": @(self.transportState), @"wantsPlayback": @(self.wantsPlayback), @"buffering": @(self.buffering)}); return; }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
       [self waitForTapSmokePlayback:attempt + 1 completion:completion];
     }); return;
@@ -2925,17 +3125,17 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self hideControls];
   BOOL shown = [self.chrome smokeTapVideoBackground] && self.chrome.controlsVisible;
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-    checks[@"playingTapShowsWithoutPausing"] = @(shown && self.player.isPlaying);
+    checks[@"playingTapShowsWithoutPausing"] = @(shown && self.transportPlaying);
     BOOL hidden = [self.chrome smokeTapVideoBackground] && !self.chrome.controlsVisible;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-      checks[@"playingTapHidesWithoutPausing"] = @(hidden && self.player.isPlaying);
+      checks[@"playingTapHidesWithoutPausing"] = @(hidden && self.transportPlaying);
       [self setPlaybackIntent:NO];
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        BOOL paused = !self.player.isPlaying;
+        BOOL paused = !self.transportPlaying;
         BOOL revealed = [self.chrome smokeTapVideoBackground] && self.chrome.controlsVisible;
         BOOL concealed = [self.chrome smokeTapVideoBackground] && !self.chrome.controlsVisible;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-          checks[@"pausedTapTogglesUIWithoutPlaying"] = @(paused && revealed && concealed && !self.player.isPlaying);
+          checks[@"pausedTapTogglesUIWithoutPlaying"] = @(paused && revealed && concealed && !self.transportPlaying);
           checks[@"success"] = [[checks allValues] indexOfObject:@NO] == NSNotFound ? @YES : @NO;
           [self setPlaybackIntent:YES]; completion(checks);
         });
@@ -2944,7 +3144,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   });
 }
 - (void)runControlsSmokeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
-  BOOL playing = self.player.isPlaying; [self setPlaybackIntent:NO];
+  BOOL playing = self.transportPlaying; [self setPlaybackIntent:NO];
   NSMutableDictionary *checks = [[self.chrome runInteractionChecks] mutableCopy];
   self.chrome.autoHide = YES; [self hideControls];
   BOOL showTap = [self.chrome smokeTapVideoBackground] && self.chrome.controlsVisible;
@@ -3046,7 +3246,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }];
 }
 - (void)pollReloadSmoke:(NSInteger)attempt expectedPlaying:(BOOL)playing completion:(void (^)(NSDictionary<NSString *, id> *))completion {
-  if (!self.reloading && !self.restoringReload && self.player.isPlaying == playing && self.player.isSeekable) {
+  if (!self.reloading && !self.restoringReload && self.transportPlaying == playing && self.transportSeekable) {
     int64_t restored = [self mediaTime];
     BOOL position = llabs(restored - self.reloadTime) < 1000;
     BOOL settings = fabs(self.player.rate - 1.25) < 0.01 && self.networkCaching == 7000;
@@ -3086,7 +3286,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     }
     return;
   }
-  if (attempt >= 30 || self.player.state == VLCMediaPlayerStateError) { completion(@{@"success": @NO, @"error": @"reload timed out", @"reloading": @(self.reloading), @"restoring": @(self.restoringReload), @"state": VLCMediaPlayerStateToString(self.player.state)}); return; }
+  if (attempt >= 30 || self.transportState == VLCMediaPlayerStateError) { completion(@{@"success": @NO, @"error": @"reload timed out", @"reloading": @(self.reloading), @"restoring": @(self.restoringReload), @"state": VLCMediaPlayerStateToString(self.transportState)}); return; }
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self pollReloadSmoke:attempt + 1 expectedPlaying:playing completion:completion]; });
 }
 // The simulator's scene rotation can outlast a fixed delay under CI load.
@@ -3110,7 +3310,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(40*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
     if (!delivered) { finish(@{@"success": @NO, @"error": @"interactive exit timed out", @"closing": @(self.closing),
       @"dismissing": @(self.dismissingPlayer), @"rotating": @(self.rotatingPlayer), @"interactive": @(self.playerTransition.interactive),
-      @"hasCoordinator": @(self.transitionCoordinator != nil), @"nativeState": @(self.player.state)}); }
+      @"hasCoordinator": @(self.transitionCoordinator != nil), @"nativeState": @(self.transportState)}); }
   });
   // Reload checks end by unlocking orientation, which may rotate the simulator
   // again. Exercise the portrait-only back gesture after that rotation settles.
@@ -3217,6 +3417,24 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 - (void)play { [self setPlaybackIntent:YES]; }
 - (void)pause { [self setPlaybackIntent:NO]; }
 - (void)seekBy:(int64_t)offset completion:(dispatch_block_t)completion {
+  if (self.aether) {
+    if (self.closing || self.reloading || !self.aether.seekable) { completion(); return; }
+    [self sampleHistory]; [self.history flush]; [self completeSeek:self.seekGeneration failed:NO];
+    int64_t from = [self mediaTime], target = MAX(0,MIN([self mediaLength],from+offset));
+    self.playbackEnded = NO; self.seeking = YES; self.seekCompletion = completion;
+    NSInteger generation = ++self.seekGeneration; self.seekStartedAt = CACurrentMediaTime(); self.seekTargetTime = target;
+    [NeoPlaybackDiagnostics beginSeek:generation];
+    [NeoPlaybackDiagnostics record:@"seek.start" fields:@{@"engine":@"aether",@"fromMs":@(from),@"targetMs":@(target)}];
+    [self.chrome previewSeek:target/1000]; [self.comments beginSeek:target/1000.0];
+    [self.commentPiP seekDiscontinuity:target/1000.0]; [self.rewindCache beginSeek:target/1000.0]; [self.streamingSession beginSeek:target/1000.0];
+    __weak typeof(self) weakSelf = self;
+    [self.aether seekMilliseconds:target completion:^(BOOL success) {
+      if (!weakSelf || weakSelf.closing || generation != weakSelf.seekGeneration) { return; }
+      weakSelf.lastObservedTime = weakSelf.aether.timeMs;
+      [weakSelf completeSeek:generation failed:!success];
+    }];
+    return;
+  }
   if ((self.networkFlow.holding || self.networkFlow.verifying) && !self.flowResyncing) {
     int64_t target = [self mediaTime]+offset;
     [self resetNetworkFlow]; offset = target-[self mediaTime];
@@ -3226,7 +3444,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     self.videoResumeDeferredTime = @(MAX(0, [self mediaTime]+offset)); self.videoResumeDeferredCompletion = completion;
     if (superseded) { superseded(); } return;
   }
-  if (self.closing || !self.player.isSeekable) { completion(); return; }
+  if (self.closing || !self.transportSeekable) { completion(); return; }
   [NeoVLCFrameTap clearARIBView:self.movieView];
   [self sampleHistory]; [self.history flush];
   [self completeSeek:self.seekGeneration failed:NO];
@@ -3264,7 +3482,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     weakSelf.reloadTextTracks = tracks;
     weakSelf.reloadGeneration += 1;
     weakSelf.reloading = YES; weakSelf.restoringReload = NO; [weakSelf armReloadDeadline];
-    [weakSelf.commentPiP seekDiscontinuity:target / 1000.0]; [weakSelf.player stop];
+    [weakSelf.commentPiP seekDiscontinuity:target / 1000.0]; [weakSelf stopTransport];
   }];
   [NSRunLoop.mainRunLoop addTimer:self.seekTimer forMode:NSRunLoopCommonModes];
   dispatch_block_t finished = ^{
@@ -3281,9 +3499,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     self.videoOutputView.hidden = priming;
     if ([self isStreaming] && priming) {
       [self holdRestoreMute];
-      self.tsPositionWaitForPause = self.player.state != VLCMediaPlayerStatePaused;
-      [self.player pause];
-    } else if (priming) { [self.player pause]; }
+      self.tsPositionWaitForPause = self.transportState != VLCMediaPlayerStatePaused;
+      [self pauseTransport];
+    } else if (priming) { [self pauseTransport]; }
     [self armTSPosition]; [self updateLoadingState]; return;
   }
   BOOL accepted;
@@ -3315,8 +3533,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     self.tsPositionPending = NO; [self.tsPositionTimer invalidate]; self.tsPositionTimer = nil;
     [NeoVLCFrameTap bindFrameArrival:self.movieView handler:nil];
   }
-  if (!failed && self.player.state == VLCMediaPlayerStatePaused) {
-    int64_t position = self.player.nativeTimeMs;
+  if (!failed && self.transportState == VLCMediaPlayerStatePaused) {
+    int64_t position = self.aether ? self.aether.timeMs : self.player.nativeTimeMs;
     position = [self guardStreamingTime:position];
     if (position >= 0 && (self.lastObservedLength <= 0 || position <= self.lastObservedLength+1500)) { self.lastObservedTime = position; }
   }
@@ -3345,14 +3563,14 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   NSInteger generation = self.reloadGeneration;
   self.reloadTimer = [NSTimer timerWithTimeInterval:25 repeats:NO block:^(NSTimer *timer) {
     if (!weakSelf || weakSelf.closing || !weakSelf.reloading || weakSelf.reloadGeneration != generation) { return; }
-    BOOL pendingHealthyInput = weakSelf.player.state != VLCMediaPlayerStateStopped && weakSelf.player.state != VLCMediaPlayerStateError;
+    BOOL pendingHealthyInput = weakSelf.transportState != VLCMediaPlayerStateStopped && weakSelf.transportState != VLCMediaPlayerStateError;
     if (weakSelf.rewindCache || weakSelf.streamingSession) {
       // Never reuse the late start-paused input after a network opening
       // deadline. Its decoder/clock queues can resume with obsolete deadlines.
       weakSelf.networkReloadWaiting = YES; weakSelf.reloading = NO; weakSelf.restoringReload = NO;
       weakSelf.reloadTimedOut = NO; weakSelf.awaitingEndpoint = YES; weakSelf.inputBufferReady = NO;
       weakSelf.tsPositionPending = NO; [weakSelf.tsPositionTimer invalidate]; weakSelf.tsPositionTimer = nil;
-      weakSelf.player.onSeekCompletion = nil; [weakSelf.player stop];
+      weakSelf.player.onSeekCompletion = nil; [weakSelf stopTransport];
       [NeoPlaybackDiagnostics record:@"input.retiredAfterDeadline" fields:@{@"targetMs": @(weakSelf.reloadTime)}];
       weakSelf.networkRetryTimer = [NSTimer timerWithTimeInterval:2 repeats:YES block:^(NSTimer *retry) { [weakSelf retryNetworkReload]; }];
       [NSRunLoop.mainRunLoop addTimer:weakSelf.networkRetryTimer forMode:NSRunLoopCommonModes];
@@ -3360,34 +3578,36 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     }
     [weakSelf completeSeek:weakSelf.seekGeneration failed:YES]; [weakSelf finishReload:YES];
     weakSelf.reloadTimedOut = pendingHealthyInput;
-    [NeoPlaybackDiagnostics record:@"input.reloadDeadline" fields:@{@"retained": @(pendingHealthyInput), @"state": @(weakSelf.player.state)}];
+    [NeoPlaybackDiagnostics record:@"input.reloadDeadline" fields:@{@"retained": @(pendingHealthyInput), @"state": @(weakSelf.transportState)}];
     weakSelf.statusLabel.text = @"再読み込みできませんでした。接続を確認して再試行してください。";
     [weakSelf.chrome updateDiagnostics]; [weakSelf showControls];
   }];
   [NSRunLoop.mainRunLoop addTimer:self.reloadTimer forMode:NSRunLoopCommonModes];
 }
 - (void)holdRestoreMute {
+  if (self.aether) { self.aether.muted = YES; return; }
   if (!self.restoreMuted) { self.restorePreviousMute = libvlc_audio_get_mute(self.player.libVLCMediaPlayer) == 1; self.restoreMuted = YES; }
   self.player.preparationMuted = YES;
   self.player.audio.muted = YES;
 }
 - (void)releaseRestoreMute {
+  if (self.aether) { self.aether.muted = NO; return; }
   if (!self.restoreMuted) { return; }
   // pause is queued by VLCKit. Never unmute the still-playing preparation
   // merely because the controller has issued pause or verified a video frame.
-  if ((!self.wantsPlayback || self.closing) && self.player.state != VLCMediaPlayerStatePaused &&
-      self.player.state != VLCMediaPlayerStateStopped && self.player.state != VLCMediaPlayerStateError) { return; }
+  if ((!self.wantsPlayback || self.closing) && self.transportState != VLCMediaPlayerStatePaused &&
+      self.transportState != VLCMediaPlayerStateStopped && self.transportState != VLCMediaPlayerStateError) { return; }
   self.player.preparationMuted = NO;
   self.player.audio.muted = self.restorePreviousMute; self.restoreMuted = NO;
   [NeoPlaybackDiagnostics record:@"audio.primeReleased" fields:@{@"actualMute": @(libvlc_audio_get_mute(self.player.libVLCMediaPlayer)),
-    @"state": @(self.player.state), @"paused": @(self.player.state == VLCMediaPlayerStatePaused), @"wantsPlayback": @(self.wantsPlayback)}];
+    @"state": @(self.transportState), @"paused": @(self.transportState == VLCMediaPlayerStatePaused), @"wantsPlayback": @(self.wantsPlayback)}];
 }
 - (void)waitForStreamingNetwork {
   if (self.closing) { return; }
   self.networkReloadWaiting = YES; self.reloading = NO; self.restoringReload = NO;
   self.reloadTimedOut = NO; self.awaitingEndpoint = YES; self.inputBufferReady = NO;
   self.tsPositionPending = NO; [self.tsPositionTimer invalidate]; self.tsPositionTimer = nil;
-  [self.reloadTimer invalidate]; self.reloadTimer = nil; self.player.onSeekCompletion = nil; [self.player stop];
+  [self.reloadTimer invalidate]; self.reloadTimer = nil; self.player.onSeekCompletion = nil; [self stopTransport];
   [self.networkRetryTimer invalidate];
   __weak typeof(self) weakSelf = self;
   self.networkRetryTimer = [NSTimer timerWithTimeInterval:2 repeats:YES block:^(NSTimer *timer) { [weakSelf retryNetworkReload]; }];
@@ -3412,12 +3632,13 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if (self.streamingSession) { [self.streamingSession checkAvailability:probe]; }
   else { [self.rewindCache checkAvailability:probe]; }
 }
-- (int64_t)mediaLength { return MAX(self.lastObservedLength, MAX(0, self.player.media.length.value.longLongValue)); }
+- (int64_t)mediaLength { return MAX(self.lastObservedLength, self.aether ? self.aether.durationMs : MAX(0, self.player.media.length.value.longLongValue)); }
 - (int64_t)mediaTime {
+  if (self.aether) { return self.reloading || self.networkReloadWaiting ? self.reloadTime : self.seeking ? self.seekTargetTime : self.aether.timeMs; }
   if (self.networkReloadWaiting || (self.videoReloadRecovery && !self.reloading)) { return self.reloadTime; }
   if (self.tsPositionPending) { return self.tsPositionTarget; }
   if (self.videoResuming) { return self.videoResumeTime; }
-  if (self.player.state == VLCMediaPlayerStatePaused && !self.reloading && !self.seeking && !self.videoResuming) {
+  if (self.transportState == VLCMediaPlayerStatePaused && !self.reloading && !self.seeking && !self.videoResuming) {
     return self.lastObservedTime;
   }
   if (self.networkFlow.holding || self.networkFlow.verifying || self.flowResyncing) { return self.flowHoldTime; }
@@ -3443,8 +3664,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
   return time;
 }
-- (BOOL)isMediaSeekable { return self.player.isSeekable; }
-- (BOOL)isMediaPlaying { return self.player.isPlaying; }
+- (BOOL)isMediaSeekable { return self.transportSeekable; }
+- (BOOL)isMediaPlaying { return self.transportPlaying; }
 
 - (void)closePlayer {
   [NeoVLCFrameTap bindFrameArrival:self.movieView handler:nil];
@@ -3493,13 +3714,14 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [NSNotificationCenter.defaultCenter removeObserver:self];
   if (self.loginReference) { [self.dialogs dismissDialogWithReference:self.loginReference]; }
   [NeoVLCFrameTap bindView:self.movieView sink:nil]; [self.commentPiP stop];
+  [self.aether shutdown];
   [NeoVLCFrameTap bindARIBView:self.movieView state:nil];
   // VLC 4 stops asynchronously. Keep the drawable and player alive until stopped.
-  if (!self.player || self.player.state == VLCMediaPlayerStateStopped || self.player.state == VLCMediaPlayerStateNothingSpecial) {
+  if (!self.player || self.transportState == VLCMediaPlayerStateStopped || self.transportState == VLCMediaPlayerStateNothingSpecial) {
     [self finishClosing];
   } else {
     self.statusLabel.text = @"停止中…";
-    [self.player stop];
+    [self stopTransport];
   }
 }
 - (void)finishClosing {

@@ -34,12 +34,12 @@ def bindings(data):
             continue
         start = strings + string
         name = data[start:data.index(b'\0', start)].decode()
-        if not re.match(r'^_(av(?:codec|format|util|filter|io|priv)?_|sws_|swr_|dav1d_)', name):
+        if not re.match(r'^_(av(?:codec|format|util|filter|io|priv)?_|sws_|swr_|dav1d_|ass_)', name):
             continue
         ordinal = description >> 8
         library = libraries[ordinal-1] if 0 < ordinal <= len(libraries) else 'unresolved'
         rows.append({'symbol': name, 'library': library, 'cpu': cpu,
-                     'correct': library.startswith('@rpath/AetherLib')})
+                     'correct': library.startswith('@rpath/VLCKit.framework/') if name.startswith('_ass_') else library.startswith('@rpath/AetherLib')})
     required = {'_av_read_frame', '_avcodec_send_packet', '_avformat_open_input', '_avcodec_find_decoder_by_name'}
     assert required <= {r['symbol'] for r in rows}, 'Core decoder imports missing'
     return rows
@@ -55,7 +55,7 @@ def main():
     args.output.write_text(json.dumps(result, indent=2)+'\n')
     wrong = [r for r in rows if not r['correct']]
     assert not wrong, 'Cross-engine FFmpeg imports: '+str(wrong[:8])
-    print('Verified', len(rows), 'FFmpeg/dav1d imports resolve to Aether frameworks')
+    print('Verified', len(rows), 'FFmpeg/dav1d imports resolve to Aether; ASS imports resolve to bundled VLC libass')
 
 
 if __name__ == '__main__':

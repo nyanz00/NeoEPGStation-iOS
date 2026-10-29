@@ -9,7 +9,7 @@ import CoreImage
 import IOSurface
 
 // Fixed tokens only: no URLs, subtitles, titles or raw engine error strings.
-private final class NeoAetherLogCapture: @unchecked Sendable {
+final class NeoAetherLogCapture: @unchecked Sendable {
   private let lock = NSLock()
   private var seen = Set<String>()
   func receive(_ line: String) {
@@ -58,7 +58,7 @@ private final class NeoAetherLogCapture: @unchecked Sendable {
 
 // The software callback proves a freshly decoded target, not physical display.
 // Keep that evidence separate when the OS returns an untimed 10-bit image copy.
-private final class NeoAetherDecodedFrames: @unchecked Sendable {
+final class NeoAetherDecodedFrames: @unchecked Sendable {
   struct Frame { let time: Double; let generation: UInt64 }
   private let lock = NSLock()
   private var frame: Frame?

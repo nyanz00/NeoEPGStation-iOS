@@ -140,6 +140,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       && playButton.isEnabled && backButton.isEnabled && rotationButton.isEnabled
       && !zoomPinch.isEnabled && !orientationPan.isEnabled && !navigationPan.isEnabled
   }
+  @objc func connectedControlsAvailable() -> Bool {
+    !comparisonMode && [menuButton,subtitleButton,commentButton,ruleButton,reloadButton].allSatisfy(\.isEnabled)
+      && zoomPinch.isEnabled && orientationPan.isEnabled && navigationPan.isEnabled
+  }
 #endif
   // Keep the production chrome; only connections outside the engine experiment
   // are disabled. Ordinary VLC playback never enables this mode.
@@ -1342,7 +1346,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     updateZoom(state: .changed, distance: max(0,target))
     updateZoom(state: .ended, distance: max(0,target))
   }
-  func runZoomPanChecks() -> [String: Bool] {
+  @objc func runZoomPanChecks() -> [String: Bool] {
     smokeZoomTo(1); setNeedsLayout(); layoutIfNeeded()
     let original = videoView.frame
     smokeZoomTo(8); layoutIfNeeded()

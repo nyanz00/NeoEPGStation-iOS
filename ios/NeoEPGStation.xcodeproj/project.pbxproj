@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+    BDEF0000000000000000003C = {isa = PBXBuildFile; fileRef = ADEF0000000000000000003C; };
+    BDEF0000000000000000003B = {isa = PBXBuildFile; fileRef = ADEF0000000000000000003B; };
+    BDEF0000000000000000003A = {isa = PBXBuildFile; fileRef = ADEF0000000000000000003A; };
     BDEF00000000000000000039 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000039; };
     BDEF00000000000000000038 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000038; };
     BDEF00000000000000000037 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000037; };
@@ -60,6 +63,10 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+    ADEF0000000000000000003D = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = NeoASSSubtitleRenderer.h; path = NeoEPGStation/NeoASSSubtitleRenderer.h; sourceTree = "<group>"; };
+    ADEF0000000000000000003C = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoSubtitleScript.swift; path = NeoEPGStation/NeoSubtitleScript.swift; sourceTree = "<group>"; };
+    ADEF0000000000000000003B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoAetherBackend.swift; path = NeoEPGStation/NeoAetherBackend.swift; sourceTree = "<group>"; };
+    ADEF0000000000000000003A = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = NeoASSSubtitleRenderer.m; path = NeoEPGStation/NeoASSSubtitleRenderer.m; sourceTree = "<group>"; };
     ADEF00000000000000000039 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoCheckpointPlacement.swift; path = NeoEPGStation/NeoCheckpointPlacement.swift; sourceTree = "<group>"; };
     ADEF00000000000000000038 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoCheckpointPlayback.swift; path = NeoEPGStation/NeoCheckpointPlayback.swift; sourceTree = "<group>"; };
     ADEF00000000000000000037 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoDecodeTrialController.swift; path = NeoEPGStation/NeoDecodeTrialController.swift; sourceTree = "<group>"; };
@@ -134,6 +141,10 @@
 		13B07FAE1A68108700A75B9A /* NeoEPGStation */ = {
 			isa = PBXGroup;
 			children = (
+        ADEF0000000000000000003D,
+        ADEF0000000000000000003C,
+        ADEF0000000000000000003B,
+        ADEF0000000000000000003A,
         ADEF00000000000000000032,
         ADEF00000000000000000035,
         ADEF00000000000000000036,
@@ -370,6 +381,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+        BDEF0000000000000000003C,
+        BDEF0000000000000000003B,
+        BDEF0000000000000000003A,
         BDEF00000000000000000032,
         BDEF00000000000000000035,
         BDEF00000000000000000034,

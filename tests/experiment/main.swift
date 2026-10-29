@@ -10,7 +10,8 @@ for engine in NeoPlaybackExperiment.allCases {
   defaults.set(engine.rawValue, forKey: "player.experiment.engine")
   precondition(NeoPlaybackExperiment.selection(in: defaults) == engine)
   precondition(!engine.applies(fileType: "ts", streaming: false, recording: false))
-  precondition(!engine.applies(fileType: "encoded", streaming: true, recording: false))
+  precondition(engine.applies(fileType: "encoded", streaming: true, recording: false) == (engine == .aether || engine == .checkpointPlayer))
+  precondition(!engine.applies(fileType: "ts", streaming: true, recording: false))
   precondition(!engine.applies(fileType: "encoded", streaming: false, recording: true))
   precondition(engine.applies(fileType: "encoded", streaming: false, recording: false) == (engine != .vlc))
 }
