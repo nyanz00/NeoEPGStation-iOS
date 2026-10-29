@@ -2235,7 +2235,18 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 #if TARGET_OS_SIMULATOR
 - (void)runAetherConnectedProbeWithCompletion:(void (^)(NSDictionary<NSString *,id> *))completion {
   NSMutableDictionary *checks = [NSMutableDictionary new];
-  [self waitAetherPhase:0 began:CACurrentMediaTime() checks:checks completion:completion];
+  __block BOOL completed = NO;
+  void (^finish)(NSDictionary *) = ^(NSDictionary *result) {
+    if (completed) { return; } completed = YES; completion(result);
+  };
+  __weak typeof(self) owner = self;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW,120*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+    if (!completed) {
+      finish(@{@"success":@NO,@"error":@"Asynchronous player operation did not complete",@"checks":checks,
+        @"surface":owner.aether.surfaceProbe ?: @{},@"reloading":@(owner.reloading),@"ready":@(owner.aether.ready)});
+    }
+  });
+  [self waitAetherPhase:0 began:CACurrentMediaTime() checks:checks completion:finish];
 }
 - (void)waitAetherPhase:(NSInteger)phase began:(double)began checks:(NSMutableDictionary *)checks
              completion:(void (^)(NSDictionary<NSString *,id> *))completion {

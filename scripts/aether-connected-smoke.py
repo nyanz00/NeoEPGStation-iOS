@@ -26,8 +26,6 @@ documents = Path(run('xcrun','simctl','get_app_container',device,bundle,'data'))
 checker = (dist/'aether-picture-check').resolve()
 reference = Path('tests/fixtures/aether-seek-reference')
 manifest = json.loads((reference/'manifest.json').read_text())['fixtures']
-if not shutil.which('ffmpeg'):
-    subprocess.run(['brew','install','ffmpeg'],check=True,timeout=600)
 header = '''[Script Info]
 ScriptType: v4.00+
 PlayResX: 1280
@@ -47,8 +45,8 @@ def stamp(value):
 comments = header+''.join(f'Dialogue: 0,{stamp(i)},{stamp(i+4)},Default,,0,0,0,,{{\\move(1280,80,-300,80)}}Synthetic 日本語 comment\n' for i in range(90))
 captions = header.replace(',1,2,0,2,',',3,2,0,2,')+''.join(f'Dialogue: 0,{stamp(i)},{stamp(i+3)},Default,,0,0,0,,{{\\c&HFFFF00&}}Styled ordinary ASS {i}\n' for i in range(0,90,3))
 results = []
-cases = [('av1-seek-10.mkv',False,True),('encoded-seek-1080.mkv',False,False),
-         ('hevc-seek-10.mkv',False,False),('encoded-seek-1080.mkv',False,True),('encoded-seek-1080.mkv',True,False)]
+cases = [('encoded-seek-1080.mkv',False,False),('encoded-seek-1080.mkv',True,False),
+         ('hevc-seek-10.mkv',False,False),('av1-seek-10.mkv',False,True),('encoded-seek-1080.mkv',False,True)]
 for fixture,streaming,checkpoint in cases:
     label = fixture+('-hls' if streaming else '-play')+('-checkpoint' if checkpoint else '')
     rows, fault_until = [], [0.0]
@@ -56,11 +54,12 @@ for fixture,streaming,checkpoint in cases:
     assert hashlib.sha256(video).hexdigest() == manifest[fixture]['sha256']
     hls = dist/'aether-connected-hls'
     if streaming:
-        hls.mkdir(exist_ok=True)
-        subprocess.run(['ffmpeg','-hide_banner','-loglevel','error','-y','-i',str(Path('tests/fixtures',fixture)),
-                        '-map','0:v:0','-map','0:a:0','-c','copy','-f','hls','-hls_time','4',
-                        '-hls_segment_type','mpegts','-hls_playlist_type','vod',
-                        '-hls_segment_options','mpegts_copyts=1','-hls_segment_filename',str(hls/'%d.ts'),str(hls/'playlist.m3u8')],check=True,timeout=120)
+        origin=Path('tests/fixtures/aether-connected-hls')
+        recipe=json.loads((origin/'manifest.json').read_text())
+        assert recipe['source']==fixture and recipe['sourceSHA256']==hashlib.sha256(video).hexdigest()
+        for name,digest in recipe['files'].items():
+            assert hashlib.sha256((origin/name).read_bytes()).hexdigest()==digest,name
+        shutil.copytree(origin,hls,dirs_exist_ok=True)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*_): pass
@@ -155,12 +154,17 @@ for fixture,streaming,checkpoint in cases:
         if checkpoint and not fixture.startswith('av1'):
             assert not any(e['event']=='checkpoint.restored' for e in events),'AV1 state was applied to another codec'
             assert all(not e['checkpoint'] for e in connected),'Unsupported codec retained checkpoint worker'
-        assert any(row.get('fault') for row in rows) and any(row.get('failed') for row in rows),'Real media outage not exercised'
+        assert any(row.get('fault') for row in rows),'Origin outage not injected'
+        # A complete PLAY byte cache can reopen without contacting the origin.
+        # HLS must exercise actual playlist failures; PLAY instead verifies
+        # muted transport recovery and latest pause using retained cached bytes.
+        assert any(e['event']=='aether.recoveryRequested' for e in events),'Transport recovery not exercised'
         assert len([r for r in rows if 'failed' in r]) <= 30,'Unbounded retry loop'
         histories=[r for r in rows if r.get('put')=='/api/recorded/1/playback']
         assert histories and all(r['user']=='1' for r in histories)
         assert any(r['value']['position']>=29 for r in histories),'History did not follow actual seek positions'
         if streaming:
+            assert any(row.get('failed') for row in rows),'Real HLS outage not exercised'
             playlists=[r['playlist'] for r in rows if 'playlist' in r]
             assert playlists and all(p.get('client')==['ios'] and p.get('subtitleIndex')==['-1'] for p in playlists)
             assert any('/sessions/' in r.get('delete','') for r in rows),'HLS server session not released'

@@ -142,7 +142,13 @@ final class NeoAetherBackend: NSObject {
           if next.sourceVideoCodecName?.lowercased() != "av1", self.checkpoints != nil {
             self.checkpoints?.stop(); self.checkpoints = nil; NeoAV1PlaybackBridge.install(nil)
           }
-          self.loaded = true; next.setRate(self.rate)
+          next.setRate(self.rate)
+          // Opening a paused transport need not publish a target picture.
+          // Use the same paused seek that already prepares a single picture
+          // during normal seeking, without ever starting audible playback.
+          if !self.wantsPlayback { await next.seek(to:Double(startMilliseconds)/1000) }
+          guard !Task.isCancelled, !self.closed, self.epoch == generation else { return }
+          self.loaded = true
           self.applyIntent(); next.clearSubtitle()
           for font in next.fontAttachments { self.ass.addFont(font.data,name:font.filename) }
           self.refreshTracks(); self.onChange?()
@@ -224,7 +230,9 @@ final class NeoAetherBackend: NSObject {
   }
   private func tick() {
     guard !closed, let engine else { return }
-    guard !recovering else { return }
+    // An outgoing layer may still hold a picture during the engine handover.
+    // It cannot establish readiness for the new input before load completes.
+    guard loaded, !recovering else { return }
     let now = CACurrentMediaTime(); seekable = engine.canSeek
     let duration = engine.duration
     if duration.isFinite, duration > 0 { durationMs = Int64(duration*1000) }
@@ -367,6 +375,7 @@ final class NeoAetherBackend: NSObject {
   @objc var surfaceProbe: [String:Any] {
     ["inWindow":surface.window != nil,"width":surface.bounds.width,"height":surface.bounds.height,
      "sampleFailure":sampleFailure,"frames":samples,"hasSink":frameSink != nil,
+     "loaded":loaded,"intent":wantsPlayback,"recovering":recovering,"state":String(describing:engine?.state),
      "layers":layers(surface.layer).map { String(describing:type(of:$0)) }]
   }
   @objc var renderSurfaceReadyForProbe: Bool {
@@ -376,7 +385,7 @@ final class NeoAetherBackend: NSObject {
   }
   @objc var checkpointReadyForProbe: Bool {
     guard let checkpoints else { return true }
-    return (checkpoints.report()["newestMs"] as? Double ?? 0) >= 35000
+    return (checkpoints.report()["newestMs"] as? Double ?? 0) >= 30000
   }
   @objc var effectiveVolume: Float { engine?.volume ?? 0 }
   @objc var subtitleVisible: Bool { caption.image != nil }

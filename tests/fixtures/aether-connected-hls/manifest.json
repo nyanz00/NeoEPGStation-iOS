@@ -1,0 +1,11 @@
+{
+  "source": "encoded-seek-1080.mkv",
+  "sourceSHA256": "cb164f0ef517bd83eed73d103a1a55452300da9205ba8b7b6d5ffa0906359f9e",
+  "command": "ffmpeg -i encoded-seek-1080.mkv -map 0:v:0 -map 0:a:0 -c copy -f hls -hls_time 4 -hls_segment_type mpegts -hls_playlist_type vod -hls_segment_options mpegts_copyts=1 -hls_segment_filename %d.ts playlist.m3u8",
+  "files": {
+    "0.ts": "25dcdaf3b994df46781c5fbb9ca7b11f4a7c68959fc74eed65e568495e3c620d",
+    "1.ts": "81b3f7395b862db9e2b8d9e15a203076d213c5def180e7d9bda2bdb88c44dc3b",
+    "2.ts": "31d0fb2b8d7610f891430f6b8d3b33b152be3baac3ef219b8e01304fb9df60c9",
+    "playlist.m3u8": "9581bf03ba35c00fa93a2b8256dbc55220c414a87a726165cd543b6299837b5f"
+  }
+}
