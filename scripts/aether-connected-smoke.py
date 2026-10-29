@@ -53,6 +53,7 @@ results = []
 cases = [('encoded-seek-1080.mkv',False,False),('encoded-seek-1080.mkv',True,False),
          ('hevc-seek-10.mkv',False,False),('av1-seek-10.mkv',False,True),('encoded-seek-1080.mkv',False,True)]
 for fixture,streaming,checkpoint in cases:
+    case_began=time.monotonic()
     label = fixture+('-hls' if streaming else '-play')+('-checkpoint' if checkpoint else '')
     rows, fault_until = [], [0.0]
     video = Path('tests/fixtures',fixture).read_bytes()
@@ -78,6 +79,7 @@ for fixture,streaming,checkpoint in cases:
         def do_GET(self):self.get(False)
         def get(self,head):
             parsed = urlparse(self.path);path=parsed.path;query=parse_qs(parsed.query)
+            rows.append({'incoming':path,'at':time.monotonic()-case_began,'head':head})
             if path=='/api/test-fault':
                 fault_until[0]=time.monotonic()+6;rows.append({'fault':True});self.json({});return
             if time.monotonic()<fault_until[0] and (path=='/api/videos/1' or '/vodhls/' in path):
@@ -90,8 +92,11 @@ for fixture,streaming,checkpoint in cases:
                 self.send_header('Content-Length',str(end-begin+1));self.send_header('Content-Range',f'bytes {begin}-{end}/{len(video)}');self.end_headers()
                 rows.append({'video':True,'bytes':end-begin+1})
                 if not head:
-                    try:self.wfile.write(video[begin:end+1])
-                    except (BrokenPipeError,ConnectionResetError):pass
+                    try:
+                        self.wfile.write(video[begin:end+1])
+                        rows.append({'sent':path,'at':time.monotonic()-case_began,'bytes':end-begin+1})
+                    except (BrokenPipeError,ConnectionResetError):
+                        rows.append({'closed':path,'at':time.monotonic()-case_began})
                 return
             if path.endswith('/duration'):self.json({'duration':90});return
             if path.endswith('/subtitles'):
@@ -181,6 +186,9 @@ for fixture,streaming,checkpoint in cases:
         results.append({'case':label,'success':True,'checks':result['checks'],'targetImagesVerified':len(pictures),'pictureChecks':pictures})
         print(label,'PASS',flush=True)
     except Exception as error:
+        with (dist/(label+'-system.log')).open('w') as log:
+            subprocess.run(['xcrun','simctl','spawn',device,'log','show','--last','4m','--style','compact',
+                            '--predicate','process == "NeoEPGStation"'],stdout=log,stderr=subprocess.STDOUT,timeout=40,check=False)
         results.append({'case':label,'success':False,'error':type(error).__name__+': '+str(error)[:1800]})
         print(label,'FAIL',repr(error)[:1800],flush=True)
         # Diagnose the first failed integration before spending three minutes

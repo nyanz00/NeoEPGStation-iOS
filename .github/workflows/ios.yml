@@ -267,8 +267,8 @@ jobs:
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'aether-connected' }}
         run: |
           connected_failed=0
-          python3 -u scripts/aether-connected-smoke.py || connected_failed=1
           python3 -u scripts/encoded-seek-smoke.py || connected_failed=1
+          python3 -u scripts/aether-connected-smoke.py || connected_failed=1
           exit "$connected_failed"
       - name: Check analysis prefetch waiting and cancellation
         id: checkpoint-analysis-checks
@@ -447,8 +447,8 @@ jobs:
             build/native-tests/subtitle-script > dist/subtitle-script.txt
             python3 -u scripts/simulator-smoke.py --prepare
             connected_failed=0
-            python3 -u scripts/aether-connected-smoke.py || connected_failed=1
             python3 -u scripts/encoded-seek-smoke.py || connected_failed=1
+            python3 -u scripts/aether-connected-smoke.py || connected_failed=1
             exit "$connected_failed"
           elif [ "$CHECK_SCOPE" = "checkpoint-analysis" ]; then
             mkdir -p build/native-tests
