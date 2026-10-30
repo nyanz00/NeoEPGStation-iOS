@@ -413,6 +413,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     else {
       let page: NeoPage
       if id == "recorded" { page = NeoRecordedPage(shell: self) }
+      else if id == "onair" { page = NeoOnAirPage(shell: self) }
       else if id == "settings" { page = NeoSettingsPage(shell: self) }
       else if id == "history" { page = NeoHistoryPage(shell: self) }
       else { page = NeoPlaceholderPage(id: id, shell: self) }
@@ -575,6 +576,20 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       }
     }
     present(controller, animated: true)
+  }
+  func playLive(_ schedule: NeoLiveSchedule, option: NeoLiveOption, options: [NeoLiveOption], schedules: [NeoLiveSchedule], api: NeoAPI) {
+    guard player == nil, !preparingPlay, self.api === api else { return }
+    var context = schedule.context(base:api.base)
+    context["liveType"] = option.type; context["liveMode"] = option.mode; context["liveQuality"] = option.quality
+    context["liveOptions"] = options.map(\.dictionary); context["liveChannels"] = schedules.map { $0.context(base:api.base) }
+    context["liveHeaders"] = api.liveRequestHeaders
+    let buffer = UserDefaults.standard.object(forKey:"live.bufferMs") as? Int ?? (option.type == "m2tsll" ? 300 : 1500)
+    let controller = NeoPlayerController(url:option.url(api:api,channel:schedule.channel.id),title:schedule.program?.name ?? schedule.channel.name,
+      username:"",password:"",networkCaching:buffer)
+    controller.recordingContext = context; controller.modalPresentationStyle = .fullScreen; player = controller
+    controller.onClose = { [weak self] in self?.player = nil }
+    controller.onNavigate = { [weak self] route in self?.selectDestination(route) }
+    present(controller,animated:true)
   }
   func showPopup(anchor: UIView, entries: [NeoMenuEntry], appearance: NeoAnchoredMenu.Appearance) {
     dismissPopup(); guard !entries.isEmpty, anchor.window != nil else { return }

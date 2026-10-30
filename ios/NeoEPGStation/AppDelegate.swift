@@ -20,6 +20,39 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     let window = UIWindow(frame: UIScreen.main.bounds)
     window.rootViewController = NeoShell(); self.window = window; window.makeKeyAndVisible()
 #if targetEnvironment(simulator)
+    if let raw = ProcessInfo.processInfo.environment["NEO_EPG_LIVE_SMOKE"], let base = URL(string:raw), let shell = window.rootViewController as? NeoShell {
+      let api = NeoAPI(base:base); api.activate(user:"master",headers:["X-Live-Test":"synthetic"]); shell.smokeUseAPI(api)
+      DispatchQueue.main.asyncAfter(deadline:.now()+0.5) {
+        shell.showRoute("onair")
+        DispatchQueue.main.asyncAfter(deadline:.now()+2) {
+          guard let page = shell.children.compactMap({ $0 as? UINavigationController }).first?.viewControllers.first as? NeoOnAirPage else {
+            NeoPiPSmoke.save("live-smoke",["success":false,"error":"onair route missing"]); return
+          }
+          page.runLiveUIProbe { ui in
+            Task { @MainActor in
+              do {
+                let config = try await api.configuration(), schedules = try await api.broadcasting()
+                let options = NeoLiveOption.available(config), schedule = schedules.first!
+                var context = schedule.context(base:base)
+                context["liveHeaders"] = api.liveRequestHeaders; context["liveType"] = "m2ts"; context["liveMode"] = 0; context["liveQuality"] = options[0].quality
+                context["liveOptions"] = options.map(\.dictionary); context["liveChannels"] = schedules.map { $0.context(base:base) }
+                let controller = NeoPlayerController(url:options[0].url(api:api,channel:schedule.channel.id),title:schedule.channel.name,username:"",password:"",networkCaching:500)
+                controller.recordingContext = context; controller.modalPresentationStyle = .fullScreen
+                NeoSubtitlePreference.save(""); UserDefaults.standard.set(true,forKey:"player.comments.enabled")
+                shell.present(controller,animated:false) {
+                  controller.runLiveProbe { result in
+                    var result = result; result["ui"] = ui; result["success"] = result["success"] as? Bool == true && ui.values.allSatisfy { $0 }
+                    NeoPiPSmoke.save("live-smoke",result)
+                    if let source = NeoPlaybackDiagnostics.exportURL(), let bytes = try? Data(contentsOf:source) { try? bytes.write(to:NeoPiPSmoke.directory.appendingPathComponent("live-diagnostics.json")) }
+                  }
+                }
+              } catch { NeoPiPSmoke.save("live-smoke",["success":false,"error":"live fixture setup failed"]) }
+            }
+          }
+        }
+      }
+      return true
+    }
     if let base = ProcessInfo.processInfo.environment["NEO_EPG_AETHER_CONNECTED"], let url = URL(string:base+"/api/videos/1") {
       NeoCommentOverlay.waitBeforePlayback = true
       UserDefaults.standard.set(true,forKey:"player.comments.enabled")

@@ -35,6 +35,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   private var renderer: NeoDanmakuRenderer?
   private var loader: NeoCommentLoader?
   private var usesJikkyo = false
+  private var liveMode = false, nextLiveID = 0
   private var task: URLSessionDataTask?
   private var fullTask: URLSessionDataTask?
   private var rawTimeline: CommentTimeline?
@@ -220,6 +221,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
 
   @objc(configureWithSource:username:password:jikkyo:)
   func configure(source: URL, username: String, password: String, jikkyo: Bool = false) {
+    liveMode = false
     guard renderer != nil, !closed else { settled = true; finishPreparationIfPossible(); onChange?(); return }
     loader = NeoCommentLoader(source: source, username: username, password: password)
     usesJikkyo = jikkyo
@@ -233,6 +235,25 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
       }
     }
     reloadTracks()
+  }
+
+  @objc func configureLive() {
+    version += 1; task?.cancel(); task = nil; fullTask?.cancel(); fullTask = nil; loader = nil
+    liveMode = true; nextLiveID = 0; usesJikkyo = true; videoDuration = 0
+    rawTimeline = nil; timeline = CommentTimeline(width:1920,height:1080,comments:[])
+    tracks = []; selectedIndex = nil; clock.reset(); renderer?.reset(); resumeGate = nil; seeking = false
+    ready = true; settled = true; fullLoaded = true; contentVersion += 1
+    status = "実況コメントに接続中…"; preparationStage = ""; refreshRendering(); finishPreparationIfPossible(); onChange?()
+  }
+  @objc func updateLiveStatus(_ value: String) { guard liveMode else { return }; status = value; onChange?() }
+  @objc func appendLiveComments(_ rows: [[String:Any]]) {
+    guard liveMode, !closed, !rows.isEmpty else { return }
+    let value: [String:Any] = ["isSuccess":true,"source":"jikkyo","timeBase":"video","comments":rows]
+    guard let data = try? JSONSerialization.data(withJSONObject:value), let parsed = try? NeoCommentLoader.parseJikkyo(data) else { return }
+    var comments = (rawTimeline?.comments ?? []).filter { $0.end >= renderedTime-60 }
+    for var comment in parsed.comments { comment.id = nextLiveID; nextLiveID += 1; comments.append(comment) }
+    if comments.count > 2000 { comments.removeFirst(comments.count-2000) }
+    publish(CommentTimeline(width:1920,height:1080,comments:comments))
   }
 
   func reloadTracks() {

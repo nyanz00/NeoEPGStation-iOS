@@ -88,6 +88,14 @@ final class NeoNowPlaying: NSObject {
     MPNowPlayingInfoCenter.default().nowPlayingInfo = info
   }
 
+  @objc(setLiveTitle:channel:)
+  func setLiveTitle(_ title: String, channel: String) {
+    guard !closed, Self.owner === self else { return }
+    info[MPMediaItemPropertyTitle] = title; info[MPMediaItemPropertyArtist] = channel
+    info[MPNowPlayingInfoPropertyIsLiveStream] = true
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+  }
+
   @objc func stop() {
     guard !closed else { return }; closed = true
     for (command, target) in targets { command.removeTarget(target) }

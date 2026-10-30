@@ -41,11 +41,19 @@ struct NeoDropLog: Decodable {
 }
 struct NeoServerConfig: Decodable {
   struct StreamConfig: Decodable {
+    struct Live: Decodable {
+      struct TS: Decodable {
+        struct Mode: Decodable { let name: String; let isUnconverted: Bool? }
+        let m2ts: [Mode]?; let m2tsll: [String]?
+      }
+      let ts: TS?
+    }
     struct Recorded: Decodable {
       struct Source: Decodable { let hls: [String]? }
       let ts: Source?; let encoded: Source?
     }
     let recorded: Recorded?
+    var live: Live? = nil
   }
   var streamConfig: StreamConfig? = nil
   func streamingQualities(_ type: String) -> [String] {
@@ -55,11 +63,14 @@ struct NeoServerConfig: Decodable {
   let encode: [String]; let developerMode: Bool?
   var isEnableTSRecordedStream: Bool? = nil
   var isEnableEncodedRecordedStream: Bool? = nil
+  var isEnableTSLiveStream: Bool? = nil
+  var broadcast: [String: Bool]? = nil
+  var urlscheme: [String:[String:String]]? = nil
   init(encode: [String], developerMode: Bool?, isEnableTSRecordedStream: Bool? = nil, isEnableEncodedRecordedStream: Bool? = nil) {
     self.encode = encode; self.developerMode = developerMode
     self.isEnableTSRecordedStream = isEnableTSRecordedStream; self.isEnableEncodedRecordedStream = isEnableEncodedRecordedStream
   }
-  private enum CodingKeys: String, CodingKey { case encode, developerMode, isEnableTSRecordedStream, isEnableEncodedRecordedStream, streamConfig }
+  private enum CodingKeys: String, CodingKey { case encode, developerMode, isEnableTSRecordedStream, isEnableEncodedRecordedStream, streamConfig, isEnableTSLiveStream, broadcast, urlscheme }
   init(from decoder: Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
     // queries.ts normalizes missing/non-string encode modes independently of capabilities.
@@ -75,6 +86,9 @@ struct NeoServerConfig: Decodable {
     developerMode = try values.decodeIfPresent(Bool.self, forKey: .developerMode)
     isEnableTSRecordedStream = try values.decodeIfPresent(Bool.self, forKey: .isEnableTSRecordedStream)
     isEnableEncodedRecordedStream = try values.decodeIfPresent(Bool.self, forKey: .isEnableEncodedRecordedStream)
+    isEnableTSLiveStream = try values.decodeIfPresent(Bool.self, forKey: .isEnableTSLiveStream)
+    broadcast = try values.decodeIfPresent([String: Bool].self, forKey: .broadcast)
+    urlscheme = try values.decodeIfPresent([String:[String:String]].self, forKey:.urlscheme)
   }
 }
 enum NeoRecordingCommand: String {
@@ -305,6 +319,10 @@ final class NeoAPI {
     headersLock.lock(); defer { headersLock.unlock() }
     return (viewer, authenticationHeaders)
   }
+  var liveRequestHeaders: [String:String] {
+    let identity = identitySnapshot()
+    return identity.1.merging(["X-EPGStation-User-Id":identity.0]) { _, current in current }
+  }
   var resumePlayback: Bool {
     get { UserDefaults.standard.object(forKey: "resume." + base.absoluteString) as? Bool ?? true }
     set { UserDefaults.standard.set(newValue, forKey: "resume." + base.absoluteString) }
@@ -346,6 +364,9 @@ final class NeoAPI {
     return value
   }
   func channels() async throws -> [NeoChannel] { try await request(url("/channels")) }
+  func broadcasting() async throws -> [NeoLiveSchedule] { try await request(url("/schedules/broadcasting?isHalfWidth=true")) }
+  func liveForces() async throws -> [NeoLiveForce] { try await request(url("/channels/jikkyo")) }
+  func liveJikkyo(_ channel: Int) async throws -> NeoLiveJikkyoInfo { try await request(url("/channels/\(channel)/jikkyo"), timeout: 8) }
   func viewers() async throws -> NeoViewers { try await request(url("/users"), headers: [:]) }
   func viewerProfiles() async throws -> NeoViewerProfiles { try await request(url("/viewer-profiles"), headers: [:]) }
   func unlockProfile(_ id: Int, password: String) async throws -> NeoViewerSession {

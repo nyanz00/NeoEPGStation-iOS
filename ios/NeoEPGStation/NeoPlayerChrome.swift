@@ -126,6 +126,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private var tabButtons: [NeoPlayerPanelTab] = [], tab = "program", followsComments = true, lastCommentIndex = -1
   private var comments: [(time: Double, text: String)] = []
   private var context: [String: Any] = [:], api: NeoAPI?, recording: NeoRecording?
+  private var isLive: Bool { context["live"] as? Bool == true }
   private var records: [NeoRecording] = [], rulesLoaded = false, ruleHeading = "関連する録画", ruleError: String?
   private var task: Task<Void, Never>?, relatedTask: Task<Void, Never>?, logoTask: URLSessionDataTask?
   private var popup: NeoAnchoredMenu?, remainingTime = false, current: Int64 = 0, duration: Int64 = 0
@@ -200,7 +201,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     [infoButton, pipButton, commentButton, settingsButton].forEach(rightHeader.addSubview)
     [timeButton, timeline, rotationButton, reloadButton, ruleButton, subtitleButton].forEach(controls.addSubview)
     timeButton.addSubview(timeLabel); timeButton.accessibilityLabel = "再生時間表示を切り替える"
-    timeButton.addAction(UIAction { [weak self] _ in self?.onAction?("interaction"); self?.remainingTime.toggle(); self?.updateTime() }, for: .touchUpInside)
+    timeButton.addAction(UIAction { [weak self] _ in
+      guard let self else { return }; self.onAction?("interaction")
+      if self.isLive { self.onAction?("live-edge") } else { self.remainingTime.toggle(); self.updateTime() }
+    }, for: .touchUpInside)
     configure(menuButton, icon: "Menu", label: "サイドメニュー", action: "menu")
     configure(backButton, icon: "ArrowBack", label: "録画詳細へ戻る", action: "back")
     configure(infoButton, icon: "InfoOutlined", label: "番組情報", action: "program")
@@ -364,9 +368,15 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   @objc func updateStreamQuality(_ mode: Int) { context["streamMode"] = mode; if tab == "settings" { renderPanel() } }
   @objc func configure(_ context: [String: Any]) {
     self.context = context; channel.text = context["channelName"] as? String; renderPanel()
-    guard let base = (context["baseURL"] as? String).flatMap(URL.init(string:)), let id = context["id"] as? Int else { return }
+    if isLive {
+      title.text = context["name"] as? String; tabButtons[1].caption.text = "放送局"; tabButtons[1].accessibilityLabel = "放送局"
+      tabButtons[1].glyph.image = NeoIcon.image("LiveTvOutlined"); ruleButton.accessibilityLabel = "放送局"
+      timeButton.accessibilityLabel = "ライブへ戻る"; updateTime(); setNeedsLayout()
+    }
+    guard let base = (context["baseURL"] as? String).flatMap(URL.init(string:)) else { return }
     let api = NeoAPI(base: base); self.api = api
     loadLogo(context["channelId"] as? Int ?? 0, api: api)
+    guard !isLive, let id = context["id"] as? Int else { return }
     task = Task { [weak self] in
       do {
         let recording = try await api.recording(id); try Task.checkCancellation()
@@ -379,7 +389,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     guard id > 0 else { return }; logoTask?.cancel()
     logoTask = api.session.dataTask(with: api.url("/channels/\(id)/logo")) { [weak self] data, response, _ in
       guard let data, (response as? HTTPURLResponse)?.statusCode == 200, let image = UIImage(data: data) else { return }
-      DispatchQueue.main.async { self?.logo.image = image; self?.setNeedsLayout(); if self?.tab == "program" { self?.renderPanel() } }
+      DispatchQueue.main.async { guard self?.context["channelId"] as? Int == id else { return }; self?.logo.image = image; self?.setNeedsLayout(); if self?.tab == "program" { self?.renderPanel() } }
     }; logoTask?.resume()
   }
   override func layoutSubviews() {
@@ -422,6 +432,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     rotationButton.frame = CGRect(x: controls.bounds.width - 44, y: -6, width: 44, height: 40)
     // A small visual thumb with a generous 32pt tracking area, independent of iOS's glass slider styling.
     timeline.frame = CGRect(x: 0, y: 26, width: controls.bounds.width, height: 32)
+    timeline.isHidden = isLive
     for (index, button) in [reloadButton, ruleButton, subtitleButton].enumerated() {
       button.isHidden = !wide
       button.frame = CGRect(x: controls.bounds.width - CGFloat(3 - index) * 44, y: 44, width: 44, height: 36)
@@ -434,6 +445,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       let side: CGFloat = button === playButton ? 64 : 46
       button.frame = CGRect(x: (CGFloat(index) + 0.5) * centerWidth / 5 - side / 2, y: (centerHeight - side) / 2, width: side, height: side)
       button.layer.cornerRadius = side / 2
+      button.isHidden = isLive && button !== playButton
     }
     panel.frame = wide ? CGRect(x: videoWidth, y: 0, width: panelWidth, height: bounds.height)
       : CGRect(x: 0, y: videoView.frame.maxY, width: bounds.width, height: max(0, bounds.height - videoView.frame.maxY))
@@ -517,6 +529,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     jumpAt(gesture.location(in: self))
   }
   private func jumpAt(_ point: CGPoint) {
+    guard !isLive else { return }
     onAction?(point.x < playbackFrame.midX ? "jump:-10" : "jump:10")
   }
   private func acceptsVideoTap(_ point: CGPoint, target: UIView?, includeLetterbox: Bool = false) -> Bool {
@@ -562,6 +575,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   @objc func previewSeek(_ seconds: Int64) { previewTime = max(0, seconds); updateTime() }
   @objc func finishSeekPreview() { previewTime = nil; updateTime() }
   private func updateTime() {
+    if isLive { timeLabel.text = "LIVE · ライブへ戻る"; return }
     let current = previewTime ?? self.current
     func format(_ seconds: Int64) -> String { seconds >= 3600 ? String(format: "%lld:%02lld:%02lld", seconds/3600, seconds/60%60, seconds%60) : String(format: "%lld:%02lld", seconds/60, seconds%60) }
     timeLabel.text = remainingTime ? "−\(format(max(0, duration - current))) / \(format(duration))" : "\(format(current)) / \(format(duration))"
@@ -610,7 +624,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     if toggle && isWide && panelOpen && tab == id { setPanel(false); return }
     tab = id; renderPanel(); setPanel(true)
     if id == "comments" { onAction?("comment-list") }
-    if id == "rules" { loadRelated() }
+    if id == "rules" && !isLive { loadRelated() }
   }
   private func setPanel(_ open: Bool) {
     let changesVideoWidth = isWide && panelOpen != open
@@ -651,6 +665,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     stack.arrangedSubviews.forEach { $0.removeFromSuperview() }; scroll.setContentOffset(.zero, animated: false)
     scroll.isHidden = tab == "comments"; commentList.isHidden = tab != "comments"; followButton.isHidden = tab != "comments"
     panelTitle.text = ["program":"番組情報", "rules":"ルール", "comments":"コメント", "settings":"プレイヤー設定"][tab]
+    if isLive && tab == "rules" { panelTitle.text = "放送局" }
     for (i, button) in categoryButtons.enumerated() {
       let selected = ["general", "comments", "subtitles"][i] == settingsCategory
       button.tintColor = selected ? NeoStyle.accent : NeoStyle.muted
@@ -664,7 +679,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     case "program":
       let identity = UIStackView(); identity.spacing = 10; identity.alignment = .center
       if let image = logo.image { let icon = UIImageView(image: image); icon.contentMode = .scaleAspectFit; icon.widthAnchor.constraint(equalToConstant: 62).isActive = true; icon.heightAnchor.constraint(equalToConstant: 38).isActive = true; identity.addArrangedSubview(icon) }
-      let captions = UIStackView(arrangedSubviews: [NeoStyle.label(channel.text ?? "", size: 16, bold: true), NeoStyle.label("録画済み", size: 12, muted: true)])
+      let captions = UIStackView(arrangedSubviews: [NeoStyle.label(channel.text ?? "", size: 16, bold: true), NeoStyle.label(isLive ? "放映中" : "録画済み", size: 12, muted: true)])
       captions.axis = .vertical; captions.spacing = 3; identity.addArrangedSubview(captions); stack.addArrangedSubview(identity)
       append(title.text ?? "", size: 20, bold: true, lineHeight: 1.45)
       let start = recording?.startAt ?? (context["startAt"] as? Double) ?? 0, end = recording?.endAt ?? (context["endAt"] as? Double) ?? 0
@@ -677,6 +692,16 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       let extended = recording?.extended ?? context["extended"] as? String ?? ""
       if !extended.isEmpty { append("番組内容", size: 16, bold: true); append(extended, muted: true, lineHeight: 1.75) }
     case "rules":
+      if isLive {
+        for item in context["liveChannels"] as? [[String:Any]] ?? [] {
+          guard let id = item["channelId"] as? Int else { continue }
+          let row = NeoStyle.button((item["channelName"] as? String ?? "")+"\n"+(item["name"] as? String ?? "")) { [weak self] in self?.onAction?("live-channel:\(id)") }
+          row.titleLabel?.numberOfLines = 2; row.contentHorizontalAlignment = .left
+          row.tintColor = id == context["channelId"] as? Int ? NeoStyle.accent : .white
+          row.heightAnchor.constraint(greaterThanOrEqualToConstant:58).isActive = true; stack.addArrangedSubview(row)
+        }
+        break
+      }
       append(ruleHeading, size: 16, bold: true)
       if let ruleError { append(ruleError, muted: true) }
       else if !rulesLoaded { append("関連する録画を取得中…", muted: true) }
@@ -692,6 +717,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     case "settings":
       if settingsCategory == "comments" { buildCommentSettings(); break }
       if settingsCategory == "subtitles" { buildSubtitleSettings(); break }
+      if isLive { buildLiveSettings() } else {
       append("再生速度", bold: true)
       let speeds = UIStackView(); speeds.spacing = 4; speeds.distribution = .fillEqually
       for rate in [Float(0.5), 0.75, 1, 1.25, 1.5, 2] {
@@ -740,6 +766,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       retentionRow.distribution = .equalSpacing; retentionRow.alignment = .center; retentionRow.spacing = 12
       stack.addArrangedSubview(retentionRow)
       }
+      }
       let row = UIStackView(); row.addArrangedSubview(NeoStyle.label("操作ボタンを自動で隠す")); let toggle = UISwitch(); toggle.isOn = autoHide; toggle.onTintColor = NeoStyle.accent
       toggle.addAction(UIAction { [weak self, weak toggle] _ in self?.autoHide = toggle?.isOn == true; self?.onAction?("interaction") }, for: .valueChanged); row.addArrangedSubview(toggle); stack.addArrangedSubview(row)
       let waitRow = UIStackView(arrangedSubviews: [NeoStyle.label("コメントの準備を待って再生"), UISwitch()]); waitRow.distribution = .equalSpacing
@@ -747,7 +774,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
         toggle.accessibilityIdentifier = "player-wait-for-comments"; toggle.isOn = NeoCommentOverlay.waitBeforePlayback; toggle.onTintColor = NeoStyle.accent
         toggle.addAction(UIAction { [weak toggle] _ in NeoCommentOverlay.waitBeforePlayback = toggle?.isOn == true }, for: .valueChanged)
       }
-      stack.addArrangedSubview(waitRow)
+      if !isLive { stack.addArrangedSubview(waitRow) }
       append("画面の向き", bold: true)
       for (id, text) in [("auto", "端末の向きに合わせる"), ("portrait", "縦に固定"), ("landscape", "横に固定")] {
         stack.addArrangedSubview(NeoStyle.button(text) { [weak self] in self?.onAction?("orientation:\(id)") })
@@ -768,6 +795,31 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       stack.arrangedSubviews.forEach(disableExperimentalConnections)
     }
     setNeedsLayout()
+  }
+  private func buildLiveSettings() {
+    let options = context["liveOptions"] as? [[String:Any]] ?? []
+    let selectedType = context["liveType"] as? String ?? "m2ts", selectedMode = context["liveMode"] as? Int ?? 0
+    func choice(_ label: String, value: String, menu: UIMenu) {
+      let button = UIButton(type:.system); button.setTitle(value+" ▾",for:.normal); button.tintColor = NeoStyle.accent
+      button.showsMenuAsPrimaryAction = true; button.menu = menu
+      button.heightAnchor.constraint(equalToConstant:44).isActive = true
+      let row = UIStackView(arrangedSubviews:[NeoStyle.label(label,bold:true),button]); row.distribution = .equalSpacing; row.alignment = .center
+      stack.addArrangedSubview(row)
+    }
+    let types = ["m2ts","m2tsll"].filter { type in options.contains { $0["type"] as? String == type } }
+    choice("ストリーム",value:selectedType == "m2tsll" ? "M2TS-LL" : "M2TS",menu:UIMenu(children:types.map { type in
+      UIAction(title:type == "m2tsll" ? "M2TS-LL" : "M2TS",state:type == selectedType ? .on : .off) { [weak self] _ in
+        if let index = options.firstIndex(where: { $0["type"] as? String == type }) { self?.onAction?("live-option:\(index)") }
+      }
+    }))
+    choice("画質",value:context["liveQuality"] as? String ?? "",menu:UIMenu(children:options.indices.filter { options[$0]["type"] as? String == selectedType }.map { index in
+      UIAction(title:options[index]["quality"] as? String ?? "",state:options[index]["mode"] as? Int == selectedMode ? .on : .off) { [weak self] _ in self?.onAction?("live-option:\(index)") }
+    }))
+    let saved = UserDefaults.standard.integer(forKey:"live.bufferMs"), current = saved > 0 ? saved : selectedType == "m2tsll" ? 300 : 1500
+    choice("バッファ",value:"\(Double(current)/1000) 秒",menu:UIMenu(children:[300,500,1000,1500,3000,5000].map { value in
+      UIAction(title:"\(Double(value)/1000) 秒",state:value == current ? .on : .off) { [weak self] _ in self?.onAction?("live-buffer:\(value)") }
+    }))
+    append("一時停止後の再生とライブへ戻る操作では、最新の放送へ接続します。",size:12,muted:true)
   }
   private func loadRelated() {
     guard !rulesLoaded, relatedTask == nil, let api else { return }

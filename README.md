@@ -9,4 +9,4 @@ NeoEPGStationのiPhone / iPad向けネイティブクライアント。iOS / iPa
 
 Swift / UIKit、VLCKit 4系を使用します。
 ActionsのArtifactにLiveContainer取り込み用のIPAを生成します。
-録画STREAMINGの画質・キャッシュ設定と検証範囲は [STREAMING](docs/streaming.md) を参照してください。字幕の詳細調整と放映中の視聴は開発中です。
+録画STREAMINGの画質・キャッシュ設定と検証範囲は [STREAMING](docs/streaming.md) を参照してください。放映中の視聴は [放映中](docs/live.md) を参照してください。字幕の詳細調整は開発中です。
