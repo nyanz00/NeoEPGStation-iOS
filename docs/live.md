@@ -14,3 +14,14 @@
 
 Actionsの `check_scope=live` は、API設定・PCR/ラップ・コメントコマンドの単体試験、両SDKビルド、MPEG-2/H.264の実映像と音声を使った逐次TS配信、WebSocket接続、局/画質切り替え、HTTP切断と503からの回復、終了時の接続解放、録画PLAYの回帰試験を行う。
 実機の放送受信環境、iOSによるアプリ外PiP、触覚はシミュレーター試験と区別する。試験結果はビルド成果物の `live-*.json` と画面画像に保存する。
+
+## 確認済みビルド
+
+- ビルド303、ソース `953edba1c829d0df1669204e8dcc154da33f0ef4`。
+- Actions: https://github.com/nyanz00/NeoEPGStation-iOS/actions/runs/41064833249
+- iPhone用・シミュレーター用の両SDKビルドとFFmpeg import isolation確認が成功。
+- ライブのAPI/PCR/コマンド14チェックが成功。MPEG-2とH.264それぞれで再生17・UI6・サーバー9、計64チェックが成功。
+- 合成映像フレーム、ARIBの表示領域、実況の初期過去ログ除外、局/画質切り替え、停止/再開、通信切断と503後の復帰、HTTP/WebSocket解放を確認。ARIB字幕と実況が映った画面画像も確認した。
+- 録画PLAYのMKV・MP4は各48チェックが成功。
+- IPA: `NeoEPGStation-build303.ipa`。SHA-256: `51c159ef8724c1a36305a50c4109a587f42267a2a0d617ea026e583bbcf2d8c2`。
+- IPA内のビルド番号・ソース情報・配布ハッシュを照合済み。実際の放送受信環境とアプリ外PiPのOS動作は実機未確認。
