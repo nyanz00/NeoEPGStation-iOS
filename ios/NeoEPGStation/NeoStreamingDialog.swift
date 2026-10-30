@@ -169,7 +169,7 @@ final class NeoStreamingDialog: UIViewController {
         checks["commentValueVisible"] = dialog.fieldLabels[ObjectIdentifier(dialog.danmaku)]?.text == (choice < 0 ? "弾幕なし" : "Comments B")
         checks["twoCaptionFields"] = dialog.danmaku.superview !== dialog.subtitle.superview && dialog.danmaku.superview?.superview === dialog.subtitle.superview?.superview
         checks["compactTitle"] = abs((dialog.stack.arrangedSubviews.first?.bounds.height ?? 0)-42) < 1
-        let double = NeoStyle.dialogTitle("One\nTwo"); checks["wrappedTitleHeight"] = abs(double.sizeThatFits(CGSize(width:320,height:.greatestFiniteMagnitude)).height-60)<1
+        let double = NeoStyle.dialogTitle("One\nTwo"); checks["wrappedTitleHeight"] = abs(double.sizeThatFits(CGSize(width:320,height:CGFloat.greatestFiniteMagnitude)).height-60)<1
         let image = UIGraphicsImageRenderer(size:dialog.view.bounds.size).image { _ in dialog.view.drawHierarchy(in:dialog.view.bounds,afterScreenUpdates:true) }
         try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("feedback-stream-dialog.png"))
         dialog.watch()
