@@ -15,12 +15,15 @@ def run(*args, timeout=120):
 
 
 dist = Path('dist')
-device = json.loads((dist/'simulator-device.json').read_text())['udid']
+phone = json.loads((dist/'simulator-device.json').read_text())['udid']
+device = phone
 bundle = 'io.github.nyanz00.NeoEPGStation'
 run('xcrun', 'simctl', 'bootstatus', device, '-b', timeout=600)
 run('xcrun', 'simctl', 'install', device,
     'build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app', timeout=300)
-documents = Path(run('xcrun', 'simctl', 'get_app_container', device, bundle, 'data'))/'Documents'
+available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '--json'))['devices']
+runtime = next(key for key, values in available.items() if any(d['udid'] == phone for d in values))
+pad = next(d['udid'] for d in available[runtime] if d['isAvailable'] and d['name'].startswith('iPad Pro'))
 hls = Path('tests/fixtures/aether-connected-hls')
 video = Path('tests/fixtures/encoded-seek-1080.mkv').read_bytes()
 header = """[Script Info]
@@ -40,7 +43,19 @@ def stamp(seconds):
 
 
 results = []
-for choice in [2, -1]:
+for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
+    target = pad if platform == 'pad' else phone
+    if target != device:
+        run('xcrun', 'simctl', 'shutdown', device, timeout=90)
+        state = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '--json'))['devices']
+        info = next(d for values in state.values() for d in values if d['udid'] == target)
+        if info['state'] == 'Shutdown':
+            run('xcrun', 'simctl', 'boot', target)
+        run('xcrun', 'simctl', 'bootstatus', target, '-b', timeout=600)
+        run('xcrun', 'simctl', 'install', target,
+            'build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app', timeout=300)
+        device = target
+    documents = Path(run('xcrun', 'simctl', 'get_app_container', device, bundle, 'data'))/'Documents'
     rows = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -111,7 +126,7 @@ for choice in [2, -1]:
 
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    label = 'selected-b' if choice == 2 else 'none'
+    label = 'pad-selected-b' if platform == 'pad' else 'selected-b' if choice == 2 else 'none'
     try:
         subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True)
         names = ['player-feedback.json', 'player-feedback-diagnostics.json',
@@ -134,7 +149,26 @@ for choice in [2, -1]:
                     and r['path'].endswith('/text') and not r['path'].endswith('/1/text')]
         result['serverSelection'] = (
             bool(comments) and all(p.endswith('/2/text') for p in comments)) if choice == 2 else not comments
-        result['success'] = result.get('success', False) and result['serverSelection']
+        # UIKit does not propagate the legacy idiom override used by the
+        # embedded probe. Assert phone placement on an actual phone, and Pad
+        # placement on an actual Pad, retaining every raw observation below.
+        result['nativeOverallAssertion'] = result.get('success', False)
+        result['platform'] = platform
+        panels = result.get('panelChecks', {})
+        result['nativePanelChecks'] = dict(panels)
+        required = {'closeTouchTarget', 'commentSelectionFirst', 'continuesFollowing',
+                    'followsActualLivePosition', 'manualReadingStopsFollowing',
+                    'pastLogAnchorPreserved', 'recordedTimeUnchanged',
+                    'remainingSettingsOrder', 'returnResumesFollowing', 'wallClockDisplayed'}
+        required |= {'padTraitApplied', 'padCloseAtRight'} if platform == 'pad' else {'phoneClosePreserved'}
+        irrelevant = {'phoneClosePreserved'} if platform == 'pad' else {'padTraitApplied', 'padCloseAtRight'}
+        result['notApplicableToDevice'] = sorted(irrelevant)
+        result['panelChecks'] = {key: value for key, value in panels.items() if key not in irrelevant}
+        result['success'] = (result['serverSelection']
+            and required <= result['panelChecks'].keys()
+            and all(result['panelChecks'].values())
+            and bool(result.get('checks')) and all(result['checks'].values())
+            and bool(result.get('dialogChecks')) and all(result['dialogChecks'].values()))
         results.append(result)
         (dist/(label+'-feedback-result.json')).write_text(json.dumps({'result': result, 'requests': rows}, indent=2))
         print(label, json.dumps(result), flush=True)
@@ -142,6 +176,10 @@ for choice in [2, -1]:
         subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True)
         server.shutdown()
         server.server_close()
+if device != phone:
+    run('xcrun', 'simctl', 'shutdown', device, timeout=90)
+    run('xcrun', 'simctl', 'boot', phone)
+    run('xcrun', 'simctl', 'bootstatus', phone, '-b', timeout=600)
 (dist/'player-feedback-results.json').write_text(json.dumps(
     {'success': all(r['success'] for r in results), 'cases': results}, indent=2))
 assert all(r['success'] for r in results), 'Player feedback checks failed'
