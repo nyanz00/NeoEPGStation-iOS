@@ -124,7 +124,9 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private let scroll = UIScrollView(), stack = UIStackView()
   private let commentList = UITableView(frame: .zero, style: .plain), followButton = UIButton(type: .system)
   private var tabButtons: [NeoPlayerPanelTab] = [], tab = "program", followsComments = true, lastCommentIndex = -1
-  private var comments: [(time: Double, text: String)] = []
+  private var comments: [(id: Int, time: Double, text: String, postedAt: Double?)] = []
+  private var commentPosition = 0.0
+  private let liveCommentDate = { let value = DateFormatter(); value.locale = Locale(identifier:"ja_JP"); value.timeZone = .autoupdatingCurrent; value.dateFormat = "HH:mm:ss"; return value }()
   private var context: [String: Any] = [:], api: NeoAPI?, recording: NeoRecording?
   private var isLive: Bool { context["live"] as? Bool == true }
   private var records: [NeoRecording] = [], rulesLoaded = false, ruleHeading = "関連する録画", ruleError: String?
@@ -456,7 +458,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     panelHeader.frame = CGRect(x: 0, y: panelTop, width: panel.bounds.width, height: panelHeaderHeight)
     // Align the close glyph with the subtitle tab, rather than subtracting
     // landscape safe-area insets twice inside the already separate panel.
-    panelClose.frame = CGRect(x: panel.bounds.width * 5 / 6 - 22, y: 0, width: 44, height: 44)
+    let closeX = traitCollection.userInterfaceIdiom == .pad ? panel.bounds.width - max(8,panel.safeAreaInsets.right) - 44 : panel.bounds.width * 5 / 6 - 22
+    panelClose.frame = CGRect(x: closeX, y: 0, width: 44, height: 44)
     panelClose.isHidden = !wide
     panelTitle.frame = CGRect(x: 14, y: 0, width: max(0, (wide ? panelClose.frame.minX : panel.bounds.width) - 18), height: 44)
     let tabsHeight: CGFloat = 72
@@ -562,7 +565,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     return true
   }
   @objc func updatePlayback(_ running: Bool, current: Int64, duration: Int64) {
-    self.current = current; self.duration = duration
+    self.current = current; self.duration = duration; if !isLive { commentPosition = Double(current) }
     (timeline as? NeoPlayerSeekSlider)?.updateDownloadedRanges(downloadedRanges, duration: Double(duration))
     playButton.setImage(loadingMessage != nil || bufferProgress != nil ? nil : playerIcon(running ? "Pause" : "PlayArrow", side: 60), for: .normal)
     playButton.accessibilityLabel = running ? "一時停止" : "再生"
@@ -605,10 +608,25 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     updateDiagnostics()
   }
   @objc var wantsCommentRows: Bool { panelVisible && tab == "comments" }
+  @objc func updateCommentPosition(_ seconds: Double) {
+    guard seconds.isFinite else { return }; commentPosition = max(0,seconds); followCurrentComment()
+  }
   @objc func setCommentRows(_ rows: [[String: Any]], version: Int) {
-    commentVersion = version; comments = rows.compactMap { row in
-      guard let time = row["time"] as? Double, let text = row["text"] as? String else { return nil }; return (time, text)
-    }; lastCommentIndex = -1; commentList.reloadData()
+    let anchor = commentList.indexPathsForVisibleRows?.first
+    let anchorID = anchor.flatMap { comments.indices.contains($0.row) ? comments[$0.row].id : nil }
+    let delta = anchor.map { commentList.rectForRow(at:$0).minY-commentList.contentOffset.y } ?? 0
+    let previous = comments.indices.contains(lastCommentIndex) ? comments[lastCommentIndex] : nil
+    commentVersion = version; comments = rows.enumerated().compactMap { index,row in
+      guard let time = row["time"] as? Double, let text = row["text"] as? String else { return nil }
+      return (row["id"] as? Int ?? index,time,text,row["postedAt"] as? Double)
+    }
+    if !comments.indices.contains(lastCommentIndex) || previous?.id != comments[lastCommentIndex].id || previous?.time != comments[lastCommentIndex].time || previous?.text != comments[lastCommentIndex].text { lastCommentIndex = -1 }
+    commentList.reloadData(); commentList.layoutIfNeeded()
+    if !followsComments, let anchorID, let index = comments.firstIndex(where: { $0.id == anchorID }) {
+      let y = commentList.rectForRow(at:IndexPath(row:index,section:0)).minY-delta
+      commentList.setContentOffset(CGPoint(x:0,y:max(-commentList.adjustedContentInset.top,min(max(0,commentList.contentSize.height-commentList.bounds.height),y))),animated:false)
+    }
+    followCurrentComment()
   }
   @objc func updateCommentMessage(_ message: String) {
     guard comments.isEmpty else { commentList.backgroundView = nil; return }
@@ -844,7 +862,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private func followCurrentComment() {
     guard panelVisible, tab == "comments", followsComments, !comments.isEmpty else { return }
     var low = 0, high = comments.count
-    while low < high { let mid = (low + high) / 2; if comments[mid].time <= Double(current) { low = mid + 1 } else { high = mid } }
+    while low < high { let mid = (low + high) / 2; if comments[mid].time <= commentPosition { low = mid + 1 } else { high = mid } }
     let index = max(0, low - 1); guard index != lastCommentIndex else { return }; lastCommentIndex = index
     commentList.scrollToRow(at: IndexPath(row: index, section: 0), at: .middle, animated: false)
   }
@@ -870,11 +888,12 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     }
   }
   private func buildCommentSettings() {
+    stack.addArrangedSubview(commentTracks)
     append("コメント", size: 16, bold: true)
     commentStatus.numberOfLines = 0; commentStats.numberOfLines = 0
     stack.addArrangedSubview(commentStatus)
     let row = UIStackView(arrangedSubviews: [NeoStyle.label("コメントを表示"), commentToggle]); row.distribution = .equalSpacing
-    [row, commentSizeLabel, commentSize, commentOpacityLabel, commentOpacity, commentTracks, commentStats].forEach(stack.addArrangedSubview)
+    [row, commentSizeLabel, commentSize, commentOpacityLabel, commentOpacity, commentStats].forEach(stack.addArrangedSubview)
     stack.addArrangedSubview(NeoStyle.button("コメントを再読み込み") { [weak self] in self?.onAction?("interaction"); self?.commentOverlay?.reloadTracks() })
     append("表示・文字サイズ・不透明度の設定はPiPにも反映します。", size: 12, muted: true)
     refreshCommentSettings()
@@ -1132,17 +1151,59 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let cell = tableView.dequeueReusableCell(withIdentifier: "comment", for: indexPath), item = comments[indexPath.row]
     var config = cell.defaultContentConfiguration(); config.textProperties.color = .white
     config.text = item.text; config.textProperties.font = .systemFont(ofSize: 13)
-    config.secondaryText = String(format: "%d:%02d", Int(item.time) / 60, Int(item.time) % 60); config.secondaryTextProperties.color = NeoStyle.muted
+    config.secondaryText = isLive ? item.postedAt.map { liveCommentDate.string(from:Date(timeIntervalSince1970:$0)) } ?? "—" : String(format: "%d:%02d", Int(item.time) / 60, Int(item.time) % 60)
+    config.secondaryTextProperties.color = NeoStyle.muted
     cell.contentConfiguration = config; cell.backgroundColor = NeoStyle.paper; return cell
   }
   func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-    tableView.deselectRow(at: indexPath, animated: true); onAction?("seekto:\(comments[indexPath.row].time)")
+    tableView.deselectRow(at: indexPath, animated: true); guard !isLive else { return }; onAction?("seekto:\(comments[indexPath.row].time)")
   }
   func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { if scrollView === commentList { followsComments = false } }
   @objc func shutdown() { clearTransientNotice(); finishOrientationTransition(); task?.cancel(); relatedTask?.cancel(); logoTask?.cancel(); popup?.dismiss(); onAction = nil }
   deinit { task?.cancel(); relatedTask?.cancel(); logoTask?.cancel() }
 
 #if targetEnvironment(simulator)
+  @objc static func runFeedbackChecks() -> [String:Bool] {
+    let host = UIViewController(), child = UIViewController(), chrome = NeoPlayerChrome(title:"Feedback fixture")
+    host.addChild(child); host.view.addSubview(child.view); child.didMove(toParent:host); child.view.addSubview(chrome)
+    host.setOverrideTraitCollection(UITraitCollection(userInterfaceIdiom:.phone),forChild:child)
+    child.view.frame = CGRect(x:0,y:0,width:844,height:390); chrome.frame = child.view.bounds
+    chrome.showSettings("comments"); chrome.layoutIfNeeded()
+    var checks = ["commentSelectionFirst":chrome.stack.arrangedSubviews.first === chrome.commentTracks,
+      "phoneClosePreserved":abs(chrome.panelClose.frame.midX-chrome.panel.bounds.width*5/6)<0.5,
+      "remainingSettingsOrder":chrome.stack.arrangedSubviews.firstIndex(of:chrome.commentSize)! < chrome.stack.arrangedSubviews.firstIndex(of:chrome.commentOpacity)!]
+    host.setOverrideTraitCollection(UITraitCollection(userInterfaceIdiom:.pad),forChild:child)
+    child.view.frame = CGRect(x:0,y:0,width:1366,height:1024); chrome.frame = child.view.bounds; chrome.setNeedsLayout(); chrome.layoutIfNeeded()
+    checks["padTraitApplied"] = chrome.traitCollection.userInterfaceIdiom == .pad
+    checks["padCloseAtRight"] = abs(chrome.panel.bounds.width-chrome.panelClose.frame.maxX-max(8,chrome.panel.safeAreaInsets.right)) < 0.5
+    checks["closeTouchTarget"] = chrome.panelClose.bounds.size == CGSize(width:44,height:44)
+    chrome.configure(["live":true,"name":"Synthetic live"]); chrome.selectPanel("comments",toggle:false); chrome.layoutIfNeeded()
+    let stamp = 1793404800.0
+    let rows: [[String:Any]] = (0..<100).map { ["id":$0,"time":Double($0),"text":"Live row \($0)","postedAt":stamp+Double($0)] }
+    chrome.updateCommentPosition(50.5); chrome.setCommentRows(rows,version:1)
+    checks["followsActualLivePosition"] = chrome.lastCommentIndex == 50
+    let cell = chrome.tableView(chrome.commentList,cellForRowAt:IndexPath(row:50,section:0))
+    let content = cell.contentConfiguration as? UIListContentConfiguration
+    checks["wallClockDisplayed"] = content?.secondaryText == chrome.liveCommentDate.string(from:Date(timeIntervalSince1970:stamp+50)) && content?.secondaryText?.split(separator:":").count == 3
+    chrome.scrollViewWillBeginDragging(chrome.commentList); chrome.commentList.setContentOffset(CGPoint(x:0,y:1000),animated:false); chrome.commentList.layoutIfNeeded()
+    let anchor = chrome.commentList.indexPathsForVisibleRows?.first
+    let anchorID = anchor.map { chrome.comments[$0.row].id }
+    let before = anchor.map { chrome.commentList.rectForRow(at:$0).minY-chrome.commentList.contentOffset.y }
+    chrome.setCommentRows(Array(rows.dropFirst(10))+[["id":100,"time":100.0,"text":"Next","postedAt":stamp+100]],version:2)
+    if let anchorID, let before, let index = chrome.comments.firstIndex(where: { $0.id == anchorID }) {
+      checks["pastLogAnchorPreserved"] = abs(chrome.commentList.rectForRow(at:IndexPath(row:index,section:0)).minY-chrome.commentList.contentOffset.y-before) < 1
+    } else { checks["pastLogAnchorPreserved"] = false }
+    checks["manualReadingStopsFollowing"] = !chrome.followsComments
+    chrome.updateCommentPosition(80.5); chrome.followButton.sendActions(for:.touchUpInside)
+    checks["returnResumesFollowing"] = chrome.followsComments && chrome.comments[chrome.lastCommentIndex].id == 80
+    chrome.updateCommentPosition(90.5)
+    checks["continuesFollowing"] = chrome.comments[chrome.lastCommentIndex].id == 90
+    chrome.configure([:]); chrome.updatePlayback(false,current:90,duration:120)
+    checks["recordedTimeUnchanged"] = chrome.timeLabel.text == "1:30 / 2:00"
+    let image = UIGraphicsImageRenderer(size:chrome.bounds.size).image { _ in chrome.drawHierarchy(in:chrome.bounds,afterScreenUpdates:true) }
+    try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("feedback-pad-panel.png"))
+    chrome.shutdown(); return checks
+  }
   private func runDiagnosticsChecks() -> [String: Bool] {
     let handler = onAction; onAction = { _ in }; defer { onAction = handler }
     let oldTime = current, oldDuration = duration, oldRemaining = remainingTime, oldStatus = statusLabel.text
@@ -1557,7 +1618,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
 
     showSettings("general"); setNeedsLayout(); layoutIfNeeded()
     let side = abs(panel.frame.width / bounds.width - 1/3) < 0.01 && panel.frame.minX == videoView.frame.maxX
-    let closeAligned = abs(panelClose.frame.midX - categoryButtons[2].frame.midX) < 0.5
+    let closeAligned = traitCollection.userInterfaceIdiom == .pad ? abs(panel.bounds.width-panelClose.frame.maxX-max(8,panel.safeAreaInsets.right)) < 0.5 : abs(panelClose.frame.midX - categoryButtons[2].frame.midX) < 0.5
     let landscapeTabs = panelTabRowsAligned()
 
     frame = CGRect(x: 0, y: 0, width: 390, height: 844); setNeedsLayout(); layoutIfNeeded()

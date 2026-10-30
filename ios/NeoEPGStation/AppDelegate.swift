@@ -20,6 +20,29 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     let window = UIWindow(frame: UIScreen.main.bounds)
     window.rootViewController = NeoShell(); self.window = window; window.makeKeyAndVisible()
 #if targetEnvironment(simulator)
+    if let raw = ProcessInfo.processInfo.environment["NEO_EPG_FEEDBACK_BASE"], let url = URL(string:raw+"/api/videos/1"), let host = window.rootViewController {
+      NeoCommentOverlay.waitBeforePlayback = true; NeoCommentPreference.save("Comments A")
+      UserDefaults.standard.set(true,forKey:"player.comments.enabled")
+      let choice = Int(ProcessInfo.processInfo.environment["NEO_EPG_FEEDBACK_CHOICE"] ?? "2") ?? 2
+      DispatchQueue.main.asyncAfter(deadline:.now()+0.5) {
+        let panelChecks = NeoPlayerChrome.runFeedbackChecks()
+        NeoStreamingDialog.runFeedbackProbe(host:host,source:url,choice:choice) { mode,subtitle,comment,dialogChecks in
+          let player = NeoPlayerController(url:url,title:"Comment selection fixture",username:"",password:"",networkCaching:1000)
+          player.initialPosition = 20; player.aetherOptions = [:]; player.modalPresentationStyle = .fullScreen
+          player.recordingContext = ["baseURL":raw,"id":1,"disableHistory":true,"videoFileType":"encoded","streaming":true,
+            "streamMode":mode,"streamQualities":["1080p"],"streamSubtitleIndex":subtitle,"streamCommentIndex":comment]
+          host.present(player,animated:false) {
+            player.runCommentChoiceProbe { result in
+              var result = result; result["panelChecks"] = panelChecks; result["dialogChecks"] = dialogChecks
+              result["success"] = result["success"] as? Bool == true && panelChecks.values.allSatisfy { $0 } && dialogChecks.values.allSatisfy { $0 }
+              NeoPiPSmoke.save("player-feedback",result)
+              if let export = NeoPlaybackDiagnostics.exportURL(), let data = try? Data(contentsOf:export) { try? data.write(to:NeoPiPSmoke.directory.appendingPathComponent("player-feedback-diagnostics.json")) }
+            }
+          }
+        }
+      }
+      return true
+    }
     if let raw = ProcessInfo.processInfo.environment["NEO_EPG_LIVE_SMOKE"], let base = URL(string:raw), let shell = window.rootViewController as? NeoShell {
       let api = NeoAPI(base:base); api.activate(user:"master",headers:["X-Live-Test":"synthetic"]); shell.smokeUseAPI(api)
       DispatchQueue.main.asyncAfter(deadline:.now()+0.5) {

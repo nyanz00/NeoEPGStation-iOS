@@ -42,6 +42,8 @@ struct NativeComment {
   var text: String, style: CommentStyle
   var position: CommentPoint?, motion: CommentMotion?
   var usesDanmakuTiming = false
+  // Live log display metadata; rendering and seeking remain video-relative.
+  var postedAt: Double? = nil
 
   // Match DPlayer: right edge to completely off the left edge, using the
   // actual rendered text width even after font substitution or resizing.

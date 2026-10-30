@@ -3,15 +3,16 @@ import UIKit
 // Compact centered card, matching RecordedSelectStreamDialog. Captions use
 // the native subtitle path; commentary stays in the shared comment worker.
 final class NeoStreamingDialog: UIViewController {
-  private let file: NeoVideoFile, qualities: [String], start: (Int, Int) -> Void
+  private let file: NeoVideoFile, qualities: [String], start: (Int, Int, Int) -> Void
   private let card = UIView(), scroll = UIScrollView(), stack = UIStackView()
-  private let quality = UIButton(type: .system), subtitle = UIButton(type: .system)
+  private let quality = UIButton(type: .system), subtitle = UIButton(type: .system), danmaku = UIButton(type:.system)
   private let subtitleStatus = NeoStyle.label(size: 12, muted: true)
   private let loader: NeoCommentLoader
   private var watchButton: UIButton?
   private var fieldLabels: [ObjectIdentifier: UILabel] = [:]
+  private var commentTracks: [NativeCommentTrack] = [], selectedComment = -1
   private var mode: Int, selectedSubtitle = -1, tracks: [NativeCommentTrack] = [], closed = false
-  init(file: NeoVideoFile, qualities: [String], source: URL, start: @escaping (Int, Int) -> Void) {
+  init(file: NeoVideoFile, qualities: [String], source: URL, start: @escaping (Int, Int, Int) -> Void) {
     self.file = file; self.qualities = qualities; self.start = start
     loader = NeoCommentLoader(source: source, username: "", password: "")
     let saved = UserDefaults.standard.integer(forKey: "player.streaming.mode."+file.type)
@@ -29,8 +30,8 @@ final class NeoStreamingDialog: UIViewController {
     NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
       stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor), stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
       stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor), stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor)])
-    let title = NeoStyle.label(file.name+" - STREAMING", size: 22, bold: true); title.numberOfLines = 0
-    stack.addArrangedSubview(padded(title, top: 12, bottom: 12, horizontal: 16)); divider()
+    let title = NeoStyle.dialogTitle(file.name+" - STREAMING")
+    stack.addArrangedSubview(padded(title, top: 6, bottom: 6, horizontal: 16)); divider()
     let fields = UIStackView(); fields.axis = .vertical; fields.spacing = 12
     let row = UIStackView(); row.spacing = 12; row.distribution = .fillEqually
     let stream = UIButton(type: .system); let type = file.type == "ts" ? "HLS-TS" : "HLS"
@@ -39,8 +40,11 @@ final class NeoStreamingDialog: UIViewController {
     row.addArrangedSubview(field("ストリーム", button: stream)); row.addArrangedSubview(field("画質", button: quality))
     fields.addArrangedSubview(row); updateQuality()
     if file.type == "encoded" {
-      fields.addArrangedSubview(field("字幕", button: subtitle)); fields.addArrangedSubview(subtitleStatus)
-      subtitle.isEnabled = false; showValue("確認中…", on: subtitle); loadSubtitles()
+      let captions = UIStackView(); captions.spacing = 12; captions.distribution = .fillEqually
+      captions.addArrangedSubview(field("弾幕",button:danmaku)); captions.addArrangedSubview(field("字幕", button: subtitle))
+      fields.addArrangedSubview(captions); fields.addArrangedSubview(subtitleStatus)
+      subtitle.isEnabled = false; danmaku.isEnabled = false
+      showValue("確認中…", on: subtitle); showValue("確認中…",on:danmaku); loadSubtitles()
     }
     let content = padded(fields, top: 16, bottom: 16, horizontal: 24); content.backgroundColor = UIColor.white.withAlphaComponent(0.08)
     stack.addArrangedSubview(content); divider()
@@ -98,15 +102,19 @@ final class NeoStreamingDialog: UIViewController {
   }
   private func loadSubtitles() {
     subtitleStatus.isHidden = true
-    loader.ordinaryTracks { [weak self] result in
+    loader.allTracks { [weak self] result in
       DispatchQueue.main.async {
         guard let self, !self.closed else { return }
         if case .success(let tracks) = result {
-          self.tracks = tracks
+          self.tracks = tracks.filter { !$0.isComment && ["ass","ssa","subrip","srt","webvtt"].contains($0.codecName?.lowercased() ?? "") }
+          self.commentTracks = tracks.filter(\.isComment)
+          if let saved = UserDefaults.standard.object(forKey:"player.streaming.commentIndex") as? Int {
+            self.selectedComment = saved < 0 ? -1 : self.commentTracks.first { $0.subtitleIndex == saved }?.subtitleIndex ?? NeoCommentPreference.preferred(self.commentTracks)?.subtitleIndex ?? -1
+          } else { self.selectedComment = NeoCommentPreference.preferred(self.commentTracks)?.subtitleIndex ?? -1 }
           let saved = UserDefaults.standard.object(forKey: "player.streaming.subtitleIndex") as? Int ?? -1
-          self.selectedSubtitle = tracks.contains { $0.subtitleIndex == saved } ? saved : -1
+          self.selectedSubtitle = self.tracks.contains { $0.subtitleIndex == saved } ? saved : -1
         } else { self.subtitleStatus.text = "字幕を取得できません。字幕なしで視聴できます。"; self.subtitleStatus.isHidden = false }
-        self.subtitle.isEnabled = true; self.watchButton?.isEnabled = true; self.updateSubtitle(); self.view.setNeedsLayout()
+        self.subtitle.isEnabled = true; self.danmaku.isEnabled = true; self.watchButton?.isEnabled = true; self.updateSubtitle(); self.updateDanmaku(); self.view.setNeedsLayout()
       }
     }
   }
@@ -115,6 +123,14 @@ final class NeoStreamingDialog: UIViewController {
     let items = [(-1, "字幕なし")]+tracks.map { ($0.subtitleIndex, $0.displayName) }
     subtitle.menu = UIMenu(children: items.map { index, name in
       UIAction(title: name, state: index == selectedSubtitle ? .on : .off) { [weak self] _ in self?.selectedSubtitle = index; self?.updateSubtitle() }
+    })
+  }
+  private func selectDanmaku(_ index: Int) { selectedComment = index; updateDanmaku() }
+  private func updateDanmaku() {
+    showValue(commentTracks.first { $0.subtitleIndex == selectedComment }?.displayName ?? "弾幕なし",on:danmaku)
+    let items = [(-1,"弾幕なし")]+commentTracks.map { ($0.subtitleIndex,$0.displayName) }
+    danmaku.menu = UIMenu(children:items.map { index,name in
+      UIAction(title:name,state:index == selectedComment ? .on : .off) { [weak self] _ in self?.selectDanmaku(index) }
     })
   }
   override func viewDidLayoutSubviews() {
@@ -131,14 +147,40 @@ final class NeoStreamingDialog: UIViewController {
     guard !closed else { return }; closed = true; loader.close()
     UserDefaults.standard.set(mode, forKey: "player.streaming.mode."+file.type)
     UserDefaults.standard.set(selectedSubtitle, forKey: "player.streaming.subtitleIndex")
-    dismiss(animated: true) { [start, mode, selectedSubtitle] in start(mode, selectedSubtitle) }
+    if file.type == "encoded" { UserDefaults.standard.set(selectedComment,forKey:"player.streaming.commentIndex") }
+    dismiss(animated: true) { [start, mode, selectedSubtitle, selectedComment] in start(mode, selectedSubtitle, selectedComment) }
   }
 #if targetEnvironment(simulator)
+  static func runFeedbackProbe(host: UIViewController, source: URL, choice: Int, completion: @escaping (Int,Int,Int,[String:Bool]) -> Void) {
+    let file = NeoVideoFile(id:1,name:"Fixture",type:"encoded",size:1,filename:nil)
+    var checks = [String:Bool]()
+    let dialog = NeoStreamingDialog(file:file,qualities:["1080p"],source:source) { mode,subtitle,comment in
+      completion(mode,subtitle,comment,checks)
+    }
+    host.present(dialog,animated:false) {
+      var attempts = 0; var timer: Timer?
+      timer = Timer.scheduledTimer(withTimeInterval:0.1,repeats:true) { _ in
+        attempts += 1
+        guard dialog.watchButton?.isEnabled == true || attempts >= 100 else { return }
+        timer?.invalidate(); timer = nil
+        checks["trackListLoaded"] = dialog.commentTracks.count == 2 && dialog.tracks.count == 1
+        dialog.selectDanmaku(choice); dialog.selectedSubtitle = 1; dialog.updateSubtitle(); dialog.view.layoutIfNeeded()
+        checks["independentSelections"] = dialog.selectedSubtitle == 1 && dialog.selectedComment == choice
+        checks["commentValueVisible"] = dialog.fieldLabels[ObjectIdentifier(dialog.danmaku)]?.text == (choice < 0 ? "弾幕なし" : "Comments B")
+        checks["twoCaptionFields"] = dialog.danmaku.superview !== dialog.subtitle.superview && dialog.danmaku.superview?.superview === dialog.subtitle.superview?.superview
+        checks["compactTitle"] = abs((dialog.stack.arrangedSubviews.first?.bounds.height ?? 0)-42) < 1
+        let double = NeoStyle.dialogTitle("One\nTwo"); checks["wrappedTitleHeight"] = abs(double.sizeThatFits(CGSize(width:320,height:.greatestFiniteMagnitude)).height-60)<1
+        let image = UIGraphicsImageRenderer(size:dialog.view.bounds.size).image { _ in dialog.view.drawHierarchy(in:dialog.view.bounds,afterScreenUpdates:true) }
+        try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("feedback-stream-dialog.png"))
+        dialog.watch()
+      }
+    }
+  }
   @objc(runLayoutChecksWithSource:) static func runLayoutChecks(source: URL) -> [String: Bool] {
     let file = NeoVideoFile(id: 1, name: "Synthetic recording", type: "encoded", size: 1, filename: nil)
-    let dialog = NeoStreamingDialog(file: file, qualities: ["1080p", "720p"], source: source) { _, _ in }
+    let dialog = NeoStreamingDialog(file: file, qualities: ["1080p", "720p"], source: source) { _, _, _ in }
     dialog.loadViewIfNeeded(); dialog.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844); dialog.view.layoutIfNeeded()
-    dialog.updateSubtitle()
+    dialog.updateSubtitle(); dialog.updateDanmaku()
     dialog.subtitle.isEnabled = true; dialog.watchButton?.isEnabled = true; dialog.view.setNeedsLayout(); dialog.view.layoutIfNeeded()
     let screenshot = UIGraphicsImageRenderer(size: dialog.view.bounds.size).image { context in dialog.view.layer.render(in: context.cgContext) }
     try? screenshot.pngData()?.write(to: NeoPiPSmoke.directory.appendingPathComponent("streaming-dialog.png"))

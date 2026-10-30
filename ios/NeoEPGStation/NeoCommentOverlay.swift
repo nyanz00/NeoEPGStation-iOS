@@ -31,6 +31,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   private(set) var mixedOpacity = false
   private(set) var tracks: [NativeCommentTrack] = []
   private(set) var selectedIndex: Int?
+  @objc var initialTrackSelection: NSNumber?
   private var metal: MTKView?
   private var renderer: NeoDanmakuRenderer?
   private var loader: NeoCommentLoader?
@@ -55,7 +56,10 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   private var timeline: CommentTimeline?
   @objc var panelVersion: Int { contentVersion * 2 + (ready ? 1 : 0) }
   @objc func panelComments() -> [[String: Any]] {
-    (timeline?.comments ?? []).map { ["time": $0.start, "text": $0.text] }
+    (timeline?.comments ?? []).map {
+      var row: [String:Any] = ["id":$0.id,"time":$0.start,"text":$0.text]
+      if let date = $0.postedAt { row["postedAt"] = date }; return row
+    }
   }
   @objc static var waitBeforePlayback: Bool {
     get { UserDefaults.standard.bool(forKey: "player.comments.waitBeforePlayback") }
@@ -258,6 +262,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
 
   func reloadTracks() {
     guard !closed, let loader = loader else { return }
+    if initialTrackSelection == nil && selectedIndex == -1 { initialTrackSelection = -1 }
     version += 1; let requestVersion = version
     task?.cancel(); task = nil; fullTask?.cancel(); fullTask = nil
     ready = false; settled = false; timeline = nil; rawTimeline = nil; contentVersion += 1; renderer?.reset(); status = "コメントを確認中…"
@@ -268,6 +273,15 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
         switch result {
         case .success(let tracks):
           self.tracks = tracks
+          if let requested = self.initialTrackSelection {
+            self.initialTrackSelection = nil
+            if requested.intValue < 0 { self.selectNone(); return }
+            if let track = tracks.first(where: { $0.subtitleIndex == requested.intValue }) {
+              NeoPlaybackDiagnostics.record("comments.initialSelection",fields:["index":track.subtitleIndex])
+              self.select(track); return
+            }
+            self.settled = true; self.status = "選択した弾幕を取得できません。"; self.finishPreparationIfPossible(); self.onChange?(); return
+          }
           if let first = NeoCommentPreference.preferred(tracks) { self.select(first, remember: false) }
           else { self.settled = true; self.status = "コメント字幕がありません"; self.finishPreparationIfPossible(); self.onChange?() }
         case .failure(let error): self.settled = true; self.status = error.localizedDescription; self.finishPreparationIfPossible(); self.onChange?()
@@ -285,6 +299,13 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     rawTimeline = nil; timeline = nil; renderer?.reset(); clock.reset()
     resumeGate = CommentSeekResumeGate()
     loadWindow(track, at: max(0, timeProvider?() ?? 0))
+  }
+  private func selectNone() {
+    version += 1; contentVersion += 1; task?.cancel(); task = nil; fullTask?.cancel(); fullTask = nil
+    selectedIndex = -1; rawTimeline = nil; timeline = nil; renderer?.reset(); clock.reset()
+    ready = true; settled = true; fullLoaded = true; status = "弾幕なし"; preparationStage = ""
+    NeoPlaybackDiagnostics.record("comments.initialSelection",fields:["index":-1])
+    refreshRendering(); finishPreparationIfPossible(); onChange?()
   }
   private func sourceOpacity(_ incoming: CommentTimeline) {
     guard usesSourceOpacity, !incoming.comments.isEmpty else { return }

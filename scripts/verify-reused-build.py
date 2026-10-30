@@ -18,7 +18,7 @@ subprocess.run(['git', 'diff', '--exit-code', commit, 'HEAD', '--',
                 'App.tsx', 'src', 'ios', 'vendor/vlckit', 'vendor/aether', 'package.json', 'package-lock.json'], check=True, cwd=repository)
 # A checkpoint-only recheck must also retain the private native library,
 # compression sources and their build recipe; ordinary app paths are insufficient.
-if os.environ.get('CHECK_SCOPE') in ('checkpoint-trial', 'checkpoint-player', 'checkpoint-analysis', 'aether-connected', 'aether-recovery'):
+if os.environ.get('CHECK_SCOPE') in ('checkpoint-trial', 'checkpoint-player', 'checkpoint-analysis', 'aether-connected', 'aether-recovery', 'player-feedback'):
     subprocess.run(['git', 'diff', '--exit-code', commit, 'HEAD', '--',
         'vendor/checkpoint', 'vendor/lscomp', 'vendor/rcomp-metal',
         'scripts/build-checkpoint.py', 'scripts/checkpoint_compression_sources.py',
@@ -36,7 +36,7 @@ if Path('ios/NeoEPGStation/NeoPlayerChrome.swift').exists():
     required += ['player-ui-smoke', 'player-playback-smoke']
 full_recheck = os.environ.get('RECHECK_PLAYBACK') == 'true'
 network_probe = os.environ.get('NETWORK_PROBE') == 'true'
-focused = os.environ.get('CHECK_SCOPE') in ('zoom-font', 'ts-comments', 'recovery-ui', 'streaming', 'encoded-seek', 'av1-decoder', 'startup-preroll', 'aether-compare', 'avplayer-compare', 'aether-seek', 'decode-trial', 'checkpoint-trial', 'checkpoint-player', 'checkpoint-analysis', 'aether-connected', 'aether-recovery')
+focused = os.environ.get('CHECK_SCOPE') in ('zoom-font', 'ts-comments', 'recovery-ui', 'streaming', 'encoded-seek', 'av1-decoder', 'startup-preroll', 'aether-compare', 'avplayer-compare', 'aether-seek', 'decode-trial', 'checkpoint-trial', 'checkpoint-player', 'checkpoint-analysis', 'aether-connected', 'aether-recovery', 'player-feedback')
 for name in ([] if full_recheck or network_probe or focused else required):
     result = json.loads((artifact / f'{name}.json').read_text())
     if result.get('success') is not True:
@@ -49,7 +49,8 @@ if not full_recheck and not network_probe and not focused and not json.loads((ar
 if full_recheck or network_probe or focused:
     jobs = json.loads(subprocess.check_output(['gh', 'run', 'view', info['run'], '--json', 'jobs']))['jobs']
     steps = {step['name']: step['conclusion'] for job in jobs for step in job['steps']}
-    for name in ['Native ASS parser and playback clock tests', 'Native UI type checks',
+    foundation = 'Check player feedback models' if os.environ.get('CHECK_SCOPE') == 'player-feedback' else 'Native ASS parser and playback clock tests'
+    for name in [foundation, 'Native UI type checks',
                  'Build device application', 'Verify device FFmpeg import isolation',
                  'Package LiveContainer IPA', 'Build simulator application', 'Verify simulator FFmpeg import isolation']:
         if steps.get(name) != 'success':

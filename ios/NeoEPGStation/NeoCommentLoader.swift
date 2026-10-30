@@ -19,6 +19,7 @@ private struct CommentTextResponse: Decodable { let subtitleText: String }
 private struct JikkyoResponse: Decodable {
   struct Comment: Decodable {
     let time: Double, text: String, color: String, position: String, size: String
+    let postedAt: Double?
   }
   let isSuccess: Bool, source: String, timeBase: String
   let comments: [Comment]
@@ -66,27 +67,26 @@ final class NeoCommentLoader: NSObject, URLSessionTaskDelegate {
       return nil
     }
     let began = ProcessInfo.processInfo.systemUptime
-    return request(source.appendingPathComponent("subtitles")) { [weak self] result in
+    return allTracks { [weak self] result in
       self?.onMetric?("comments.tracks", (ProcessInfo.processInfo.systemUptime-began)*1000, (try? result.get().count) ?? 0)
+      completion(result.map { $0.filter(\.isComment) })
+    }
+  }
+  @discardableResult func allTracks(completion: @escaping (Result<[NativeCommentTrack], Error>) -> Void) -> URLSessionDataTask? {
+    request(source.appendingPathComponent("subtitles")) { result in
       completion(result.flatMap { data in
         do {
-          let items = try JSONDecoder().decode(CommentTrackList.self, from: data).items
-          guard items.allSatisfy({ $0.subtitleIndex >= 0 && $0.streamIndex >= 0 }),
-            Set(items.map(\.subtitleIndex)).count == items.count else { throw CommentLoadError.response }
-          return .success(items.filter(\.isComment))
+          let items = try JSONDecoder().decode(CommentTrackList.self, from:data).items
+          guard items.allSatisfy({ $0.subtitleIndex >= 0 && $0.streamIndex >= 0 }), Set(items.map(\.subtitleIndex)).count == items.count else { throw CommentLoadError.response }
+          return .success(items)
         } catch { return .failure(CommentLoadError.response) }
       })
     }
   }
-
   func ordinaryTracks(completion: @escaping (Result<[NativeCommentTrack], Error>) -> Void) {
-    request(source.appendingPathComponent("subtitles")) { result in
-      completion(result.flatMap { data in
-        do { return .success(try JSONDecoder().decode(CommentTrackList.self, from: data).items.filter { !$0.isComment && ["ass", "ssa", "subrip", "srt", "webvtt"].contains($0.codecName?.lowercased() ?? "") }) }
-        catch { return .failure(error) }
-      })
-    }
+    allTracks { completion($0.map { items in items.filter { !$0.isComment && ["ass","ssa","subrip","srt","webvtt"].contains($0.codecName?.lowercased() ?? "") } }) }
   }
+
   func ordinaryText(index: Int, completion: @escaping (Result<String, Error>) -> Void) {
     request(source.appendingPathComponent("subtitles/\(index)/text")) { result in
       completion(result.flatMap { data in
@@ -149,7 +149,7 @@ final class NeoCommentLoader: NSObject, URLSessionTaskDelegate {
       comments.append(NativeComment(id: comments.count, layer: 0, start: item.time, end: item.time+lifetime,
         text: item.text, style: style, position: nil,
         motion: scrolling ? CommentMotion(from: CommentPoint(x: 1920, y: 20), to: CommentPoint(x: 0, y: 20), start: 0, end: lifetime) : nil,
-        usesDanmakuTiming: true))
+        usesDanmakuTiming: true, postedAt: item.postedAt.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }))
     }
     guard !comments.isEmpty else { throw CommentLoadError.noJikkyo }
     return CommentTimeline(width: 1920, height: 1080, comments: comments)

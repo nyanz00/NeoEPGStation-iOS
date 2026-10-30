@@ -541,6 +541,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.suppressedCommentTracks = [NSMutableSet new];
   self.comments = [[NeoCommentOverlay alloc] initWithFrame:self.movieView.bounds];
   self.comments.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+  self.comments.initialTrackSelection = self.recordingContext[@"streamCommentIndex"];
   self.comments.rateProvider = ^double { return weakSelf.playbackRate; };
   self.comments.timeProvider = ^double { return weakSelf.initialPosition > 0 ? weakSelf.initialPosition : (double)[weakSelf mediaTime] / 1000.0; };
   self.comments.wantsPlaybackProvider = ^BOOL { return weakSelf.wantsPlayback && !weakSelf.playbackEnded && !weakSelf.closing; };
@@ -924,7 +925,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     if ((!self.inputBufferReady && now-self.liveOpenedAt > 25) || (self.inputBufferReady && now-self.liveVideoAt > 5)) { [self retryLive:YES]; }
   }
   if (self.inputBufferReady && self.wantsPlayback) { self.lastObservedTime = MAX(0, self.player.nativeTimeMs); }
-  [self.chrome updatePlayback:self.wantsPlayback current:0 duration:0];
+  [self.chrome updateCommentPosition:[self mediaTime]/1000.0];
+  [self.chrome updatePlayback:self.wantsPlayback current:[self mediaTime]/1000 duration:0];
   [self updateSubtitleSettings];
   CGSize size = self.transportVideoSize;
   VLCMediaVideoTrack *video = self.player.media.videoTracks.firstObject.video;
@@ -2856,6 +2858,24 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 - (void)runLiveProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
   [self pollLiveProbe:0 checks:[NSMutableDictionary new] completion:completion];
+}
+- (void)runCommentChoiceProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion {
+  __block NSInteger attempts = 0; __block NSTimer *timer;
+  timer = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *probe) {
+    attempts++;
+    NSArray *rows = [self.comments panelComments]; BOOL none = [self.recordingContext[@"streamCommentIndex"] integerValue] < 0;
+    BOOL chosen = none ? rows.count == 0 && [self.comments.status isEqual:@"弾幕なし"] : rows.count > 0;
+    if (!none) { for (NSDictionary *row in rows) { chosen &= [row[@"text"] containsString:@"CHOSEN B"]; } }
+    BOOL video = self.inputBufferReady && self.commentPiP.capturedFrameCount > 5 && self.transportPlaying;
+    if (!(video && chosen && self.comments.ready) && attempts < 120) { return; }
+    [timer invalidate]; timer = nil;
+    NSDictionary *checks = @{@"selectedBeforePlayback":@(chosen && self.comments.ready),@"actualVideo":@(video),
+      @"nativeHLS":@(self.aether != nil && [self isStreaming]),@"ordinarySubtitleSeparate":@([self.recordingContext[@"streamSubtitleIndex"] integerValue] == 1),
+      @"resumedWholeFileClock":@([self mediaTime] >= 20000)};
+    BOOL all = YES; for (NSNumber *value in checks.allValues) { all &= value.boolValue; }
+    completion(@{@"success":@(all),@"checks":checks,@"requested":self.recordingContext[@"streamCommentIndex"] ?: @(-99),@"rowCount":@(rows.count)});
+    [self closePlayer];
+  }];
 }
 - (void)pollLiveProbe:(NSInteger)phase checks:(NSMutableDictionary *)checks completion:(void (^)(NSDictionary *))completion {
   __block NSInteger attempts = 0; __block NSTimer *probe;

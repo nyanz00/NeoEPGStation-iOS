@@ -35,6 +35,14 @@ enum NeoStyle {
     label.font = .systemFont(ofSize: size, weight: bold ? .bold : .regular)
     label.lineBreakMode = .byTruncatingTail; return label
   }
+  // Web DialogTitle: 20px, weight 700, line-height 1.5, vertical padding 6px.
+  static func dialogTitle(_ text: String) -> UILabel {
+    let value = label(size:20,bold:true); value.numberOfLines = 0
+    let paragraph = NSMutableParagraphStyle(); paragraph.minimumLineHeight = 30; paragraph.maximumLineHeight = 30
+    paragraph.lineBreakMode = .byWordWrapping
+    value.attributedText = NSAttributedString(string:text,attributes:[.font:value.font!, .foregroundColor:UIColor.white, .paragraphStyle:paragraph])
+    return value
+  }
   static func iconButton(_ name: String, label: String, action: @escaping () -> Void) -> UIButton {
     let button = UIButton(type: .system); button.setImage(NeoIcon.image(name), for: .normal)
     button.tintColor = .white; button.accessibilityLabel = label

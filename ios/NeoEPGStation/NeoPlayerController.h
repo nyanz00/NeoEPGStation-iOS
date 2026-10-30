@@ -14,6 +14,7 @@ NS_ASSUME_NONNULL_BEGIN
                   username:(NSString *)username password:(NSString *)password
             networkCaching:(NSInteger)networkCaching;
 #if TARGET_OS_SIMULATOR
+- (void)runCommentChoiceProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runCommentChoiceProbe(completion:));
 - (void)runLiveProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runLiveProbe(completion:));
 - (void)runAetherConnectedProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runAetherConnectedProbe(completion:));
 - (void)runEncodedSeekProbeWithCompletion:(void (^)(NSDictionary<NSString *, id> *))completion NS_SWIFT_NAME(runEncodedSeekProbe(completion:));

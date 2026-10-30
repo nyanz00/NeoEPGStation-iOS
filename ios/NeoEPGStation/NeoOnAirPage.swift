@@ -215,15 +215,9 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     guard let config = shell.serverConfig else { alert("配信設定を取得できませんでした。更新して再試行してください。"); return }
     let options = NeoLiveOption.available(config)
     let dialog = NeoLiveStreamDialog(title:schedule.channel.name,options:options)
-    dialog.onWatch = { [weak self, weak shell] selected, external in
+    dialog.onWatch = { [weak self, weak shell] selected in
       guard let self else { return }
-      if external, let scheme = config.urlscheme?["m2ts"]?["ios"] {
-        let url = selected.url(api:api,channel:schedule.channel.id), raw = String(url.absoluteString.dropFirst((url.scheme?.count ?? 0)+3))
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn:"-_.!~*'()"))
-        let address = scheme.contains("vlc-x-callback") ? raw.addingPercentEncoding(withAllowedCharacters:allowed) ?? raw : raw
-        let value = scheme.replacingOccurrences(of:"PROTOCOL",with:url.scheme ?? "http").replacingOccurrences(of:"ADDRESS",with:address)
-        if let target = URL(string:value) { UIApplication.shared.open(target) }
-      } else { shell?.playLive(schedule,option:selected,options:options,schedules:self.schedules,api:api) }
+      shell?.playLive(schedule,option:selected,options:options,schedules:self.schedules,api:api)
     }
     present(dialog,animated:true)
   }
@@ -240,6 +234,8 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     DispatchQueue.main.asyncAfter(deadline:.now()+0.5) { [weak self] in
       guard let self, let dialog = self.presentedViewController as? NeoLiveDialog else { checks["dialogPresented"] = false; completion(checks); return }
       dialog.view.layoutIfNeeded(); checks["dialogCompact"] = dialog.smokeCompact
+      checks["dialogTitleMatchesWeb"] = abs(dialog.smokeTitleHeight-42)<1
+      checks["nativePlaybackOnly"] = dialog.smokeNativeOnly
       let image = UIGraphicsImageRenderer(bounds:dialog.view.bounds).image { _ in dialog.view.drawHierarchy(in:dialog.view.bounds,afterScreenUpdates:true) }
       try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("live-dialog.png"))
       dialog.dismiss(animated:false) { completion(checks) }
@@ -258,6 +254,11 @@ class NeoLiveDialog: UIViewController {
   required init?(coder: NSCoder) { fatalError() }
 #if targetEnvironment(simulator)
   var smokeCompact: Bool { card.bounds.height < 400 && card.bounds.width <= 444 && card.frame.minY > 0 }
+  var smokeTitleHeight: CGFloat { contentFill.frame.minY }
+  var smokeNativeOnly: Bool {
+    func hasSwitch(_ view: UIView) -> Bool { view is UISwitch || view.subviews.contains(where:hasSwitch) }
+    return !hasSwitch(view)
+  }
 #endif
   override func loadView() {
     view = UIView(); view.backgroundColor = .black.withAlphaComponent(0.5)
@@ -269,7 +270,7 @@ class NeoLiveDialog: UIViewController {
     stack.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:scroll.contentLayoutGuide.leadingAnchor),stack.trailingAnchor.constraint(equalTo:scroll.contentLayoutGuide.trailingAnchor),
       stack.topAnchor.constraint(equalTo:scroll.contentLayoutGuide.topAnchor),stack.bottomAnchor.constraint(equalTo:scroll.contentLayoutGuide.bottomAnchor),stack.widthAnchor.constraint(equalTo:scroll.frameLayoutGuide.widthAnchor)])
-    headingLabel.text = heading; headingLabel.numberOfLines = 0
+    headingLabel.attributedText = NeoStyle.dialogTitle(heading).attributedText; headingLabel.numberOfLines = 0
   }
   func addText(_ text: String, bold: Bool = false) {
     loadViewIfNeeded(); guard !text.isEmpty else { return }; let label = NeoStyle.label(text,size:bold ? 20 : 14,bold:bold,muted:!bold); label.numberOfLines = 0; stack.addArrangedSubview(label)
@@ -290,10 +291,10 @@ class NeoLiveDialog: UIViewController {
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews(); let width = min(444,max(0,view.bounds.width-24))
     let content = stack.systemLayoutSizeFitting(CGSize(width:width-48,height:UIView.layoutFittingCompressedSize.height),withHorizontalFittingPriority:.required,verticalFittingPriority:.fittingSizeLevel).height
-    let header = max(40,headingLabel.sizeThatFits(CGSize(width:width-48,height:.greatestFiniteMagnitude)).height+16)
+    let header = headingLabel.sizeThatFits(CGSize(width:width-48,height:.greatestFiniteMagnitude)).height+12
     let height = min(max(200,header+content+92),max(200,view.bounds.height-view.safeAreaInsets.top-view.safeAreaInsets.bottom-32))
     card.frame = CGRect(x:(view.bounds.width-width)/2,y:(view.bounds.height-height)/2,width:width,height:height)
-    headingLabel.frame = CGRect(x:24,y:8,width:width-48,height:header-16)
+    headingLabel.frame = CGRect(x:24,y:6,width:width-48,height:header-12)
     contentFill.frame = CGRect(x:0,y:header,width:width,height:height-header-60)
     topLine.frame = CGRect(x:0,y:header,width:width,height:1); bottomLine.frame = CGRect(x:0,y:height-60,width:width,height:1)
     scroll.frame = CGRect(x:24,y:header+16,width:width-48,height:max(0,height-header-92)); actions.frame = CGRect(x:12,y:height-54,width:width-24,height:48)
@@ -304,35 +305,27 @@ private final class NeoLiveStreamDialog: NeoLiveDialog {
   private let options: [NeoLiveOption]
   private var selected: NeoLiveOption?
   private var stream: UIButton!, quality: UIButton!
-  private let external = UISwitch()
-  var onWatch: ((NeoLiveOption,Bool) -> Void)?
+  var onWatch: ((NeoLiveOption) -> Void)?
   init(title: String, options: [NeoLiveOption]) {
     self.options = options
     selected = options.first { $0.type == UserDefaults.standard.string(forKey:"live.type") && $0.mode == UserDefaults.standard.integer(forKey:"live.mode") } ?? options.first
     super.init(title:title)
     let fields = UIStackView(); fields.spacing = 14; fields.distribution = .fillEqually
     stream = addChoice("ストリーム",container:fields); quality = addChoice("画質",container:fields); addView(fields)
-    let row = UIStackView(arrangedSubviews:[external,NeoStyle.label("外部アプリで開く")]); row.alignment = .center; row.spacing = 10
-    external.onTintColor = NeoStyle.accent; addView(row)
-    external.addAction(UIAction { [weak self] _ in
-      guard let self else { return }
-      if self.external.isOn { self.selected = self.options.first { $0.type == "m2ts" } }
-      self.updateChoices()
-    },for:.valueChanged)
     if options.isEmpty { addText("利用できる視聴設定がありません。") }
     addAction("キャンセル") { [weak self] in self?.dismiss(animated:true) }
     addAction("視聴",filled:true,enabled:!options.isEmpty) { [weak self] in
       guard let self, let value = self.selected else { return }
       UserDefaults.standard.set(value.type,forKey:"live.type"); UserDefaults.standard.set(value.mode,forKey:"live.mode")
-      let callback = self.onWatch, outside = self.external.isOn
-      self.dismiss(animated:true) { callback?(value,outside) }
+      let callback = self.onWatch
+      self.dismiss(animated:true) { callback?(value) }
     }
     updateChoices()
   }
   required init?(coder: NSCoder) { fatalError() }
   private func updateChoices() {
     stream.setTitle((selected?.label ?? "")+" ▾",for:.normal); quality.setTitle((selected?.quality ?? "")+" ▾",for:.normal)
-    let types = ["m2ts","m2tsll"].filter { type in options.contains { $0.type == type } && (!external.isOn || type == "m2ts") }
+    let types = ["m2ts","m2tsll"].filter { type in options.contains { $0.type == type } }
     stream.menu = UIMenu(children:types.map { type in UIAction(title:type == "m2tsll" ? "M2TS-LL" : "M2TS",state:type == selected?.type ? .on : .off) { [weak self] _ in
       guard let self else { return }; self.selected = self.options.first { $0.type == type }; self.updateChoices()
     } })

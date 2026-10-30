@@ -471,7 +471,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     historyReturnSnapshot = origin; historyReturnRevision = fromHistory ? api?.identityRevision : nil
     list.locate(id, page: position.page, userID: position.userId); list.view.setNeedsLayout()
   }
-  func play(_ file: NeoVideoFile, recording: NeoRecording, fromBeginning: Bool = false, streaming: Int? = nil, streamSubtitle: Int? = nil, onPrepared: (() -> Void)? = nil) {
+  func play(_ file: NeoVideoFile, recording: NeoRecording, fromBeginning: Bool = false, streaming: Int? = nil, streamSubtitle: Int? = nil, streamComment: Int? = nil, onPrepared: (() -> Void)? = nil) {
     guard player == nil, !preparingPlay, let api else { onPrepared?(); return }
     guard api.accountReady else {
       (active?.topViewController as? NeoPage)?.alert("アクティブユーザーの確認が必要です。設定のアカウントで確認してください。")
@@ -494,8 +494,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         catch {
           guard self.api === api, api.identityRevision == revision, active?.topViewController === origin else { return }
           let alert = UIAlertController(title: "再生位置を取得できません", message: error.localizedDescription, preferredStyle: .alert)
-          alert.addAction(UIAlertAction(title: "再試行", style: .default) { [weak self] _ in self?.play(file, recording: recording, streaming: streaming, streamSubtitle: streamSubtitle) })
-          alert.addAction(UIAlertAction(title: "最初から再生", style: .default) { [weak self] _ in self?.play(file, recording: recording, fromBeginning: true, streaming: streaming, streamSubtitle: streamSubtitle) })
+          alert.addAction(UIAlertAction(title: "再試行", style: .default) { [weak self] _ in self?.play(file, recording: recording, streaming: streaming, streamSubtitle: streamSubtitle, streamComment: streamComment) })
+          alert.addAction(UIAlertAction(title: "最初から再生", style: .default) { [weak self] _ in self?.play(file, recording: recording, fromBeginning: true, streaming: streaming, streamSubtitle: streamSubtitle, streamComment: streamComment) })
           alert.addAction(UIAlertAction(title: "キャンセル", style: .cancel)); origin?.present(alert, animated: true); return
         }
       }
@@ -522,11 +522,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
 #if targetEnvironment(simulator)
       if let probe = checkpointAnalysisProbe { probe(decision); return }
 #endif
-      presentPlayer(file, recording: recording, api: api, user: user, start: start, streaming: streaming, streamSubtitle: streamSubtitle,
+      presentPlayer(file, recording: recording, api: api, user: user, start: start, streaming: streaming, streamSubtitle: streamSubtitle, streamComment: streamComment,
         experiment: experiment, checkpointDecision: decision)
     }
   }
-  private func presentPlayer(_ file: NeoVideoFile, recording: NeoRecording, api: NeoAPI, user: String, start: Double, streaming: Int?, streamSubtitle: Int?,
+  private func presentPlayer(_ file: NeoVideoFile, recording: NeoRecording, api: NeoAPI, user: String, start: Double, streaming: Int?, streamSubtitle: Int?, streamComment: Int?,
     experiment: NeoPlaybackExperiment, checkpointDecision: NeoCheckpointDecision?) {
     if (experiment == .decodeTrial || experiment == .checkpointTrial), experiment.applies(fileType: file.type, streaming: streaming != nil, recording: recording.isRecording) {
       let controller = NeoDecodeTrialController(source: api.url("/videos/\(file.id)"), checkpoint: experiment == .checkpointTrial)
@@ -560,6 +560,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       var context = controller.recordingContext ?? [:]
       context["streaming"] = true; context["streamMode"] = mode; context["streamQualities"] = qualities
       if file.type == "encoded", let streamSubtitle { context["streamSubtitleIndex"] = streamSubtitle }
+      if file.type == "encoded", let streamComment { context["streamCommentIndex"] = streamComment }
       controller.recordingContext = context
     }
     controller.modalPresentationStyle = .fullScreen; player = controller

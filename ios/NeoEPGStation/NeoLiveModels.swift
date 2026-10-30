@@ -104,7 +104,11 @@ enum NeoLiveCommentCommand {
       else if value == "naka" { position = "right" }
       else if ["big","small","medium"].contains(value) { size = value }
     }
-    return ["time":max(0,time),"text":text,"color":color,"position":position,"size":size]
+    var value: [String:Any] = ["time":max(0,time),"text":text,"color":color,"position":position,"size":size]
+    let date = (chat["date"] as? NSNumber)?.doubleValue ?? Double(chat["date"] as? String ?? "") ?? 0
+    let micros = (chat["date_usec"] as? NSNumber)?.doubleValue ?? Double(chat["date_usec"] as? String ?? "") ?? 0
+    if date.isFinite && date > 0 { value["postedAt"] = date + (micros.isFinite ? min(999999,max(0,micros))/1_000_000 : 0) }
+    return value
   }
 }
 
