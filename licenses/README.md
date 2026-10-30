@@ -11,3 +11,7 @@ AlphaA is an app-authored path.
 
 - https://github.com/google/material-design-icons
 - https://github.com/Templarian/MaterialDesign
+
+The live station flame and pin paths use the matching Google Material Design
+24px outlined/filled sources in `src/maps/local_fire_department/` and
+`src/content/push_pin/` (same Apache-2.0 license).

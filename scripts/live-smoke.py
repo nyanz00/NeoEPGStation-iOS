@@ -63,6 +63,7 @@ for codec in ['mpeg2video','libx264']:
             path=urlparse(self.path).path;query=parse_qs(urlparse(self.path).query)
             if path.startswith('/ws/'):
                 self.websocket(path);return
+            if path.endswith('/logo'):self.json({},404);return
             if path.startswith('/api/') and self.headers.get('X-Live-Test')!='synthetic' and path!='/api/live-test-fault':
                 events.append({'authMissing':path});self.json({},403);return
             if path=='/api/config':
@@ -128,7 +129,7 @@ for codec in ['mpeg2video','libx264']:
     server=ThreadingHTTPServer(('127.0.0.1',0),Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
     try:
         subprocess.run(['xcrun','simctl','terminate',device,bundle],capture_output=True)
-        for name in ['live-smoke.json','live-diagnostics.json','live-onair.png','live-dialog.png']:(documents/name).unlink(missing_ok=True)
+        for name in ['live-smoke.json','live-diagnostics.json','live-onair.png','live-dialog.png','live-player.png']:(documents/name).unlink(missing_ok=True)
         env=os.environ.copy();env['SIMCTL_CHILD_NEO_EPG_LIVE_SMOKE']=f'http://127.0.0.1:{server.server_port}'
         subprocess.check_call(['xcrun','simctl','launch',device,bundle],env=env,timeout=30)
         deadline=time.monotonic()+155
@@ -139,9 +140,10 @@ for codec in ['mpeg2video','libx264']:
             'faultRefused':any('injected503' in e for e in events),'streamReleasedOnExit':active[0]==0,
             'noRangeOrOverride':all(not e.get('range') and set(e.get('query',{}))=={'mode','quality'} for e in events if 'open' in e),
             'noOriginAuthOnWS':not any(e.get('socketAuthLeaked') or e.get('authMissing') for e in events),
-            'watchPong':any(e.get('watchCommand')=='pong' for e in events),'keepSeat':any(e.get('watchCommand')=='keepSeat' for e in events)}
+            'watchPong':any(e.get('watchCommand')=='pong' for e in events),'keepSeat':any(e.get('watchCommand')=='keepSeat' for e in events),
+            'socketsReleasedOnExit':sum('socketOpen' in e for e in events)==sum('socketClosed' in e for e in events)}
         report['serverChecks']=checks;report['maximumConcurrentStreams']=max_active[0];report['success']=report.get('success',False) and all(checks.values())
-        for name in ['live-diagnostics.json','live-onair.png','live-dialog.png']:
+        for name in ['live-diagnostics.json','live-onair.png','live-dialog.png','live-player.png']:
             if (documents/name).exists():shutil.copy2(documents/name,dist/f'live-{codec}-{name}')
         (dist/f'live-{codec}.json').write_text(json.dumps({'result':report,'events':events},indent=2))
         results.append(report);print(codec,json.dumps(report),flush=True)

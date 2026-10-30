@@ -279,7 +279,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 @property (nonatomic) NSTimer *liveRetryTimer;
 @property (nonatomic) NSInteger liveGeneration, liveAttempts;
 @property (nonatomic) NSTimeInterval liveOpenedAt, liveVideoAt;
-@property (nonatomic) NSUInteger liveDecoded;
+@property (nonatomic) NSUInteger liveDecoded, liveDecodedAudio;
 @property (nonatomic) NeoStreamingSubtitles *streamingSubtitles;
 @property (nonatomic) NSMutableSet<NSURL *> *attachedSubtitles;
 @property (nonatomic) BOOL streamSubtitleUserSelected;
@@ -843,7 +843,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.awaitingEndpoint = YES; self.inputBufferReady = NO; self.buffering = YES;
   self.playbackFailed = NO; self.playbackEnded = NO; self.inputStartTime = 0;
   self.initialPosition = 0; self.lastObservedTime = 0; self.lastObservedLength = 0;
-  self.liveDecoded = 0; self.liveOpenedAt = CACurrentMediaTime(); self.liveVideoAt = self.liveOpenedAt;
+  self.liveDecoded = 0; self.liveDecodedAudio = 0; self.liveOpenedAt = CACurrentMediaTime(); self.liveVideoAt = self.liveOpenedAt;
   self.player.audio.muted = YES; [self stopTransport];
   [self.comments configureLive]; [self.commentPiP seekDiscontinuity:0];
   [NeoVLCFrameTap clearARIBView:self.movieView]; self.aribClock = [NeoARIBCaptionClock new];
@@ -860,9 +860,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.live.onCommentStatus = ^(NSString *status) {
     if (owner.liveGeneration == generation) { [owner.comments updateLiveStatus:status]; }
   };
-  self.live.onSourceData = ^(NSData *data, int64_t offset) {
-    if (owner.liveGeneration == generation) { [owner.aribClock observeData:data offset:offset]; }
-  };
+  NeoARIBCaptionClock *clock = self.aribClock;
+  self.live.onSourceData = ^(NSData *data, int64_t offset) { [clock observeData:data offset:offset]; };
   self.live.onMetadata = ^(NSDictionary *metadata) {
     if (!owner || owner.liveGeneration != generation || owner.closing) { return; }
     NSMutableDictionary *context = [owner.recordingContext mutableCopy]; [context addEntriesFromDictionary:metadata];
@@ -895,7 +894,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.inputBufferReady = NO; self.buffering = YES; self.awaitingEndpoint = YES;
   [NeoPlaybackDiagnostics record:@"live.reconnect" fields:@{@"attempt": @(self.liveAttempts+1), @"retryable": @(retryable)}];
   if (!retryable || self.liveAttempts >= 8) {
-    self.playbackFailed = YES; self.buffering = NO; self.awaitingEndpoint = NO;
+    self.playbackFailed = YES; self.wantsPlayback = NO; self.buffering = NO; self.awaitingEndpoint = NO;
     self.statusLabel.text = retryable ? @"接続できませんでした。再生ボタンで再試行できます。" : @"再生中にエラーが発生しました。";
   } else {
     NSTimeInterval delay = MIN(15, pow(2, self.liveAttempts++));
@@ -911,9 +910,12 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if (self.closing) { return; }
   NSTimeInterval now = CACurrentMediaTime();
   NSUInteger decoded = self.player.media.statistics.decodedVideo;
-  BOOL fresh = decoded > self.liveDecoded && self.transportState == VLCMediaPlayerStatePlaying;
+  NSUInteger decodedAudio = self.player.media.statistics.decodedAudio;
+  BOOL audioOnly = self.transportVideoSize.height <= 0 && self.player.media.videoTracks.count == 0 &&
+    self.player.media.audioTracks.count > 0 && now-self.liveOpenedAt > 3;
+  BOOL fresh = (decoded > self.liveDecoded || (audioOnly && decodedAudio > self.liveDecodedAudio)) && self.transportState == VLCMediaPlayerStatePlaying;
   if (fresh && !self.awaitingEndpoint && !self.liveRetryTimer && self.wantsPlayback && !self.playbackFailed) {
-    self.liveDecoded = decoded; self.liveVideoAt = now; self.liveAttempts = 0;
+    self.liveDecoded = decoded; self.liveDecodedAudio = decodedAudio; self.liveVideoAt = now; self.liveAttempts = 0;
     self.inputBufferReady = YES; self.buffering = NO; self.player.audio.muted = NO;
     self.statusLabel.text = @"放映中 · 再生中";
     [self.chrome updateBuffering:NO progress:1];
@@ -965,6 +967,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     [NSURLQueryItem queryItemWithName:@"quality" value:context[@"liveQuality"]]];
   if (!parts.URL) { return YES; }
   self.recordingContext = context; self.sourceURL = parts.URL; [self.chrome configure:context];
+  [NSUserDefaults.standardUserDefaults setObject:context[@"liveType"] forKey:@"live.type"];
+  [NSUserDefaults.standardUserDefaults setInteger:[context[@"liveMode"] integerValue] forKey:@"live.mode"];
   self.wantsPlayback = YES; self.liveAttempts = 0; [self startLive]; return YES;
 }
 - (void)performPlayerAction:(NSString *)action {
@@ -1179,7 +1183,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     else if (self.networkFlow.holding) { message = @"通信を待機中"; }
     else if (self.networkFlow.verifying) { message = @"映像を再開中"; }
     else if (self.awaitingEndpoint || self.transportState == VLCMediaPlayerStateOpening ||
-      (self.wantsPlayback && self.commentPiP.capturedFrameCount == 0)) { message = @"動画を読み込み中"; }
+      (self.wantsPlayback && ![self isLive] && self.commentPiP.capturedFrameCount == 0)) { message = @"動画を読み込み中"; }
   }
   if (self.playbackEnded || self.playbackFailed || self.closing) { [self.chrome updateBuffering:NO progress:1]; }
   [self.chrome updateLoading:message];
@@ -2857,8 +2861,15 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   __block NSInteger attempts = 0; __block NSTimer *probe;
   probe = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) {
     attempts++;
+    NSUInteger captionRegions = 0;
+    if (phase == 0 && self.player.textTracks.count > 0) {
+      VLCMediaPlayerTrack *track = self.player.textTracks.firstObject;
+      if (![NeoSubtitlePreference.savedName isEqual:track.trackName]) { [NeoSubtitlePreference save:track.trackName ?: @"字幕"]; self.subtitleSignature = nil; [self updateSubtitleSettings]; }
+      UIView *caption = [self aribSubtitleView:self.movieView];
+      @try { captionRegions = [[[caption valueForKey:@"pendingSubpicture"] valueForKey:@"regions"] count]; } @catch (NSException *error) {}
+    }
     BOOL ready = self.inputBufferReady && !self.buffering && self.player.media.statistics.decodedVideo > 5 && self.commentPiP.capturedFrameCount > 3;
-    if (phase == 0) { ready &= self.live.commentCount > 2; }
+    if (phase == 0) { ready &= self.live.commentCount > 2 && captionRegions > 0; }
     if (!ready && attempts < 120) { return; }
     [probe invalidate]; probe = nil;
     checks[[NSString stringWithFormat:@"phase%ld.videoReady",(long)phase]] = @(ready);
@@ -2866,6 +2877,12 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     if (!ready) { completion(@{@"success":@NO,@"checks":checks,@"phase":@(phase),@"state":@(self.transportState),@"time":@([self mediaTime]),@"comments":@(self.live.commentCount)}); return; }
     if (phase == 0) {
       checks[@"realtimeComments"] = @(self.live.commentCount > 2 && self.comments.ready);
+      BOOL backlog = NO; for (NSDictionary *row in [self.comments panelComments]) { backlog |= [row[@"text"] containsString:@"BACKLOG"]; }
+      checks[@"historicalMessagesExcluded"] = @(!backlog);
+      checks[@"nativeARIBTrack"] = @(self.player.textTracks.count > 0);
+      checks[@"nativeARIBVisible"] = @(captionRegions > 0);
+      UIImage *image = [[[UIGraphicsImageRenderer alloc] initWithSize:self.view.bounds.size] imageWithActions:^(UIGraphicsImageRendererContext *context) { [self.view drawViewHierarchyInRect:self.view.bounds afterScreenUpdates:YES]; }];
+      [UIImagePNGRepresentation(image) writeToURL:[[NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject URLByAppendingPathComponent:@"live-player.png"] atomically:YES];
       [self.commentPiP beginCompositionSmoke];
       [self setPlaybackIntent:NO];
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.5*NSEC_PER_SEC)),dispatch_get_main_queue(),^{

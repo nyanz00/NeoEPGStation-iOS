@@ -3,6 +3,7 @@ import UIKit
 private final class NeoOnAirCell: UICollectionViewCell {
   private let logo = UIImageView(), station = NeoStyle.label(size:16,bold:true)
   private let wave = NeoStyle.label(size:12,muted:true), force = NeoStyle.label(size:12,bold:true)
+  private let fallback = NeoStyle.label(size:12,bold:true,muted:true)
   private let fire = UIImageView(), title = NeoStyle.label(size:16,bold:true)
   private let times = NeoStyle.label(size:12,muted:true), summary = NeoStyle.label(size:13,muted:true)
   private let info = UIButton(type:.custom), watch = UIButton(type:.custom), pin = UIButton(type:.system)
@@ -14,8 +15,8 @@ private final class NeoOnAirCell: UICollectionViewCell {
     super.init(frame:frame)
     contentView.backgroundColor = NeoStyle.paper; contentView.layer.cornerRadius = 6
     contentView.layer.borderWidth = 1; contentView.layer.borderColor = NeoStyle.border.cgColor; contentView.clipsToBounds = true
-    logo.contentMode = .scaleAspectFit
-    [logo,station,wave,force,fire,title,times,summary,info,watch,pin,track].forEach(contentView.addSubview)
+    logo.contentMode = .scaleAspectFit; fallback.textAlignment = .center
+    [logo,fallback,station,wave,force,fire,title,times,summary,info,watch,pin,track].forEach(contentView.addSubview)
     [logo,station,wave,force,fire,title,times,summary].forEach { $0.isUserInteractionEnabled = false }
     title.numberOfLines = 1; summary.numberOfLines = 2
     track.backgroundColor = NeoStyle.border; progress.backgroundColor = NeoStyle.accent; track.addSubview(progress)
@@ -26,14 +27,15 @@ private final class NeoOnAirCell: UICollectionViewCell {
   required init?(coder: NSCoder) { fatalError() }
   override func prepareForReuse() { super.prepareForReuse(); imageTask?.cancel(); imageTask = nil; imageID += 1; logo.image = nil; logoChannel = -1 }
   func configure(_ schedule: NeoLiveSchedule, force amount: Int?, pinned: Bool, api: NeoAPI, now: Double) {
+    fallback.text = schedule.channel.waveLabel; fallback.isHidden = schedule.channel.hasLogoData == true
     station.text = schedule.channel.name
     wave.text = schedule.channel.waveLabel+(schedule.channel.remoteControlKeyId.map { " \($0)" } ?? "")
     force.text = (amount.map { NumberFormatter.localizedString(from:NSNumber(value:$0),number:.decimal) } ?? "--")+" コメ/分"
     // OnAirPage.forceColor, MUI dark warning.main orange[400], error.main red[500].
     let color: UIColor = (amount ?? 0) < 100 ? NeoStyle.muted : amount! < 200 ? NeoStyle.accent : amount! < 500 ?
       UIColor(red:255/255,green:167/255,blue:38/255,alpha:1) : UIColor(red:244/255,green:67/255,blue:54/255,alpha:1)
-    force.textColor = color; fire.tintColor = color; fire.image = NeoIcon.image("LocalFireDepartmentOutlined") ?? UIImage(systemName:"flame")
-    pin.setImage(UIImage(systemName:pinned ? "pin.fill" : "pin"),for:.normal); pin.tintColor = pinned ? NeoStyle.accent : NeoStyle.muted
+    force.textColor = color; fire.tintColor = color; fire.image = NeoIcon.image("LocalFireDepartmentOutlined")
+    pin.setImage(NeoIcon.image(pinned ? "PushPin" : "PushPinOutlined"),for:.normal); pin.tintColor = pinned ? NeoStyle.accent : NeoStyle.muted
     pin.accessibilityLabel = schedule.channel.name+(pinned ? "のピン留めを解除" : "をピン留め")
     watch.accessibilityLabel = schedule.channel.name+"を視聴"; info.accessibilityLabel = schedule.channel.name+"の番組詳細を開く"
     if let program = schedule.program {
@@ -62,6 +64,7 @@ private final class NeoOnAirCell: UICollectionViewCell {
     title.numberOfLines = tablet ? 2 : 1; summary.numberOfLines = tablet ? 3 : 2
     let head: CGFloat = tablet ? 62 : 54, logoWidth: CGFloat = tablet ? 68 : 58
     logo.frame = CGRect(x:inset,y:12,width:logoWidth,height:tablet ? 38 : 34)
+    fallback.frame = logo.frame
     let x = inset+logoWidth+8, available = max(0,bounds.width-x-42)
     station.frame = CGRect(x:x,y:5,width:available,height:22)
     wave.sizeToFit(); let waveWidth = min(available,wave.intrinsicContentSize.width)
@@ -69,9 +72,9 @@ private final class NeoOnAirCell: UICollectionViewCell {
     fire.frame = CGRect(x:x+waveWidth+6,y:29,width:15,height:15)
     force.frame = CGRect(x:fire.frame.maxX+2,y:28,width:max(0,bounds.width-fire.frame.maxX-12),height:18)
     pin.frame = CGRect(x:bounds.width-42,y:9,width:34,height:34)
-    title.frame = CGRect(x:inset,y:head,width:bounds.width-2*inset,height:tablet ? 44 : 23)
+    title.frame = CGRect(x:inset,y:head,width:bounds.width-2*inset,height:min(tablet ? 44 : 23,title.sizeThatFits(CGSize(width:bounds.width-2*inset,height:.greatestFiniteMagnitude)).height))
     times.frame = CGRect(x:inset,y:title.frame.maxY+3,width:title.bounds.width,height:18)
-    summary.frame = CGRect(x:inset,y:times.frame.maxY+3,width:title.bounds.width,height:max(0,bounds.height-times.frame.maxY-13))
+    summary.frame = CGRect(x:inset,y:times.frame.maxY+3,width:title.bounds.width,height:min(tablet ? 64 : 40,summary.sizeThatFits(CGSize(width:title.bounds.width,height:.greatestFiniteMagnitude)).height))
     info.frame = CGRect(x:0,y:0,width:bounds.width-43,height:head)
     watch.frame = CGRect(x:0,y:head,width:bounds.width,height:max(0,bounds.height-head-4))
     track.frame = CGRect(x:0,y:bounds.height-4,width:bounds.width,height:4)
@@ -249,6 +252,7 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
 // Same compact, centered outlined dialog surface as the mobile Web player.
 class NeoLiveDialog: UIViewController {
   private let card = UIView(), scroll = UIScrollView(), stack = UIStackView(), actions = UIStackView()
+  private let headingLabel = NeoStyle.label(size:20,bold:true), contentFill = UIView(), topLine = UIView(), bottomLine = UIView()
   private let heading: String
   init(title: String) { heading = title; super.init(nibName:nil,bundle:nil); modalPresentationStyle = .overFullScreen; modalTransitionStyle = .crossDissolve }
   required init?(coder: NSCoder) { fatalError() }
@@ -258,12 +262,14 @@ class NeoLiveDialog: UIViewController {
   override func loadView() {
     view = UIView(); view.backgroundColor = .black.withAlphaComponent(0.5)
     card.backgroundColor = NeoStyle.paper; card.layer.cornerRadius = 12; card.layer.borderColor = NeoStyle.border.cgColor; card.layer.borderWidth = 1
-    view.addSubview(card); card.addSubview(scroll); scroll.addSubview(stack); card.addSubview(actions)
+    card.clipsToBounds = true; contentFill.backgroundColor = UIColor.white.withAlphaComponent(0.08)
+    topLine.backgroundColor = NeoStyle.border; bottomLine.backgroundColor = NeoStyle.border
+    view.addSubview(card); [contentFill,scroll,headingLabel,actions,topLine,bottomLine].forEach(card.addSubview); scroll.addSubview(stack)
     stack.axis = .vertical; stack.spacing = 14; actions.spacing = 12; actions.alignment = .center; actions.addArrangedSubview(UIView())
     stack.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:scroll.contentLayoutGuide.leadingAnchor),stack.trailingAnchor.constraint(equalTo:scroll.contentLayoutGuide.trailingAnchor),
       stack.topAnchor.constraint(equalTo:scroll.contentLayoutGuide.topAnchor),stack.bottomAnchor.constraint(equalTo:scroll.contentLayoutGuide.bottomAnchor),stack.widthAnchor.constraint(equalTo:scroll.frameLayoutGuide.widthAnchor)])
-    let title = NeoStyle.label(heading,size:20,bold:true); title.numberOfLines = 0; stack.addArrangedSubview(title)
+    headingLabel.text = heading; headingLabel.numberOfLines = 0
   }
   func addText(_ text: String, bold: Bool = false) {
     loadViewIfNeeded(); guard !text.isEmpty else { return }; let label = NeoStyle.label(text,size:bold ? 20 : 14,bold:bold,muted:!bold); label.numberOfLines = 0; stack.addArrangedSubview(label)
@@ -284,9 +290,13 @@ class NeoLiveDialog: UIViewController {
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews(); let width = min(444,max(0,view.bounds.width-24))
     let content = stack.systemLayoutSizeFitting(CGSize(width:width-48,height:UIView.layoutFittingCompressedSize.height),withHorizontalFittingPriority:.required,verticalFittingPriority:.fittingSizeLevel).height
-    let height = min(max(200,content+98),max(200,view.bounds.height-view.safeAreaInsets.top-view.safeAreaInsets.bottom-32))
+    let header = max(40,headingLabel.sizeThatFits(CGSize(width:width-48,height:.greatestFiniteMagnitude)).height+16)
+    let height = min(max(200,header+content+92),max(200,view.bounds.height-view.safeAreaInsets.top-view.safeAreaInsets.bottom-32))
     card.frame = CGRect(x:(view.bounds.width-width)/2,y:(view.bounds.height-height)/2,width:width,height:height)
-    scroll.frame = CGRect(x:24,y:16,width:width-48,height:height-90); actions.frame = CGRect(x:12,y:height-60,width:width-24,height:48)
+    headingLabel.frame = CGRect(x:24,y:8,width:width-48,height:header-16)
+    contentFill.frame = CGRect(x:0,y:header,width:width,height:height-header-60)
+    topLine.frame = CGRect(x:0,y:header,width:width,height:1); bottomLine.frame = CGRect(x:0,y:height-60,width:width,height:1)
+    scroll.frame = CGRect(x:24,y:header+16,width:width-48,height:max(0,height-header-92)); actions.frame = CGRect(x:12,y:height-54,width:width-24,height:48)
   }
 }
 

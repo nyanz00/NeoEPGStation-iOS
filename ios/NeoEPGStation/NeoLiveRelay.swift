@@ -8,6 +8,7 @@ final class NeoLiveRelay: NSObject, URLSessionDataDelegate {
   private let queue = DispatchQueue(label:"neo.live.relay")
   private var session: URLSession!, task: URLSessionDataTask?, listener: NWListener?
   private var connection: NWConnection?, chunks: [Data] = [], pendingBytes = 0
+  private var pendingClients: [ObjectIdentifier:NWConnection] = [:]
   private var busy = false, suspended = false, accepted = false, closed = false, generation = 0
   private let clockLock = NSLock(), pcr = NeoLivePCRClock()
   private var bytes: Int64 = 0
@@ -48,6 +49,12 @@ final class NeoLiveRelay: NSObject, URLSessionDataDelegate {
         }
         next.newConnectionHandler = { [weak self, weak next] client in
           guard let self, let next, self.listener === next, self.generation == token, !self.closed else { client.cancel(); return }
+          guard self.pendingClients.count < 16 else { client.cancel(); return }
+          self.pendingClients[ObjectIdentifier(client)] = client
+          client.stateUpdateHandler = { [weak self, weak client] state in
+            guard let self, let client else { return }
+            switch state { case .failed, .cancelled: self.pendingClients.removeValue(forKey:ObjectIdentifier(client)); default: break }
+          }
           client.start(queue:self.queue); self.readHeader(client,route:route,token:token,data:Data())
         }
         next.start(queue:queue)
@@ -68,6 +75,7 @@ final class NeoLiveRelay: NSObject, URLSessionDataDelegate {
         client.send(content:Data("HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nConnection: close\r\n\r\n".utf8),completion:.contentProcessed { _ in client.cancel() }); return
       }
       guard self.connection == nil else { client.cancel(); return }
+      self.pendingClients.removeValue(forKey:ObjectIdentifier(client))
       self.connection = client
       client.stateUpdateHandler = { [weak self, weak client] state in
         guard let self, let client, self.connection === client else { return }
@@ -138,6 +146,7 @@ final class NeoLiveRelay: NSObject, URLSessionDataDelegate {
     let previous = task; task = nil; previous?.cancel()
     let client = connection; connection = nil; client?.cancel()
     let old = listener; listener = nil; old?.cancel()
+    let pending = Array(pendingClients.values); pendingClients.removeAll(); pending.forEach { $0.cancel() }
     chunks.removeAll(); pendingBytes = 0; busy = false; suspended = false; accepted = false
   }
   func suspend() { queue.async { [self] in generation += 1; retire() } }

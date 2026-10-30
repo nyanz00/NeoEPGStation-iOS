@@ -29,17 +29,16 @@ final class NeoLiveCoordinator: NSObject {
     relay = NeoLiveRelay(source:source,headers:headers)
     super.init()
     relay.onFailure = { [weak self] retryable in Task { @MainActor in self?.onFailure?(retryable) } }
-    relay.onData = { [weak self] data,offset in
-      // The caption clock has its own serial parser. Keep transport callbacks
-      // off UIKit while preserving byte order for the ARIB timing parser.
-      Task { @MainActor in self?.onSourceData?(data,offset) }
-    }
   }
   @objc(openWithCompletion:)
   func open(_ completion: @escaping (URL?) -> Void) {
     guard !closed else { completion(nil); return }
     clearSockets(); generation += 1; pending.removeAll(); recent.removeAll(); seen.removeAll()
     commentCount = 0; received = 0
+    // Capture this input's thread-safe caption clock callback once. Forward
+    // bytes in transport order, without per-chunk actor tasks or UIKit access.
+    let consume = onSourceData
+    relay.onData = { data,offset in consume?(data,offset) }
     relay.open(completion)
     startComments(); refreshMetadata()
     if metadataTimer == nil {
@@ -80,7 +79,8 @@ final class NeoLiveCoordinator: NSObject {
       guard let self else { return }
       do {
         let (data,response) = try await self.apiSession.data(for:self.request("/channels/\(self.channelID)/jikkyo"))
-        guard !Task.isCancelled, !self.closed, self.generation == token, (response as? HTTPURLResponse)?.statusCode == 200 else { return }
+        guard !Task.isCancelled, !self.closed, self.generation == token else { return }
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { self.reconnectComments(token); return }
         let info = try JSONDecoder().decode(NeoLiveJikkyoInfo.self,from:data)
         guard let watchURL = self.socketURL(info.watchSessionUrl), let commentURL = self.socketURL(info.commentSessionUrl) else {
           self.onCommentStatus?("実況コメントがありません"); return
@@ -124,7 +124,7 @@ final class NeoLiveCoordinator: NSObject {
     } else if type == "room" || type == "messageServer" {
       let server = data["messageServer"] as? [String:Any]
       connectComments(url:socketURL(server?["uri"] as? String) ?? commentURL,
-        thread:data["threadId"] as? String ?? "",key:data["yourPostKey"] as? String,token:token)
+        thread:String(describing:data["threadId"] ?? ""),key:data["yourPostKey"] as? String,token:token)
     } else if ["disconnect","reconnect","error"].contains(type ?? "") { reconnectComments(token) }
   }
   private func connectComments(url: URL, thread: String, key: String?, token: Int) {
