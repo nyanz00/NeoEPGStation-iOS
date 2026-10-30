@@ -128,7 +128,7 @@ for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
     threading.Thread(target=server.serve_forever, daemon=True).start()
     label = 'pad-selected-b' if platform == 'pad' else 'selected-b' if choice == 2 else 'none'
     try:
-        subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True)
+        print('Starting feedback case', label, device, flush=True)
         names = ['player-feedback.json', 'player-feedback-diagnostics.json',
                  'feedback-pad-panel.png', 'feedback-stream-dialog.png']
         for name in names:
@@ -136,7 +136,13 @@ for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
         env = os.environ.copy()
         env['SIMCTL_CHILD_NEO_EPG_FEEDBACK_BASE'] = f'http://127.0.0.1:{server.server_port}'
         env['SIMCTL_CHILD_NEO_EPG_FEEDBACK_CHOICE'] = str(choice)
-        subprocess.check_call(['xcrun', 'simctl', 'launch', device, bundle], env=env, timeout=30)
+        try:
+            subprocess.check_call(['xcrun', 'simctl', 'launch', '--terminate-running-process', device, bundle], env=env, timeout=120)
+        except subprocess.TimeoutExpired:
+            # simctl can print the PID and remain alive while the app is
+            # already running. Do not launch it again; require fresh app and
+            # HTTP-server results below, or fail the probe as usual.
+            print('simctl launch did not exit; waiting for this launch result', flush=True)
         deadline = time.monotonic()+65
         while time.monotonic() < deadline and not (documents/names[0]).exists():
             time.sleep(.5)
@@ -173,7 +179,10 @@ for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
         (dist/(label+'-feedback-result.json')).write_text(json.dumps({'result': result, 'requests': rows}, indent=2))
         print(label, json.dumps(result), flush=True)
     finally:
-        subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True)
+        try:
+            subprocess.run(['xcrun', 'simctl', 'terminate', device, bundle], capture_output=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            print('simctl terminate did not exit; next launch explicitly terminates the existing process', flush=True)
         server.shutdown()
         server.server_close()
 if device != phone:
