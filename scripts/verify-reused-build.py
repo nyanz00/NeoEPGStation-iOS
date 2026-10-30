@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from ci_github import read_json
 
 artifact = Path('reused/artifact/dist')
 info = json.loads((artifact / 'build-info.json').read_text())
@@ -47,7 +48,7 @@ if not full_recheck and not network_probe and not focused and not json.loads((ar
 # builds/type checks. The workflow then runs every playback and UI assertion;
 # no previous pass or failed result is used to satisfy the new check.
 if full_recheck or network_probe or focused:
-    jobs = json.loads(subprocess.check_output(['gh', 'run', 'view', info['run'], '--json', 'jobs']))['jobs']
+    jobs = read_json(['run', 'view', info['run'], '--json', 'jobs'])['jobs']
     steps = {step['name']: step['conclusion'] for job in jobs for step in job['steps']}
     foundation = 'Check player feedback models' if os.environ.get('CHECK_SCOPE') == 'player-feedback' else 'Native ASS parser and playback clock tests'
     for name in [foundation, 'Native UI type checks',
