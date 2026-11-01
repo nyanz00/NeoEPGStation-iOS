@@ -146,10 +146,25 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
       let button = UIButton(type:.system); button.setTitle(id == "PINNED" ? "Pinned" : id.hasPrefix("GR-ALT") ? String(id.dropFirst(3)) : id,for:.normal)
       button.titleLabel?.font = .systemFont(ofSize:14,weight:.medium)
       button.accessibilityIdentifier = "onair-wave-"+id
-      button.addAction(UIAction { [weak self] _ in self?.wave = id; self?.filter() },for:.touchUpInside)
+      button.addAction(UIAction { [weak self] _ in self?.selectWave(id) },for:.touchUpInside)
       tabs.addSubview(button); return button
     }
     filter()
+  }
+  private func selectWave(_ id: String) {
+    guard waves.contains(id), id != wave else { return }
+    wave = id; filter(); list.layoutIfNeeded()
+    list.setContentOffset(CGPoint(x:0,y:-list.adjustedContentInset.top),animated:false)
+    if let index = waves.firstIndex(of:id), buttons.indices.contains(index) { tabs.scrollRectToVisible(buttons[index].frame,animated:true) }
+  }
+  // A right swipe at the first wave belongs to the shell's drawer.
+  func waveSwipeDirection(horizontal: CGFloat) -> Int? {
+    guard let index = waves.firstIndex(of:wave) else { return nil }
+    return horizontal < 0 ? 1 : index > 0 ? -1 : nil
+  }
+  func swipeWave(_ direction: Int) {
+    guard let index = waves.firstIndex(of:wave), waves.indices.contains(index+direction) else { return }
+    selectWave(waves[index+direction])
   }
   private func filter() {
     visible = schedules.filter { wave == "PINNED" ? pins.contains($0.channel.id) : $0.channel.channelType == wave }
@@ -226,6 +241,21 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     var checks = ["liveRoute":!visible.isEmpty,"waveTabs":waves.contains("GR") && waves.contains("BS"),
       "forceFetched":forces.values.contains(220),"streamModes":shell?.serverConfig.map { NeoLiveOption.available($0).count >= 3 } ?? false]
     view.layoutIfNeeded(); list.layoutIfNeeded()
+    let original = wave
+    selectWave(waves.first ?? original)
+    checks["firstWaveRightSwipeUsesDrawer"] = shell?.smokeSwipeWave(horizontal:100) == false
+    if waves.count > 1 {
+      checks["leftSwipeChangesWave"] = shell?.smokeSwipeWave(horizontal:-100) == true && wave == waves[1]
+      list.setContentOffset(CGPoint(x:0,y:200),animated:false); filter(); list.layoutIfNeeded()
+      checks["refreshPreservesScroll"] = list.contentOffset.y > 150
+      checks["rightSwipeChangesWave"] = shell?.smokeSwipeWave(horizontal:100) == true && wave == waves[0]
+      checks["swipeResetsScroll"] = abs(list.contentOffset.y+list.adjustedContentInset.top)<1
+      list.setContentOffset(CGPoint(x:0,y:200),animated:false); buttons[1].sendActions(for:.touchUpInside)
+      checks["buttonResetsScroll"] = wave == waves[1] && abs(list.contentOffset.y+list.adjustedContentInset.top)<1
+      let before = wave; _ = shell?.smokeSwipeWave(horizontal:100,complete:false)
+      checks["cancelledSwipeKeepsWave"] = wave == before
+    }
+    selectWave(original)
     checks["cardsInsideViewport"] = list.visibleCells.allSatisfy { $0.bounds.width > 0 && $0.bounds.width <= list.bounds.width }
     guard let item = visible.first else { completion(checks); return }
     let renderer = UIGraphicsImageRenderer(bounds:view.bounds)
@@ -234,11 +264,24 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     DispatchQueue.main.asyncAfter(deadline:.now()+0.5) { [weak self] in
       guard let self, let dialog = self.presentedViewController as? NeoLiveDialog else { checks["dialogPresented"] = false; completion(checks); return }
       dialog.view.layoutIfNeeded(); checks["dialogCompact"] = dialog.smokeCompact
-      checks["dialogTitleMatchesWeb"] = abs(dialog.smokeTitleHeight-42)<1
+      checks["dialogTitleMatchesWeb"] = abs(dialog.smokeTitleHeight-(dialog.view.bounds.width >= 600 ? 78 : 62))<1
       checks["nativePlaybackOnly"] = dialog.smokeNativeOnly
       let image = UIGraphicsImageRenderer(bounds:dialog.view.bounds).image { _ in dialog.view.drawHierarchy(in:dialog.view.bounds,afterScreenUpdates:true) }
       try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("live-dialog.png"))
-      dialog.dismiss(animated:false) { completion(checks) }
+      dialog.smokeOutsideTap(inside:true)
+      checks["insideTapKeepsDialog"] = self.presentedViewController === dialog && !dialog.isBeingDismissed
+      dialog.smokeOutsideTap(inside:false)
+      DispatchQueue.main.asyncAfter(deadline:.now()+0.4) {
+        checks["outsideTapCancels"] = self.presentedViewController == nil
+        self.watch(item)
+        DispatchQueue.main.asyncAfter(deadline:.now()+0.5) {
+          guard let cancelDialog = self.presentedViewController as? NeoLiveDialog else { checks["cancelButtonCloses"] = false; completion(checks); return }
+          cancelDialog.smokePressCancel()
+          DispatchQueue.main.asyncAfter(deadline:.now()+0.4) {
+            checks["cancelButtonCloses"] = self.presentedViewController == nil; completion(checks)
+          }
+        }
+      }
     }
   }
 #endif
@@ -255,6 +298,8 @@ class NeoLiveDialog: UIViewController {
 #if targetEnvironment(simulator)
   var smokeCompact: Bool { card.bounds.height < 400 && card.bounds.width <= 444 && card.frame.minY > 0 }
   var smokeTitleHeight: CGFloat { contentFill.frame.minY }
+  func smokeOutsideTap(inside: Bool) { cancelIfOutside(inside ? card.center : CGPoint(x:1,y:1)) }
+  func smokePressCancel() { actions.arrangedSubviews.compactMap { $0 as? UIButton }.first { $0.title(for:.normal) == "キャンセル" }?.sendActions(for:.touchUpInside) }
   var smokeNativeOnly: Bool {
     func hasSwitch(_ view: UIView) -> Bool { view is UISwitch || view.subviews.contains(where:hasSwitch) }
     return !hasSwitch(view)
@@ -271,7 +316,10 @@ class NeoLiveDialog: UIViewController {
     NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:scroll.contentLayoutGuide.leadingAnchor),stack.trailingAnchor.constraint(equalTo:scroll.contentLayoutGuide.trailingAnchor),
       stack.topAnchor.constraint(equalTo:scroll.contentLayoutGuide.topAnchor),stack.bottomAnchor.constraint(equalTo:scroll.contentLayoutGuide.bottomAnchor),stack.widthAnchor.constraint(equalTo:scroll.frameLayoutGuide.widthAnchor)])
     headingLabel.attributedText = NeoStyle.dialogTitle(heading).attributedText; headingLabel.numberOfLines = 0
+    let tap = UITapGestureRecognizer(target:self,action:#selector(tappedBackground(_:))); tap.cancelsTouchesInView = false; view.addGestureRecognizer(tap)
   }
+  private func cancelIfOutside(_ point: CGPoint) { if !card.frame.contains(point) { dismiss(animated:true) } }
+  @objc private func tappedBackground(_ gesture: UITapGestureRecognizer) { cancelIfOutside(gesture.location(in:view)) }
   func addText(_ text: String, bold: Bool = false) {
     loadViewIfNeeded(); guard !text.isEmpty else { return }; let label = NeoStyle.label(text,size:bold ? 20 : 14,bold:bold,muted:!bold); label.numberOfLines = 0; stack.addArrangedSubview(label)
   }
@@ -291,10 +339,11 @@ class NeoLiveDialog: UIViewController {
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews(); let width = min(444,max(0,view.bounds.width-24))
     let content = stack.systemLayoutSizeFitting(CGSize(width:width-48,height:UIView.layoutFittingCompressedSize.height),withHorizontalFittingPriority:.required,verticalFittingPriority:.fittingSizeLevel).height
-    let header = headingLabel.sizeThatFits(CGSize(width:width-48,height:.greatestFiniteMagnitude)).height+12
+    let inset = NeoStyle.dialogTitleInset(viewportWidth:view.bounds.width)
+    let header = headingLabel.sizeThatFits(CGSize(width:width-2*inset,height:CGFloat.greatestFiniteMagnitude)).height+2*inset
     let height = min(max(200,header+content+92),max(200,view.bounds.height-view.safeAreaInsets.top-view.safeAreaInsets.bottom-32))
     card.frame = CGRect(x:(view.bounds.width-width)/2,y:(view.bounds.height-height)/2,width:width,height:height)
-    headingLabel.frame = CGRect(x:24,y:6,width:width-48,height:header-12)
+    headingLabel.frame = CGRect(x:inset,y:inset,width:width-2*inset,height:header-2*inset)
     contentFill.frame = CGRect(x:0,y:header,width:width,height:height-header-60)
     topLine.frame = CGRect(x:0,y:header,width:width,height:1); bottomLine.frame = CGRect(x:0,y:height-60,width:width,height:1)
     scroll.frame = CGRect(x:24,y:header+16,width:width-48,height:max(0,height-header-92)); actions.frame = CGRect(x:12,y:height-54,width:width-24,height:48)

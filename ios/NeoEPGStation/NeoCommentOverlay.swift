@@ -37,6 +37,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   private var loader: NeoCommentLoader?
   private var usesJikkyo = false
   private var liveMode = false, nextLiveID = 0
+  private var liveLog = LiveCommentLog()
   private var task: URLSessionDataTask?
   private var fullTask: URLSessionDataTask?
   private var rawTimeline: CommentTimeline?
@@ -56,7 +57,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   private var timeline: CommentTimeline?
   @objc var panelVersion: Int { contentVersion * 2 + (ready ? 1 : 0) }
   @objc func panelComments() -> [[String: Any]] {
-    (timeline?.comments ?? []).map {
+    (liveMode ? liveLog.comments : timeline?.comments ?? []).map {
       var row: [String:Any] = ["id":$0.id,"time":$0.start,"text":$0.text]
       if let date = $0.postedAt { row["postedAt"] = date }; return row
     }
@@ -206,6 +207,23 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     }
   }
 
+  @objc static func runLiveLogChecks() -> [String:Bool] {
+    let overlay = NeoCommentOverlay(frame:.zero); overlay.configureLive()
+    func rows(_ start: Int, _ count: Int) -> [[String:Any]] {
+      (start..<start+count).map { ["text":"History \($0)","time":Double($0),"postedAt":1793404800+Double($0)] }
+    }
+    overlay.appendLiveComments(rows(0,600))
+    var checks = ["normalLogHas500":overlay.panelComments().count == 500]
+    overlay.followLiveLog(false); overlay.renderedTime = 1200
+    overlay.appendLiveComments(rows(1200,200))
+    checks["manualLogSurvives60Seconds"] = overlay.panelComments().count == 700 && overlay.panelComments().first?["time"] as? Double == 100
+    checks["drawingDataStillPruned"] = (overlay.rawTimeline?.comments.count ?? 9999) == 200
+    overlay.followLiveLog(true)
+    checks["followRestores500"] = overlay.panelComments().count == 500
+    overlay.configureLive(); checks["newLiveResetsLog"] = overlay.panelComments().isEmpty
+    overlay.stop(); return checks
+  }
+
   @objc func loadSmokeComments() {
     version += 1; timeline = NeoPiPSmoke.fixture; ready = true; settled = true; status = "Synthetic comments · 80"
     renderer?.prepare(NeoPiPSmoke.fixture.comments); refreshRendering(); onChange?()
@@ -243,7 +261,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
 
   @objc func configureLive() {
     version += 1; task?.cancel(); task = nil; fullTask?.cancel(); fullTask = nil; loader = nil
-    liveMode = true; nextLiveID = 0; usesJikkyo = true; videoDuration = 0
+    liveMode = true; nextLiveID = 0; let following = liveLog.following; liveLog.reset(); liveLog.follow(following); usesJikkyo = true; videoDuration = 0
     rawTimeline = nil; timeline = CommentTimeline(width:1920,height:1080,comments:[])
     tracks = []; selectedIndex = nil; clock.reset(); renderer?.reset(); resumeGate = nil; seeking = false
     ready = true; settled = true; fullLoaded = true; contentVersion += 1
@@ -255,9 +273,17 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     let value: [String:Any] = ["isSuccess":true,"source":"jikkyo","timeBase":"video","comments":rows]
     guard let data = try? JSONSerialization.data(withJSONObject:value), let parsed = try? NeoCommentLoader.parseJikkyo(data) else { return }
     var comments = (rawTimeline?.comments ?? []).filter { $0.end >= renderedTime-60 }
-    for var comment in parsed.comments { comment.id = nextLiveID; nextLiveID += 1; comments.append(comment) }
+    var incoming: [NativeComment] = []
+    for var comment in parsed.comments { comment.id = nextLiveID; nextLiveID += 1; incoming.append(comment) }
+    liveLog.append(incoming); comments.append(contentsOf:incoming)
     if comments.count > 2000 { comments.removeFirst(comments.count-2000) }
     publish(CommentTimeline(width:1920,height:1080,comments:comments))
+  }
+
+  @objc func followLiveLog(_ following: Bool) {
+    guard liveMode else { return }
+    let previous = liveLog.comments.count; liveLog.follow(following)
+    if previous != liveLog.comments.count { contentVersion += 1; onChange?() }
   }
 
   func reloadTracks() {
@@ -486,7 +512,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     closed = true; version += 1; preparationTimer?.invalidate(); preparationTimer = nil; preparationCompletion = nil; task?.cancel(); task = nil; fullTask?.cancel(); fullTask = nil
     loader?.close(); loader = nil
     metal?.isPaused = true; metal?.delegate = nil
-    renderer?.reset(); renderer = nil; timeline = nil
+    renderer?.reset(); renderer = nil; timeline = nil; rawTimeline = nil; liveLog.reset()
     timeProvider = nil; runningProvider = nil; wantsPlaybackProvider = nil; rateProvider = nil; videoHostProvider = nil; onChange = nil
     NotificationCenter.default.removeObserver(self)
   }

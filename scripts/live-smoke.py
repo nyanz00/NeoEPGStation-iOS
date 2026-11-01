@@ -72,7 +72,7 @@ for codec in ['mpeg2video','libx264']:
             if path=='/api/schedules/broadcasting':
                 now=time.time()*1000;self.json([{'channel':{'id':i,'name':name,'channelType':wave,'type':1,'hasLogoData':False},
                     'programs':[{'id':i,'name':'Synthetic live 番組 '+str(i),'startAt':now-600000,'endAt':now+1200000,'description':'現在放送中のテスト番組です。'}]}
-                    for i,name,wave in [(1,'Synthetic GR','GR'),(2,'Synthetic BS','BS')]]);return
+                    for i,name,wave in [(1,'Synthetic GR','GR'),(2,'Synthetic BS','BS')]+[(i,'Synthetic station '+str(i),'GR' if i<11 else 'BS') for i in range(3,20)]]);return
             if path=='/api/channels/jikkyo':self.json([{'channelId':1,'force':220},{'channelId':2,'force':80}]);return
             if path.endswith('/jikkyo'):
                 self.json({'watchSessionUrl':f'ws://127.0.0.1:{self.server.server_port}/ws/watch','commentSessionUrl':f'ws://127.0.0.1:{self.server.server_port}/ws/comments'});return
@@ -131,7 +131,7 @@ for codec in ['mpeg2video','libx264']:
         subprocess.run(['xcrun','simctl','terminate',device,bundle],capture_output=True)
         for name in ['live-smoke.json','live-diagnostics.json','live-onair.png','live-dialog.png','live-player.png']:(documents/name).unlink(missing_ok=True)
         env=os.environ.copy();env['SIMCTL_CHILD_NEO_EPG_LIVE_SMOKE']=f'http://127.0.0.1:{server.server_port}'
-        subprocess.check_call(['xcrun','simctl','launch',device,bundle],env=env,timeout=30)
+        subprocess.check_call(['xcrun','simctl','launch','--terminate-running-process',device,bundle],env=env,timeout=120)
         deadline=time.monotonic()+155
         while time.monotonic()<deadline and not (documents/'live-smoke.json').exists():time.sleep(0.5)
         report=json.loads((documents/'live-smoke.json').read_text()) if (documents/'live-smoke.json').exists() else {'success':False,'error':'live probe timeout'}

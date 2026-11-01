@@ -35,7 +35,9 @@ enum NeoStyle {
     label.font = .systemFont(ofSize: size, weight: bold ? .bold : .regular)
     label.lineBreakMode = .byTruncatingTail; return label
   }
-  // Web DialogTitle: 20px, weight 700, line-height 1.5, vertical padding 6px.
+  // Match generated Web CSS, not the overridden py: 16px below 600px,
+  // 24px at/above it; its 20px title has a 30px line box.
+  static func dialogTitleInset(viewportWidth: CGFloat) -> CGFloat { viewportWidth >= 600 ? 24 : 16 }
   static func dialogTitle(_ text: String) -> UILabel {
     let value = label(size:20,bold:true); value.numberOfLines = 0
     let paragraph = NSMutableParagraphStyle(); paragraph.minimumLineHeight = 30; paragraph.maximumLineHeight = 30

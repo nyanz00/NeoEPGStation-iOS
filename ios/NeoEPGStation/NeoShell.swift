@@ -283,6 +283,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private var popup: NeoAnchoredMenu?
   private var swipeStart = CGPoint.zero
   private var swipeAction: NeoSwipeAction?
+  private var waveSwipe: Int?
   private weak var swipeScroll: UIScrollView?
   private var scrollWasEnabled = false
   private var popInteraction: UIPercentDrivenInteractiveTransition?
@@ -673,13 +674,30 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       scrollWasEnabled = swipeScroll?.isScrollEnabled == true
       swipeScroll?.isScrollEnabled = false
     }
-    if swipeAction == .menu { dragMenu(recognizer) }
+    if let direction = waveSwipe {
+      if recognizer.state == .ended { finishWaveSwipe(direction,translation:recognizer.translation(in:content).x,velocity:recognizer.velocity(in:content).x) }
+    } else if swipeAction == .menu { dragMenu(recognizer) }
     else if swipeAction == .back { dragBack(recognizer) }
     if [.ended, .cancelled, .failed].contains(recognizer.state) {
       if scrollWasEnabled { swipeScroll?.isScrollEnabled = true }
-      swipeScroll = nil; swipeAction = nil
+      swipeScroll = nil; swipeAction = nil; waveSwipe = nil
     }
   }
+  private func beginWaveSwipe(horizontal: CGFloat) -> Bool {
+    waveSwipe = nil
+    guard let page = active?.topViewController as? NeoOnAirPage, let direction = page.waveSwipeDirection(horizontal:horizontal) else { return false }
+    waveSwipe = direction; swipeAction = nil; return true
+  }
+  private func finishWaveSwipe(_ direction: Int, translation: CGFloat, velocity: CGFloat) {
+    if translation*CGFloat(-direction) >= 44 || velocity*CGFloat(-direction) >= 350 { (active?.topViewController as? NeoOnAirPage)?.swipeWave(direction) }
+  }
+#if targetEnvironment(simulator)
+  func smokeSwipeWave(horizontal: CGFloat, complete: Bool = true) -> Bool {
+    let owns = beginWaveSwipe(horizontal:horizontal)
+    if owns, complete, let direction = waveSwipe { finishWaveSwipe(direction,translation:horizontal,velocity:horizontal*5) }
+    waveSwipe = nil; return owns
+  }
+#endif
   private func dragBack(_ recognizer: UIPanGestureRecognizer) {
     updateBack(state: recognizer.state, translation: recognizer.translation(in: content).x, velocity: recognizer.velocity(in: content).x)
   }
@@ -809,6 +827,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     if recognizer === closingPan || recognizer === backdropPan { return (tablet ? tabletReveal > 0 : menuOpen) && velocity.x < 0 }
     guard recognizer === contentPan || recognizer === sidebarBackPan, api != nil, !menuOpen, popup == nil, presentedViewController == nil,
       popInteraction == nil, !routeBackRunning, active?.transitionCoordinator == nil else { return false }
+    if recognizer === contentPan, beginWaveSwipe(horizontal:velocity.x) { return true }
     swipeAction = NeoNavigationGesture.action(startY: Double(swipeStart.y), height: Double(view.bounds.height),
       canGoBack: canGoBack, tablet: tablet && tabletExpanded, horizontal: Double(velocity.x), vertical: Double(velocity.y), persistentMenu: tablet)
     if recognizer === sidebarBackPan { return tablet && tabletExpanded && swipeAction == .back }

@@ -126,6 +126,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private var tabButtons: [NeoPlayerPanelTab] = [], tab = "program", followsComments = true, lastCommentIndex = -1
   private var comments: [(id: Int, time: Double, text: String, postedAt: Double?)] = []
   private var commentPosition = 0.0
+  private var usesARIBToggle: Bool { isLive || context["videoFileType"] as? String == "ts" }
   private let liveCommentDate = { let value = DateFormatter(); value.locale = Locale(identifier:"ja_JP"); value.timeZone = .autoupdatingCurrent; value.dateFormat = "HH:mm:ss"; return value }()
   private var context: [String: Any] = [:], api: NeoAPI?, recording: NeoRecording?
   private var isLive: Bool { context["live"] as? Bool == true }
@@ -282,7 +283,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     commentList.dataSource = self; commentList.delegate = self; commentList.rowHeight = UITableView.automaticDimension
     commentList.estimatedRowHeight = 52; commentList.register(UITableViewCell.self, forCellReuseIdentifier: "comment")
     followButton.setTitle("現在のコメントへ戻る", for: .normal); followButton.tintColor = NeoStyle.accent
-    followButton.addAction(UIAction { [weak self] _ in self?.followsComments = true; self?.lastCommentIndex = -1; self?.followCurrentComment() }, for: .touchUpInside)
+    followButton.addAction(UIAction { [weak self] _ in self?.setCommentFollowing(true) }, for: .touchUpInside)
     for (id, label, icon) in [("program", "番組情報", "InfoOutlined"), ("rules", "ルール", "RuleOutlined"),
       ("comments", "コメント", "ChatBubbleOutlineOutlined"), ("settings", "設定", "SettingsOutlined")] {
       let b = NeoPlayerPanelTab(label: label, icon: icon)
@@ -369,7 +370,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   }
   @objc func updateStreamQuality(_ mode: Int) { context["streamMode"] = mode; if tab == "settings" { renderPanel() } }
   @objc func configure(_ context: [String: Any]) {
-    self.context = context; channel.text = context["channelName"] as? String; renderPanel()
+    self.context = context; channel.text = context["channelName"] as? String; updateSubtitleButton(); renderPanel()
     if isLive {
       title.text = context["name"] as? String; tabButtons[1].caption.text = "放送局"; tabButtons[1].accessibilityLabel = "放送局"
       tabButtons[1].glyph.image = NeoIcon.image("LiveTvOutlined"); ruleButton.accessibilityLabel = "放送局"
@@ -608,6 +609,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     updateDiagnostics()
   }
   @objc var wantsCommentRows: Bool { panelVisible && tab == "comments" }
+  @objc var subtitlePickerVisible: Bool { panelVisible && tab == "settings" && settingsCategory == "subtitles" }
   @objc func updateCommentPosition(_ seconds: Double) {
     guard seconds.isFinite else { return }; commentPosition = max(0,seconds); followCurrentComment()
   }
@@ -862,14 +864,22 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private func followCurrentComment() {
     guard panelVisible, tab == "comments", followsComments, !comments.isEmpty else { return }
     var low = 0, high = comments.count
-    while low < high { let mid = (low + high) / 2; if comments[mid].time <= commentPosition { low = mid + 1 } else { high = mid } }
-    let index = max(0, low - 1); guard index != lastCommentIndex else { return }; lastCommentIndex = index
-    commentList.scrollToRow(at: IndexPath(row: index, section: 0), at: .middle, animated: false)
+    if !isLive {
+      while low < high { let mid = (low + high) / 2; if comments[mid].time <= commentPosition { low = mid + 1 } else { high = mid } }
+    }
+    let index = isLive ? comments.count-1 : max(0,low-1)
+    guard index != lastCommentIndex else { return }; lastCommentIndex = index
+    commentList.scrollToRow(at:IndexPath(row:index,section:0),at:isLive ? .bottom : .middle,animated:false)
   }
   @objc func showSettings(_ category: String) {
     onAction?("interaction"); settingsCategory = category; selectPanel("settings", toggle: false)
   }
-  @objc func bindCommentSettings(_ overlay: NeoCommentOverlay) { commentOverlay = overlay; refreshCommentSettings() }
+  private func setCommentFollowing(_ value: Bool) {
+    followsComments = value; lastCommentIndex = -1
+    if isLive { commentOverlay?.followLiveLog(value) }
+    followCurrentComment(); setNeedsLayout()
+  }
+  @objc func bindCommentSettings(_ overlay: NeoCommentOverlay) { commentOverlay = overlay; if isLive { overlay.followLiveLog(followsComments) }; refreshCommentSettings() }
   @objc func refreshCommentSettings() {
     guard let overlay = commentOverlay else { return }
     if !commentToggle.isTracking { commentToggle.isOn = overlay.enabled }
@@ -902,10 +912,17 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     tracks.filter { !NeoCommentOverlay.isCommentName($0["name"] as? String ?? "") && !NeoCommentOverlay.isCommentName($0["detail"] as? String ?? "") }
   }
   @objc func updateSubtitleTracks(_ tracks: [[String: Any]]) {
-    subtitleTracks = Self.ordinarySubtitles(tracks)
+    subtitleTracks = Self.ordinarySubtitles(tracks); updateSubtitleButton()
     let key = subtitleTracks.map { "\($0["index"] ?? ""): \($0["name"] ?? ""): \($0["selected"] ?? false)" }.joined(separator: "|")
     guard key != subtitleKey else { return }; subtitleKey = key
     if tab == "settings" && settingsCategory == "subtitles" { renderPanel() }
+  }
+  private func updateSubtitleButton() {
+    let selected = subtitleTracks.contains { $0["selected"] as? Bool == true }
+    subtitleButton.setImage(NeoIcon.image(usesARIBToggle && selected ? "Subtitles" : "SubtitlesOutlined"),for:.normal)
+    subtitleButton.accessibilityValue = selected ? "有効" : "無効"
+    subtitleButton.accessibilityLabel = usesARIBToggle ? "字幕を"+(selected ? "無効" : "有効")+"にする" : "字幕"
+    subtitleButton.isEnabled = !comparisonMode && (!usesARIBToggle || !subtitleTracks.isEmpty)
   }
   private func settingChoice(_ name: String, selected: Bool, action: @escaping () -> Void) -> UIButton {
     let button = NeoStyle.button(name, action: action)
@@ -1158,7 +1175,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
     tableView.deselectRow(at: indexPath, animated: true); guard !isLive else { return }; onAction?("seekto:\(comments[indexPath.row].time)")
   }
-  func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { if scrollView === commentList { followsComments = false } }
+  func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { if scrollView === commentList { setCommentFollowing(false) } }
   @objc func shutdown() { clearTransientNotice(); finishOrientationTransition(); task?.cancel(); relatedTask?.cancel(); logoTask?.cancel(); popup?.dismiss(); onAction = nil }
   deinit { task?.cancel(); relatedTask?.cancel(); logoTask?.cancel() }
 
@@ -1166,13 +1183,11 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   @objc static func runFeedbackChecks() -> [String:Bool] {
     let host = UIViewController(), child = UIViewController(), chrome = NeoPlayerChrome(title:"Feedback fixture")
     host.addChild(child); host.view.addSubview(child.view); child.didMove(toParent:host); child.view.addSubview(chrome)
-    host.setOverrideTraitCollection(UITraitCollection(userInterfaceIdiom:.phone),forChild:child)
     child.view.frame = CGRect(x:0,y:0,width:844,height:390); chrome.frame = child.view.bounds
     chrome.showSettings("comments"); chrome.layoutIfNeeded()
     var checks = ["commentSelectionFirst":chrome.stack.arrangedSubviews.first === chrome.commentTracks,
       "phoneClosePreserved":abs(chrome.panelClose.frame.midX-chrome.panel.bounds.width*5/6)<0.5,
       "remainingSettingsOrder":chrome.stack.arrangedSubviews.firstIndex(of:chrome.commentSize)! < chrome.stack.arrangedSubviews.firstIndex(of:chrome.commentOpacity)!]
-    host.setOverrideTraitCollection(UITraitCollection(userInterfaceIdiom:.pad),forChild:child)
     child.view.frame = CGRect(x:0,y:0,width:1366,height:1024); chrome.frame = child.view.bounds; chrome.setNeedsLayout(); chrome.layoutIfNeeded()
     checks["padTraitApplied"] = chrome.traitCollection.userInterfaceIdiom == .pad
     checks["padCloseAtRight"] = abs(chrome.panel.bounds.width-chrome.panelClose.frame.maxX-max(8,chrome.panel.safeAreaInsets.right)) < 0.5
@@ -1181,7 +1196,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let stamp = 1793404800.0
     let rows: [[String:Any]] = (0..<100).map { ["id":$0,"time":Double($0),"text":"Live row \($0)","postedAt":stamp+Double($0)] }
     chrome.updateCommentPosition(50.5); chrome.setCommentRows(rows,version:1)
-    checks["followsActualLivePosition"] = chrome.lastCommentIndex == 50
+    checks["followsLatestLiveComment"] = chrome.lastCommentIndex == 99
     let cell = chrome.tableView(chrome.commentList,cellForRowAt:IndexPath(row:50,section:0))
     let content = cell.contentConfiguration as? UIListContentConfiguration
     checks["wallClockDisplayed"] = content?.secondaryText == chrome.liveCommentDate.string(from:Date(timeIntervalSince1970:stamp+50)) && content?.secondaryText?.split(separator:":").count == 3
@@ -1195,13 +1210,32 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     } else { checks["pastLogAnchorPreserved"] = false }
     checks["manualReadingStopsFollowing"] = !chrome.followsComments
     chrome.updateCommentPosition(80.5); chrome.followButton.sendActions(for:.touchUpInside)
-    checks["returnResumesFollowing"] = chrome.followsComments && chrome.comments[chrome.lastCommentIndex].id == 80
+    checks["returnResumesFollowing"] = chrome.followsComments && chrome.comments[chrome.lastCommentIndex].id == 100
     chrome.updateCommentPosition(90.5)
-    checks["continuesFollowing"] = chrome.comments[chrome.lastCommentIndex].id == 90
-    chrome.configure([:]); chrome.updatePlayback(false,current:90,duration:120)
-    checks["recordedTimeUnchanged"] = chrome.timeLabel.text == "1:30 / 2:00"
+    checks["continuesFollowing"] = chrome.comments[chrome.lastCommentIndex].id == 100
     let image = UIGraphicsImageRenderer(size:chrome.bounds.size).image { _ in chrome.drawHierarchy(in:chrome.bounds,afterScreenUpdates:true) }
     try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("feedback-pad-panel.png"))
+    let overlay = NeoCommentOverlay(frame:.zero); overlay.configureLive(); chrome.bindCommentSettings(overlay)
+    overlay.onChange = { [weak chrome, weak overlay] in
+      guard let chrome, let overlay else { return }; chrome.setCommentRows(overlay.panelComments(),version:overlay.panelVersion)
+    }
+    func liveRows(_ start: Int, _ count: Int) -> [[String:Any]] { (start..<start+count).map { ["text":"Browse \($0)","time":Double($0)] } }
+    overlay.appendLiveComments(liveRows(0,600)); chrome.scrollViewWillBeginDragging(chrome.commentList)
+    overlay.appendLiveComments(liveRows(600,50))
+    checks["manualUIProtectsLog"] = chrome.comments.count == 550 && !chrome.followsComments
+    chrome.followButton.sendActions(for:.touchUpInside)
+    checks["returnUITrimsLogAndFollowsTail"] = chrome.comments.count == 500 && chrome.comments.last?.id == 649 && chrome.lastCommentIndex == 499
+    overlay.stop()
+    chrome.configure(["videoFileType":"ts"])
+    chrome.updateSubtitleTracks([["index":0,"name":"ARIB captions","selected":true]])
+    let filled = chrome.subtitleButton.image(for:.normal)?.pngData()
+    checks["tsSubtitleFilledWhenSelected"] = chrome.subtitleButton.accessibilityValue == "有効" && filled == NeoIcon.image("Subtitles").pngData()
+    chrome.updateSubtitleTracks([["index":0,"name":"ARIB captions","selected":false]])
+    checks["tsSubtitleOutlinedWhenDisabled"] = chrome.subtitleButton.accessibilityValue == "無効" && chrome.subtitleButton.image(for:.normal)?.pngData() == NeoIcon.image("SubtitlesOutlined").pngData() && filled != chrome.subtitleButton.image(for:.normal)?.pngData()
+    chrome.configure(["videoFileType":"encoded"]); chrome.updateSubtitleTracks([["index":0,"name":"ASS","selected":true]])
+    checks["encodedSubtitleKeepsPicker"] = chrome.subtitleButton.accessibilityLabel == "字幕" && chrome.subtitleButton.image(for:.normal)?.pngData() == NeoIcon.image("SubtitlesOutlined").pngData()
+    chrome.configure([:]); chrome.updatePlayback(false,current:90,duration:120)
+    checks["recordedTimeUnchanged"] = chrome.timeLabel.text == "1:30 / 2:00"
     chrome.shutdown(); return checks
   }
   private func runDiagnosticsChecks() -> [String: Bool] {

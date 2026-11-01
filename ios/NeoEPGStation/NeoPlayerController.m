@@ -1889,7 +1889,25 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if (self.aribClock && arib) { provider = ^NSInteger { return [weakSelf.aribClock stateAt:[weakSelf mediaTime]/1000.0]; }; }
   [NeoVLCFrameTap bindARIBView:self.movieView state:provider];
 }
-- (void)showSubtitles { [self showControls]; [self updateSubtitleSettings]; [self.chrome showSettings:@"subtitles"]; }
+- (void)showSubtitles {
+  [self showControls]; [self updateSubtitleSettings];
+  if ([self isLive] || [self.recordingContext[@"videoFileType"] isEqual:@"ts"]) {
+    NSInteger selected = -1, available = -1, index = 0;
+    for (VLCMediaPlayerTrack *track in self.player.textTracks) {
+      NSString *name = [NSString stringWithFormat:@"%@ %@",track.trackName ?: @"",track.trackDescription ?: @""];
+      if (![NeoCommentOverlay isCommentName:name]) {
+        if (available < 0 || [name rangeOfString:@"ARIB" options:NSCaseInsensitiveSearch].location != NSNotFound) { available = index; }
+        if (track.isSelected) { selected = index; }
+      }
+      index++;
+    }
+    // Single-service TS normally exposes one ARIB track. Keep the existing
+    // selection path so preference restoration and PiP observe the same state.
+    if (available >= 0) { [self performPlayerAction:[NSString stringWithFormat:@"subtitle:%ld",(long)(selected >= 0 ? -1 : available)]]; }
+    return;
+  }
+  [self.chrome showSettings:@"subtitles"];
+}
 - (void)showComments { [self showControls]; [self.chrome showSettings:@"comments"]; }
 
 - (void)updateCommentState {
@@ -2903,11 +2921,23 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       checks[@"nativeARIBVisible"] = @(captionRegions > 0);
       UIImage *image = [[[UIGraphicsImageRenderer alloc] initWithSize:self.view.bounds.size] imageWithActions:^(UIGraphicsImageRendererContext *context) { [self.view drawViewHierarchyInRect:self.view.bounds afterScreenUpdates:YES]; }];
       [UIImagePNGRepresentation(image) writeToURL:[[NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject URLByAppendingPathComponent:@"live-player.png"] atomically:YES];
-      [self.commentPiP beginCompositionSmoke];
-      [self setPlaybackIntent:NO];
-      dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.5*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
-        checks[@"pauseClosesTransport"] = @(self.live == nil && !self.wantsPlayback && !self.inputBufferReady && self.player.audio.muted);
-        [self setPlaybackIntent:YES]; [self pollLiveProbe:1 checks:checks completion:completion];
+      [self performPlayerAction:@"subtitles"];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.4*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+        [self updateSubtitleSettings]; BOOL anySelected = NO;
+        for (VLCMediaPlayerTrack *track in self.player.textTracks) { anySelected |= track.isSelected; }
+        checks[@"aribButtonDisables"] = @(!anySelected && [self.chrome.subtitleButton.accessibilityValue isEqual:@"無効"]);
+        checks[@"aribButtonKeepsPanelClosed"] = @(!self.chrome.subtitlePickerVisible);
+        [self performPlayerAction:@"subtitles"];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.4*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+          [self updateSubtitleSettings]; BOOL selected = NO;
+          for (VLCMediaPlayerTrack *track in self.player.textTracks) { selected |= track.isSelected; }
+          checks[@"aribButtonEnables"] = @(selected && [self.chrome.subtitleButton.accessibilityValue isEqual:@"有効"]);
+          [self.commentPiP beginCompositionSmoke]; [self setPlaybackIntent:NO];
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.5*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
+            checks[@"pauseClosesTransport"] = @(self.live == nil && !self.wantsPlayback && !self.inputBufferReady && self.player.audio.muted);
+            [self setPlaybackIntent:YES]; [self pollLiveProbe:1 checks:checks completion:completion];
+          });
+        });
       });
     } else if (phase == 1) {
       NSInteger before = self.liveGeneration;

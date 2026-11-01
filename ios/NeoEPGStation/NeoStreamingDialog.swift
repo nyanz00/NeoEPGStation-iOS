@@ -9,6 +9,7 @@ final class NeoStreamingDialog: UIViewController {
   private let subtitleStatus = NeoStyle.label(size: 12, muted: true)
   private let loader: NeoCommentLoader
   private var watchButton: UIButton?
+  private var titleEdges: [NSLayoutConstraint] = []
   private var fieldLabels: [ObjectIdentifier: UILabel] = [:]
   private var commentTracks: [NativeCommentTrack] = [], selectedComment = -1
   private var mode: Int, selectedSubtitle = -1, tracks: [NativeCommentTrack] = [], closed = false
@@ -31,7 +32,7 @@ final class NeoStreamingDialog: UIViewController {
       stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor), stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
       stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor), stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor)])
     let title = NeoStyle.dialogTitle(file.name+" - STREAMING")
-    stack.addArrangedSubview(padded(title, top: 6, bottom: 6, horizontal: 16)); divider()
+    stack.addArrangedSubview(padded(title, top: 16, bottom: 16, horizontal: 16, isTitle:true)); divider()
     let fields = UIStackView(); fields.axis = .vertical; fields.spacing = 12
     let row = UIStackView(); row.spacing = 12; row.distribution = .fillEqually
     let stream = UIButton(type: .system); let type = file.type == "ts" ? "HLS-TS" : "HLS"
@@ -58,11 +59,12 @@ final class NeoStreamingDialog: UIViewController {
     stack.addArrangedSubview(padded(actions, top: 12, bottom: 12, horizontal: 12))
     let tap = UITapGestureRecognizer(target: self, action: #selector(tappedBackground(_:))); tap.cancelsTouchesInView = false; view.addGestureRecognizer(tap)
   }
-  private func padded(_ child: UIView, top: CGFloat, bottom: CGFloat, horizontal: CGFloat) -> UIView {
+  private func padded(_ child: UIView, top: CGFloat, bottom: CGFloat, horizontal: CGFloat, isTitle: Bool = false) -> UIView {
     let box = UIView(); box.addSubview(child); child.translatesAutoresizingMaskIntoConstraints = false
-    NSLayoutConstraint.activate([child.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: horizontal),
-      child.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -horizontal), child.topAnchor.constraint(equalTo: box.topAnchor, constant: top),
-      child.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -bottom)])
+    let edges = [child.leadingAnchor.constraint(equalTo:box.leadingAnchor,constant:horizontal),
+      child.trailingAnchor.constraint(equalTo:box.trailingAnchor,constant:-horizontal),child.topAnchor.constraint(equalTo:box.topAnchor,constant:top),
+      child.bottomAnchor.constraint(equalTo:box.bottomAnchor,constant:-bottom)]
+    NSLayoutConstraint.activate(edges); if isTitle { titleEdges = edges }
     return box
   }
   private func divider() { let line = UIView(); line.backgroundColor = NeoStyle.border; line.heightAnchor.constraint(equalToConstant: 1).isActive = true; stack.addArrangedSubview(line) }
@@ -135,6 +137,8 @@ final class NeoStreamingDialog: UIViewController {
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
+    let inset = NeoStyle.dialogTitleInset(viewportWidth:view.bounds.width)
+    for (index,edge) in titleEdges.enumerated() { edge.constant = index % 2 == 0 ? inset : -inset }
     let area = view.bounds.inset(by: view.safeAreaInsets).insetBy(dx: 12, dy: 12), width = min(444, area.width)
     scroll.frame = CGRect(x: 0, y: 0, width: width, height: area.height)
     let height = min(area.height, stack.systemLayoutSizeFitting(CGSize(width: width, height: 0),
@@ -168,10 +172,13 @@ final class NeoStreamingDialog: UIViewController {
         checks["independentSelections"] = dialog.selectedSubtitle == 1 && dialog.selectedComment == choice
         checks["commentValueVisible"] = dialog.fieldLabels[ObjectIdentifier(dialog.danmaku)]?.text == (choice < 0 ? "弾幕なし" : "Comments B")
         checks["twoCaptionFields"] = dialog.danmaku.superview !== dialog.subtitle.superview && dialog.danmaku.superview?.superview === dialog.subtitle.superview?.superview
-        checks["compactTitle"] = abs((dialog.stack.arrangedSubviews.first?.bounds.height ?? 0)-42) < 1
+        checks["titleMatchesRenderedWeb"] = abs((dialog.stack.arrangedSubviews.first?.bounds.height ?? 0)-(dialog.view.bounds.width >= 600 ? 78 : 62)) < 1
+        checks["titleChangedFromPrior42"] = (dialog.stack.arrangedSubviews.first?.bounds.height ?? 0) > 60
         let double = NeoStyle.dialogTitle("One\nTwo"); checks["wrappedTitleHeight"] = abs(double.sizeThatFits(CGSize(width:320,height:CGFloat.greatestFiniteMagnitude)).height-60)<1
         let image = UIGraphicsImageRenderer(size:dialog.view.bounds.size).image { _ in dialog.view.drawHierarchy(in:dialog.view.bounds,afterScreenUpdates:true) }
         try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("feedback-stream-dialog.png"))
+        let measured = dialog.stack.arrangedSubviews.first?.bounds.height ?? 0
+        try? JSONSerialization.data(withJSONObject:["viewportWidth":dialog.view.bounds.width,"headerHeight":measured,"previousAppHeight":42,"webReferenceHeight":dialog.view.bounds.width >= 600 ? 78 : 62]).write(to:NeoPiPSmoke.directory.appendingPathComponent("feedback-title-metrics.json"))
         dialog.watch()
       }
     }

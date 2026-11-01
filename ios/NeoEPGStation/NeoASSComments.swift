@@ -54,6 +54,21 @@ struct NativeComment {
   }
 }
 
+// Browsing history holds lightweight comment values, independently of render/GPU data.
+struct LiveCommentLog {
+  private(set) var comments: [NativeComment] = []
+  private(set) var following = true
+  static let limit = 500
+  mutating func append(_ incoming: [NativeComment]) {
+    comments.append(contentsOf:incoming); trim()
+  }
+  mutating func follow(_ value: Bool) { following = value; trim() }
+  private mutating func trim() {
+    if following, comments.count > Self.limit { comments.removeFirst(comments.count-Self.limit) }
+  }
+  mutating func reset() { comments.removeAll(); following = true }
+}
+
 enum CommentTiming: Equatable {
   case ass, danmaku
   // App-specific travel time requested for both portrait and landscape.

@@ -781,6 +781,11 @@ enum NeoIcon {
       path.addLine(to: CGPoint(x: 19, y: 20))
       path.addLine(to: CGPoint(x: 5, y: 20))
       path.close()
+    case "Subtitles":
+      path.append(UIBezierPath(roundedRect:CGRect(x:2,y:4,width:20,height:16),cornerRadius:2))
+      for rect in [CGRect(x:4,y:12,width:4,height:2),CGRect(x:4,y:16,width:10,height:2),
+                   CGRect(x:16,y:16,width:4,height:2),CGRect(x:10,y:12,width:10,height:2)] { path.append(UIBezierPath(rect:rect)) }
+      path.usesEvenOddFillRule = true
     case "SubtitlesOutlined":
       path.move(to: CGPoint(x: 20, y: 4))
       path.addLine(to: CGPoint(x: 4, y: 4))

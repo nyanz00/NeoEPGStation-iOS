@@ -130,7 +130,7 @@ for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
     try:
         print('Starting feedback case', label, device, flush=True)
         names = ['player-feedback.json', 'player-feedback-diagnostics.json',
-                 'feedback-pad-panel.png', 'feedback-stream-dialog.png']
+                 'feedback-pad-panel.png', 'feedback-stream-dialog.png', 'feedback-title-metrics.json']
         for name in names:
             (documents/name).unlink(missing_ok=True)
         env = os.environ.copy()
@@ -163,9 +163,13 @@ for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
         panels = result.get('panelChecks', {})
         result['nativePanelChecks'] = dict(panels)
         required = {'closeTouchTarget', 'commentSelectionFirst', 'continuesFollowing',
-                    'followsActualLivePosition', 'manualReadingStopsFollowing',
+                    'followsLatestLiveComment', 'manualReadingStopsFollowing',
                     'pastLogAnchorPreserved', 'recordedTimeUnchanged',
-                    'remainingSettingsOrder', 'returnResumesFollowing', 'wallClockDisplayed'}
+                    'remainingSettingsOrder', 'returnResumesFollowing', 'wallClockDisplayed',
+                    'normalLogHas500', 'manualLogSurvives60Seconds', 'drawingDataStillPruned',
+                    'followRestores500', 'newLiveResetsLog', 'manualUIProtectsLog',
+                    'returnUITrimsLogAndFollowsTail', 'tsSubtitleFilledWhenSelected',
+                    'tsSubtitleOutlinedWhenDisabled', 'encodedSubtitleKeepsPicker'}
         required |= {'padTraitApplied', 'padCloseAtRight'} if platform == 'pad' else {'phoneClosePreserved'}
         irrelevant = {'phoneClosePreserved'} if platform == 'pad' else {'padTraitApplied', 'padCloseAtRight'}
         result['notApplicableToDevice'] = sorted(irrelevant)
@@ -174,7 +178,8 @@ for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
             and required <= result['panelChecks'].keys()
             and all(result['panelChecks'].values())
             and bool(result.get('checks')) and all(result['checks'].values())
-            and bool(result.get('dialogChecks')) and all(result['dialogChecks'].values()))
+            and {'titleMatchesRenderedWeb', 'titleChangedFromPrior42'} <= result.get('dialogChecks', {}).keys()
+            and all(result['dialogChecks'].values()))
         results.append(result)
         (dist/(label+'-feedback-result.json')).write_text(json.dumps({'result': result, 'requests': rows}, indent=2))
         print(label, json.dumps(result), flush=True)

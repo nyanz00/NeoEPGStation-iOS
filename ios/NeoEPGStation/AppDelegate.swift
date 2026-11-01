@@ -25,7 +25,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
       UserDefaults.standard.set(true,forKey:"player.comments.enabled")
       let choice = Int(ProcessInfo.processInfo.environment["NEO_EPG_FEEDBACK_CHOICE"] ?? "2") ?? 2
       DispatchQueue.main.asyncAfter(deadline:.now()+0.5) {
-        let panelChecks = NeoPlayerChrome.runFeedbackChecks()
+        var panelChecks = NeoPlayerChrome.runFeedbackChecks(); panelChecks.merge(NeoCommentOverlay.runLiveLogChecks(),uniquingKeysWith: { _,new in new })
         NeoStreamingDialog.runFeedbackProbe(host:host,source:url,choice:choice) { mode,subtitle,comment,dialogChecks in
           let player = NeoPlayerController(url:url,title:"Comment selection fixture",username:"",password:"",networkCaching:1000)
           player.initialPosition = 20; player.aetherOptions = [:]; player.modalPresentationStyle = .fullScreen

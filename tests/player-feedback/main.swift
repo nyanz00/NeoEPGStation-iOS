@@ -18,4 +18,14 @@ let textual = NeoLiveCommentCommand.row(["content":"text","date":"1793404800"],a
 check("numeric string timestamp",textual["postedAt"] as? Double == 1793404800)
 let bad = NeoLiveCommentCommand.row(["content":"text","date":-1],at:2)!
 check("missing time never becomes elapsed display date",bad["postedAt"] == nil)
+var log = LiveCommentLog()
+let seed = parsed.comments[0]
+func batch(_ start: Int, _ count: Int) -> [NativeComment] {
+  (start..<start+count).map { index in var c = seed; c.id = index; c.start = Double(index); c.end = Double(index)+5; return c }
+}
+log.append(batch(0,600)); check("normal history keeps latest500",log.comments.count == 500 && log.comments.first?.id == 100)
+log.follow(false); log.append(batch(600,1000)); check("manual reading retains old rows beyond500",log.comments.count == 1500 && log.comments.first?.id == 100)
+check("old rows keep post time and full text",log.comments.first?.postedAt == seed.postedAt && log.comments.first?.text == seed.text)
+log.follow(true); check("follow resumes bounded history",log.comments.count == 500 && log.comments.first?.id == 1100)
+log.reset(); check("new live history starts empty",log.comments.isEmpty && log.following)
 print("Player feedback model checks: \(count) passed")
