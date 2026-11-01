@@ -1219,7 +1219,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     overlay.onChange = { [weak chrome, weak overlay] in
       guard let chrome, let overlay else { return }; chrome.setCommentRows(overlay.panelComments(),version:overlay.panelVersion)
     }
-    func liveRows(_ start: Int, _ count: Int) -> [[String:Any]] { (start..<start+count).map { ["text":"Browse \($0)","time":Double($0)] } }
+    func liveRows(_ start: Int, _ count: Int) -> [[String:Any]] { (start..<start+count).compactMap { NeoLiveCommentCommand.row(["content":"Browse \($0)"],at:Double($0)) } }
     overlay.appendLiveComments(liveRows(0,600)); chrome.scrollViewWillBeginDragging(chrome.commentList)
     overlay.appendLiveComments(liveRows(600,50))
     checks["manualUIProtectsLog"] = chrome.comments.count == 550 && !chrome.followsComments

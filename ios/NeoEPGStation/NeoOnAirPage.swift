@@ -270,18 +270,19 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
       try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("live-dialog.png"))
       dialog.smokeOutsideTap(inside:true)
       checks["insideTapKeepsDialog"] = self.presentedViewController === dialog && !dialog.isBeingDismissed
-      dialog.smokeOutsideTap(inside:false)
-      DispatchQueue.main.asyncAfter(deadline:.now()+0.4) {
-        checks["outsideTapCancels"] = self.presentedViewController == nil
+      dialog.smokeOnCancel = {
+        checks["outsideTapCancels"] = dialog.view.window == nil && self.presentedViewController !== dialog
         self.watch(item)
         DispatchQueue.main.asyncAfter(deadline:.now()+0.5) {
           guard let cancelDialog = self.presentedViewController as? NeoLiveDialog else { checks["cancelButtonCloses"] = false; completion(checks); return }
-          cancelDialog.smokePressCancel()
-          DispatchQueue.main.asyncAfter(deadline:.now()+0.4) {
-            checks["cancelButtonCloses"] = self.presentedViewController == nil; completion(checks)
+          cancelDialog.smokeOnCancel = {
+            checks["cancelButtonCloses"] = cancelDialog.view.window == nil && self.presentedViewController !== cancelDialog
+            completion(checks)
           }
+          cancelDialog.smokePressCancel()
         }
       }
+      dialog.smokeOutsideTap(inside:false)
     }
   }
 #endif
@@ -298,6 +299,7 @@ class NeoLiveDialog: UIViewController {
 #if targetEnvironment(simulator)
   var smokeCompact: Bool { card.bounds.height < 400 && card.bounds.width <= 444 && card.frame.minY > 0 }
   var smokeTitleHeight: CGFloat { contentFill.frame.minY }
+  var smokeOnCancel: (() -> Void)?
   func smokeOutsideTap(inside: Bool) { cancelIfOutside(inside ? card.center : CGPoint(x:1,y:1)) }
   func smokePressCancel() { actions.arrangedSubviews.compactMap { $0 as? UIButton }.first { $0.title(for:.normal) == "キャンセル" }?.sendActions(for:.touchUpInside) }
   var smokeNativeOnly: Bool {
@@ -318,7 +320,16 @@ class NeoLiveDialog: UIViewController {
     headingLabel.attributedText = NeoStyle.dialogTitle(heading).attributedText; headingLabel.numberOfLines = 0
     let tap = UITapGestureRecognizer(target:self,action:#selector(tappedBackground(_:))); tap.cancelsTouchesInView = false; view.addGestureRecognizer(tap)
   }
-  private func cancelIfOutside(_ point: CGPoint) { if !card.frame.contains(point) { dismiss(animated:true) } }
+  func cancel() {
+    guard !isBeingDismissed else { return }
+    let presenter = presentingViewController ?? self
+    presenter.dismiss(animated:true) {
+#if targetEnvironment(simulator)
+      let completion = self.smokeOnCancel; self.smokeOnCancel = nil; completion?()
+#endif
+    }
+  }
+  private func cancelIfOutside(_ point: CGPoint) { if !card.frame.contains(point) { cancel() } }
   @objc private func tappedBackground(_ gesture: UITapGestureRecognizer) { cancelIfOutside(gesture.location(in:view)) }
   func addText(_ text: String, bold: Bool = false) {
     loadViewIfNeeded(); guard !text.isEmpty else { return }; let label = NeoStyle.label(text,size:bold ? 20 : 14,bold:bold,muted:!bold); label.numberOfLines = 0; stack.addArrangedSubview(label)
@@ -362,7 +373,7 @@ private final class NeoLiveStreamDialog: NeoLiveDialog {
     let fields = UIStackView(); fields.spacing = 14; fields.distribution = .fillEqually
     stream = addChoice("ストリーム",container:fields); quality = addChoice("画質",container:fields); addView(fields)
     if options.isEmpty { addText("利用できる視聴設定がありません。") }
-    addAction("キャンセル") { [weak self] in self?.dismiss(animated:true) }
+    addAction("キャンセル") { [weak self] in self?.cancel() }
     addAction("視聴",filled:true,enabled:!options.isEmpty) { [weak self] in
       guard let self, let value = self.selected else { return }
       UserDefaults.standard.set(value.type,forKey:"live.type"); UserDefaults.standard.set(value.mode,forKey:"live.mode")

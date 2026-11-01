@@ -210,7 +210,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   @objc static func runLiveLogChecks() -> [String:Bool] {
     let overlay = NeoCommentOverlay(frame:.zero); overlay.configureLive()
     func rows(_ start: Int, _ count: Int) -> [[String:Any]] {
-      (start..<start+count).map { ["text":"History \($0)","time":Double($0),"postedAt":1793404800+Double($0)] }
+      (start..<start+count).compactMap { NeoLiveCommentCommand.row(["content":"History \($0)","date":1793404800+Double($0)],at:Double($0)) }
     }
     overlay.appendLiveComments(rows(0,600))
     var checks = ["normalLogHas500":overlay.panelComments().count == 500]
