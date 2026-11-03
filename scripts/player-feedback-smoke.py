@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
+from settings_image import right_edge_foreground
 
 
 def run(*args, timeout=120):
@@ -15,7 +16,6 @@ def run(*args, timeout=120):
 
 
 dist = Path('dist')
-run('swift', 'scripts/check-settings-image.swift', '--self-test')
 phone = json.loads((dist/'simulator-device.json').read_text())['udid']
 device = phone
 bundle = 'io.github.nyanz00.NeoEPGStation'
@@ -173,8 +173,10 @@ for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
         # assertion. Retain the raw observation and verify the reported visual
         # regression in the rendered image instead (311 fails, 312 passes).
         result['supersededNativeChecks'] = {'viewingControlsFitViewport': 'Rendered settings edge check replaces control-tree bounds'}
-        image_metrics = json.loads(run('swift', 'scripts/check-settings-image.swift',
-            str(dist/(label+'-feedback-viewing-settings.png')), platform))
+        bitmap = dist/(label+'-settings-image.bmp')
+        run('sips', '-s', 'format', 'bmp', str(dist/(label+'-feedback-viewing-settings.png')), '--out', str(bitmap))
+        image_metrics = right_edge_foreground(bitmap.read_bytes(), 1032 if platform == 'pad' else 402)
+        bitmap.unlink()
         result['settingsImageCheck'] = image_metrics
         (dist/(label+'-settings-image-metrics.json')).write_text(json.dumps(image_metrics, indent=2))
         required = {'closeTouchTarget', 'commentSelectionFirst', 'continuesFollowing',
