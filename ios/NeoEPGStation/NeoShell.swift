@@ -901,6 +901,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     wait?.isOn = true; wait?.sendActions(for:.valueChanged)
     checks["globalWaitSharesPlayerSetting"] = wait != nil && NeoCommentOverlay.waitBeforePlayback
     capture("feedback-viewing-settings")
+    checks["viewingControlsFitViewport"] = viewing.smokeControlsWithinWidth
     let app = NeoSettingsCategoryPage(category:.app,shell:self); app.loadViewIfNeeded()
     checks["engineRemovedFromApp"] = !all(app.view).contains { $0.accessibilityIdentifier == "playback-experiment-engine" }
     NeoViewingPreferences.navigationLabels = false; refreshNavigationLabels(); bottom.layoutIfNeeded(); bottomButtons.forEach { $0.layoutIfNeeded() }
@@ -908,7 +909,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     NeoViewingPreferences.navigationLabels = true; refreshNavigationLabels()
     checks["labelsRestored"] = bottomButtons.allSatisfy { ($0 as? NeoNavigationButton)?.caption.isHidden == false }
     setMenu(true,animated:false); setMenu(false,animated:true)
-    checks["closingBackdropDoesNotBlockNewPage"] = !dim.isUserInteractionEnabled && !menuOpen
+    checks["closingBackdropDoesNotBlockNewPage"] = !menuOpen && (tablet ? dim.isHidden : !dim.isUserInteractionEnabled)
     overlay.stop()
     return checks
   }

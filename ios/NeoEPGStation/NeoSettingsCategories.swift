@@ -220,7 +220,9 @@ final class NeoSettingsCategoryPage: NeoPage {
     let saved = NeoViewingPreferences.subtitleKeywords
     for index in 0..<3 {
       let field = UITextField(); field.text = saved.indices.contains(index) ? saved[index] : ""
-      field.placeholder = "優先字幕 \(index+1)"; field.accessibilityIdentifier = "viewing-subtitle-priority-\(index)"
+      field.attributedPlaceholder = NSAttributedString(string:"優先字幕 \(index+1)",attributes:[.foregroundColor:NeoStyle.muted])
+      field.backgroundColor = NeoStyle.paper; field.font = .systemFont(ofSize:16)
+      field.accessibilityIdentifier = "viewing-subtitle-priority-\(index)"
       field.textColor = .white; field.borderStyle = .roundedRect; field.autocorrectionType = .no; field.autocapitalizationType = .none
       field.addAction(UIAction { [weak field] _ in
         var values = NeoViewingPreferences.subtitleKeywords; while values.count < 3 { values.append("") }; values[index] = field?.text ?? ""; NeoViewingPreferences.subtitleKeywords = values
@@ -241,11 +243,13 @@ final class NeoSettingsCategoryPage: NeoPage {
       }
     }
     let size = UISlider(); size.minimumValue = 0.5; size.maximumValue = 2; size.value = Float(NeoViewingPreferences.commentSize)
+    size.minimumTrackTintColor = NeoStyle.accent; size.maximumTrackTintColor = NeoStyle.border
     let sizeLabel = NeoStyle.label(String(format:"文字サイズ %.2f倍",NeoViewingPreferences.commentSize))
     size.accessibilityIdentifier = "viewing-comment-size"
     size.addAction(UIAction { [weak size,weak sizeLabel] _ in NeoViewingPreferences.commentSize = Double(size?.value ?? 1); sizeLabel?.text = String(format:"文字サイズ %.2f倍",NeoViewingPreferences.commentSize) },for:.valueChanged)
     stack.addArrangedSubview(sizeLabel); stack.addArrangedSubview(size)
     let opacity = UISlider(); opacity.minimumValue = 0; opacity.maximumValue = 1; opacity.value = NeoViewingPreferences.commentOpacity
+    opacity.minimumTrackTintColor = NeoStyle.accent; opacity.maximumTrackTintColor = NeoStyle.border
     let opacityLabel = NeoStyle.label("コメントの不透明度 \(Int(opacity.value*100))%")
     opacity.accessibilityIdentifier = "viewing-comment-opacity"
     opacity.addAction(UIAction { [weak opacity,weak opacityLabel] _ in NeoViewingPreferences.commentOpacity = opacity?.value ?? 1; opacityLabel?.text = "コメントの不透明度 \(Int(NeoViewingPreferences.commentOpacity*100))%" },for:.valueChanged)
@@ -258,10 +262,18 @@ final class NeoSettingsCategoryPage: NeoPage {
   }
   private func row(_ title: String, explanation: String = "", control: UIView) {
     let labels = UIStackView(); labels.axis = .vertical; labels.spacing = 4
-    let name = NeoStyle.label(title, size: 16); name.numberOfLines = 0; labels.addArrangedSubview(name)
-    if !explanation.isEmpty { let detail = NeoStyle.label(explanation, muted: true); detail.numberOfLines = 0; labels.addArrangedSubview(detail) }
+    let name = NeoStyle.label(title, size: 16); name.numberOfLines = 0; name.lineBreakMode = .byWordWrapping
+    name.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
+    name.setContentCompressionResistancePriority(.required,for:.vertical); labels.addArrangedSubview(name)
+    if !explanation.isEmpty {
+      let detail = NeoStyle.label(explanation, muted: true); detail.numberOfLines = 0; detail.lineBreakMode = .byWordWrapping
+      detail.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
+      detail.setContentCompressionResistancePriority(.required,for:.vertical); labels.addArrangedSubview(detail)
+    }
     let row = UIStackView(arrangedSubviews: [labels, control]); row.axis = .horizontal; row.alignment = .center; row.spacing = 16
-    control.setContentHuggingPriority(.required, for: .horizontal); labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    control.setContentHuggingPriority(.required, for: .horizontal); control.setContentCompressionResistancePriority(.required,for:.horizontal)
+    labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    labels.widthAnchor.constraint(greaterThanOrEqualToConstant:0).isActive = true
     row.heightAnchor.constraint(greaterThanOrEqualToConstant: 56).isActive = true; stack.addArrangedSubview(row)
   }
   private func toggle(_ title: String, explanation: String = "", on: Bool, action: @escaping (Bool) -> Void) {
@@ -271,6 +283,14 @@ final class NeoSettingsCategoryPage: NeoPage {
   }
 #if targetEnvironment(simulator)
   var smokeSettingCount: Int { stack.arrangedSubviews.count }
+  var smokeControlsWithinWidth: Bool {
+    view.layoutIfNeeded()
+    func all(_ view: UIView) -> [UIView] { [view]+view.subviews.flatMap(all) }
+    return all(stack).filter { $0 is UISwitch || $0 is UIStepper || $0 is UITextField || $0 is UISlider }.allSatisfy {
+      let rect = scroll.convert($0.bounds,from:$0)
+      return rect.minX >= 15 && rect.maxX <= scroll.bounds.width-15
+    }
+  }
   var smokeAccountSelector: Bool {
     guard category == .account, let selector = stack.arrangedSubviews.flatMap({ $0.subviews }).first(where: { $0 is NeoUserSelector }) as? NeoUserSelector else { return false }
     return selector.bounds.size == CGSize(width: 160, height: 40) && selector.showsMenuAsPrimaryAction && selector.menu != nil

@@ -179,7 +179,7 @@ for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
         required |= {'settingsSevenCategories','categoryDescriptionsRemoved','annictEmpty','discordEmpty',
                      'engineInViewing','engineRemovedFromApp','globalNetworkPersists',
                      'globalSizeReachesPlayer','globalOpacityReachesPlayer','globalWaitSharesPlayerSetting',
-                     'labelsOffCentersIcons','labelsRestored','closingBackdropDoesNotBlockNewPage'}
+                     'labelsOffCentersIcons','labelsRestored','closingBackdropDoesNotBlockNewPage','viewingControlsFitViewport'}
         required |= {'padTraitApplied', 'padCloseAtRight'} if platform == 'pad' else {'phoneClosePreserved'}
         irrelevant = {'phoneClosePreserved'} if platform == 'pad' else {'padTraitApplied', 'padCloseAtRight'}
         result['notApplicableToDevice'] = sorted(irrelevant)
