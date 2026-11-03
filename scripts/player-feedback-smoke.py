@@ -15,6 +15,7 @@ def run(*args, timeout=120):
 
 
 dist = Path('dist')
+run('swift', 'scripts/check-settings-image.swift', '--self-test')
 phone = json.loads((dist/'simulator-device.json').read_text())['udid']
 device = phone
 bundle = 'io.github.nyanz00.NeoEPGStation'
@@ -168,6 +169,14 @@ for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
         result['platform'] = platform
         panels = result.get('panelChecks', {})
         result['nativePanelChecks'] = dict(panels)
+        # A predicate over all UIKit descendants is not a rendered clipping
+        # assertion. Retain the raw observation and verify the reported visual
+        # regression in the rendered image instead (311 fails, 312 passes).
+        result['supersededNativeChecks'] = {'viewingControlsFitViewport': 'Rendered settings edge check replaces control-tree bounds'}
+        image_metrics = json.loads(run('swift', 'scripts/check-settings-image.swift',
+            str(dist/(label+'-feedback-viewing-settings.png')), platform))
+        result['settingsImageCheck'] = image_metrics
+        (dist/(label+'-settings-image-metrics.json')).write_text(json.dumps(image_metrics, indent=2))
         required = {'closeTouchTarget', 'commentSelectionFirst', 'continuesFollowing',
                     'followsLatestLiveComment', 'manualReadingStopsFollowing',
                     'pastLogAnchorPreserved', 'recordedTimeUnchanged',
@@ -179,12 +188,12 @@ for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
         required |= {'settingsSevenCategories','categoryDescriptionsRemoved','annictEmpty','discordEmpty',
                      'engineInViewing','engineRemovedFromApp','globalNetworkPersists',
                      'globalSizeReachesPlayer','globalOpacityReachesPlayer','globalWaitSharesPlayerSetting',
-                     'labelsOffCentersIcons','labelsRestored','closingBackdropDoesNotBlockNewPage','viewingControlsFitViewport'}
+                     'labelsOffCentersIcons','labelsRestored','closingBackdropDoesNotBlockNewPage'}
         required |= {'padTraitApplied', 'padCloseAtRight'} if platform == 'pad' else {'phoneClosePreserved'}
         irrelevant = {'phoneClosePreserved'} if platform == 'pad' else {'padTraitApplied', 'padCloseAtRight'}
         result['notApplicableToDevice'] = sorted(irrelevant)
-        result['panelChecks'] = {key: value for key, value in panels.items() if key not in irrelevant}
-        result['success'] = (result['serverSelection'] and result['globalStreamOverrides']
+        result['panelChecks'] = {key: value for key, value in panels.items() if key not in irrelevant and key not in result['supersededNativeChecks']}
+        result['success'] = (result['serverSelection'] and result['globalStreamOverrides'] and image_metrics['success']
             and required <= result['panelChecks'].keys()
             and all(result['panelChecks'].values())
             and bool(result.get('checks')) and all(result['checks'].values())
