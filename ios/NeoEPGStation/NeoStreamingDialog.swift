@@ -17,7 +17,7 @@ final class NeoStreamingDialog: UIViewController {
     self.file = file; self.qualities = qualities; self.start = start
     loader = NeoCommentLoader(source: source, username: "", password: "")
     let saved = UserDefaults.standard.integer(forKey: "player.streaming.mode."+file.type)
-    mode = qualities.indices.contains(saved) && !qualities[saved].isEmpty ? saved : (qualities.firstIndex(where: { !$0.isEmpty }) ?? 0)
+    mode = NeoViewingPreferences.initialQuality(qualities,saved:saved)
     super.init(nibName: nil, bundle: nil)
     modalPresentationStyle = .overFullScreen; modalTransitionStyle = .crossDissolve
   }
@@ -110,11 +110,12 @@ final class NeoStreamingDialog: UIViewController {
         if case .success(let tracks) = result {
           self.tracks = tracks.filter { !$0.isComment && ["ass","ssa","subrip","srt","webvtt"].contains($0.codecName?.lowercased() ?? "") }
           self.commentTracks = tracks.filter(\.isComment)
-          if let saved = UserDefaults.standard.object(forKey:"player.streaming.commentIndex") as? Int {
+          if let preferred = NeoCommentPreference.priority(self.commentTracks) {
+            self.selectedComment = preferred.subtitleIndex
+          } else if let saved = UserDefaults.standard.object(forKey:"player.streaming.commentIndex") as? Int {
             self.selectedComment = saved < 0 ? -1 : self.commentTracks.first { $0.subtitleIndex == saved }?.subtitleIndex ?? NeoCommentPreference.preferred(self.commentTracks)?.subtitleIndex ?? -1
           } else { self.selectedComment = NeoCommentPreference.preferred(self.commentTracks)?.subtitleIndex ?? -1 }
-          let saved = UserDefaults.standard.object(forKey: "player.streaming.subtitleIndex") as? Int ?? -1
-          self.selectedSubtitle = self.tracks.contains { $0.subtitleIndex == saved } ? saved : -1
+          self.selectedSubtitle = NeoCommentPreference.priority(self.tracks)?.subtitleIndex ?? -1
         } else { self.subtitleStatus.text = "字幕を取得できません。字幕なしで視聴できます。"; self.subtitleStatus.isHidden = false }
         self.subtitle.isEnabled = true; self.danmaku.isEnabled = true; self.watchButton?.isEnabled = true; self.updateSubtitle(); self.updateDanmaku(); self.view.setNeedsLayout()
       }
@@ -168,6 +169,7 @@ final class NeoStreamingDialog: UIViewController {
         guard dialog.watchButton?.isEnabled == true || attempts >= 100 else { return }
         timer?.invalidate(); timer = nil
         checks["trackListLoaded"] = dialog.commentTracks.count == 2 && dialog.tracks.count == 1
+        checks["globalSubtitlePriorityApplied"] = dialog.selectedComment == 2 && dialog.selectedSubtitle == 1
         dialog.selectDanmaku(choice); dialog.selectedSubtitle = 1; dialog.updateSubtitle(); dialog.view.layoutIfNeeded()
         checks["independentSelections"] = dialog.selectedSubtitle == 1 && dialog.selectedComment == choice
         checks["commentValueVisible"] = dialog.fieldLabels[ObjectIdentifier(dialog.danmaku)]?.text == (choice < 0 ? "弾幕なし" : "Comments B")

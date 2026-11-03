@@ -94,6 +94,7 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     sizeMultiplier = size.isFinite ? min(2, max(0.5, size)) : 1
     opacity = alpha.isFinite ? min(1, max(0, alpha)) : 1
     usesSourceOpacity = defaults.object(forKey: Self.opacityKey) == nil
+    NotificationCenter.default.addObserver(self,selector:#selector(globalCommentPreferencesChanged),name:.init("neoViewingCommentsChanged"),object:nil)
     isUserInteractionEnabled = false; backgroundColor = .clear
     do {
       guard let device = MTLCreateSystemDefaultDevice() else { throw CommentParseError.invalid("Metalデバイス") }
@@ -496,6 +497,10 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   func setSize(_ value: Double) {
     guard value.isFinite else { return }
     sizeMultiplier = min(2, max(0.5, value)); if let rawTimeline { publish(rawTimeline, preserveActive: false) }; UserDefaults.standard.set(sizeMultiplier, forKey: Self.sizeKey); onChange?()
+  }
+  @objc private func globalCommentPreferencesChanged() {
+    setSize(NeoViewingPreferences.commentSize)
+    if UserDefaults.standard.object(forKey:Self.opacityKey) != nil { setOpacity(NeoViewingPreferences.commentOpacity) }
   }
   func setOpacity(_ value: Float) {
     guard value.isFinite else { return }

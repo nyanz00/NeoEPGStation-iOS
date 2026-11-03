@@ -237,6 +237,7 @@ final class NeoAetherBackend: NSObject {
           load.sessionCacheByteBudget = 256*1024*1024
           _ = try await next.load(url:url,startPosition:Double(startMilliseconds)/1000,options:load)
           guard !Task.isCancelled, !self.closed, self.epoch == generation else { return }
+          next.clearSubtitle() // Ordinary captions start only after explicit/priority selection.
           if next.sourceVideoCodecName?.lowercased() != "av1", self.checkpoints != nil {
             self.checkpoints?.stop(); self.checkpoints = nil; NeoAV1PlaybackBridge.install(nil)
           }
@@ -467,8 +468,6 @@ final class NeoAetherBackend: NSObject {
     let id = Int(url.lastPathComponent.components(separatedBy:"-").first ?? "") ?? choices.count
     choices[id] = url
     if selected { selectSubtitle(id) }
-    else if options["streamSubtitleIndex"] == nil, chosenSubtitle < 0, let name = NeoSubtitlePreference.savedName, !name.isEmpty,
-      url.deletingPathExtension().lastPathComponent.contains(name) { selectSubtitle(id) }
     refreshTracks()
   }
   @objc func selectSubtitle(_ index: Int) {

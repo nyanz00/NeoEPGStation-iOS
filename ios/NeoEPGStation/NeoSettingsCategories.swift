@@ -1,9 +1,9 @@
 import UIKit
 
 enum NeoSettingsCategory: String, CaseIterable {
-  case app, general, viewing, display, account
+  case app, general, viewing, display, account, annict, discord
   var title: String {
-    switch self { case .app: return "アプリ設定"; case .general: return "全般"; case .viewing: return "視聴"; case .display: return "表示"; case .account: return "アカウント" }
+    switch self { case .app: return "アプリ設定"; case .general: return "全般"; case .viewing: return "視聴"; case .display: return "表示"; case .account: return "アカウント"; case .annict: return "Annict"; case .discord: return "Discord" }
   }
   var explanation: String {
     switch self {
@@ -12,10 +12,11 @@ enum NeoSettingsCategory: String, CaseIterable {
     case .viewing: return "リジューム再生と視聴履歴の送信を設定します。"
     case .display: return "録画一覧の表示件数とハイライト、操作ボタン、視聴履歴の保存件数を設定します。"
     case .account: return "アクティブユーザーの切り替えと外部連携の認証を管理します。"
+    case .annict, .discord: return ""
     }
   }
   var icon: String {
-    switch self { case .app: return "SettingsOutlined"; case .general: return "TuneOutlined"; case .viewing: return "PlayCircleOutlineOutlined"; case .display: return "VisibilityOutlined"; case .account: return "LinkOutlined" }
+    switch self { case .app: return "SettingsOutlined"; case .general: return "TuneOutlined"; case .viewing: return "PlayCircleOutlineOutlined"; case .display: return "VisibilityOutlined"; case .account: return "LinkOutlined"; case .annict: return "AlphaA"; case .discord: return "ChatBubbleOutlineOutlined" }
   }
 }
 
@@ -33,7 +34,7 @@ final class NeoSettingsPage: NeoPage, UITableViewDataSource, UITableViewDelegate
   func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
     let category = NeoSettingsCategory.allCases[indexPath.row]
     let cell = tableView.dequeueReusableCell(withIdentifier: "category", for: indexPath)
-    var config = cell.defaultContentConfiguration(); config.text = category.title; config.secondaryText = category.explanation
+    var config = cell.defaultContentConfiguration(); config.text = category.title; config.secondaryText = nil
     config.textProperties.font = .systemFont(ofSize: 17, weight: .bold); config.textProperties.color = .white
     config.secondaryTextProperties.font = .systemFont(ofSize: 14); config.secondaryTextProperties.color = NeoStyle.muted
     config.secondaryTextProperties.numberOfLines = 0; config.textToSecondaryTextVerticalPadding = 4
@@ -50,6 +51,12 @@ final class NeoSettingsPage: NeoPage, UITableViewDataSource, UITableViewDelegate
     navigationController?.pushViewController(NeoSettingsCategoryPage(category: NeoSettingsCategory.allCases[indexPath.row], shell: shell), animated: true)
   }
 #if targetEnvironment(simulator)
+  var smokeCategoryDescriptionsRemoved: Bool {
+    (0..<NeoSettingsCategory.allCases.count).allSatisfy {
+      let cell = tableView(table,cellForRowAt:IndexPath(row:$0,section:0))
+      return (cell.contentConfiguration as? UIListContentConfiguration)?.secondaryText == nil
+    }
+  }
   func smokeHistoryPreferences() -> Bool {
     guard let api = shell?.api, let shell else { return false }
     let original = api.disablePlaybackHistory
@@ -58,7 +65,7 @@ final class NeoSettingsPage: NeoPage, UITableViewDataSource, UITableViewDelegate
     page.smokeSetHistoryDisabled(true)
     let restored = NeoAPI(base: api.base).disablePlaybackHistory
     page.smokeSetHistoryDisabled(false)
-    return restored && !api.disablePlaybackHistory && table.numberOfRows(inSection: 0) == 5
+    return restored && !api.disablePlaybackHistory && table.numberOfRows(inSection: 0) == 7
   }
 #endif
 }
@@ -91,7 +98,8 @@ final class NeoSettingsCategoryPage: NeoPage {
     task?.cancel(); stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
     guard let shell, let api = shell.api else { return }
     switch category {
-    case .app:
+    case .viewing:
+      buildViewingPreferences()
       let engine = UIButton(type: .system)
       engine.setTitle(NeoPlaybackExperiment.selected.title, for: .normal); engine.tintColor = NeoStyle.accent
       engine.titleLabel?.font = .systemFont(ofSize: 14); engine.titleLabel?.numberOfLines = 2
@@ -114,6 +122,16 @@ final class NeoSettingsCategoryPage: NeoPage {
         })
         row("チェックポイント", explanation: "1080p以下のAV1が対象です。自動はサーバー解析の最大間隔が10秒以上の場合に使用します。未解析・旧版は解析完了後に選択します。オフでは通常経路で再生します。過去60秒・先読み20秒、保持上限128MiB。次の再生から適用します。", control: checkpoint)
       }
+      toggle("リジューム再生", explanation: "保存された再生位置から続けて再生します。", on: api.resumePlayback) { api.resumePlayback = $0 }
+      historyToggle.isOn = api.disablePlaybackHistory; historyToggle.onTintColor = NeoStyle.accent
+      historyToggle.accessibilityLabel = "視聴履歴を送信しない"
+      historyToggle.removeTarget(nil, action: nil, for: .valueChanged)
+      historyToggle.addTarget(self, action: #selector(historyChanged), for: .valueChanged)
+      row("視聴履歴を送信しない", explanation: "このアプリからの送信だけを止めます。既存の履歴とリジューム位置は残ります。", control: historyToggle)
+    case .app:
+      toggle("下部ナビゲーションのラベルを表示", on: NeoViewingPreferences.navigationLabels) { [weak shell] in
+        NeoViewingPreferences.navigationLabels = $0; shell?.refreshNavigationLabels()
+      }
       button("接続先を変更") { [weak self, weak shell] in
         guard let shell else { return }; self?.navigationController?.pushViewController(NeoConnectionPage(shell: shell), animated: true)
       }
@@ -122,13 +140,7 @@ final class NeoSettingsCategoryPage: NeoPage {
       }
     case .general:
       info("テーマ：ターコイズ・ダーク")
-    case .viewing:
-      toggle("リジューム再生", explanation: "保存された再生位置から続けて再生します。", on: api.resumePlayback) { api.resumePlayback = $0 }
-      historyToggle.isOn = api.disablePlaybackHistory; historyToggle.onTintColor = NeoStyle.accent
-      historyToggle.accessibilityLabel = "視聴履歴を送信しない"
-      historyToggle.removeTarget(nil, action: nil, for: .valueChanged)
-      historyToggle.addTarget(self, action: #selector(historyChanged), for: .valueChanged)
-      row("視聴履歴を送信しない", explanation: "このアプリからの送信だけを止めます。既存の履歴とリジューム位置は残ります。", control: historyToggle)
+    case .annict, .discord: break
     case .display:
       toggle("THUMBボタンを表示しない", on: shell.storage.hideRecordedThumbnailButton) { [weak shell] in shell?.storage.hideRecordedThumbnailButton = $0 }
       toggle("録画済みへ戻った番組を強調表示", explanation: "録画詳細や視聴履歴から一覧へ移動した際、対象の録画を約1秒間ハイライトします。", on: api.highlightRecorded) { api.highlightRecorded = $0 }
@@ -188,6 +200,57 @@ final class NeoSettingsCategoryPage: NeoPage {
     }
   }
   @objc private func historyChanged() { shell?.api?.disablePlaybackHistory = historyToggle.isOn }
+  private func choice(_ title: String, values: [(String,String)], selected: String, save: @escaping (String) -> Void) {
+    let control = UIButton(type:.system); control.tintColor = NeoStyle.accent; control.showsMenuAsPrimaryAction = true
+    control.setTitle((values.first { $0.0 == selected }?.1 ?? selected)+" ▾",for:.normal)
+    control.accessibilityIdentifier = "viewing-"+title
+    control.menu = UIMenu(children:values.map { key,text in UIAction(title:text,state:key == selected ? .on : .off) { [weak self] _ in save(key); self?.render() } })
+    row(title,control:control)
+  }
+  private func buildViewingPreferences() {
+    let config = shell?.serverConfig
+    var seen = Set<String>()
+    let encoders = (["Config"]+(config?.watchConfig?.availableEncoders ?? [])).filter { seen.insert($0).inserted }
+    choice("エンコーダー",values:encoders.map { ($0,$0) },selected:NeoViewingPreferences.encoder) { NeoViewingPreferences.encoder = $0 }
+    choice("デフォルト画質",values:[("","自動")]+(config?.watchConfig?.liveQualities ?? config?.streamingQualities("encoded") ?? []).map { ($0,$0) },selected:NeoViewingPreferences.quality) { NeoViewingPreferences.quality = $0 }
+    toggle("HEVCでエンコード",on:NeoViewingPreferences.hevc) { NeoViewingPreferences.hevc = $0 }
+    toggle("低遅延モード",on:NeoViewingPreferences.lowLatency) { NeoViewingPreferences.lowLatency = $0 }
+    toggle("STREAMING開始バッファ",explanation:"先頭3セグメントを生成してから開始します。",on:NeoViewingPreferences.bufferedStart) { NeoViewingPreferences.bufferedStart = $0 }
+    let priorities = UIStackView(); priorities.axis = .vertical; priorities.spacing = 8
+    let saved = NeoViewingPreferences.subtitleKeywords
+    for index in 0..<3 {
+      let field = UITextField(); field.text = saved.indices.contains(index) ? saved[index] : ""
+      field.placeholder = "優先字幕 \(index+1)"; field.accessibilityIdentifier = "viewing-subtitle-priority-\(index)"
+      field.textColor = .white; field.borderStyle = .roundedRect; field.autocorrectionType = .no; field.autocapitalizationType = .none
+      field.addAction(UIAction { [weak field] _ in
+        var values = NeoViewingPreferences.subtitleKeywords; while values.count < 3 { values.append("") }; values[index] = field?.text ?? ""; NeoViewingPreferences.subtitleKeywords = values
+      },for:.editingChanged)
+      priorities.addArrangedSubview(field)
+    }
+    priorities.widthAnchor.constraint(equalToConstant:180).isActive = true
+    row("優先字幕",explanation:"上から順に弾幕と通常字幕を照合します。通常字幕は一致がなければオフになります。",control:priorities)
+    toggle("字幕・コメントの準備を待ってPLAY再生を開始",on:NeoCommentOverlay.waitBeforePlayback) { NeoCommentOverlay.waitBeforePlayback = $0 }
+    let network = UIStepper(); network.minimumValue = 1; network.maximumValue = 30; network.value = Double(NeoViewingPreferences.networkSeconds)
+    network.accessibilityIdentifier = "viewing-network-cache"
+    network.addAction(UIAction { [weak self,weak network] _ in NeoViewingPreferences.networkSeconds = Int(network?.value ?? 5); self?.render() },for:.valueChanged)
+    row("PLAYのネットワークキャッシュ：\(NeoViewingPreferences.networkSeconds)秒",explanation:"次の再生・再読み込みから適用します。",control:network)
+    choice("PLAYの巻き戻し用キャッシュ",values:NeoPlaybackCache.presets.map { (String($0),$0 == 0 ? "オフ" : "\($0)秒") },selected:String(NeoPlaybackCache.savedSeconds)) { UserDefaults.standard.set(Int($0) ?? 60,forKey:NeoPlaybackCache.preference) }
+    for ts in [false,true] {
+      for rewind in [false,true] {
+        choice("\(ts ? "TS" : "エンコード済み")STREAMINGの\(rewind ? "巻き戻し用キャッシュ" : "先読み")",values:(rewind ? NeoStreamBuffer.rewindChoices : NeoStreamBuffer.aheadChoices).map { (String($0),NeoStreamBuffer.label($0,ts:ts)) },selected:String(NeoStreamBuffer.count(ts:ts,rewind:rewind))) { NeoStreamBuffer.save(Int($0) ?? 0,ts:ts,rewind:rewind) }
+      }
+    }
+    let size = UISlider(); size.minimumValue = 0.5; size.maximumValue = 2; size.value = Float(NeoViewingPreferences.commentSize)
+    let sizeLabel = NeoStyle.label(String(format:"文字サイズ %.2f倍",NeoViewingPreferences.commentSize))
+    size.accessibilityIdentifier = "viewing-comment-size"
+    size.addAction(UIAction { [weak size,weak sizeLabel] _ in NeoViewingPreferences.commentSize = Double(size?.value ?? 1); sizeLabel?.text = String(format:"文字サイズ %.2f倍",NeoViewingPreferences.commentSize) },for:.valueChanged)
+    stack.addArrangedSubview(sizeLabel); stack.addArrangedSubview(size)
+    let opacity = UISlider(); opacity.minimumValue = 0; opacity.maximumValue = 1; opacity.value = NeoViewingPreferences.commentOpacity
+    let opacityLabel = NeoStyle.label("コメントの不透明度 \(Int(opacity.value*100))%")
+    opacity.accessibilityIdentifier = "viewing-comment-opacity"
+    opacity.addAction(UIAction { [weak opacity,weak opacityLabel] _ in NeoViewingPreferences.commentOpacity = opacity?.value ?? 1; opacityLabel?.text = "コメントの不透明度 \(Int(NeoViewingPreferences.commentOpacity*100))%" },for:.valueChanged)
+    stack.addArrangedSubview(opacityLabel); stack.addArrangedSubview(opacity)
+  }
   private func info(_ text: String) { let label = NeoStyle.label(text, muted: true); label.numberOfLines = 0; stack.addArrangedSubview(label) }
   private func button(_ title: String, action: @escaping () -> Void) {
     let button = NeoStyle.button(title, action: action); button.contentHorizontalAlignment = .left
@@ -207,6 +270,7 @@ final class NeoSettingsCategoryPage: NeoPage {
     row(title, explanation: explanation, control: toggle)
   }
 #if targetEnvironment(simulator)
+  var smokeSettingCount: Int { stack.arrangedSubviews.count }
   var smokeAccountSelector: Bool {
     guard category == .account, let selector = stack.arrangedSubviews.flatMap({ $0.subviews }).first(where: { $0 is NeoUserSelector }) as? NeoUserSelector else { return false }
     return selector.bounds.size == CGSize(width: 160, height: 40) && selector.showsMenuAsPrimaryAction && selector.menu != nil

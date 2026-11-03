@@ -40,6 +40,10 @@ struct NeoDropLog: Decodable {
   var hasErrors: Bool { dropCnt > 0 || errorCnt > 0 || scramblingCnt > 0 }
 }
 struct NeoServerConfig: Decodable {
+  struct WatchConfig: Decodable {
+    var availableEncoders: [String]?; var liveQualities: [String]?
+  }
+  var watchConfig: WatchConfig? = nil
   struct StreamConfig: Decodable {
     struct Live: Decodable {
       struct TS: Decodable {
@@ -70,7 +74,7 @@ struct NeoServerConfig: Decodable {
     self.encode = encode; self.developerMode = developerMode
     self.isEnableTSRecordedStream = isEnableTSRecordedStream; self.isEnableEncodedRecordedStream = isEnableEncodedRecordedStream
   }
-  private enum CodingKeys: String, CodingKey { case encode, developerMode, isEnableTSRecordedStream, isEnableEncodedRecordedStream, streamConfig, isEnableTSLiveStream, broadcast, urlscheme }
+  private enum CodingKeys: String, CodingKey { case encode, developerMode, isEnableTSRecordedStream, isEnableEncodedRecordedStream, streamConfig, isEnableTSLiveStream, broadcast, urlscheme, watchConfig }
   init(from decoder: Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
     // queries.ts normalizes missing/non-string encode modes independently of capabilities.
@@ -82,6 +86,7 @@ struct NeoServerConfig: Decodable {
       }
     }
     streamConfig = try values.decodeIfPresent(StreamConfig.self, forKey: .streamConfig)
+    watchConfig = try values.decodeIfPresent(WatchConfig.self,forKey:.watchConfig)
     encode = modes
     developerMode = try values.decodeIfPresent(Bool.self, forKey: .developerMode)
     isEnableTSRecordedStream = try values.decodeIfPresent(Bool.self, forKey: .isEnableTSRecordedStream)
@@ -89,6 +94,69 @@ struct NeoServerConfig: Decodable {
     isEnableTSLiveStream = try values.decodeIfPresent(Bool.self, forKey: .isEnableTSLiveStream)
     broadcast = try values.decodeIfPresent([String: Bool].self, forKey: .broadcast)
     urlscheme = try values.decodeIfPresent([String:[String:String]].self, forKey:.urlscheme)
+  }
+}
+
+// Shared by settings pages, playback controls and request construction. Keep
+// existing player keys so moving controls never resets a saved preference.
+@objc(NeoViewingPreferences)
+final class NeoViewingPreferences: NSObject {
+  static var defaults: UserDefaults { .standard }
+  static var encoder: String {
+    get { defaults.string(forKey:"watch.encoder") ?? "Config" }
+    set { defaults.set(newValue,forKey:"watch.encoder") }
+  }
+  static var quality: String {
+    get { defaults.string(forKey:"watch.quality") ?? "" }
+    set { defaults.set(newValue,forKey:"watch.quality") }
+  }
+  static var hevc: Bool {
+    get { defaults.bool(forKey:"watch.hevc") }
+    set { defaults.set(newValue,forKey:"watch.hevc") }
+  }
+  static var lowLatency: Bool {
+    get { defaults.object(forKey:"watch.lowLatency") as? Bool ?? true }
+    set { defaults.set(newValue,forKey:"watch.lowLatency") }
+  }
+  static var bufferedStart: Bool {
+    get { defaults.bool(forKey:"watch.bufferedStart") }
+    set { defaults.set(newValue,forKey:"watch.bufferedStart") }
+  }
+  static var subtitleKeywords: [String] {
+    get { Array((defaults.stringArray(forKey:"watch.subtitleKeywords") ?? ["","",""]).prefix(3)) }
+    set { defaults.set(Array(newValue.prefix(3)),forKey:"watch.subtitleKeywords") }
+  }
+  static func preferredMetadata(_ values: [[String]]) -> Int? {
+    for keyword in subtitleKeywords {
+      let word = keyword.trimmingCharacters(in:.whitespacesAndNewlines).lowercased()
+      if !word.isEmpty, let index = values.firstIndex(where: { $0.contains { $0.lowercased().contains(word) } }) { return index }
+    }
+    return nil
+  }
+  static func initialQuality(_ values: [String], saved: Int) -> Int {
+    values.firstIndex(of:quality) ?? (values.indices.contains(saved) && !values[saved].isEmpty ? saved : values.firstIndex(where: { !$0.isEmpty }) ?? 0)
+  }
+  static var streamQuery: [URLQueryItem] {
+    var result: [URLQueryItem] = []
+    if encoder != "Config" { result.append(.init(name:"encoder",value:encoder)) }
+    if hevc { result.append(.init(name:"hevc",value:"true")) }
+    return result
+  }
+  @objc static var networkSeconds: Int {
+    get { min(30,max(1,defaults.object(forKey:"player.network.seconds") as? Int ?? 5)) }
+    set { defaults.set(min(30,max(1,newValue)),forKey:"player.network.seconds") }
+  }
+  static var commentSize: Double {
+    get { let value = defaults.object(forKey:"player.comments.size") as? Double ?? 1; return value.isFinite ? min(2,max(0.5,value)) : 1 }
+    set { defaults.set(newValue.isFinite ? min(2,max(0.5,newValue)) : 1,forKey:"player.comments.size"); NotificationCenter.default.post(name:.init("neoViewingCommentsChanged"),object:nil) }
+  }
+  static var commentOpacity: Float {
+    get { let value = defaults.object(forKey:"player.comments.absoluteOpacity") as? Float ?? 1; return value.isFinite ? min(1,max(0,value)) : 1 }
+    set { defaults.set(newValue.isFinite ? min(1,max(0,newValue)) : 1,forKey:"player.comments.absoluteOpacity"); NotificationCenter.default.post(name:.init("neoViewingCommentsChanged"),object:nil) }
+  }
+  static var navigationLabels: Bool {
+    get { defaults.object(forKey:"neoepgstation.navigation.labels") as? Bool ?? true }
+    set { defaults.set(newValue,forKey:"neoepgstation.navigation.labels") }
   }
 }
 enum NeoRecordingCommand: String {

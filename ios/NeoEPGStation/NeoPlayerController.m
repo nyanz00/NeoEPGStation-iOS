@@ -611,7 +611,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
   [self showControls];
   if ([self isLive]) { [self startLive]; return; }
-  if (self.aether && ![self isStreaming]) {
+  if (![self isStreaming] && ![self.recordingContext[@"videoFileType"] isEqual:@"ts"] &&
+      (self.aether || [NeoCommentOverlay waitBeforePlayback])) {
     self.streamingSubtitles = [[NeoStreamingSubtitles alloc] initWithSource:self.sourceURL username:self.username password:self.password];
     self.streamingSubtitles.onChange = ^{ [weakSelf attachStreamingSubtitles]; };
     [self.streamingSubtitles start];
@@ -619,6 +620,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   if ([self isStreaming]) {
     if (![self.recordingContext[@"videoFileType"] isEqual:@"ts"]) {
       self.streamingSubtitles = [[NeoStreamingSubtitles alloc] initWithSource:self.sourceURL username:self.username password:self.password];
+      self.streamingSubtitles.initialTrackIndex = self.recordingContext[@"streamSubtitleIndex"];
       self.streamingSubtitles.onChange = ^{ [weakSelf attachStreamingSubtitles]; };
       [self.streamingSubtitles start];
     }
@@ -668,8 +670,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   for (NSURL *url in self.streamingSubtitles.files) {
     if ([self.attachedSubtitles containsObject:url]) { continue; }
     NSNumber *chosen = self.recordingContext[@"streamSubtitleIndex"];
-    BOOL selected = !self.streamSubtitleUserSelected && chosen && chosen.integerValue >= 0 &&
-      [[url.lastPathComponent componentsSeparatedByString:@"-"].firstObject integerValue] == chosen.integerValue;
+    NSInteger preferred = chosen ? chosen.integerValue : self.streamingSubtitles.preferredIndex;
+    BOOL selected = !self.streamSubtitleUserSelected && preferred >= 0 &&
+      [[url.lastPathComponent componentsSeparatedByString:@"-"].firstObject integerValue] == preferred;
     if (self.aether) { [self.aether addSubtitleURL:url selected:selected]; [self.attachedSubtitles addObject:url]; }
     else if ([self.player addPlaybackSlave:url type:VLCMediaPlaybackSlaveTypeSubtitle enforce:selected] == 0) { [self.attachedSubtitles addObject:url]; }
   }
@@ -1386,14 +1389,20 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 - (void)startWhenCommentsReady {
   if (self.closing || self.transportSuspended || self.reloading) { return; }
-  if (![NeoCommentOverlay waitBeforePlayback] || !self.comments.enabled) { [self restartMedia]; return; }
+  if (![NeoCommentOverlay waitBeforePlayback]) { [self restartMedia]; return; }
   self.awaitingComments = YES; [self updateLoadingState]; self.statusLabel.text = @"コメントを準備しています…";
   __weak typeof(self) weakSelf = self;
-  [self.comments prepareBeforePlayback:^{
+  dispatch_block_t ready = ^{
     if (!weakSelf || weakSelf.closing) { return; }
     weakSelf.awaitingComments = NO; [weakSelf updateLoadingState];
     if (!weakSelf.transportSuspended && !weakSelf.reloading) { [weakSelf restartMedia]; }
-  }];
+  };
+  dispatch_block_t commentsReady = ^{
+    if (weakSelf.streamingSubtitles && ![weakSelf isStreaming]) { [weakSelf.streamingSubtitles prepareBeforePlayback:ready]; }
+    else { ready(); }
+  };
+  if (self.comments.enabled) { [self.comments prepareBeforePlayback:commentsReady]; }
+  else { commentsReady(); }
 }
 - (void)restartInputAfterEndpointReady {
   if (self.closing) { return; }
@@ -1852,19 +1861,21 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     }
     return;
   }
+  BOOL ts = [self isLive] || [self.recordingContext[@"videoFileType"] isEqual:@"ts"];
+  if (!ts && self.streamSubtitleUserSelected) { return; }
   NSString *name = [NeoSubtitlePreference savedName];
-  if (!name) { return; }
+  if (ts && !name) { return; }
   NSMutableArray<VLCMediaPlayerTrack *> *tracks = [NSMutableArray new];
   NSMutableArray<NSString *> *names = [NSMutableArray new];
   NSMutableArray<NSString *> *ids = [NSMutableArray new];
   for (VLCMediaPlayerTrack *track in self.player.textTracks) {
     if (![self isOrdinarySubtitle:track]) { continue; }
-    [tracks addObject:track]; [names addObject:track.trackName ?: @"字幕"]; [ids addObject:track.trackId ?: @""];
+    [tracks addObject:track]; [names addObject:ts ? (track.trackName ?: @"字幕") : [NSString stringWithFormat:@"%@ %@",track.trackName ?: @"",track.trackDescription ?: @""]]; [ids addObject:track.trackId ?: @""];
   }
   NSString *signature = [NSString stringWithFormat:@"%@|%@", name, [ids componentsJoinedByString:@"|"]];
   if ([signature isEqualToString:self.subtitleSignature]) { return; }
   self.subtitleSignature = signature;
-  NSInteger chosen = [NeoSubtitlePreference preferredIndex:names];
+  NSInteger chosen = ts ? [NeoSubtitlePreference preferredIndex:names] : [NeoSubtitlePreference automaticIndex:names];
   for (NSInteger index = 0; index < tracks.count; index++) {
     VLCMediaPlayerTrack *track = tracks[index]; BOOL selected = index == chosen;
     if (track.isSelected != selected) { track.selected = selected; }

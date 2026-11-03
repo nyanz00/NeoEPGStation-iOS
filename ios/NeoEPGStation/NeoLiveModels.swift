@@ -49,8 +49,7 @@ struct NeoLiveOption: Equatable {
   }
   func url(api: NeoAPI, channel: Int) -> URL {
     var parts = URLComponents(url:api.url("/streams/live/\(channel)/\(type)"),resolvingAgainstBaseURL:false)!
-    parts.queryItems = [.init(name:"mode",value:String(mode)),.init(name:"quality",value:quality)]
-    // Omitted overrides intentionally use the server's watch/config defaults.
+    parts.queryItems = [.init(name:"mode",value:String(mode)),.init(name:"quality",value:quality)]+NeoViewingPreferences.streamQuery
     return parts.url!
   }
 }

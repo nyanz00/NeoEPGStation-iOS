@@ -177,6 +177,7 @@ private final class NeoSidebarCell: UITableViewCell {
 }
 
 private final class NeoNavigationButton: UIButton {
+  var showsCaption = true { didSet { caption.isHidden = !showsCaption; setNeedsLayout() } }
   let icon = UIImageView(), caption = NeoStyle.label(size: 10)
   init(item: NeoDestination) {
     super.init(frame: .zero)
@@ -188,7 +189,7 @@ private final class NeoNavigationButton: UIButton {
   override func tintColorDidChange() { super.tintColorDidChange(); icon.tintColor = tintColor; caption.textColor = tintColor }
   override func layoutSubviews() {
     super.layoutSubviews()
-    icon.frame = CGRect(x: (bounds.width-24)/2, y: 7, width: 24, height: 24)
+    icon.frame = CGRect(x: (bounds.width-24)/2, y: showsCaption ? 7 : (bounds.height-24)/2, width: 24, height: 24)
     caption.frame = CGRect(x: 1, y: 34, width: max(0, bounds.width-2), height: 14)
   }
 }
@@ -543,7 +544,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       player = controller; controller.onClose = { [weak self] in self?.player = nil }
       present(controller, animated: true); return
     }
-    let controller = NeoPlayerController(url: api.url("/videos/\(file.id)"), title: recording.name, username: "", password: "", networkCaching: 5000)
+    let controller = NeoPlayerController(url: api.url("/videos/\(file.id)"), title: recording.name, username: "", password: "", networkCaching: NeoViewingPreferences.networkSeconds*1000)
     controller.initialPosition = start
     if (experiment == .aether || experiment == .checkpointPlayer), experiment.applies(fileType:file.type, streaming:streaming != nil, recording:recording.isRecording) {
       var options: [String:Any] = ["checkpointEnabled":streaming == nil && checkpointDecision?.enabled == true]
@@ -619,9 +620,12 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     if open { dismissPopup() }
     let changed = menuOpen != open
     menuOpen = open
+    // A fading backdrop must stop intercepting the new page immediately.
+    // Its opacity animation previously swallowed the first swipe after routing.
+    dim.isUserInteractionEnabled = open
     let changes = { self.sidebar.frame.origin.x = open ? 0 : -self.sidebarWidth; self.dim.alpha = open ? 1 : 0 }
     if animated && (changed || menuDragging || sidebar.bounds.width > 0 && sidebar.frame.minX > -sidebarWidth && !open) && view.window != nil {
-      UIView.animate(withDuration: 0.22, delay: 0, options: [.beginFromCurrentState, .curveEaseOut], animations: changes)
+      UIView.animate(withDuration: 0.22, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut], animations: changes)
     }
     else { changes() }
     sidebar.accessibilityViewIsModal = open
@@ -835,11 +839,15 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     return swipeAction != nil
   }
   func saveShortcuts(_ values: [String]) throws { try storage.saveShortcuts(values); shortcuts = values; rebuildBottom(); view.setNeedsLayout() }
+  func refreshNavigationLabels() {
+    for case let button as NeoNavigationButton in bottomButtons { button.showsCaption = NeoViewingPreferences.navigationLabels }
+  }
   private func rebuildBottom() {
     bottomButtons.forEach { $0.removeFromSuperview() }; bottomButtons = []
     for id in shortcuts {
       guard let item = NeoDestination.all.first(where: { $0.id == id }) else { continue }
       let b = NeoNavigationButton(item: item)
+      b.showsCaption = NeoViewingPreferences.navigationLabels
       b.accessibilityLabel = item.title; b.accessibilityIdentifier = "tab-" + id
       b.addAction(UIAction { [weak self] _ in self?.selectDestination(id) }, for: .touchUpInside)
       bottom.addSubview(b); bottomButtons.append(b)
@@ -856,6 +864,54 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
 
 #if targetEnvironment(simulator)
+  func runViewingSettingsProbe(base: URL) -> [String:Bool] {
+    let keys = ["player.network.seconds","player.comments.size","player.comments.absoluteOpacity","player.comments.waitBeforePlayback","neoepgstation.navigation.labels"]
+    let old = keys.map { UserDefaults.standard.object(forKey:$0) }
+    defer { for (key,value) in zip(keys,old) { if let value { UserDefaults.standard.set(value,forKey:key) } else { UserDefaults.standard.removeObject(forKey:key) } }; refreshNavigationLabels() }
+    smokeUseAPI(NeoAPI(base:base)); showRoute("settings"); view.layoutIfNeeded()
+    func capture(_ name: String) {
+      view.layoutIfNeeded()
+      let image = UIGraphicsImageRenderer(bounds:view.bounds).image { _ in view.drawHierarchy(in:view.bounds,afterScreenUpdates:true) }
+      try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent(name+".png"))
+    }
+    func all(_ view: UIView) -> [UIView] { [view]+view.subviews.flatMap(all) }
+    let root = active!.topViewController!; root.loadViewIfNeeded()
+    let cells = (root as? NeoSettingsPage)?.smokeCategoryDescriptionsRemoved ?? false
+    var checks = ["settingsSevenCategories":NeoSettingsCategory.allCases.count == 7,"categoryDescriptionsRemoved":cells]
+    capture("feedback-settings-categories")
+    for category in [NeoSettingsCategory.annict,.discord] {
+      let page = NeoSettingsCategoryPage(category:category,shell:self); page.loadViewIfNeeded()
+      checks[category.rawValue+"Empty"] = page.smokeSettingCount == 0
+    }
+    let viewing = NeoSettingsCategoryPage(category:.viewing,shell:self); active!.pushViewController(viewing,animated:false); view.layoutIfNeeded()
+    let views = all(viewing.view)
+    let engine = views.contains { $0.accessibilityIdentifier == "playback-experiment-engine" }
+    checks["engineInViewing"] = engine
+    let network = views.first { $0.accessibilityIdentifier == "viewing-network-cache" } as? UIStepper
+    network?.value = 7; network?.sendActions(for:.valueChanged)
+    checks["globalNetworkPersists"] = NeoViewingPreferences.networkSeconds == 7
+    let overlay = NeoCommentOverlay(frame:.zero)
+    let size = all(viewing.view).first { $0.accessibilityIdentifier == "viewing-comment-size" } as? UISlider
+    size?.value = 1.25; size?.sendActions(for:.valueChanged)
+    checks["globalSizeReachesPlayer"] = overlay.sizeMultiplier == 1.25
+    let opacity = all(viewing.view).first { $0.accessibilityIdentifier == "viewing-comment-opacity" } as? UISlider
+    opacity?.value = 0.65; opacity?.sendActions(for:.valueChanged)
+    checks["globalOpacityReachesPlayer"] = abs(overlay.opacity-0.65)<0.001
+    let wait = all(viewing.view).compactMap { $0 as? UISwitch }.first { $0.accessibilityLabel == "字幕・コメントの準備を待ってPLAY再生を開始" }
+    wait?.isOn = true; wait?.sendActions(for:.valueChanged)
+    checks["globalWaitSharesPlayerSetting"] = wait != nil && NeoCommentOverlay.waitBeforePlayback
+    capture("feedback-viewing-settings")
+    let app = NeoSettingsCategoryPage(category:.app,shell:self); app.loadViewIfNeeded()
+    checks["engineRemovedFromApp"] = !all(app.view).contains { $0.accessibilityIdentifier == "playback-experiment-engine" }
+    NeoViewingPreferences.navigationLabels = false; refreshNavigationLabels(); bottom.layoutIfNeeded(); bottomButtons.forEach { $0.layoutIfNeeded() }
+    checks["labelsOffCentersIcons"] = bottomButtons.allSatisfy { ($0 as? NeoNavigationButton).map { $0.caption.isHidden && abs($0.icon.frame.midY-$0.bounds.midY)<0.5 } ?? false }
+    NeoViewingPreferences.navigationLabels = true; refreshNavigationLabels()
+    checks["labelsRestored"] = bottomButtons.allSatisfy { ($0 as? NeoNavigationButton)?.caption.isHidden == false }
+    setMenu(true,animated:false); setMenu(false,animated:true)
+    checks["closingBackdropDoesNotBlockNewPage"] = !dim.isUserInteractionEnabled && !menuOpen
+    overlay.stop()
+    return checks
+  }
   private var backSmokeDetails: [String: Any] = [:]
   func runCheckpointAnalysisProbe(base: URL, scenario: String) {
     let oldEngine = NeoPlaybackExperiment.selected, oldMode = NeoPlaybackExperiment.checkpointMode

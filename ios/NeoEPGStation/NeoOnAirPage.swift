@@ -1,10 +1,40 @@
 import UIKit
 
+// Animate only overflowing, visible titles. Updating force/progress does not
+// restart the text; reuse and width changes invalidate the old animation.
+private final class NeoMarqueeTitle: UIView {
+  private let label = NeoStyle.label(size:16,bold:true)
+  private var measuredWidth: CGFloat = -1
+  var text: String? {
+    get { label.text }
+    set { guard label.text != newValue else { return }; label.text = newValue; measuredWidth = -1; setNeedsLayout() }
+  }
+  override init(frame: CGRect) { super.init(frame:frame); clipsToBounds = true; isUserInteractionEnabled = false; addSubview(label) }
+  required init?(coder: NSCoder) { fatalError() }
+  override func didMoveToWindow() { super.didMoveToWindow(); measuredWidth = -1; setNeedsLayout(); if window == nil { label.layer.removeAllAnimations() } }
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    guard measuredWidth != bounds.width else { return }; measuredWidth = bounds.width
+    label.layer.removeAllAnimations(); label.transform = .identity
+    let width = ceil(label.intrinsicContentSize.width)
+    label.frame = CGRect(x:0,y:0,width:max(bounds.width,width),height:bounds.height)
+    guard window != nil, width > bounds.width+1, bounds.width > 0, !UIAccessibility.isReduceMotionEnabled else { return }
+    let distance = width-bounds.width, travel = Double(distance/28), duration = travel*2+3
+    let animation = CAKeyframeAnimation(keyPath:"transform.translation.x")
+    animation.values = [0,0,-distance,-distance,0]
+    animation.keyTimes = [0,NSNumber(value:1.5/duration),NSNumber(value:(1.5+travel)/duration),NSNumber(value:(3+travel)/duration),1]
+    animation.duration = duration; animation.repeatCount = .infinity; animation.calculationMode = .linear
+    label.layer.add(animation,forKey:"onair.title.marquee")
+    accessibilityLabel = text
+  }
+  var scrolling: Bool { label.layer.animation(forKey:"onair.title.marquee") != nil }
+}
+
 private final class NeoOnAirCell: UICollectionViewCell {
   private let logo = UIImageView(), station = NeoStyle.label(size:16,bold:true)
   private let wave = NeoStyle.label(size:12,muted:true), force = NeoStyle.label(size:12,bold:true)
   private let fallback = NeoStyle.label(size:12,bold:true,muted:true)
-  private let fire = UIImageView(), title = NeoStyle.label(size:16,bold:true)
+  private let fire = UIImageView(), title = NeoMarqueeTitle()
   private let times = NeoStyle.label(size:12,muted:true), summary = NeoStyle.label(size:13,muted:true)
   private let info = UIButton(type:.custom), watch = UIButton(type:.custom), pin = UIButton(type:.system)
   private let track = UIView(), progress = UIView()
@@ -18,14 +48,14 @@ private final class NeoOnAirCell: UICollectionViewCell {
     logo.contentMode = .scaleAspectFit; fallback.textAlignment = .center
     [logo,fallback,station,wave,force,fire,title,times,summary,info,watch,pin,track].forEach(contentView.addSubview)
     [logo,station,wave,force,fire,title,times,summary].forEach { $0.isUserInteractionEnabled = false }
-    title.numberOfLines = 1; summary.numberOfLines = 2
+    summary.numberOfLines = 2
     track.backgroundColor = NeoStyle.border; progress.backgroundColor = NeoStyle.accent; track.addSubview(progress)
     pin.addAction(UIAction { [weak self] _ in self?.onPin?() },for:.touchUpInside)
     info.addAction(UIAction { [weak self] _ in self?.onInfo?() },for:.touchUpInside)
     watch.addAction(UIAction { [weak self] _ in self?.onWatch?() },for:.touchUpInside)
   }
   required init?(coder: NSCoder) { fatalError() }
-  override func prepareForReuse() { super.prepareForReuse(); imageTask?.cancel(); imageTask = nil; imageID += 1; logo.image = nil; logoChannel = -1 }
+  override func prepareForReuse() { super.prepareForReuse(); imageTask?.cancel(); imageTask = nil; imageID += 1; logo.image = nil; logoChannel = -1; title.text = nil }
   func configure(_ schedule: NeoLiveSchedule, force amount: Int?, pinned: Bool, api: NeoAPI, now: Double) {
     fallback.text = schedule.channel.waveLabel; fallback.isHidden = schedule.channel.hasLogoData == true
     station.text = schedule.channel.name
@@ -61,7 +91,7 @@ private final class NeoOnAirCell: UICollectionViewCell {
   }
   override func layoutSubviews() {
     super.layoutSubviews(); let tablet = bounds.height >= 250, inset: CGFloat = tablet ? 16 : 10
-    title.numberOfLines = tablet ? 2 : 1; summary.numberOfLines = tablet ? 3 : 2
+    summary.numberOfLines = tablet ? 3 : 2
     let head: CGFloat = tablet ? 62 : 54, logoWidth: CGFloat = tablet ? 68 : 58
     logo.frame = CGRect(x:inset,y:12,width:logoWidth,height:tablet ? 38 : 34)
     fallback.frame = logo.frame
@@ -72,7 +102,7 @@ private final class NeoOnAirCell: UICollectionViewCell {
     fire.frame = CGRect(x:x+waveWidth+6,y:29,width:15,height:15)
     force.frame = CGRect(x:fire.frame.maxX+2,y:28,width:max(0,bounds.width-fire.frame.maxX-12),height:18)
     pin.frame = CGRect(x:bounds.width-42,y:9,width:34,height:34)
-    title.frame = CGRect(x:inset,y:head,width:bounds.width-2*inset,height:min(tablet ? 44 : 23,title.sizeThatFits(CGSize(width:bounds.width-2*inset,height:.greatestFiniteMagnitude)).height))
+    title.frame = CGRect(x:inset,y:head,width:bounds.width-2*inset,height:23)
     times.frame = CGRect(x:inset,y:title.frame.maxY+3,width:title.bounds.width,height:18)
     summary.frame = CGRect(x:inset,y:times.frame.maxY+3,width:title.bounds.width,height:min(tablet ? 64 : 40,summary.sizeThatFits(CGSize(width:title.bounds.width,height:.greatestFiniteMagnitude)).height))
     info.frame = CGRect(x:0,y:0,width:bounds.width-43,height:head)
@@ -83,6 +113,7 @@ private final class NeoOnAirCell: UICollectionViewCell {
 }
 
 final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
+  private var waveSnapshot: UIView?
   private let tabs = UIScrollView(), tabLine = UIView(), indicator = UIView()
   private let list = UICollectionView(frame:.zero,collectionViewLayout:UICollectionViewFlowLayout())
   private let message = NeoStyle.label(size:14,muted:true), spinner = UIActivityIndicatorView(style:.medium)
@@ -153,8 +184,19 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
   }
   private func selectWave(_ id: String) {
     guard waves.contains(id), id != wave else { return }
+    waveSnapshot?.removeFromSuperview(); waveSnapshot = nil; list.layer.removeAllAnimations(); list.transform = .identity
+    let direction: CGFloat = (waves.firstIndex(of:id) ?? 0) > (waves.firstIndex(of:wave) ?? 0) ? 1 : -1
+    let old = !UIAccessibility.isReduceMotionEnabled ? list.snapshotView(afterScreenUpdates:false) : nil
+    if let old { old.frame = list.frame; body.addSubview(old); waveSnapshot = old }
     wave = id; filter(); list.layoutIfNeeded()
     list.setContentOffset(CGPoint(x:0,y:-list.adjustedContentInset.top),animated:false)
+    if let old {
+      list.transform = CGAffineTransform(translationX:direction*list.bounds.width,y:0)
+      UIView.animate(withDuration:0.22,delay:0,options:[.beginFromCurrentState,.allowUserInteraction,.curveEaseOut]) {
+        self.list.transform = .identity; old.transform = CGAffineTransform(translationX:-direction*self.list.bounds.width,y:0)
+        self.view.layoutIfNeeded()
+      } completion: { [weak self,weak old] _ in old?.removeFromSuperview(); if self?.waveSnapshot === old { self?.waveSnapshot = nil } }
+    }
     if let index = waves.firstIndex(of:id), buttons.indices.contains(index) { tabs.scrollRectToVisible(buttons[index].frame,animated:true) }
   }
   // A right swipe at the first wave belongs to the shell's drawer.
@@ -246,6 +288,7 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     checks["firstWaveRightSwipeUsesDrawer"] = shell?.smokeSwipeWave(horizontal:100) == false
     if waves.count > 1 {
       checks["leftSwipeChangesWave"] = shell?.smokeSwipeWave(horizontal:-100) == true && wave == waves[1]
+      checks["waveSlideAnimated"] = UIAccessibility.isReduceMotionEnabled || (waveSnapshot != nil && !(list.layer.animationKeys()?.isEmpty ?? true))
       list.setContentOffset(CGPoint(x:0,y:200),animated:false); filter(); list.layoutIfNeeded()
       checks["refreshPreservesScroll"] = list.contentOffset.y > 150
       checks["rightSwipeChangesWave"] = shell?.smokeSwipeWave(horizontal:100) == true && wave == waves[0]
@@ -256,6 +299,12 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
       checks["cancelledSwipeKeepsWave"] = wave == before
     }
     selectWave(original)
+    let marquee = NeoMarqueeTitle(frame:CGRect(x:0,y:0,width:100,height:23)); body.addSubview(marquee)
+    marquee.text = String(repeating:"Long program title ",count:5); marquee.layoutIfNeeded()
+    checks["overflowingTitleScrolls"] = UIAccessibility.isReduceMotionEnabled || marquee.scrolling
+    marquee.frame.size.width = 3000; marquee.layoutIfNeeded()
+    checks["fittingTitleDoesNotScroll"] = !marquee.scrolling
+    marquee.removeFromSuperview()
     checks["cardsInsideViewport"] = list.visibleCells.allSatisfy { $0.bounds.width > 0 && $0.bounds.width <= list.bounds.width }
     guard let item = visible.first else { completion(checks); return }
     let renderer = UIGraphicsImageRenderer(bounds:view.bounds)
@@ -368,7 +417,11 @@ private final class NeoLiveStreamDialog: NeoLiveDialog {
   var onWatch: ((NeoLiveOption) -> Void)?
   init(title: String, options: [NeoLiveOption]) {
     self.options = options
-    selected = options.first { $0.type == UserDefaults.standard.string(forKey:"live.type") && $0.mode == UserDefaults.standard.integer(forKey:"live.mode") } ?? options.first
+    let type = NeoViewingPreferences.lowLatency && options.contains { $0.type == "m2tsll" } ? "m2tsll" : options.first?.type ?? "m2ts"
+    let available = options.filter { $0.type == type }
+    let remembered = available.firstIndex { $0.mode == UserDefaults.standard.integer(forKey:"live.mode") } ?? 0
+    let mode = NeoViewingPreferences.initialQuality(available.map(\.quality),saved:remembered)
+    selected = available.indices.contains(mode) ? available[mode] : options.first
     super.init(title:title)
     let fields = UIStackView(); fields.spacing = 14; fields.distribution = .fillEqually
     stream = addChoice("ストリーム",container:fields); quality = addChoice("画質",container:fields); addView(fields)
@@ -385,9 +438,11 @@ private final class NeoLiveStreamDialog: NeoLiveDialog {
   required init?(coder: NSCoder) { fatalError() }
   private func updateChoices() {
     stream.setTitle((selected?.label ?? "")+" ▾",for:.normal); quality.setTitle((selected?.quality ?? "")+" ▾",for:.normal)
-    let types = ["m2ts","m2tsll"].filter { type in options.contains { $0.type == type } }
+    let types = (NeoViewingPreferences.lowLatency ? ["m2tsll","m2ts"] : ["m2ts","m2tsll"]).filter { type in options.contains { $0.type == type } }
     stream.menu = UIMenu(children:types.map { type in UIAction(title:type == "m2tsll" ? "M2TS-LL" : "M2TS",state:type == selected?.type ? .on : .off) { [weak self] _ in
-      guard let self else { return }; self.selected = self.options.first { $0.type == type }; self.updateChoices()
+      guard let self else { return }
+      let values = self.options.filter { $0.type == type }; let index = NeoViewingPreferences.initialQuality(values.map(\.quality),saved:0)
+      self.selected = values.indices.contains(index) ? values[index] : nil; self.updateChoices()
     } })
     quality.menu = UIMenu(children:options.filter { $0.type == selected?.type }.map { value in UIAction(title:value.quality,state:value == selected ? .on : .off) { [weak self] _ in self?.selected = value; self?.updateChoices() } })
   }

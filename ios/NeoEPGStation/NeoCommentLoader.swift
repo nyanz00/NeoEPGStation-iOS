@@ -216,7 +216,10 @@ enum NeoCommentPreference {
   static func save(_ name: String) { UserDefaults.standard.set(name, forKey: key) }
   static func preferred(_ tracks: [NativeCommentTrack]) -> NativeCommentTrack? {
     let name = UserDefaults.standard.string(forKey: key)
-    return tracks.first(where: { $0.displayName == name }) ?? tracks.first
+    return priority(tracks) ?? tracks.first(where: { $0.displayName == name }) ?? tracks.first
+  }
+  static func priority(_ tracks: [NativeCommentTrack]) -> NativeCommentTrack? {
+    NeoViewingPreferences.preferredMetadata(tracks.map { [$0.displayName,$0.title ?? "",$0.language ?? "",$0.codecName ?? ""] }).map { tracks[$0] }
   }
 }
 
@@ -225,6 +228,7 @@ final class NeoSubtitlePreference: NSObject {
   private static let key = "player.subtitle.name"
   @objc static var savedName: String? { UserDefaults.standard.string(forKey: key) }
   @objc static func save(_ name: String) { UserDefaults.standard.set(name, forKey: key) }
+  @objc static func automaticIndex(_ names: [String]) -> Int { NeoViewingPreferences.preferredMetadata(names.map { [$0] }) ?? -1 }
   @objc static func preferredIndex(_ names: [String]) -> Int {
     guard let name = savedName, !name.isEmpty else { return -1 }
     return names.firstIndex(of: name) ?? -1

@@ -133,7 +133,8 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private var records: [NeoRecording] = [], rulesLoaded = false, ruleHeading = "関連する録画", ruleError: String?
   private var task: Task<Void, Never>?, relatedTask: Task<Void, Never>?, logoTask: URLSessionDataTask?
   private var popup: NeoAnchoredMenu?, remainingTime = false, current: Int64 = 0, duration: Int64 = 0
-  private var cacheSeconds = 5, speed: Float = 1
+  private var cacheSeconds: Int { get { NeoViewingPreferences.networkSeconds } set { NeoViewingPreferences.networkSeconds = newValue } }
+  private var speed: Float = 1
   private let drawer = NeoSidebar(), drawerDim = UIButton(type: .custom)
   private var drawerOpen = false, drawerDragging = false, drawerStart: CGFloat = 0
   private var diagnostic = "", commentDiagnostic = ""

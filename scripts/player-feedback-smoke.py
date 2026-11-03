@@ -130,7 +130,8 @@ for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
     try:
         print('Starting feedback case', label, device, flush=True)
         names = ['player-feedback.json', 'player-feedback-diagnostics.json',
-                 'feedback-pad-panel.png', 'feedback-stream-dialog.png', 'feedback-title-metrics.json']
+                 'feedback-pad-panel.png', 'feedback-stream-dialog.png', 'feedback-title-metrics.json',
+                 'feedback-settings-categories.png', 'feedback-viewing-settings.png']
         for name in names:
             (documents/name).unlink(missing_ok=True)
         env = os.environ.copy()
@@ -155,6 +156,11 @@ for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
                     and r['path'].endswith('/text') and not r['path'].endswith('/1/text')]
         result['serverSelection'] = (
             bool(comments) and all(p.endswith('/2/text') for p in comments)) if choice == 2 else not comments
+        playlists = [r for r in rows if '/vodhls/playlist' in r['path']]
+        result['globalStreamOverrides'] = bool(playlists) and all(
+            r.get('query', {}).get('encoder') == ['NVEncC']
+            and r.get('query', {}).get('hevc') == ['true']
+            and r.get('query', {}).get('startupBufferSegments') == ['3'] for r in playlists)
         # UIKit does not propagate the legacy idiom override used by the
         # embedded probe. Assert phone placement on an actual phone, and Pad
         # placement on an actual Pad, retaining every raw observation below.
@@ -170,11 +176,15 @@ for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
                     'followRestores500', 'newLiveResetsLog', 'manualUIProtectsLog',
                     'returnUITrimsLogAndFollowsTail', 'tsSubtitleFilledWhenSelected',
                     'tsSubtitleOutlinedWhenDisabled', 'encodedSubtitleKeepsPicker'}
+        required |= {'settingsSevenCategories','categoryDescriptionsRemoved','annictEmpty','discordEmpty',
+                     'engineInViewing','engineRemovedFromApp','globalNetworkPersists',
+                     'globalSizeReachesPlayer','globalOpacityReachesPlayer','globalWaitSharesPlayerSetting',
+                     'labelsOffCentersIcons','labelsRestored','closingBackdropDoesNotBlockNewPage'}
         required |= {'padTraitApplied', 'padCloseAtRight'} if platform == 'pad' else {'phoneClosePreserved'}
         irrelevant = {'phoneClosePreserved'} if platform == 'pad' else {'padTraitApplied', 'padCloseAtRight'}
         result['notApplicableToDevice'] = sorted(irrelevant)
         result['panelChecks'] = {key: value for key, value in panels.items() if key not in irrelevant}
-        result['success'] = (result['serverSelection']
+        result['success'] = (result['serverSelection'] and result['globalStreamOverrides']
             and required <= result['panelChecks'].keys()
             and all(result['panelChecks'].values())
             and bool(result.get('checks')) and all(result['checks'].values())

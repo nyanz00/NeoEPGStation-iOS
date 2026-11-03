@@ -26,6 +26,13 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
       let choice = Int(ProcessInfo.processInfo.environment["NEO_EPG_FEEDBACK_CHOICE"] ?? "2") ?? 2
       DispatchQueue.main.asyncAfter(deadline:.now()+0.5) {
         var panelChecks = NeoPlayerChrome.runFeedbackChecks(); panelChecks.merge(NeoCommentOverlay.runLiveLogChecks(),uniquingKeysWith: { _,new in new })
+        if let shell = host as? NeoShell { panelChecks.merge(shell.runViewingSettingsProbe(base:URL(string:raw)!),uniquingKeysWith: { _,new in new }) }
+        let preferenceKeys = ["watch.encoder","watch.hevc","watch.bufferedStart","watch.subtitleKeywords"]
+        let originalPreferences = preferenceKeys.map { UserDefaults.standard.object(forKey:$0) }
+        NeoViewingPreferences.encoder = "NVEncC"; NeoViewingPreferences.hevc = true; NeoViewingPreferences.bufferedStart = true
+        NeoViewingPreferences.subtitleKeywords = ["Comments B","日本語",""]
+        NeoStreamingSubtitles.checkPreparation(source:url) { preparationChecks in
+        panelChecks.merge(preparationChecks,uniquingKeysWith: { _,new in new })
         NeoStreamingDialog.runFeedbackProbe(host:host,source:url,choice:choice) { mode,subtitle,comment,dialogChecks in
           let player = NeoPlayerController(url:url,title:"Comment selection fixture",username:"",password:"",networkCaching:1000)
           player.initialPosition = 20; player.aetherOptions = [:]; player.modalPresentationStyle = .fullScreen
@@ -33,12 +40,14 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             "streamMode":mode,"streamQualities":["1080p"],"streamSubtitleIndex":subtitle,"streamCommentIndex":comment]
           host.present(player,animated:false) {
             player.runCommentChoiceProbe { result in
+              for (key,value) in zip(preferenceKeys,originalPreferences) { if let value { UserDefaults.standard.set(value,forKey:key) } else { UserDefaults.standard.removeObject(forKey:key) } }
               var result = result; result["panelChecks"] = panelChecks; result["dialogChecks"] = dialogChecks
               result["success"] = result["success"] as? Bool == true && panelChecks.values.allSatisfy { $0 } && dialogChecks.values.allSatisfy { $0 }
               NeoPiPSmoke.save("player-feedback",result)
               if let export = NeoPlaybackDiagnostics.exportURL(), let data = try? Data(contentsOf:export) { try? data.write(to:NeoPiPSmoke.directory.appendingPathComponent("player-feedback-diagnostics.json")) }
             }
           }
+        }
         }
       }
       return true
