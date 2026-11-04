@@ -51,7 +51,7 @@ final class NeoSwipeBackAnimator: NSObject, UIViewControllerAnimatedTransitionin
   func animationEnded(_ transitionCompleted: Bool) { animator = nil; onCompletion?(transitionCompleted) }
 }
 
-// UIKit creates the dismissal context on a later run-loop iteration. Keep an
+// UIKit creates the interactive context on a later run-loop iteration. Keep an
 // early update/end from a short drag until that context has actually started.
 private final class NeoPlayerInteractiveTransition: UIPercentDrivenInteractiveTransition {
   private var ready = false
@@ -288,6 +288,10 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private weak var swipeScroll: UIScrollView?
   private var scrollWasEnabled = false
   private var popInteraction: UIPercentDrivenInteractiveTransition?
+  private weak var pushingNavigation: UINavigationController?
+  private weak var pushingPage: UIViewController?
+  private var pendingBack: (navigation: UINavigationController, target: UIViewController,
+    state: UIGestureRecognizer.State, translation: CGFloat, velocity: CGFloat)?
   private var panStart: CGFloat = 0
   private var menuDragging = false
   private var player: UIViewController?
@@ -445,6 +449,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
   private func attach(_ nav: UINavigationController) {
     if active !== nav {
+      pendingBack = nil
       active?.willMove(toParent: nil); active?.view.removeFromSuperview(); active?.removeFromParent()
       addChild(nav); content.addSubview(nav.view); nav.view.frame = content.bounds; nav.didMove(toParent: self); active = nav
     }
@@ -707,6 +712,18 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
   private func updateBack(state: UIGestureRecognizer.State, translation: CGFloat, velocity: CGFloat) {
     guard let active else { return }
+    // A swipe that starts during a push must not fail for its entire lifetime.
+    // Retain the same drag until UIKit finishes the push; never overlap two
+    // navigation transitions or replay a cancelled/insufficient drag later.
+    if pendingBack != nil || (state == .began && canDeferBackUntilPushCompletes) {
+      if state == .cancelled || state == .failed ||
+        (state == .ended && translation / max(1, content.bounds.width) <= 0.28 && velocity <= 450) {
+        pendingBack = nil
+      } else if let target = active.topViewController {
+        pendingBack = (active, target, state, translation, velocity)
+      }
+      return
+    }
     let width = max(1, content.bounds.width)
     let progress = min(1, max(0, translation / width))
     // Choose the gesture's owner at begin. UINavigationController removes
@@ -724,7 +741,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     switch state {
     case .began:
       if active.viewControllers.count > 1 {
-        let interaction = UIPercentDrivenInteractiveTransition(); interaction.completionCurve = .easeOut
+        let interaction = NeoPlayerInteractiveTransition(); interaction.completionCurve = .easeOut
         popInteraction = interaction; active.popViewController(animated: true)
 #if targetEnvironment(simulator)
         backSmokeDetails["detailContextInteractive"] = active.transitionCoordinator?.isInteractive == true
@@ -774,7 +791,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   func navigationController(_ navigationController: UINavigationController,
     animationControllerFor operation: UINavigationController.Operation,
     from fromVC: UIViewController, to toVC: UIViewController) -> UIViewControllerAnimatedTransitioning? {
-    operation == .pop && popInteraction != nil ? NeoSwipeBackAnimator() : nil
+    if operation == .push { pushingNavigation = navigationController; pushingPage = toVC }
+    return operation == .pop && popInteraction != nil ? NeoSwipeBackAnimator() : nil
   }
   func navigationController(_ navigationController: UINavigationController,
     interactionControllerFor animationController: UIViewControllerAnimatedTransitioning) -> UIViewControllerInteractiveTransitioning? {
@@ -785,7 +803,26 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
   func navigationController(_ navigationController: UINavigationController, didShow viewController: UIViewController, animated: Bool) {
     if navigationController === active, preparingPlay, viewController !== preparationOrigin { playPreparationTask?.cancel() }
-    popInteraction = nil; viewController.view.setNeedsLayout()
+    if pushingNavigation === navigationController { pushingNavigation = nil; pushingPage = nil }
+    if navigationController === active { popInteraction = nil }
+    viewController.view.setNeedsLayout()
+    // didShow can run before UIKit releases its transition context. The next
+    // turn starts the retained drag after that context has been released.
+    DispatchQueue.main.async { [weak self] in self?.resumePendingBack() }
+  }
+  private var canDeferBackUntilPushCompletes: Bool {
+    guard let active, active === pushingNavigation, active.topViewController === pushingPage,
+      active.viewControllers.count > 1, let transition = active.transitionCoordinator else { return false }
+    return !transition.isInteractive
+  }
+  private func resumePendingBack() {
+    guard let pending = pendingBack else { return }
+    guard active === pending.navigation, active?.topViewController === pending.target else { pendingBack = nil; return }
+    guard active?.transitionCoordinator == nil else { return }
+    pendingBack = nil
+    updateBack(state:.began,translation:0,velocity:pending.velocity)
+    updateBack(state:.changed,translation:pending.translation,velocity:pending.velocity)
+    if pending.state == .ended { updateBack(state:.ended,translation:pending.translation,velocity:pending.velocity) }
   }
   private func acceptsSidebarBack(start: CGPoint) -> Bool {
     tablet && tabletExpanded && start.x <= max(24, view.safeAreaInsets.left+24) && start.y >= view.bounds.height*0.3 && canGoBack
@@ -827,13 +864,17 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
     let pan = recognizer as? UIPanGestureRecognizer
     let velocity = pan?.velocity(in: view) ?? .zero
+    return beginNavigationSwipe(recognizer, velocity:velocity)
+  }
+  private func beginNavigationSwipe(_ recognizer: UIGestureRecognizer, velocity: CGPoint) -> Bool {
     guard abs(velocity.x) >= abs(velocity.y), abs(velocity.x) > 0 else { return false }
     if recognizer === closingPan || recognizer === backdropPan { return (tablet ? tabletReveal > 0 : menuOpen) && velocity.x < 0 }
     guard recognizer === contentPan || recognizer === sidebarBackPan, api != nil, !menuOpen, popup == nil, presentedViewController == nil,
-      popInteraction == nil, !routeBackRunning, active?.transitionCoordinator == nil else { return false }
-    if recognizer === contentPan, beginWaveSwipe(horizontal:velocity.x) { return true }
+      popInteraction == nil, pendingBack == nil, !routeBackRunning else { return false }
+    if active?.transitionCoordinator == nil, recognizer === contentPan, beginWaveSwipe(horizontal:velocity.x) { return true }
     swipeAction = NeoNavigationGesture.action(startY: Double(swipeStart.y), height: Double(view.bounds.height),
       canGoBack: canGoBack, tablet: tablet && tabletExpanded, horizontal: Double(velocity.x), vertical: Double(velocity.y), persistentMenu: tablet)
+    if active?.transitionCoordinator != nil && !(swipeAction == .back && canDeferBackUntilPushCompletes) { return false }
     if recognizer === sidebarBackPan { return tablet && tabletExpanded && swipeAction == .back }
     if tablet && tabletExpanded && swipeAction == .back { return false }
     return swipeAction != nil
@@ -1009,6 +1050,13 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let original = recorded.collection
     showRoute("settings"); showRoute("recorded")
     let retained = original === recorded.collection
+    if smokeStage == "navigation" {
+      Task { [self] in
+        let checks = await runNavigationTimingSmoke()
+        writeIPadSmoke(recorded,checks:checks,retained:retained)
+      }
+      return
+    }
     if smokeStage == "ipad-connection" {
       showConnection(); view.layoutIfNeeded()
       let original = view.bounds
@@ -1177,6 +1225,59 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     NeoNative.writeSmoke("ui-\(smokeStage)-smoke", ["success": checks.values.allSatisfy { $0 }, "checks": checks,
       "stage": smokeStage, "route": route, "recordCount": recorded.records.count, "theme": "neon-teal-dark",
       "uiEngine": "Swift / UIKit", "retainedList": retained, "sidebarWidth": api == nil ? 0 : 240])
+  }
+  private func runNavigationTimingSmoke() async -> [String:Bool] {
+    var checks = [String:Bool]()
+    func settle() async {
+      for _ in 0..<150 {
+        if active?.transitionCoordinator == nil && popInteraction == nil && pendingBack == nil { return }
+        try? await Task.sleep(nanoseconds:20_000_000)
+      }
+    }
+    func classify() -> Bool {
+      swipeStart = CGPoint(x:tablet ? 8 : 100,y:view.bounds.height*0.7)
+      return beginNavigationSwipe(tablet ? sidebarBackPan : contentPan,velocity:CGPoint(x:500,y:0)) && swipeAction == .back
+    }
+    for name in ["settings","detail"] {
+      showRoute(name == "settings" ? "settings" : "recorded"); view.layoutIfNeeded(); await settle()
+      guard let nav = active else { checks[name+"NavigationExists"] = false; continue }
+      nav.popToRootViewController(animated:false)
+      let page: UIViewController = name == "settings" ? NeoSettingsCategoryPage(category:.general,shell:self) : NeoDetailPage(item:NeoRecordedPage.fixtures.records[0],shell:self)
+      nav.pushViewController(page,animated:true)
+      try? await Task.sleep(nanoseconds:50_000_000)
+      checks[name+"PushActuallyInProgress"] = nav.transitionCoordinator != nil && canDeferBackUntilPushCompletes
+      checks[name+"EarlySwipeAccepted"] = classify()
+      let hit = view.hitTest(swipeStart,with:nil)
+      checks[name+"EarlySwipeSurfaceReceivesTouches"] = hit != nil && (hit === (tablet ? sidebar : content) || hit!.isDescendant(of:tablet ? sidebar : content))
+      updateBack(state:.began,translation:0,velocity:500)
+      updateBack(state:.changed,translation:content.bounds.width*0.5,velocity:500)
+      updateBack(state:.ended,translation:content.bounds.width*0.5,velocity:500)
+      checks[name+"DragRetainedWithoutOverlappingPush"] = pendingBack != nil && popInteraction == nil && nav.topViewController === page
+      await settle()
+      checks[name+"FirstSwipeReturnsToRoot"] = nav.viewControllers.count == 1 && pendingBack == nil && popInteraction == nil
+    }
+    showRoute("settings"); view.layoutIfNeeded(); await settle()
+    guard let nav = active else { return checks }
+    for cancel in [true,false] {
+      let page = NeoSettingsCategoryPage(category:.general,shell:self)
+      nav.pushViewController(page,animated:true)
+      try? await Task.sleep(nanoseconds:50_000_000)
+      checks[cancel ? "CancelledEarlySwipeAccepted" : "ShortEarlySwipeAccepted"] = classify()
+      updateBack(state:.began,translation:0,velocity:100)
+      updateBack(state:cancel ? .cancelled : .ended,translation:10,velocity:0)
+      await settle()
+      checks[cancel ? "CancelledSwipeNeverReplayed" : "ShortSwipeNeverReplayed"] = nav.topViewController === page && pendingBack == nil
+      checks[cancel ? "NextSwipeReadyAfterCancellation" : "NextSwipeReadyAfterShortDrag"] = classify()
+      updateBack(state:.began,translation:0,velocity:500)
+      updateBack(state:.changed,translation:content.bounds.width*0.5,velocity:500)
+      updateBack(state:.ended,translation:content.bounds.width*0.5,velocity:500)
+      checks[cancel ? "OverlappingPopRejectedAfterCancellation" : "OverlappingPopRejectedAfterShortDrag"] = !classify()
+      await settle()
+      checks[cancel ? "NextSwipeReturnsAfterCancellation" : "NextSwipeReturnsAfterShortDrag"] = nav.viewControllers.count == 1
+    }
+    showRoute("recorded"); goBack()
+    checks["RootDoesNotReturnAcrossTabs"] = route == "recorded" && active?.viewControllers.count == 1
+    return checks
   }
   private func runHistoryReturnChecks(_ recorded: NeoRecordedPage) async -> Bool {
     func settle() async {

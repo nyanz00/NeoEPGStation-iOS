@@ -56,7 +56,7 @@ on:
         required: false
         default: all
         type: choice
-        options: [all, recorded, pagination, detail, record-actions, detail-actions, play-popup, list-actions, drop-dialog, menu, settings, gestures]
+        options: [all, recorded, pagination, detail, record-actions, detail-actions, play-popup, list-actions, drop-dialog, menu, settings, gestures, navigation]
 
 permissions:
   contents: read
@@ -290,11 +290,15 @@ jobs:
           exit "$comparison_failed"
       - name: Check player feedback interactions
         id: player-feedback-checks
-        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' }}
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && inputs.ui_stage != 'navigation' }}
         run: python3 -u scripts/player-feedback-smoke.py
+      - name: Check immediate navigation swipes on iPhone and iPad
+        id: navigation-checks
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'navigation' }}
+        run: python3 -u scripts/simulator-smoke.py --navigation-only
       - name: Check live station UI, raw/transcoded TS, comments, switching and reconnect
         id: live-checks
-        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && contains(fromJSON('["live","player-feedback"]'), inputs.check_scope) }}
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && contains(fromJSON('["live","player-feedback"]'), inputs.check_scope) && inputs.ui_stage != 'navigation' }}
         run: python3 -u scripts/live-smoke.py
       - name: Check recorded PLAY remains separate from live transport
         id: live-recorded-regression
@@ -488,8 +492,12 @@ jobs:
             python3 -u scripts/ts-resume-smoke.py mpeg2
           elif [ "$CHECK_SCOPE" = "player-feedback" ]; then
             python3 -u scripts/simulator-smoke.py --prepare
-            python3 -u scripts/player-feedback-smoke.py
-            python3 -u scripts/live-smoke.py
+            if [ "$UI_STAGE" = "navigation" ]; then
+              python3 -u scripts/simulator-smoke.py --navigation-only
+            else
+              python3 -u scripts/player-feedback-smoke.py
+              python3 -u scripts/live-smoke.py
+            fi
           elif [ "$CHECK_SCOPE" = "aether-connected" ] || [ "$CHECK_SCOPE" = "aether-recovery" ]; then
             mkdir -p build/native-tests
             swiftc scripts/check-aether-picture.swift -o dist/aether-picture-check
