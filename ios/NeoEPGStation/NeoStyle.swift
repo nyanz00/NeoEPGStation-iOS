@@ -1,6 +1,38 @@
 import UIKit
 import ImageIO
 
+// MUI small outlined Select surface. UIMenu still owns its native menu and
+// anchors it to this button; only the closed field is drawn here.
+final class NeoSelectButton: UIButton {
+  private let value = NeoStyle.label(size:16), arrow = UIImageView()
+  override init(frame: CGRect) {
+    super.init(frame:frame)
+    showsMenuAsPrimaryAction = true; layer.cornerRadius = 6; layer.borderWidth = 1
+    layer.borderColor = UIColor.white.withAlphaComponent(0.23).cgColor
+    value.numberOfLines = 2
+    arrow.image = UIGraphicsImageRenderer(size:CGSize(width:24,height:24)).image { _ in
+      UIColor.white.withAlphaComponent(0.7).setFill(); let path = UIBezierPath()
+      path.move(to:CGPoint(x:7,y:10)); path.addLine(to:CGPoint(x:12,y:15)); path.addLine(to:CGPoint(x:17,y:10)); path.close(); path.fill()
+    }
+    [value,arrow].forEach { $0.isUserInteractionEnabled = false; addSubview($0) }
+    heightAnchor.constraint(greaterThanOrEqualToConstant:44).isActive = true
+  }
+  required init?(coder: NSCoder) { fatalError() }
+  override func setTitle(_ title: String?, for state: UIControl.State) {
+    super.setTitle(title,for:state)
+    guard state == .normal else { return }
+    let text = title?.hasSuffix(" ▾") == true ? String(title!.dropLast(2)) : title
+    value.text = text; accessibilityValue = text; invalidateIntrinsicContentSize(); setNeedsLayout()
+  }
+  override var intrinsicContentSize: CGSize { CGSize(width:180,height:44) }
+  override var isEnabled: Bool { didSet { value.alpha = isEnabled ? 1 : 0.38; arrow.alpha = isEnabled ? 1 : 0.38 } }
+  override func layoutSubviews() {
+    super.layoutSubviews(); titleLabel?.isHidden = true
+    value.frame = CGRect(x:14,y:3,width:max(0,bounds.width-46),height:max(0,bounds.height-6))
+    arrow.frame = CGRect(x:bounds.width-31,y:(bounds.height-24)/2,width:24,height:24)
+  }
+}
+
 enum NeoStyle {
   static let background = UIColor(red: 16/255, green: 20/255, blue: 24/255, alpha: 1)
   static let paper = UIColor(red: 25/255, green: 30/255, blue: 35/255, alpha: 1)

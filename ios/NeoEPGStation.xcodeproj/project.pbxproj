@@ -24,6 +24,8 @@
     BDEF00000000000000000027 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000027; };
     BDEF00000000000000000025 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000025; };
     BDEF00000000000000000026 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000026; };
+    CAFE00000000000000000001 = {isa = PBXBuildFile; fileRef = BEEF00000000000000000001; };
+    CAFE00000000000000000002 = {isa = PBXBuildFile; fileRef = BEEF00000000000000000002; };
     BDEF00000000000000000024 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000024; };
     BDEF00000000000000000023 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000023; };
     BDEF00000000000000000022 = {isa = PBXBuildFile; fileRef = ADEF00000000000000000022; };
@@ -84,6 +86,8 @@
     ADEF00000000000000000027 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoHLSManifest.swift; path = NeoEPGStation/NeoHLSManifest.swift; sourceTree = "<group>"; };
     ADEF00000000000000000025 = {isa = PBXFileReference; lastKnownFileType = file; name = NotoSansJP-Bold.otf; path = "NeoEPGStation/Fonts/NotoSansJP-Bold.otf"; sourceTree = "<group>"; };
     ADEF00000000000000000026 = {isa = PBXFileReference; lastKnownFileType = text; name = NotoSansJP-OFL.txt; path = "../licenses/NotoSansJP-OFL.txt"; sourceTree = "<group>"; };
+    BEEF00000000000000000001 = {isa = PBXFileReference; lastKnownFileType = folder; name = licenses; path = "../licenses"; sourceTree = "<group>"; };
+    BEEF00000000000000000002 = {isa = PBXFileReference; lastKnownFileType = text; name = THIRD_PARTY_NOTICES.md; path = "../THIRD_PARTY_NOTICES.md"; sourceTree = "<group>"; };
     ADEF00000000000000000024 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoRecordedSearch.swift; path = NeoEPGStation/NeoRecordedSearch.swift; sourceTree = "<group>"; };
     ADEF00000000000000000023 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoAccountSmoke.swift; path = NeoEPGStation/NeoAccountSmoke.swift; sourceTree = "<group>"; };
     ADEF00000000000000000022 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoHistoryPage.swift; path = NeoEPGStation/NeoHistoryPage.swift; sourceTree = "<group>"; };
@@ -169,6 +173,8 @@
         ADEF00000000000000000027,
         ADEF00000000000000000025,
         ADEF00000000000000000026,
+        BEEF00000000000000000001,
+        BEEF00000000000000000002,
         AABC00000000000000000001,
         AABC00000000000000000002,
         AABC00000000000000000003,
@@ -321,6 +327,8 @@
 			files = (
         BDEF00000000000000000025,
         BDEF00000000000000000026,
+        CAFE00000000000000000001,
+        CAFE00000000000000000002,
 				81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
         BDEF00000000000000000008 /* PrivacyInfo.xcprivacy in Resources */,

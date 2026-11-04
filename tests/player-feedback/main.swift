@@ -29,7 +29,7 @@ check("old rows keep post time and full text",log.comments.first?.postedAt == se
 log.follow(true); check("follow resumes bounded history",log.comments.count == 500 && log.comments.first?.id == 1100)
 log.reset(); check("new live history starts empty",log.comments.isEmpty && log.following)
 do {
-  let keys = ["watch.encoder","watch.quality","watch.hevc","watch.lowLatency","watch.bufferedStart","watch.subtitleKeywords","player.network.seconds","neoepgstation.navigation.labels","player.comments.size","player.comments.absoluteOpacity"]
+  let keys = ["watch.encoder","watch.quality","watch.hevc","watch.lowLatency","watch.bufferedStart","watch.subtitleKeywords","player.network.seconds","neoepgstation.navigation.labels","player.comments.size","player.comments.absoluteOpacity","player.comments.enabled"]
   let defaults = UserDefaults.standard, previous = keys.map { UserDefaults.standard.object(forKey:$0) }
   defer { for (key,value) in zip(keys,previous) { if let value { defaults.set(value,forKey:key) } else { defaults.removeObject(forKey:key) } } }
   keys.forEach(defaults.removeObject(forKey:))
@@ -47,6 +47,18 @@ do {
   check("normal tracks match independently",NeoCommentPreference.priority([normal])?.subtitleIndex == 1)
   NeoViewingPreferences.subtitleKeywords = ["NicoJK","",""]
   check("ordinary subtitle defaults off",NeoCommentPreference.priority([normal]) == nil && NeoSubtitlePreference.automaticIndex(["字幕"]) == -1)
+  check("three priority rows by default",NeoViewingPreferences.subtitleKeywords.count == 3)
+  NeoViewingPreferences.addSubtitlePriority(); NeoViewingPreferences.addSubtitlePriority()
+  var priorities = NeoViewingPreferences.subtitleKeywords; priorities[3] = "日本語"; priorities[4] = "Last"; NeoViewingPreferences.subtitleKeywords = priorities
+  check("additional priorities saved without truncation",defaults.stringArray(forKey:"watch.subtitleKeywords")?.count == 5 && NeoViewingPreferences.subtitleKeywords.last == "Last")
+  check("fourth priority participates in selection",NeoCommentPreference.priority([normal])?.subtitleIndex == 1)
+  NeoViewingPreferences.removeSubtitlePriority(at:3)
+  check("additional priority removal preserves order",NeoViewingPreferences.subtitleKeywords.count == 4 && NeoViewingPreferences.subtitleKeywords[3] == "Last")
+  NeoViewingPreferences.removeSubtitlePriority(at:0)
+  check("first three priority fields cannot be removed",NeoViewingPreferences.subtitleKeywords.count == 4 && NeoViewingPreferences.subtitleKeywords[0] == "NicoJK")
+  check("comment visibility defaults enabled",NeoViewingPreferences.commentsEnabled)
+  NeoViewingPreferences.commentsEnabled = false
+  check("comment visibility uses existing player key",defaults.object(forKey:"player.comments.enabled") as? Bool == false)
   defaults.set(1.25,forKey:"player.comments.size"); defaults.set(Float(0.65),forKey:"player.comments.absoluteOpacity")
   check("legacy comment keys retained",NeoViewingPreferences.commentSize == 1.25 && abs(NeoViewingPreferences.commentOpacity-0.65)<0.001)
   NeoViewingPreferences.networkSeconds = 7; check("network cache persisted and bounded",defaults.integer(forKey:"player.network.seconds") == 7)

@@ -23,7 +23,10 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
   @objc private(set) var ready = false
   @objc private(set) var renderedTime = 0.0
   @objc var enabled = true {
-    didSet { UserDefaults.standard.set(enabled, forKey: Self.enabledKey); refreshRendering(); finishPreparationIfPossible(); onChange?() }
+    didSet {
+      if NeoViewingPreferences.commentsEnabled != enabled { NeoViewingPreferences.commentsEnabled = enabled }
+      refreshRendering(); finishPreparationIfPossible(); onChange?()
+    }
   }
   private static let enabledKey = "player.comments.enabled", sizeKey = "player.comments.size", opacityKey = "player.comments.absoluteOpacity"
   private(set) var sizeMultiplier = 1.0, opacity: Float = 1
@@ -499,8 +502,10 @@ final class NeoCommentOverlay: UIView, MTKViewDelegate {
     sizeMultiplier = min(2, max(0.5, value)); if let rawTimeline { publish(rawTimeline, preserveActive: false) }; UserDefaults.standard.set(sizeMultiplier, forKey: Self.sizeKey); onChange?()
   }
   @objc private func globalCommentPreferencesChanged() {
-    setSize(NeoViewingPreferences.commentSize)
-    if UserDefaults.standard.object(forKey:Self.opacityKey) != nil { setOpacity(NeoViewingPreferences.commentOpacity) }
+    if enabled != NeoViewingPreferences.commentsEnabled { enabled = NeoViewingPreferences.commentsEnabled }
+    if sizeMultiplier != NeoViewingPreferences.commentSize { setSize(NeoViewingPreferences.commentSize) }
+    if UserDefaults.standard.object(forKey:Self.opacityKey) != nil,
+       usesSourceOpacity || opacity != NeoViewingPreferences.commentOpacity { setOpacity(NeoViewingPreferences.commentOpacity) }
   }
   func setOpacity(_ value: Float) {
     guard value.isFinite else { return }

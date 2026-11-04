@@ -748,12 +748,14 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       if context["streaming"] as? Bool == true {
         let ts = context["videoFileType"] as? String == "ts"
         func selection(_ label: String, values: [Int], current: Int, text: (Int) -> String, action: @escaping (Int) -> Void) {
-          let button = UIButton(type: .system); button.setTitle(text(current)+" ▾", for: .normal)
+          let button = NeoSelectButton(frame:.zero); button.setTitle(text(current), for: .normal)
           button.tintColor = NeoStyle.accent; button.showsMenuAsPrimaryAction = true
           button.heightAnchor.constraint(equalToConstant: 44).isActive = true
           button.menu = UIMenu(children: values.map { value in UIAction(title: text(value), state: value == current ? .on : .off) { _ in action(value) } })
-          let row = UIStackView(arrangedSubviews: [NeoStyle.label(label, bold: true), button])
-          row.distribution = .equalSpacing; row.alignment = .center; row.spacing = 12; stack.addArrangedSubview(row)
+          let caption = NeoStyle.label(label,bold:true); caption.numberOfLines = 0; caption.lineBreakMode = .byWordWrapping
+          caption.setContentCompressionResistancePriority(.defaultLow,for:.horizontal); button.setContentCompressionResistancePriority(.required,for:.horizontal)
+          let row = UIStackView(arrangedSubviews: [caption, button])
+          row.alignment = .center; row.spacing = 12; stack.addArrangedSubview(row)
         }
         let qualities = context["streamQualities"] as? [String] ?? []
         selection("画質", values: qualities.indices.filter { !qualities[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }, current: context["streamMode"] as? Int ?? 0,
@@ -774,7 +776,7 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       stack.addArrangedSubview(cache); append("次のリロードから適用します。", size: 12, muted: true)
       let retained = NeoPlaybackCache.savedSeconds
       func retentionLabel(_ value: Int) -> String { value == 0 ? "オフ" : value == 30 ? "30秒" : "\(value/60)分" }
-      let retention = UIButton(type: .system); retention.setTitle(retentionLabel(retained) + " ▾", for: .normal)
+      let retention = NeoSelectButton(frame:.zero); retention.setTitle(retentionLabel(retained), for: .normal)
       retention.tintColor = NeoStyle.accent; retention.contentHorizontalAlignment = .left
       retention.accessibilityIdentifier = "player-retention-dropdown"; retention.accessibilityLabel = "巻き戻し用キャッシュ"
       retention.heightAnchor.constraint(equalToConstant: 44).isActive = true; retention.showsMenuAsPrimaryAction = true
@@ -783,8 +785,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
           self?.onAction?("retention:\(value)"); self?.renderPanel()
         }
       })
-      let retentionRow = UIStackView(arrangedSubviews: [NeoStyle.label("巻き戻し用キャッシュ", bold: true), retention])
-      retentionRow.distribution = .equalSpacing; retentionRow.alignment = .center; retentionRow.spacing = 12
+      let retentionCaption = NeoStyle.label("巻き戻し用キャッシュ",bold:true); retentionCaption.numberOfLines = 0; retentionCaption.lineBreakMode = .byWordWrapping
+      retentionCaption.setContentCompressionResistancePriority(.defaultLow,for:.horizontal); retention.setContentCompressionResistancePriority(.required,for:.horizontal)
+      let retentionRow = UIStackView(arrangedSubviews: [retentionCaption, retention])
+      retentionRow.alignment = .center; retentionRow.spacing = 12
       stack.addArrangedSubview(retentionRow)
       }
       }
@@ -821,10 +825,12 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let options = context["liveOptions"] as? [[String:Any]] ?? []
     let selectedType = context["liveType"] as? String ?? "m2ts", selectedMode = context["liveMode"] as? Int ?? 0
     func choice(_ label: String, value: String, menu: UIMenu) {
-      let button = UIButton(type:.system); button.setTitle(value+" ▾",for:.normal); button.tintColor = NeoStyle.accent
+      let button = NeoSelectButton(frame:.zero); button.setTitle(value,for:.normal)
       button.showsMenuAsPrimaryAction = true; button.menu = menu
       button.heightAnchor.constraint(equalToConstant:44).isActive = true
-      let row = UIStackView(arrangedSubviews:[NeoStyle.label(label,bold:true),button]); row.distribution = .equalSpacing; row.alignment = .center
+      let caption = NeoStyle.label(label,bold:true); caption.numberOfLines = 0; caption.lineBreakMode = .byWordWrapping
+      caption.setContentCompressionResistancePriority(.defaultLow,for:.horizontal); button.setContentCompressionResistancePriority(.required,for:.horizontal)
+      let row = UIStackView(arrangedSubviews:[caption,button]); row.alignment = .center; row.spacing = 12
       stack.addArrangedSubview(row)
     }
     let types = ["m2ts","m2tsll"].filter { type in options.contains { $0["type"] as? String == type } }

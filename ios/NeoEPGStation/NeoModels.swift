@@ -123,9 +123,11 @@ final class NeoViewingPreferences: NSObject {
     set { defaults.set(newValue,forKey:"watch.bufferedStart") }
   }
   static var subtitleKeywords: [String] {
-    get { Array((defaults.stringArray(forKey:"watch.subtitleKeywords") ?? ["","",""]).prefix(3)) }
-    set { defaults.set(Array(newValue.prefix(3)),forKey:"watch.subtitleKeywords") }
+    get { let values = defaults.stringArray(forKey:"watch.subtitleKeywords") ?? []; return values+Array(repeating:"",count:max(0,3-values.count)) }
+    set { defaults.set(newValue+Array(repeating:"",count:max(0,3-newValue.count)),forKey:"watch.subtitleKeywords") }
   }
+  static func addSubtitlePriority() { var values = subtitleKeywords; values.append(""); subtitleKeywords = values }
+  static func removeSubtitlePriority(at index: Int) { var values = subtitleKeywords; guard index >= 3, values.indices.contains(index) else { return }; values.remove(at:index); subtitleKeywords = values }
   static func preferredMetadata(_ values: [[String]]) -> Int? {
     for keyword in subtitleKeywords {
       let word = keyword.trimmingCharacters(in:.whitespacesAndNewlines).lowercased()
@@ -149,6 +151,10 @@ final class NeoViewingPreferences: NSObject {
   static var commentSize: Double {
     get { let value = defaults.object(forKey:"player.comments.size") as? Double ?? 1; return value.isFinite ? min(2,max(0.5,value)) : 1 }
     set { defaults.set(newValue.isFinite ? min(2,max(0.5,newValue)) : 1,forKey:"player.comments.size"); NotificationCenter.default.post(name:.init("neoViewingCommentsChanged"),object:nil) }
+  }
+  static var commentsEnabled: Bool {
+    get { defaults.object(forKey:"player.comments.enabled") as? Bool ?? true }
+    set { defaults.set(newValue,forKey:"player.comments.enabled"); NotificationCenter.default.post(name:.init("neoViewingCommentsChanged"),object:nil) }
   }
   static var commentOpacity: Float {
     get { let value = defaults.object(forKey:"player.comments.absoluteOpacity") as? Float ?? 1; return value.isFinite ? min(1,max(0,value)) : 1 }

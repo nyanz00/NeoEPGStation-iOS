@@ -132,7 +132,7 @@ for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
         print('Starting feedback case', label, device, flush=True)
         names = ['player-feedback.json', 'player-feedback-diagnostics.json',
                  'feedback-pad-panel.png', 'feedback-stream-dialog.png', 'feedback-title-metrics.json',
-                 'feedback-settings-categories.png', 'feedback-viewing-settings.png']
+                 'feedback-settings-categories.png', 'feedback-viewing-settings.png', 'feedback-about.png']
         for name in names:
             (documents/name).unlink(missing_ok=True)
         env = os.environ.copy()
@@ -188,9 +188,12 @@ for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
                     'returnUITrimsLogAndFollowsTail', 'tsSubtitleFilledWhenSelected',
                     'tsSubtitleOutlinedWhenDisabled', 'encodedSubtitleKeepsPicker'}
         required |= {'settingsSevenCategories','categoryDescriptionsRemoved','annictEmpty','discordEmpty',
-                     'engineInViewing','engineRemovedFromApp','globalNetworkPersists',
+                     'engineInViewing','engineRemovedFromGeneral','generalHasAppPreferences','globalNetworkPersists',
                      'globalSizeReachesPlayer','globalOpacityReachesPlayer','globalWaitSharesPlayerSetting',
                      'labelsOffCentersIcons','labelsRestored','closingBackdropDoesNotBlockNewPage'}
+        required |= {'generalFirstAboutLast','priorityUIAddsAndSavesBeyondThree','priorityUIRemovesAndRenumbers',
+                     'globalVisibilityReachesPlayer','playerVisibilityReachesGlobal','outlinedSelectKeepsNativeMenu',
+                     'aboutUsesInstalledVersionAndBuild','licensesBundledAndReadable'}
         required |= {'padTraitApplied', 'padCloseAtRight'} if platform == 'pad' else {'phoneClosePreserved'}
         irrelevant = {'phoneClosePreserved'} if platform == 'pad' else {'padTraitApplied', 'padCloseAtRight'}
         result['notApplicableToDevice'] = sorted(irrelevant)

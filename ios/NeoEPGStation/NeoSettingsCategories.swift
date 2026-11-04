@@ -1,22 +1,12 @@
 import UIKit
 
 enum NeoSettingsCategory: String, CaseIterable {
-  case app, general, viewing, display, account, annict, discord
+  case general, viewing, display, account, annict, discord, about
   var title: String {
-    switch self { case .app: return "アプリ設定"; case .general: return "全般"; case .viewing: return "視聴"; case .display: return "表示"; case .account: return "アカウント"; case .annict: return "Annict"; case .discord: return "Discord" }
-  }
-  var explanation: String {
-    switch self {
-    case .app: return "接続先と下部ナビゲーションを設定します。"
-    case .general: return "アプリ全体の外観を確認します。"
-    case .viewing: return "リジューム再生と視聴履歴の送信を設定します。"
-    case .display: return "録画一覧の表示件数とハイライト、操作ボタン、視聴履歴の保存件数を設定します。"
-    case .account: return "アクティブユーザーの切り替えと外部連携の認証を管理します。"
-    case .annict, .discord: return ""
-    }
+    switch self { case .general: return "全般"; case .viewing: return "視聴"; case .display: return "表示"; case .account: return "アカウント"; case .annict: return "Annict"; case .discord: return "Discord"; case .about: return "アプリについて" }
   }
   var icon: String {
-    switch self { case .app: return "SettingsOutlined"; case .general: return "TuneOutlined"; case .viewing: return "PlayCircleOutlineOutlined"; case .display: return "VisibilityOutlined"; case .account: return "LinkOutlined"; case .annict: return "AlphaA"; case .discord: return "ChatBubbleOutlineOutlined" }
+    switch self { case .general: return "TuneOutlined"; case .viewing: return "PlayCircleOutlineOutlined"; case .display: return "VisibilityOutlined"; case .account: return "LinkOutlined"; case .annict: return "AlphaA"; case .discord: return "ChatBubbleOutlineOutlined"; case .about: return "InfoOutlined" }
   }
 }
 
@@ -100,7 +90,7 @@ final class NeoSettingsCategoryPage: NeoPage {
     switch category {
     case .viewing:
       buildViewingPreferences()
-      let engine = UIButton(type: .system)
+      let engine = NeoSelectButton(frame:.zero)
       engine.setTitle(NeoPlaybackExperiment.selected.title, for: .normal); engine.tintColor = NeoStyle.accent
       engine.titleLabel?.font = .systemFont(ofSize: 14); engine.titleLabel?.numberOfLines = 2
       engine.widthAnchor.constraint(lessThanOrEqualToConstant: 180).isActive = true
@@ -112,7 +102,7 @@ final class NeoSettingsCategoryPage: NeoPage {
       })
       row("再生エンジン", explanation: "Aetherはエンコード済みPLAY・STREAMINGに使用します。コメント・字幕・PiP・視聴履歴は共通のプレイヤー機能を使います。TSはARIB字幕対応のVLCで再生します。診断用はAV1動画を比較します。次の再生から適用します。", control: engine)
       if NeoPlaybackExperiment.selected == .checkpointPlayer {
-        let checkpoint = UIButton(type: .system)
+        let checkpoint = NeoSelectButton(frame:.zero)
         checkpoint.setTitle(NeoPlaybackExperiment.checkpointMode.title, for: .normal)
         checkpoint.showsMenuAsPrimaryAction = true
         checkpoint.menu = UIMenu(children: NeoCheckpointMode.allCases.map { value in
@@ -128,7 +118,7 @@ final class NeoSettingsCategoryPage: NeoPage {
       historyToggle.removeTarget(nil, action: nil, for: .valueChanged)
       historyToggle.addTarget(self, action: #selector(historyChanged), for: .valueChanged)
       row("視聴履歴を送信しない", explanation: "このアプリからの送信だけを止めます。既存の履歴とリジューム位置は残ります。", control: historyToggle)
-    case .app:
+    case .general:
       toggle("下部ナビゲーションのラベルを表示", on: NeoViewingPreferences.navigationLabels) { [weak shell] in
         NeoViewingPreferences.navigationLabels = $0; shell?.refreshNavigationLabels()
       }
@@ -138,8 +128,17 @@ final class NeoSettingsCategoryPage: NeoPage {
       button("下部ナビゲーションを編集") { [weak self, weak shell] in
         guard let shell else { return }; self?.navigationController?.pushViewController(NeoShortcutPage(shell: shell), animated: true)
       }
-    case .general:
       info("テーマ：ターコイズ・ダーク")
+    case .about:
+      let bundle = Bundle.main
+      info(bundle.object(forInfoDictionaryKey:"CFBundleDisplayName") as? String ?? "NeoEPGStation")
+      info("バージョン：\(bundle.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? "—")")
+      info("ビルド番号：\(bundle.object(forInfoDictionaryKey:"CFBundleVersion") as? String ?? "—")")
+      button("ソースコード（GitHub）") { UIApplication.shared.open(URL(string:"https://github.com/nyanz00/NeoEPGStation-iOS")!) }
+      info("使用ライブラリ：VLCKit / libVLC、AetherEngine、FFmpeg、dav1d、LZ4、Zstandard、Noto Sans JP、アイコン等")
+      button("使用ライブラリ・ライセンス") { [weak self,weak shell] in
+        guard let shell else { return }; self?.navigationController?.pushViewController(NeoLicensePage(shell:shell),animated:true)
+      }
     case .annict, .discord: break
     case .display:
       toggle("THUMBボタンを表示しない", on: shell.storage.hideRecordedThumbnailButton) { [weak shell] in shell?.storage.hideRecordedThumbnailButton = $0 }
@@ -201,8 +200,8 @@ final class NeoSettingsCategoryPage: NeoPage {
   }
   @objc private func historyChanged() { shell?.api?.disablePlaybackHistory = historyToggle.isOn }
   private func choice(_ title: String, values: [(String,String)], selected: String, save: @escaping (String) -> Void) {
-    let control = UIButton(type:.system); control.tintColor = NeoStyle.accent; control.showsMenuAsPrimaryAction = true
-    control.setTitle((values.first { $0.0 == selected }?.1 ?? selected)+" ▾",for:.normal)
+    let control = NeoSelectButton(frame:.zero)
+    control.setTitle(values.first { $0.0 == selected }?.1 ?? selected,for:.normal)
     control.accessibilityIdentifier = "viewing-"+title
     control.menu = UIMenu(children:values.map { key,text in UIAction(title:text,state:key == selected ? .on : .off) { [weak self] _ in save(key); self?.render() } })
     row(title,control:control)
@@ -218,19 +217,32 @@ final class NeoSettingsCategoryPage: NeoPage {
     toggle("STREAMING開始バッファ",explanation:"先頭3セグメントを生成してから開始します。",on:NeoViewingPreferences.bufferedStart) { NeoViewingPreferences.bufferedStart = $0 }
     let priorities = UIStackView(); priorities.axis = .vertical; priorities.spacing = 8
     let saved = NeoViewingPreferences.subtitleKeywords
-    for index in 0..<3 {
+    for index in saved.indices {
       let field = UITextField(); field.text = saved.indices.contains(index) ? saved[index] : ""
       field.attributedPlaceholder = NSAttributedString(string:"優先字幕 \(index+1)",attributes:[.foregroundColor:NeoStyle.muted])
       field.backgroundColor = NeoStyle.paper; field.font = .systemFont(ofSize:16)
       field.accessibilityIdentifier = "viewing-subtitle-priority-\(index)"
       field.textColor = .white; field.borderStyle = .roundedRect; field.autocorrectionType = .no; field.autocapitalizationType = .none
       field.addAction(UIAction { [weak field] _ in
-        var values = NeoViewingPreferences.subtitleKeywords; while values.count < 3 { values.append("") }; values[index] = field?.text ?? ""; NeoViewingPreferences.subtitleKeywords = values
+        var values = NeoViewingPreferences.subtitleKeywords; guard values.indices.contains(index) else { return }; values[index] = field?.text ?? ""; NeoViewingPreferences.subtitleKeywords = values
       },for:.editingChanged)
-      priorities.addArrangedSubview(field)
+      if index >= 3 {
+        let remove = NeoStyle.iconButton("DeleteOutlineOutlined",label:"優先順位\(index+1)を削除") { [weak self] in
+          self?.view.endEditing(true); NeoViewingPreferences.removeSubtitlePriority(at:index); self?.render()
+        }
+        remove.accessibilityIdentifier = "viewing-subtitle-remove-\(index)"
+        remove.widthAnchor.constraint(equalToConstant:36).isActive = true
+        let line = UIStackView(arrangedSubviews:[field,remove]); line.spacing = 6; priorities.addArrangedSubview(line)
+      } else { priorities.addArrangedSubview(field) }
     }
+    let add = NeoStyle.button("＋ 優先順位を追加") { [weak self] in
+      self?.view.endEditing(true); NeoViewingPreferences.addSubtitlePriority(); self?.render()
+    }
+    add.accessibilityIdentifier = "viewing-subtitle-add"; add.layer.borderWidth = 1; add.layer.borderColor = NeoStyle.accent.cgColor
+    add.heightAnchor.constraint(greaterThanOrEqualToConstant:44).isActive = true; priorities.addArrangedSubview(add)
     priorities.widthAnchor.constraint(equalToConstant:180).isActive = true
     row("優先字幕",explanation:"上から順に弾幕と通常字幕を照合します。通常字幕は一致がなければオフになります。",control:priorities)
+    toggle("コメントを表示",on:NeoViewingPreferences.commentsEnabled) { NeoViewingPreferences.commentsEnabled = $0 }
     toggle("字幕・コメントの準備を待ってPLAY再生を開始",on:NeoCommentOverlay.waitBeforePlayback) { NeoCommentOverlay.waitBeforePlayback = $0 }
     let network = UIStepper(); network.minimumValue = 1; network.maximumValue = 30; network.value = Double(NeoViewingPreferences.networkSeconds)
     network.accessibilityIdentifier = "viewing-network-cache"
@@ -298,4 +310,63 @@ final class NeoSettingsCategoryPage: NeoPage {
   func smokeSetHistoryDisabled(_ value: Bool) { historyToggle.isOn = value; historyToggle.sendActions(for: .valueChanged) }
 #endif
   deinit { task?.cancel(); observers.forEach(NotificationCenter.default.removeObserver) }
+}
+
+// Both Xcode builds carry the application notices; packaged IPA builds also
+// contain the generated notices and pinned dependency sources.
+final class NeoLicensePage: NeoPage {
+  static var documents: [URL] {
+    let bundle = Bundle.main.bundleURL
+    var urls = [URL]()
+    if let notice = Bundle.main.url(forResource:"THIRD_PARTY_NOTICES",withExtension:"md") { urls.append(notice) }
+    for directory in ["licenses","ThirdPartyNotices"] {
+      let root = bundle.appendingPathComponent(directory,isDirectory:true)
+      guard let entries = FileManager.default.enumerator(at:root,includingPropertiesForKeys:[.isRegularFileKey],options:.skipsHiddenFiles) else { continue }
+      for case let url as URL in entries {
+        let name = url.lastPathComponent.lowercased()
+        let legalName = ["license","copying","notice"].contains(where:name.contains)
+        guard (try? url.resourceValues(forKeys:[.isRegularFileKey]).isRegularFile) == true,
+          (directory == "licenses" && ["txt","md",""].contains(url.pathExtension.lowercased())) || legalName else { continue }
+        urls.append(url)
+      }
+    }
+    return urls.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+  }
+  private let scroll = UIScrollView(), stack = UIStackView()
+  init(shell: NeoShell) { super.init(title:"使用ライブラリ・ライセンス",shell:shell) }
+  required init?(coder: NSCoder) { fatalError() }
+  override func viewDidLoad() {
+    super.viewDidLoad(); body.addSubview(scroll); stack.axis = .vertical; stack.spacing = 8
+    stack.translatesAutoresizingMaskIntoConstraints = false; scroll.addSubview(stack)
+    NSLayoutConstraint.activate([stack.topAnchor.constraint(equalTo:scroll.contentLayoutGuide.topAnchor,constant:16),
+      stack.leadingAnchor.constraint(equalTo:scroll.contentLayoutGuide.leadingAnchor,constant:16),
+      stack.trailingAnchor.constraint(equalTo:scroll.contentLayoutGuide.trailingAnchor,constant:-16),
+      stack.bottomAnchor.constraint(equalTo:scroll.contentLayoutGuide.bottomAnchor,constant:-16),
+      stack.widthAnchor.constraint(equalTo:scroll.frameLayoutGuide.widthAnchor,constant:-32)])
+    for url in Self.documents {
+      let relative = url.path.replacingOccurrences(of:Bundle.main.bundleURL.path+"/",with:"")
+      let button = NeoStyle.button(relative) { [weak self] in
+        guard let self, let shell = self.shell else { return }
+        self.navigationController?.pushViewController(NeoLicenseTextPage(url:url,shell:shell),animated:true)
+      }
+      button.titleLabel?.numberOfLines = 0; button.titleLabel?.lineBreakMode = .byWordWrapping
+      button.contentHorizontalAlignment = .left; button.heightAnchor.constraint(greaterThanOrEqualToConstant:44).isActive = true
+      stack.addArrangedSubview(button)
+    }
+  }
+  override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); scroll.frame = body.bounds }
+}
+
+private final class NeoLicenseTextPage: NeoPage {
+  private let url: URL, text = UITextView()
+  init(url: URL, shell: NeoShell) { self.url = url; super.init(title:url.lastPathComponent,shell:shell) }
+  required init?(coder: NSCoder) { fatalError() }
+  override func viewDidLoad() {
+    super.viewDidLoad(); text.isEditable = false; text.isSelectable = true
+    text.backgroundColor = NeoStyle.background; text.textColor = .white; text.font = .systemFont(ofSize:14)
+    text.textContainerInset = UIEdgeInsets(top:16,left:16,bottom:16,right:16)
+    text.text = (try? String(contentsOf:url,encoding:.utf8)) ?? "文書を読み込めませんでした。"
+    body.addSubview(text)
+  }
+  override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); text.frame = body.bounds }
 }

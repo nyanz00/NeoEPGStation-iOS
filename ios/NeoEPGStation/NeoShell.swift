@@ -865,7 +865,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
 
 #if targetEnvironment(simulator)
   func runViewingSettingsProbe(base: URL) -> [String:Bool] {
-    let keys = ["player.network.seconds","player.comments.size","player.comments.absoluteOpacity","player.comments.waitBeforePlayback","neoepgstation.navigation.labels"]
+    let keys = ["player.network.seconds","player.comments.size","player.comments.absoluteOpacity","player.comments.enabled","player.comments.waitBeforePlayback","neoepgstation.navigation.labels","watch.subtitleKeywords"]
     let old = keys.map { UserDefaults.standard.object(forKey:$0) }
     defer { for (key,value) in zip(keys,old) { if let value { UserDefaults.standard.set(value,forKey:key) } else { UserDefaults.standard.removeObject(forKey:key) } }; refreshNavigationLabels() }
     smokeUseAPI(NeoAPI(base:base)); showRoute("settings"); view.layoutIfNeeded()
@@ -878,11 +878,13 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let root = active!.topViewController!; root.loadViewIfNeeded()
     let cells = (root as? NeoSettingsPage)?.smokeCategoryDescriptionsRemoved ?? false
     var checks = ["settingsSevenCategories":NeoSettingsCategory.allCases.count == 7,"categoryDescriptionsRemoved":cells]
+    checks["generalFirstAboutLast"] = NeoSettingsCategory.allCases.first == .general && NeoSettingsCategory.allCases.last == .about && !NeoSettingsCategory.allCases.contains { $0.rawValue == "app" }
     capture("feedback-settings-categories")
     for category in [NeoSettingsCategory.annict,.discord] {
       let page = NeoSettingsCategoryPage(category:category,shell:self); page.loadViewIfNeeded()
       checks[category.rawValue+"Empty"] = page.smokeSettingCount == 0
     }
+    NeoViewingPreferences.subtitleKeywords = ["","",""]
     let viewing = NeoSettingsCategoryPage(category:.viewing,shell:self); active!.pushViewController(viewing,animated:false); view.layoutIfNeeded()
     let views = all(viewing.view)
     let engine = views.contains { $0.accessibilityIdentifier == "playback-experiment-engine" }
@@ -891,6 +893,22 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     network?.value = 7; network?.sendActions(for:.valueChanged)
     checks["globalNetworkPersists"] = NeoViewingPreferences.networkSeconds == 7
     let overlay = NeoCommentOverlay(frame:.zero)
+    func control(_ id: String) -> UIControl? { all(viewing.view).first { $0.accessibilityIdentifier == id } as? UIControl }
+    control("viewing-subtitle-add")?.sendActions(for:.touchUpInside)
+    control("viewing-subtitle-add")?.sendActions(for:.touchUpInside)
+    let fourth = control("viewing-subtitle-priority-3") as? UITextField
+    fourth?.text = "Fourth priority"; fourth?.sendActions(for:.editingChanged)
+    let fifth = control("viewing-subtitle-priority-4") as? UITextField
+    fifth?.text = "Fifth priority"; fifth?.sendActions(for:.editingChanged)
+    checks["priorityUIAddsAndSavesBeyondThree"] = NeoViewingPreferences.subtitleKeywords.count == 5 && NeoViewingPreferences.subtitleKeywords[4] == "Fifth priority"
+    control("viewing-subtitle-remove-3")?.sendActions(for:.touchUpInside)
+    checks["priorityUIRemovesAndRenumbers"] = NeoViewingPreferences.subtitleKeywords.count == 4 && (control("viewing-subtitle-priority-3") as? UITextField)?.text == "Fifth priority" && control("viewing-subtitle-remove-2") == nil
+    let visibility = all(viewing.view).compactMap { $0 as? UISwitch }.first { $0.accessibilityLabel == "コメントを表示" }
+    visibility?.isOn = false; visibility?.sendActions(for:.valueChanged)
+    checks["globalVisibilityReachesPlayer"] = visibility != nil && !overlay.enabled && !NeoViewingPreferences.commentsEnabled
+    overlay.enabled = true; viewing.viewWillAppear(false)
+    checks["playerVisibilityReachesGlobal"] = NeoViewingPreferences.commentsEnabled && all(viewing.view).compactMap { $0 as? UISwitch }.first { $0.accessibilityLabel == "コメントを表示" }?.isOn == true
+    checks["outlinedSelectKeepsNativeMenu"] = all(viewing.view).compactMap { $0 as? NeoSelectButton }.allSatisfy { $0.showsMenuAsPrimaryAction && $0.menu != nil && $0.layer.borderWidth == 1 }
     let size = all(viewing.view).first { $0.accessibilityIdentifier == "viewing-comment-size" } as? UISlider
     size?.value = 1.25; size?.sendActions(for:.valueChanged)
     checks["globalSizeReachesPlayer"] = overlay.sizeMultiplier == 1.25
@@ -902,8 +920,14 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     checks["globalWaitSharesPlayerSetting"] = wait != nil && NeoCommentOverlay.waitBeforePlayback
     capture("feedback-viewing-settings")
     checks["viewingControlsFitViewport"] = viewing.smokeControlsWithinWidth
-    let app = NeoSettingsCategoryPage(category:.app,shell:self); app.loadViewIfNeeded()
-    checks["engineRemovedFromApp"] = !all(app.view).contains { $0.accessibilityIdentifier == "playback-experiment-engine" }
+    let general = NeoSettingsCategoryPage(category:.general,shell:self); general.loadViewIfNeeded()
+    checks["engineRemovedFromGeneral"] = !all(general.view).contains { $0.accessibilityIdentifier == "playback-experiment-engine" }
+    checks["generalHasAppPreferences"] = all(general.view).compactMap { $0 as? UIButton }.contains { $0.title(for:.normal) == "接続先を変更" } && all(general.view).contains { $0.accessibilityLabel == "下部ナビゲーションのラベルを表示" }
+    let about = NeoSettingsCategoryPage(category:.about,shell:self); active!.pushViewController(about,animated:false); view.layoutIfNeeded()
+    let aboutLabels = all(about.view).compactMap { ($0 as? UILabel)?.text }
+    checks["aboutUsesInstalledVersionAndBuild"] = aboutLabels.contains("バージョン：\(Bundle.main.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? "—")") && aboutLabels.contains("ビルド番号：\(Bundle.main.object(forInfoDictionaryKey:"CFBundleVersion") as? String ?? "—")") && !aboutLabels.contains { $0.lowercased().contains("ios") }
+    checks["licensesBundledAndReadable"] = !NeoLicensePage.documents.isEmpty && NeoLicensePage.documents.allSatisfy { (try? String(contentsOf:$0,encoding:.utf8).isEmpty) == false }
+    capture("feedback-about")
     NeoViewingPreferences.navigationLabels = false; refreshNavigationLabels(); bottom.layoutIfNeeded(); bottomButtons.forEach { $0.layoutIfNeeded() }
     checks["labelsOffCentersIcons"] = bottomButtons.allSatisfy { ($0 as? NeoNavigationButton).map { $0.caption.isHidden && abs($0.icon.frame.midY-$0.bounds.midY)<0.5 } ?? false }
     NeoViewingPreferences.navigationLabels = true; refreshNavigationLabels()
