@@ -349,11 +349,109 @@ struct NeoPlayback: Decodable {
 struct NeoHistoryItem: Decodable { let recorded: NeoRecording; let playback: NeoPlayback }
 struct NeoHistory: Decodable { let items: [NeoHistoryItem] }
 struct NeoHistorySettings: Decodable { let enabled: Bool; let limit: Int }
+struct NeoVideoInfo: Decodable {
+  let fileName: String
+  let formatName, videoCodec, videoProfile, pixelFormat, hdr, analysisError: String?
+  let size: Double
+  let duration, frameRate, analyzedAt: Double?
+  let width, height, bitDepth: Int?
+  let streams: [Stream]
+  let ts: TS?
+  let keyframes: Keys?
+  struct Stream: Decodable { let index: Int; let type: String; let codec, language, title: String?; let channels: Int? }
+  struct TS: Decodable { let networkId, transportStreamId, serviceId, pmtPid, pcrPid, videoPid, audioPid, subtitlePid: Int? }
+  struct Keys: Decodable {
+    let status: String; let stale: Bool
+    let averageInterval, minInterval, maxInterval: Double?
+    let sampledDuration: Double
+    let intervalCount, keyframeCount: Int
+    let sampleWindows: [Window]
+    let analyzedAt: Double?; let error: String?
+    struct Window: Decodable { let start, end: Double; let keyframeCount: Int }
+  }
+  static func seconds(_ value: Double?) -> String { value.map { String(format:"%.3f sec",$0) } ?? "-" }
+  static func bytes(_ value: Double) -> String {
+    if value >= pow(1024,3) { return String(format:"%.2f GB",value/pow(1024,3)) }
+    if value >= pow(1024,2) { return String(format:"%.1f MB",value/pow(1024,2)) }
+    return "\(max(0,Int((value/1024).rounded()))) KB"
+  }
+  var rows: [(String,String)] {
+    func number(_ value: Int?) -> String { value.map(String.init) ?? "-" }
+    let audio = streams.filter { $0.type == "audio" }.map { "\($0.index): \($0.codec ?? "-") \($0.language ?? "") \($0.channels.map(String.init) ?? "")ch" }.joined(separator:"\n")
+    let subs = streams.filter { $0.type == "subtitle" }.map { "\($0.index): \($0.codec ?? "-") \($0.language ?? "") \($0.title ?? "")" }.joined(separator:"\n")
+    let video = [videoCodec,videoProfile].compactMap { $0 }.joined(separator:" / ")
+    let pixel = [pixelFormat,bitDepth.map { "\($0) bit" },hdr].compactMap { $0 }.joined(separator:" / ")
+    return [("File",fileName),("Format",formatName ?? "-"),("Size",Self.bytes(size)),("Duration",Self.seconds(duration)),
+      ("Video",video.isEmpty ? "-" : video),("Resolution",width != nil && height != nil ? "\(width!) x \(height!)" : "-"),
+      ("Frame rate",frameRate.map { String(format:"%.3f fps",$0) } ?? "-"),("Pixel / HDR",pixel.isEmpty ? "-" : pixel),
+      ("Audio",audio.isEmpty ? "-" : audio),("Subtitle",subs.isEmpty ? "-" : subs),
+      ("TS IDs",ts.map { "network=\(number($0.networkId)) transport=\(number($0.transportStreamId)) service=\(number($0.serviceId))" } ?? "-"),
+      ("TS PIDs",ts.map { "PMT=\(number($0.pmtPid)) PCR=\(number($0.pcrPid)) video=\(number($0.videoPid)) audio=\(number($0.audioPid)) subtitle=\(number($0.subtitlePid))" } ?? "-")]
+  }
+  var keyRows: [(String,String)] {
+    guard let keys = keyframes, keys.status == "ready" || keys.stale else { return [] }
+    return [("Average interval",Self.seconds(keys.averageInterval)),("Minimum interval",Self.seconds(keys.minInterval)),
+      ("Maximum interval",Self.seconds(keys.maxInterval)),("Sample windows",String(keys.sampleWindows.count)),
+      ("Sampled duration",Self.seconds(keys.sampledDuration)),("Keyframes",String(keys.keyframeCount)),("Intervals",String(keys.intervalCount))]
+  }
+  var status: String {
+    var values = analysisError.map { ["Video error: \($0)"] } ?? []
+    if let keys = keyframes {
+      if keys.status != "ready" || keys.stale {
+        let name = keys.status == "ready" && keys.stale ? "Stale" : keys.status.capitalized
+        let note = keys.stale && keys.status != "ready" ? " (stale results available)" : ""
+        let error = ["error","unavailable"].contains(keys.status) ? keys.error.map { ": \($0)" } ?? "" : ""
+        values.append("Keyframe analysis \(name)\(note)\(error)")
+      }
+    } else { values.append("Keyframe analysis unavailable") }
+    return values.isEmpty ? "OK" : values.joined(separator:"; ")
+  }
+  var analyzed: String {
+    guard let time = [analyzedAt,keyframes?.analyzedAt].compactMap({ $0 }).filter({ $0.isFinite }).max() else { return "-" }
+    let formatter = DateFormatter(); formatter.dateStyle = .medium; formatter.timeStyle = .medium
+    return formatter.string(from:Date(timeIntervalSince1970:time/1000))
+  }
+}
+struct NeoAnnictStatus: Decodable { let configured, writeConfigured: Bool; let viewerProfileId: Int? }
+struct NeoAnnictEpisode: Decodable {
+  let state: String
+  let annictId, programAnnictId, episodeAnnictId: Int?
+  let episodeNumber: Double?
+  let episodeNumberText, episodeTitle, pendingReason: String?
+  let lastCheckedAt: Double?
+  let viewerProfileId: Int?
+  let writeConfigured, watched, canUnwatch: Bool
+  var label: String { episodeNumberText ?? episodeNumber.map { "第\(String(format:"%g",$0))話" } ?? "エピソード" }
+}
+enum NeoAnnictPreferences {
+  static var mode: String {
+    get { let value = UserDefaults.standard.string(forKey:"annict.autoWatchMode") ?? "disabled"; return ["disabled","start","progress"].contains(value) ? value : "disabled" }
+    set { UserDefaults.standard.set(newValue,forKey:"annict.autoWatchMode") }
+  }
+  static var threshold: Int {
+    get { min(100,max(1,UserDefaults.standard.object(forKey:"annict.threshold") as? Int ?? 90)) }
+    set { UserDefaults.standard.set(min(100,max(1,newValue)),forKey:"annict.threshold") }
+  }
+  static var markFinal: Bool {
+    get { UserDefaults.standard.object(forKey:"annict.markFinal") as? Bool ?? true }
+    set { UserDefaults.standard.set(newValue,forKey:"annict.markFinal") }
+  }
+  static var disableFinalRules: Bool {
+    get { UserDefaults.standard.object(forKey:"annict.disableFinalRules") as? Bool ?? true }
+    set { UserDefaults.standard.set(newValue,forKey:"annict.disableFinalRules") }
+  }
+  static var watchOptions: [String:Any] { ["markWorkWatchedOnFinalEpisode":markFinal,"disableRulesOnFinalEpisode":markFinal && disableFinalRules] }
+  static func shouldRecord(started: Bool, watched: Double, duration: Double) -> Bool {
+    guard started else { return false }
+    return mode == "start" || mode == "progress" && duration.isFinite && duration > 0 && watched.isFinite && watched/duration*100 >= Double(threshold)
+  }
+}
 struct NeoListPosition: Decodable { let page: Int; let userId: Int? }
 extension Notification.Name {
   static let neoAccountChanged = Notification.Name("NeoAccountChanged")
   static let neoHistoryChanged = Notification.Name("NeoHistoryChanged")
   static let neoRecordingPreferencesChanged = Notification.Name("NeoRecordingPreferencesChanged")
+  static let neoAnnictChanged = Notification.Name("NeoAnnictChanged")
 }
 private final class NeoAPIRedirectPolicy: NSObject, URLSessionTaskDelegate {
   func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -492,6 +590,16 @@ final class NeoAPI {
     return try await request(parts.url!)
   }
   func configuration() async throws -> NeoServerConfig { try await request(url("/config")) }
+  func videoInfo(_ id: Int, force: Bool = false) async throws -> NeoVideoInfo {
+    try await request(url("/videos/\(id)/info"),method:force ? "POST" : "GET")
+  }
+  func annictStatus() async throws -> NeoAnnictStatus { try await request(url("/annict/status")) }
+  func annictToken(_ token: String?, write: Bool, user: String? = nil, headers: [String:String]? = nil) async throws {
+    _ = try await response(url(write ? "/annict/write-token" : "/annict/token"),method:token == nil ? "DELETE" : "PUT",body:token.map { ["accessToken":$0] },user:user,headers:headers)
+  }
+  func annictEpisode(_ id: Int, method: String = "GET", user: String? = nil, headers: [String:String]? = nil) async throws -> NeoAnnictEpisode {
+    try await request(url("/recorded/\(id)/annictEpisode"),method:method,body:method == "PUT" ? NeoAnnictPreferences.watchOptions : nil,user:user,headers:headers)
+  }
   @MainActor func checkpointVideoInfo(_ id: Int) async throws -> NeoCheckpointVideoInfo {
     let key = "\(identityRevision):\(id)"
     if let active = checkpointRequests[key] { return try await active.value }
@@ -522,6 +630,7 @@ final class NeoAPI {
   private func response(_ url: URL, method: String = "GET", body: [String: Any]? = nil,
     user: String? = nil, timeout: Double = 20, headers: [String: String]? = nil) async throws -> Data {
     var request = URLRequest(url: url); request.timeoutInterval = timeout; request.httpMethod = method
+    if url.path.contains("/annict") || url.path.hasSuffix("/info") { request.cachePolicy = .reloadIgnoringLocalCacheData }
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     let identity = identitySnapshot()
     request.setValue(user ?? identity.0, forHTTPHeaderField: "X-EPGStation-User-Id")

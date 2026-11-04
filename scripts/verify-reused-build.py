@@ -51,6 +51,8 @@ if full_recheck or network_probe or focused:
     jobs = read_json(['run', 'view', info['run'], '--json', 'jobs'])['jobs']
     steps = {step['name']: step['conclusion'] for job in jobs for step in job['steps']}
     foundation = 'Check player feedback models' if os.environ.get('CHECK_SCOPE') == 'player-feedback' else 'Native ASS parser and playback clock tests'
+    if os.environ.get('UI_STAGE') == 'recording-features' and steps.get('Check recording Info and Annict models') != 'success':
+        raise RuntimeError('Cannot retest failed recording feature models')
     for name in [foundation, 'Native UI type checks',
                  'Build device application', 'Verify device FFmpeg import isolation',
                  'Package LiveContainer IPA', 'Build simulator application', 'Verify simulator FFmpeg import isolation']:

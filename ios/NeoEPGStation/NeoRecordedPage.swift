@@ -297,8 +297,9 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         let lastPage = max(1, Int(ceil(Double(result.total) / Double(limit))))
         if requestedPage > lastPage { self.reload(targetPage: lastPage); return }
         let urls = result.records.compactMap { $0.thumbnails?.first.flatMap { api?.url("/thumbnails/\($0)") } }
-        let late = try await NeoThumbnail.prepare(urls)
-        try Task.checkCancellation()
+        // Show the list immediately. Cells share asynchronous thumbnail loads;
+        // preparing every image first held the entire list for up to 400ms.
+        let late = Set(urls)
         guard self.shell?.api === api else { return }
         self.page = requestedPage; self.records = result.records; self.total = result.total
         self.lateThumbnails = late

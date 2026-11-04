@@ -45,6 +45,9 @@ def capture_ui(udid, stage, prefix, terminate_existing=True):
         result['success'] = (result['ipadSeekThumbSmall'] and all(result.get(flag) == True for flag in flags)
                              and all(result.get('playerGestureChecks', {}).values()))
     Path(f'dist/{prefix}-{stage}.json').write_text(json.dumps(result, indent=2) + '\n')
+    if stage == 'recording-features':
+        for source in (ui_container/'Documents').glob('recording-*.png'):
+            shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
     if (result.get('success') is not True or result.get('recordCount') != 4
         or result.get('theme') != 'neon-teal-dark'
         or result.get('uiEngine') != 'Swift / UIKit'
@@ -124,8 +127,9 @@ if '--ipad-only' in sys.argv:
     sys.exit(0)
 run('xcrun', 'simctl', 'bootstatus', device['udid'], '-b', timeout=600)
 run('xcrun', 'simctl', 'install', device['udid'], str(app))
-if '--navigation-only' in sys.argv:
-    capture_ui(device['udid'], 'navigation', 'ui-iphone', terminate_existing=False)
+if '--navigation-only' in sys.argv or '--recording-features-only' in sys.argv:
+    focused_stage = 'recording-features' if '--recording-features-only' in sys.argv else 'navigation'
+    capture_ui(device['udid'], focused_stage, 'ui-iphone', terminate_existing=False)
     run('xcrun', 'simctl', 'shutdown', device['udid'], timeout=90)
     available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '--json'))['devices']
     runtime = next(key for key, values in available.items() if any(d['udid'] == device['udid'] for d in values))
@@ -134,13 +138,13 @@ if '--navigation-only' in sys.argv:
         run('xcrun', 'simctl', 'boot', pad['udid'])
     run('xcrun', 'simctl', 'bootstatus', pad['udid'], '-b', timeout=600)
     run('xcrun', 'simctl', 'install', pad['udid'], str(app), timeout=300)
-    capture_ui(pad['udid'], 'navigation', 'ui-ipad', terminate_existing=False)
+    capture_ui(pad['udid'], focused_stage, 'ui-ipad', terminate_existing=False)
     sys.exit(0)
 if '--ui-only' in sys.argv:
     # Recheck navigation against the exact same binary independently of the
     # synthetic video encoder used by the native playback suite.
     requested_stage = next((arg.split('=', 1)[1] for arg in sys.argv if arg.startswith('--ui-stage=')), None)
-    if requested_stage is not None and requested_stage not in ui_stages+['navigation']:
+    if requested_stage is not None and requested_stage not in ui_stages+['navigation','recording-features']:
         raise ValueError('Unknown iPhone UI stage')
     for index, stage in enumerate([requested_stage] if requested_stage else ui_stages):
         capture_ui(device['udid'], stage, 'ui-iphone', terminate_existing=index > 0)

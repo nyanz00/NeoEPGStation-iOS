@@ -56,7 +56,7 @@ on:
         required: false
         default: all
         type: choice
-        options: [all, recorded, pagination, detail, record-actions, detail-actions, play-popup, list-actions, drop-dialog, menu, settings, gestures, navigation]
+        options: [all, recorded, pagination, detail, record-actions, detail-actions, play-popup, list-actions, drop-dialog, menu, settings, gestures, navigation, recording-features]
 
 permissions:
   contents: read
@@ -173,7 +173,18 @@ jobs:
           mkdir -p build/native-tests dist
           swiftc ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift ios/NeoEPGStation/NeoASSComments.swift ios/NeoEPGStation/NeoCommentLoader.swift tests/player-feedback/main.swift -o build/native-tests/player-feedback
           build/native-tests/player-feedback | tee dist/player-feedback-models.txt
+      - name: Check recording Info and Annict models
+        id: recording-feature-models
+        if: ${{ inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'recording-features' }}
+        run: |
+          mkdir -p build/native-tests dist
+          swiftc -frontend -parse ios/NeoEPGStation/NeoAnnict.swift ios/NeoEPGStation/NeoRecordedInfo.swift ios/NeoEPGStation/NeoRecordingFeaturesSmoke.swift
+          swiftc ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift ios/NeoEPGStation/NeoPlaybackHistory.swift tests/recording-features/main.swift -o build/native-tests/recording-features
+          build/native-tests/recording-features | tee dist/recording-feature-models.txt
       - name: Native UI type checks
+        # Recording changes exercise model formatting, cumulative watch rules and
+        # request/UI integration without rerunning unrelated playback suites.
+        # The actual Swift target is still compiled for both SDKs below.
         id: type-checks
         if: ${{ !cancelled() && steps.environment.outcome == 'success' }}
         run: |
@@ -290,15 +301,19 @@ jobs:
           exit "$comparison_failed"
       - name: Check player feedback interactions
         id: player-feedback-checks
-        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && inputs.ui_stage != 'navigation' }}
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && !contains(fromJSON('["navigation","recording-features"]'), inputs.ui_stage) }}
         run: python3 -u scripts/player-feedback-smoke.py
       - name: Check immediate navigation swipes on iPhone and iPad
         id: navigation-checks
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'navigation' }}
         run: python3 -u scripts/simulator-smoke.py --navigation-only
+      - name: Check recorded Info, Annict and immediate display
+        id: recording-feature-checks
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'recording-features' }}
+        run: python3 -u scripts/simulator-smoke.py --recording-features-only
       - name: Check live station UI, raw/transcoded TS, comments, switching and reconnect
         id: live-checks
-        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && contains(fromJSON('["live","player-feedback"]'), inputs.check_scope) && inputs.ui_stage != 'navigation' }}
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && contains(fromJSON('["live","player-feedback"]'), inputs.check_scope) && !contains(fromJSON('["navigation","recording-features"]'), inputs.ui_stage) }}
         run: python3 -u scripts/live-smoke.py
       - name: Check recorded PLAY remains separate from live transport
         id: live-recorded-regression
@@ -494,6 +509,8 @@ jobs:
             python3 -u scripts/simulator-smoke.py --prepare
             if [ "$UI_STAGE" = "navigation" ]; then
               python3 -u scripts/simulator-smoke.py --navigation-only
+            elif [ "$UI_STAGE" = "recording-features" ]; then
+              python3 -u scripts/simulator-smoke.py --recording-features-only
             else
               python3 -u scripts/player-feedback-smoke.py
               python3 -u scripts/live-smoke.py

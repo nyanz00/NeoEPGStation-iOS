@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+    B11C00000000000000000001 = {isa = PBXBuildFile; fileRef = A11C00000000000000000001; };
+    BDEF0000000000000000003F = {isa = PBXBuildFile; fileRef = ADEF0000000000000000003F; };
+    BDEF0000000000000000003E = {isa = PBXBuildFile; fileRef = ADEF0000000000000000003E; };
     BDEF0000000000000000003C = {isa = PBXBuildFile; fileRef = ADEF0000000000000000003C; };
     BDEF0000000000000000003B = {isa = PBXBuildFile; fileRef = ADEF0000000000000000003B; };
     BDEF0000000000000000003A = {isa = PBXBuildFile; fileRef = ADEF0000000000000000003A; };
@@ -69,6 +72,9 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+    A11C00000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoRecordingFeaturesSmoke.swift; path = NeoEPGStation/NeoRecordingFeaturesSmoke.swift; sourceTree = "<group>"; };
+    ADEF0000000000000000003F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoAnnict.swift; path = NeoEPGStation/NeoAnnict.swift; sourceTree = "<group>"; };
+    ADEF0000000000000000003E = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoRecordedInfo.swift; path = NeoEPGStation/NeoRecordedInfo.swift; sourceTree = "<group>"; };
     ADEF0000000000000000003D = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = NeoASSSubtitleRenderer.h; path = NeoEPGStation/NeoASSSubtitleRenderer.h; sourceTree = "<group>"; };
     ADEF0000000000000000003C = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoSubtitleScript.swift; path = NeoEPGStation/NeoSubtitleScript.swift; sourceTree = "<group>"; };
     ADEF0000000000000000003B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoAetherBackend.swift; path = NeoEPGStation/NeoAetherBackend.swift; sourceTree = "<group>"; };
@@ -202,6 +208,9 @@
                 ADEF00000000000000000019,
         ADEF00000000000000000016,
         ADEF00000000000000000014,
+        ADEF0000000000000000003F,
+        A11C00000000000000000001,
+        ADEF0000000000000000003E,
         ADEF00000000000000000013,
         ADEF00000000000000000012,
         ADEF00000000000000000011,
@@ -422,6 +431,9 @@
                 BDEF00000000000000000019,
         BDEF00000000000000000016,
         BDEF00000000000000000014,
+        BDEF0000000000000000003F,
+        B11C00000000000000000001,
+        BDEF0000000000000000003E,
         BDEF00000000000000000013,
         BDEF00000000000000000012,
         BDEF00000000000000000011,

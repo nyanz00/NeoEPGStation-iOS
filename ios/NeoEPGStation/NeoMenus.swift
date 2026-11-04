@@ -166,6 +166,9 @@ extension NeoPage {
       hideThumbnailButton: shell.storage.hideRecordedThumbnailButton)
     shell.showPopup(anchor: anchor, entries: commands.map { command in
       NeoMenuEntry(title: command.rawValue, icon: command.icon) { [weak self] in
+        if command == .info, let self, let api = self.shell?.api {
+          self.present(NeoRecordedInfoDialog(item:item,api:api),animated:true); return
+        }
         // Operation dialogs will be ported separately; never run a destructive
         // server operation from a UI-only placeholder.
         self?.alert("\(command.rawValue) の操作は準備中です。")

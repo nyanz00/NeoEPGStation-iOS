@@ -608,7 +608,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       user:self.recordingContext[@"user"] ?: @"master" username:self.username password:self.password];
     self.history.onChange = ^{ [weakSelf updateControls]; };
     self.history.onDiagnostic = ^(NSDictionary *fields) { [NeoPlaybackDiagnostics record:@"history.sendFailure" fields:fields]; };
+    self.history.onWatchProgress = ^(double watched, double duration, double sessionWatched) { [weakSelf.annictTracker historyProgress:watched duration:duration sessionWatched:sessionWatched]; };
   }
+  self.annictTracker.onChange = ^{ [weakSelf updateControls]; };
   [self showControls];
   if ([self isLive]) { [self startLive]; return; }
   if (![self isStreaming] && ![self.recordingContext[@"videoFileType"] isEqual:@"ts"] &&
@@ -1836,6 +1838,10 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   } else { [self pauseTransport]; }
 }
 - (void)sampleHistory {
+  [self.annictTracker sample:self.playbackEnded ? self.lastObservedLength / 1000.0 : MAX(0, (double)[self mediaTime] / 1000.0)
+    duration:[self mediaLength] / 1000.0
+    running:self.transportPlaying && self.wantsPlayback && !self.buffering && !self.networkFlow.holding && !self.networkFlow.verifying
+    seeking:self.seeking || self.scrubbing || self.reloading rate:self.playbackRate];
   [self.history sample:self.playbackEnded ? self.lastObservedLength / 1000.0 : MAX(0, (double)[self mediaTime] / 1000.0)
     duration:[self mediaLength] / 1000.0
     running:self.transportPlaying && self.wantsPlayback && !self.buffering && !self.networkFlow.holding && !self.networkFlow.verifying
@@ -2052,7 +2058,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self.chrome updatePlayback:self.wantsPlayback && !self.playbackEnded current:self.playbackEnded ? self.lastObservedLength / 1000 : current duration:length > 0 ? length : self.lastObservedLength / 1000];
   [self.chrome updateDownloadedRanges:(self.streamingSession ? self.streamingSession.downloadedRanges : self.rewindCache.downloadedRanges) ?: @[]];
   NSString *cacheStatus = self.streamingSession ? self.streamingSession.status : self.rewindCache.status;
-  NSString *warning = cacheStatus.length ? cacheStatus : self.history.status;
+  NSString *warning = cacheStatus.length ? cacheStatus : self.history.status.length ? self.history.status : self.annictTracker.status;
   if (warning.length) { self.statusLabel.text = warning; }
   else if (self.lastPresentedWarning.length && [self.statusLabel.text isEqualToString:self.lastPresentedWarning]) {
     self.statusLabel.text = self.playbackEnded ? @"PLAY · 再生終了" : self.wantsPlayback ? @"PLAY · 再生中" : @"PLAY · 一時停止";
@@ -4019,7 +4025,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
       initWithInterfaceOrientations:UIInterfaceOrientationMaskPortrait] errorHandler:nil];
   }
   [NeoPlaybackDiagnostics record:@"player.close" fields:@{}];
-  [self sampleHistory]; [self.history finish]; self.closing = YES;
+  [self sampleHistory]; [self.history finish]; [self.annictTracker finish]; self.closing = YES;
   ++self.liveGeneration; [self.liveRetryTimer invalidate]; self.liveRetryTimer = nil; [self.live close]; self.live = nil;
   [self cancelVideoResume];
   self.videoReloadRecovery = NO;

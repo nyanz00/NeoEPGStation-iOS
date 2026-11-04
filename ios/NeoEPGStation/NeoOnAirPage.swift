@@ -340,6 +340,9 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
 
 // Same compact, centered outlined dialog surface as the mobile Web player.
 class NeoLiveDialog: UIViewController {
+  var maximumWidth: CGFloat { 444 }
+  var titleInset: CGFloat? { nil }
+  var contentBackground: UIColor { UIColor.white.withAlphaComponent(0.08) }
   private let card = UIView(), scroll = UIScrollView(), stack = UIStackView(), actions = UIStackView()
   private let headingLabel = NeoStyle.label(size:20,bold:true), contentFill = UIView(), topLine = UIView(), bottomLine = UIView()
   private let heading: String
@@ -359,7 +362,7 @@ class NeoLiveDialog: UIViewController {
   override func loadView() {
     view = UIView(); view.backgroundColor = .black.withAlphaComponent(0.5)
     card.backgroundColor = NeoStyle.paper; card.layer.cornerRadius = 12; card.layer.borderColor = NeoStyle.border.cgColor; card.layer.borderWidth = 1
-    card.clipsToBounds = true; contentFill.backgroundColor = UIColor.white.withAlphaComponent(0.08)
+    card.clipsToBounds = true; contentFill.backgroundColor = contentBackground
     topLine.backgroundColor = NeoStyle.border; bottomLine.backgroundColor = NeoStyle.border
     view.addSubview(card); [contentFill,scroll,headingLabel,actions,topLine,bottomLine].forEach(card.addSubview); scroll.addSubview(stack)
     stack.axis = .vertical; stack.spacing = 14; actions.spacing = 12; actions.alignment = .center; actions.addArrangedSubview(UIView())
@@ -391,15 +394,16 @@ class NeoLiveDialog: UIViewController {
     button.heightAnchor.constraint(equalToConstant:38).isActive = true; field.addArrangedSubview(button)
     let line = UIView(); line.backgroundColor = NeoStyle.muted; line.heightAnchor.constraint(equalToConstant:1).isActive = true; field.addArrangedSubview(line); (container ?? stack).addArrangedSubview(field); return button
   }
-  func addAction(_ title: String, filled: Bool = false, enabled: Bool = true, action: @escaping () -> Void) {
+  @discardableResult func addAction(_ title: String, filled: Bool = false, enabled: Bool = true, action: @escaping () -> Void) -> UIButton {
     loadViewIfNeeded(); let button = NeoStyle.button(title,filled:filled,action:action); button.isEnabled = enabled
     if !filled { button.tintColor = .white; button.layer.borderWidth = 1; button.layer.borderColor = UIColor.white.withAlphaComponent(0.7).cgColor }
     button.heightAnchor.constraint(equalToConstant:42).isActive = true; button.widthAnchor.constraint(greaterThanOrEqualToConstant:74).isActive = true; actions.addArrangedSubview(button)
+    return button
   }
   override func viewDidLayoutSubviews() {
-    super.viewDidLayoutSubviews(); let width = min(444,max(0,view.bounds.width-24))
+    super.viewDidLayoutSubviews(); let width = min(maximumWidth,max(0,view.bounds.width-24))
     let content = stack.systemLayoutSizeFitting(CGSize(width:width-48,height:UIView.layoutFittingCompressedSize.height),withHorizontalFittingPriority:.required,verticalFittingPriority:.fittingSizeLevel).height
-    let inset = NeoStyle.dialogTitleInset(viewportWidth:view.bounds.width)
+    let inset = titleInset ?? NeoStyle.dialogTitleInset(viewportWidth:view.bounds.width)
     let header = headingLabel.sizeThatFits(CGSize(width:width-2*inset,height:CGFloat.greatestFiniteMagnitude)).height+2*inset
     let height = min(max(200,header+content+92),max(200,view.bounds.height-view.safeAreaInsets.top-view.safeAreaInsets.bottom-32))
     card.frame = CGRect(x:(view.bounds.width-width)/2,y:(view.bounds.height-height)/2,width:width,height:height)

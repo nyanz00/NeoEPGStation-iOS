@@ -28,6 +28,7 @@ final class NeoPlaybackHistory: NSObject, URLSessionTaskDelegate {
   @objc private(set) var status = ""
   @objc var onChange: (() -> Void)?
   @objc var onDiagnostic: (([String: Any]) -> Void)?
+  @objc var onWatchProgress: ((Double,Double,Double) -> Void)?
   static func observedMilliseconds(_ date: Date) -> Int64 { Int64((date.timeIntervalSince1970 * 1000).rounded(.down)) }
   static func errorMessage(_ error: Error?) -> String {
     let error = error as NSError?
@@ -83,6 +84,10 @@ final class NeoPlaybackHistory: NSObject, URLSessionTaskDelegate {
       sending = false
       if error == nil, let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
         acknowledged = total; status = ""; pending = pending || clock.total > total
+        if let data, let result = (try? JSONSerialization.jsonObject(with:data)) as? [String:Any],
+          let watched = result["watchedSeconds"] as? Double, let duration = result["duration"] as? Double {
+          onWatchProgress?(watched,duration,total)
+        }
         NotificationCenter.default.post(name: Notification.Name("NeoHistoryChanged"), object: nil)
       } else {
         status = Self.errorMessage(error); pending = true
@@ -104,7 +109,7 @@ final class NeoPlaybackHistory: NSObject, URLSessionTaskDelegate {
     }.resume()
   }
   @objc func finish() {
-    ended = true; onChange = nil
+    ended = true; onChange = nil; onWatchProgress = nil
     if Int(user).map({ $0 > 0 }) == true && clock.duration > 0 { flush() } else { session.finishTasksAndInvalidate() }
   }
   func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,

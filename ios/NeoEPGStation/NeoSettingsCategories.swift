@@ -65,6 +65,8 @@ final class NeoSettingsCategoryPage: NeoPage {
   private let scroll = UIScrollView(), stack = UIStackView()
   private let historyToggle = UISwitch()
   private var task: Task<Void, Never>?
+  private var firstAppearance = true
+  private var annictMutation: Task<Void,Never>?
   private var observers: [NSObjectProtocol] = []
   init(category: NeoSettingsCategory, shell: NeoShell) { self.category = category; super.init(title: category.title, shell: shell) }
   required init?(coder: NSCoder) { fatalError() }
@@ -78,13 +80,16 @@ final class NeoSettingsCategoryPage: NeoPage {
       stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -16),
       stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -32)])
     observers.append(NotificationCenter.default.addObserver(forName: .neoAccountChanged, object: nil, queue: .main) { [weak self] note in
-      guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }; self.render()
+      guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }; self.annictMutation?.cancel(); self.render()
     })
     render()
   }
-  override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); if isViewLoaded { render() } }
+  override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); if firstAppearance { firstAppearance = false } else { render() } }
   override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); scroll.frame = body.bounds }
   private func render() {
+#if targetEnvironment(simulator)
+    smokeRenderCount += 1
+#endif
     task?.cancel(); stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
     guard let shell, let api = shell.api else { return }
     switch category {
@@ -139,7 +144,8 @@ final class NeoSettingsCategoryPage: NeoPage {
       button("使用ライブラリ・ライセンス") { [weak self,weak shell] in
         guard let shell else { return }; self?.navigationController?.pushViewController(NeoLicensePage(shell:shell),animated:true)
       }
-    case .annict, .discord: break
+    case .annict: buildAnnictPreferences(api)
+    case .discord: break
     case .display:
       toggle("THUMBボタンを表示しない", on: shell.storage.hideRecordedThumbnailButton) { [weak shell] in shell?.storage.hideRecordedThumbnailButton = $0 }
       toggle("録画済みへ戻った番組を強調表示", explanation: "録画詳細や視聴履歴から一覧へ移動した際、対象の録画を約1秒間ハイライトします。", on: api.highlightRecorded) { api.highlightRecorded = $0 }
@@ -199,6 +205,68 @@ final class NeoSettingsCategoryPage: NeoPage {
     }
   }
   @objc private func historyChanged() { shell?.api?.disablePlaybackHistory = historyToggle.isOn }
+  private func buildAnnictPreferences(_ api: NeoAPI) {
+    let readStatus = NeoStyle.label(size:14,muted:true), writeStatus = NeoStyle.label(size:14,muted:true)
+    for (write,title,status) in [(false,"読み取り専用アクセストークン",readStatus),(true,"読み書きアクセストークン",writeStatus)] {
+      stack.addArrangedSubview(NeoStyle.label(title,size:16)); status.text = "確認中"; status.numberOfLines = 0; stack.addArrangedSubview(status)
+      info(write ? "視聴記録の更新に使用します。現在のアクティブユーザーのプロフィールに保存されます。" : "アニメ作品と放送予定の取得に使用します。トークンはサーバーだけに保存されます。")
+      let field = UITextField(); field.isSecureTextEntry = true; field.placeholder = "Annictアクセストークン"
+      field.textColor = .white; field.backgroundColor = NeoStyle.paper; field.borderStyle = .roundedRect
+      field.autocorrectionType = .no; field.autocapitalizationType = .none; field.heightAnchor.constraint(equalToConstant:44).isActive = true
+      field.accessibilityIdentifier = write ? "annict-write-token" : "annict-read-token"; stack.addArrangedSubview(field)
+      let paste = NeoStyle.button("貼り付け") { [weak field] in field?.text = UIPasteboard.general.string }
+      let connect = NeoStyle.button("接続",filled:true) { [weak self,weak field] in
+        guard let self, let token = field?.text?.trimmingCharacters(in:.whitespacesAndNewlines), !token.isEmpty,
+          api.accountReady, !write || api.profileHeaders["X-Viewer-Profile-Id"] != nil else { return }
+        field?.text = ""; self.updateAnnictToken(token,write:write,api:api)
+      }
+      let remove = NeoStyle.button("解除") { [weak self] in self?.updateAnnictToken(nil,write:write,api:api) }
+      connect.isEnabled = api.accountReady && (!write || api.profileHeaders["X-Viewer-Profile-Id"] != nil)
+      remove.isEnabled = false
+      let line = UIStackView(arrangedSubviews:[paste,connect,remove]); line.spacing = 8; line.distribution = .fillEqually
+      line.heightAnchor.constraint(equalToConstant:44).isActive = true; stack.addArrangedSubview(line)
+      status.tag = write ? 8002 : 8001; remove.tag = write ? 8004 : 8003
+    }
+    if api.profileHeaders["X-Viewer-Profile-Id"] == nil { info("書き込み連携には、アカウント設定で通常ユーザーを選択してください。") }
+    choice("自動視聴記録",values:[("disabled","自動記録しない"),("start","PLAY／STREAMING開始時"),("progress","指定割合まで視聴した時")],selected:NeoAnnictPreferences.mode) { NeoAnnictPreferences.mode = $0 }
+    if NeoAnnictPreferences.mode == "progress" {
+      let amount = UIStepper(); amount.minimumValue = 1; amount.maximumValue = 100; amount.value = Double(NeoAnnictPreferences.threshold)
+      amount.accessibilityIdentifier = "annict-threshold"
+      let value = NeoStyle.label("\(NeoAnnictPreferences.threshold)%")
+      amount.addAction(UIAction { [weak amount,weak value] _ in
+        NeoAnnictPreferences.threshold = Int(amount?.value ?? 90); value?.text = "\(NeoAnnictPreferences.threshold)%"
+      },for:.valueChanged)
+      let control = UIStackView(arrangedSubviews:[value,amount]); control.spacing = 8
+      row("視聴判定割合",explanation:"シークを除き、実際に再生した累計時間がこの割合に達した時に記録します。",control:control)
+    }
+    toggle("最終話視聴後に作品を「見た」にする",explanation:"EPGの最終回表示を最優先し、表示がない場合はAnnictのエピソード情報で最終話を確認して更新します。",on:NeoAnnictPreferences.markFinal) { [weak self] in NeoAnnictPreferences.markFinal = $0; self?.render() }
+    let rules = UISwitch(); rules.isOn = NeoAnnictPreferences.disableFinalRules; rules.onTintColor = NeoStyle.accent; rules.isEnabled = NeoAnnictPreferences.markFinal
+    rules.accessibilityLabel = "最終話視聴後にルールを無効化する"
+    rules.addAction(UIAction { [weak rules] _ in NeoAnnictPreferences.disableFinalRules = rules?.isOn ?? false },for:.valueChanged)
+    row("最終話視聴後にルールを無効化する",explanation:"Annictに次話がなく、予約が残っていない、視聴したプロフィール所有のルールだけを無効化します。",control:rules)
+    let revision = api.identityRevision
+    task = Task { [weak self,weak readStatus,weak writeStatus] in
+      do {
+        let value = try await api.annictStatus(); guard !Task.isCancelled, api.identityRevision == revision, let self else { return }
+        readStatus?.text = value.configured ? "接続済み" : "未設定"; writeStatus?.text = value.writeConfigured ? "接続済み" : "未設定"
+        (self.view.viewWithTag(8003) as? UIButton)?.isEnabled = value.configured
+        (self.view.viewWithTag(8004) as? UIButton)?.isEnabled = value.writeConfigured
+      } catch { if !Task.isCancelled, api.identityRevision == revision { readStatus?.text = "連携状態を取得できませんでした。"; writeStatus?.text = "連携状態を取得できませんでした。" } }
+    }
+  }
+  private func updateAnnictToken(_ token: String?, write: Bool, api: NeoAPI) {
+    guard annictMutation == nil, api.accountReady else { return }
+    let revision = api.identityRevision
+    let user = api.viewer, headers = api.profileHeaders
+    annictMutation = Task { [weak self] in
+      guard let self else { return }; defer { self.annictMutation = nil }
+      guard !Task.isCancelled, api.identityRevision == revision else { return }
+      do {
+        try await api.annictToken(token,write:write,user:user,headers:headers)
+        guard !Task.isCancelled, api.identityRevision == revision else { return }; self.render()
+      } catch { if !Task.isCancelled, api.identityRevision == revision { self.alert("Annictの連携設定を更新できませんでした。") } }
+    }
+  }
   private func choice(_ title: String, values: [(String,String)], selected: String, save: @escaping (String) -> Void) {
     let control = NeoSelectButton(frame:.zero)
     control.setTitle(values.first { $0.0 == selected }?.1 ?? selected,for:.normal)
@@ -294,6 +362,14 @@ final class NeoSettingsCategoryPage: NeoPage {
     row(title, explanation: explanation, control: toggle)
   }
 #if targetEnvironment(simulator)
+  func smokeConnectAnnict(write: Bool, token: String) {
+    guard let index = stack.arrangedSubviews.firstIndex(where: { $0.accessibilityIdentifier == (write ? "annict-write-token" : "annict-read-token") }),
+      let field = stack.arrangedSubviews[index] as? UITextField,
+      let line = stack.arrangedSubviews[index+1] as? UIStackView else { return }
+    field.text = token
+    line.arrangedSubviews.compactMap { $0 as? UIButton }.first { $0.title(for:.normal) == "接続" }?.sendActions(for:.touchUpInside)
+  }
+  var smokeRenderCount = 0
   var smokeSettingCount: Int { stack.arrangedSubviews.count }
   var smokeControlsWithinWidth: Bool {
     view.layoutIfNeeded()
@@ -309,7 +385,7 @@ final class NeoSettingsCategoryPage: NeoPage {
   }
   func smokeSetHistoryDisabled(_ value: Bool) { historyToggle.isOn = value; historyToggle.sendActions(for: .valueChanged) }
 #endif
-  deinit { task?.cancel(); observers.forEach(NotificationCenter.default.removeObserver) }
+  deinit { task?.cancel(); annictMutation?.cancel(); observers.forEach(NotificationCenter.default.removeObserver) }
 }
 
 // Both Xcode builds carry the application notices; packaged IPA builds also

@@ -8,6 +8,12 @@ enum NeoIcon {
     if let image = cache[cacheKey] { return image }
     let path = UIBezierPath()
     switch name {
+    case "CheckCircleOutlineOutlined":
+      path.append(UIBezierPath(ovalIn:CGRect(x:2,y:2,width:20,height:20)))
+      path.append(UIBezierPath(ovalIn:CGRect(x:4,y:4,width:16,height:16)).reversing())
+      path.move(to:CGPoint(x:16.59,y:7.58)); path.addLine(to:CGPoint(x:10,y:14.17))
+      path.addLine(to:CGPoint(x:7.41,y:11.59)); path.addLine(to:CGPoint(x:6,y:13))
+      path.addLine(to:CGPoint(x:10,y:17)); path.addLine(to:CGPoint(x:18,y:9)); path.close()
     case "Menu":
       path.move(to: CGPoint(x: 3, y: 18))
       path.addLine(to: CGPoint(x: 21, y: 18))

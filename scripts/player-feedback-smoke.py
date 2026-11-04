@@ -187,7 +187,7 @@ for platform, choice in [('phone', 2), ('phone', -1), ('pad', 2)]:
                     'followRestores500', 'newLiveResetsLog', 'manualUIProtectsLog',
                     'returnUITrimsLogAndFollowsTail', 'tsSubtitleFilledWhenSelected',
                     'tsSubtitleOutlinedWhenDisabled', 'encodedSubtitleKeepsPicker'}
-        required |= {'settingsSevenCategories','categoryDescriptionsRemoved','annictEmpty','discordEmpty',
+        required |= {'settingsSevenCategories','categoryDescriptionsRemoved','annictSettingsPopulated','discordEmpty',
                      'engineInViewing','engineRemovedFromGeneral','generalHasAppPreferences','globalNetworkPersists',
                      'globalSizeReachesPlayer','globalOpacityReachesPlayer','globalWaitSharesPlayerSetting',
                      'labelsOffCentersIcons','labelsRestored','closingBackdropDoesNotBlockNewPage'}

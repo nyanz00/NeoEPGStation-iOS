@@ -8,6 +8,8 @@ final class NeoDetailPage: NeoPage {
   private var thumbnailSize: [NSLayoutConstraint] = []
   private var task: Task<Void, Never>?
   private var analysisTask: Task<Void, Never>?
+  private var annict: NeoAnnictHeader?
+  private var firstAppearance = true
   private let dropStatus = NeoStyle.label(size: 14, muted: true)
   private lazy var playButton = NeoStyle.recordingButton("PLAY", icon: "PlayArrowOutlined") { [weak self] in self?.selectFile() }
   private lazy var streamingButton = NeoStyle.recordingButton("STREAMING", icon: "PlayCircleOutlineOutlined") { [weak self] in self?.selectStreamingFile() }
@@ -71,7 +73,15 @@ final class NeoDetailPage: NeoPage {
     let isWide = body.bounds.width >= 900
     if wide != isWide { wide = isWide; render() }
   }
-  override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); if isViewLoaded { render() } }
+  override func viewWillAppear(_ animated: Bool) {
+    super.viewWillAppear(animated); if firstAppearance { firstAppearance = false } else { render() }
+    if annict == nil, let api = shell?.api {
+      let control = NeoAnnictHeader(api:api,recordingID:item.id,host:self)
+      control.onVisibility = { [weak self,weak control] visible in self?.headerAccessory = visible ? control : nil }
+      annict = control
+    }
+    if shell?.smokeStage.isEmpty != false { annict?.load() }
+  }
   func refreshCapabilities() {
     guard isViewLoaded else { return }
     var buttons = [playButton, streamingButton]
@@ -79,6 +89,9 @@ final class NeoDetailPage: NeoPage {
     buttons.append(encodeButton); buttonRow.setButtons(buttons)
   }
   private func render() {
+#if targetEnvironment(simulator)
+    smokeRenderCount += 1
+#endif
     stack.arrangedSubviews.forEach { stack.removeArrangedSubview($0); $0.removeFromSuperview() }
     NSLayoutConstraint.deactivate(thumbnailSize)
     thumbnail.removeFromSuperview()
@@ -162,6 +175,8 @@ final class NeoDetailPage: NeoPage {
   }
 #if targetEnvironment(simulator)
   func smokeOpenPlay() { scroll.setContentOffset(.zero, animated: false); view.layoutIfNeeded(); selectFile() }
+  var smokeRenderCount = 0
+  func smokeAnnictControl() -> NeoAnnictHeader? { annict?.load(); return annict }
   func smokeOpenMenu() { showRecordingMenu(item, anchor: moreButton, detail: true) }
   var smokeDropText: String { dropStatus.text ?? "" }
   var smokePlayFrame: CGRect { playButton.convert(playButton.bounds, to: shell?.view) }

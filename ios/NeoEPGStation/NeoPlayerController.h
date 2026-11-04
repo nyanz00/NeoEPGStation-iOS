@@ -2,12 +2,14 @@
 #import <TargetConditionals.h>
 
 NS_ASSUME_NONNULL_BEGIN
+@class NeoAnnictPlayback;
 // Objective-C adapter keeps VLCKit's drawable/PiP protocols at the native boundary.
 @interface NeoPlayerController : UIViewController
 @property (nonatomic, copy, nullable) void (^onClose)(void);
 @property (nonatomic, copy, nullable) void (^onNavigate)(NSString *route);
 @property (nonatomic, copy, nullable) void (^onRecording)(NSInteger recordingID);
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *recordingContext;
+@property (nonatomic, strong, nullable) NeoAnnictPlayback *annictTracker;
 @property (nonatomic) double initialPosition;
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *aetherOptions;
 - (instancetype)initWithURL:(NSURL *)url title:(NSString *)title

@@ -58,7 +58,7 @@ private final class NeoPagePushAnimator: NSObject, UIViewControllerAnimatedTrans
   private weak var incoming: UIView?
   private var width: CGFloat = 1
   func transitionDuration(using context: UIViewControllerContextTransitioning?) -> TimeInterval {
-    UIAccessibility.isReduceMotionEnabled ? 0.01 : 0.35
+    UIAccessibility.isReduceMotionEnabled ? 0.01 : 0.15
   }
   func animateTransition(using context: UIViewControllerContextTransitioning) { interruptibleAnimator(using:context).startAnimation() }
   func interruptibleAnimator(using context: UIViewControllerContextTransitioning) -> UIViewImplicitlyAnimating {
@@ -602,6 +602,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       "channelId": recording.channelId ?? 0, "channelName": recording.channelName ?? recording.channelId.flatMap { channels[$0] } ?? "",
       "name": recording.name, "startAt": recording.startAt, "endAt": recording.endAt, "isRecording": recording.isRecording,
       "description": recording.description ?? "", "extended": recording.extended ?? "", "ruleId": recording.ruleId ?? 0]
+    controller.annictTracker = NeoAnnictPlayback(api:api,recordingID:recording.id)
     if let mode = streaming {
       let qualities = serverConfig?.streamingQualities(file.type) ?? []
       guard qualities.indices.contains(mode), !qualities[mode].isEmpty else { return }
@@ -951,6 +952,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
 
 #if targetEnvironment(simulator)
+  func smokeShowFeaturePage(_ page: UIViewController) {
+    showRoute("settings"); active?.pushViewController(page,animated:false); view.setNeedsLayout(); view.layoutIfNeeded()
+  }
+  func smokePopFeaturePage() { active?.popViewController(animated:false); view.layoutIfNeeded() }
+  var smokePushAnimationDuration: Double { NeoPagePushAnimator().transitionDuration(using:nil) }
   func runViewingSettingsProbe(base: URL) -> [String:Bool] {
     let keys = ["player.network.seconds","player.comments.size","player.comments.absoluteOpacity","player.comments.enabled","player.comments.waitBeforePlayback","neoepgstation.navigation.labels","watch.subtitleKeywords"]
     let old = keys.map { UserDefaults.standard.object(forKey:$0) }
@@ -967,10 +973,12 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     var checks = ["settingsSevenCategories":NeoSettingsCategory.allCases.count == 7,"categoryDescriptionsRemoved":cells]
     checks["generalFirstAboutLast"] = NeoSettingsCategory.allCases.first == .general && NeoSettingsCategory.allCases.last == .about && !NeoSettingsCategory.allCases.contains { $0.rawValue == "app" }
     capture("feedback-settings-categories")
-    for category in [NeoSettingsCategory.annict,.discord] {
+    for category in [NeoSettingsCategory.discord] {
       let page = NeoSettingsCategoryPage(category:category,shell:self); page.loadViewIfNeeded()
       checks[category.rawValue+"Empty"] = page.smokeSettingCount == 0
     }
+    let annictPage = NeoSettingsCategoryPage(category:.annict,shell:self); annictPage.loadViewIfNeeded()
+    checks["annictSettingsPopulated"] = annictPage.smokeSettingCount > 0
     NeoViewingPreferences.subtitleKeywords = ["","",""]
     let viewing = NeoSettingsCategoryPage(category:.viewing,shell:self); active!.pushViewController(viewing,animated:false); view.layoutIfNeeded()
     let views = all(viewing.view)
@@ -1096,6 +1104,13 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let original = recorded.collection
     showRoute("settings"); showRoute("recorded")
     let retained = original === recorded.collection
+    if smokeStage == "recording-features" {
+      Task { [self] in
+        let checks = await NeoRecordingFeaturesSmoke.run(shell:self)
+        writeIPadSmoke(recorded,checks:checks,retained:retained)
+      }
+      return
+    }
     if smokeStage == "navigation" {
       Task { [self] in
         let checks = await runNavigationTimingSmoke()
@@ -1284,8 +1299,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       swipeStart = CGPoint(x:tablet ? 8 : 100,y:view.bounds.height*0.7)
       return beginNavigationSwipe(tablet ? sidebarBackPan : contentPan,velocity:CGPoint(x:500,y:0)) && swipeAction == .back
     }
-    for (routeName,delay) in [("settings",50_000_000),("detail",50_000_000),("settings",180_000_000),("detail",180_000_000)] {
-      let name = routeName+(delay == 50_000_000 ? "Early" : "Mid")
+    for (routeName,delay) in [("settings",30_000_000),("detail",30_000_000),("settings",70_000_000),("detail",70_000_000)] {
+      let name = routeName+(delay == 30_000_000 ? "Early" : "Mid")
       showRoute(routeName == "settings" ? "settings" : "recorded"); view.layoutIfNeeded(); await settle()
       guard let nav = active else { checks[name+"NavigationExists"] = false; continue }
       nav.popToRootViewController(animated:false)
@@ -1305,7 +1320,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         if popInteraction != nil && pendingBack == nil { break }
         try? await Task.sleep(nanoseconds:5_000_000)
       }
-      checks[name+"TakesOverBeforeOriginalPushEnds"] = popInteraction != nil && pendingBack == nil && pushingNavigation == nil && CACurrentMediaTime()-pushBegan < 0.33
+      checks[name+"TakesOverBeforeOriginalPushEnds"] = popInteraction != nil && pendingBack == nil && pushingNavigation == nil && CACurrentMediaTime()-pushBegan < 0.14
       try? await Task.sleep(nanoseconds:40_000_000)
       let expected = min(1,initial+0.1)
       let painted = (page.view.layer.presentation()?.affineTransform().tx ?? page.view.transform.tx)/max(1,content.bounds.width)
