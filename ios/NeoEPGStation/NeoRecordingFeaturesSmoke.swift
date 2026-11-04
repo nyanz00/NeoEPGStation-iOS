@@ -5,6 +5,7 @@ private final class NeoFeatureProtocol: URLProtocol {
   static let lock = NSLock()
   static var puts: [Int:Int] = [:], gets: [Int:Int] = [:], deletes = 0, forces = 0
   static var readSaves = 0, writeSaves = 0
+  static var profileRequests = 0, historyRequests = 0
   static var watched = Set<Int>(), failRefresh = false, reads = false, writes = true, authenticated = true, tokenSaved = false
   private var cancelled = false
   private let cancellation = NSLock()
@@ -15,8 +16,17 @@ private final class NeoFeatureProtocol: URLProtocol {
     let path = request.url!.path, method = request.httpMethod ?? "GET"
     let id = path.split(separator:"/").compactMap { Int($0) }.first ?? 0
     Self.lock.lock()
-    Self.authenticated = Self.authenticated && ["7","9"].contains(request.value(forHTTPHeaderField:"X-EPGStation-User-Id") ?? "") && request.value(forHTTPHeaderField:"X-Viewer-Session") == "fixture-session"
-    Self.authenticated = Self.authenticated && request.value(forHTTPHeaderField:"X-Viewer-Profile-Id") == (request.value(forHTTPHeaderField:"X-EPGStation-User-Id") == "7" ? "21" : "22")
+    let user = request.value(forHTTPHeaderField:"X-EPGStation-User-Id") ?? ""
+    Self.authenticated = Self.authenticated && ["7","9"].contains(user)
+    if path.hasSuffix("/playback") {
+      // Playback history deliberately uses only the active user, without a
+      // locked-profile session (same public endpoint as the Web client).
+      Self.historyRequests += 1
+      Self.authenticated = Self.authenticated && request.value(forHTTPHeaderField:"X-Viewer-Session") == nil && request.value(forHTTPHeaderField:"X-Viewer-Profile-Id") == nil
+    } else {
+      Self.profileRequests += 1
+      Self.authenticated = Self.authenticated && request.value(forHTTPHeaderField:"X-Viewer-Session") == "fixture-session" && request.value(forHTTPHeaderField:"X-Viewer-Profile-Id") == (user == "7" ? "21" : "22")
+    }
     var code = 200, delay = 0.0, result: [String:Any] = [:]
     if path.hasSuffix("/annict/status") { result = ["configured":Self.reads,"writeConfigured":Self.writes,"viewerProfileId":21] }
     else if path.hasSuffix("/token") || path.hasSuffix("/write-token") {
@@ -156,7 +166,7 @@ private final class NeoFeatureProtocol: URLProtocol {
     api.activate(user:"9",headers:["X-Viewer-Profile-Id":"22","X-Viewer-Session":"fixture-session"])
     try? await Task.sleep(nanoseconds:300_000_000)
     checks["profileSwitchCancelsPendingRecord"] = NeoFeatureProtocol.snapshot { NeoFeatureProtocol.puts[6] == nil }; switched.finish()
-    checks["allRequestsUseActiveAuthentication"] = NeoFeatureProtocol.snapshot { NeoFeatureProtocol.authenticated }
+    checks["allRequestsUseActiveAuthentication"] = NeoFeatureProtocol.snapshot { NeoFeatureProtocol.authenticated && NeoFeatureProtocol.profileRequests > 0 && NeoFeatureProtocol.historyRequests > 0 }
     shell.showRoute("recorded")
     return checks
   }
