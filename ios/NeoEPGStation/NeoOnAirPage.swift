@@ -351,6 +351,7 @@ class NeoLiveDialog: UIViewController {
 #if targetEnvironment(simulator)
   var smokeCompact: Bool { card.bounds.height < 400 && card.bounds.width <= 444 && card.frame.minY > 0 }
   var smokeTitleHeight: CGFloat { contentFill.frame.minY }
+  var smokeCardHeight: CGFloat { card.frame.height }
   var smokeOnCancel: (() -> Void)?
   func smokeOutsideTap(inside: Bool) { cancelIfOutside(inside ? card.center : CGPoint(x:1,y:1)) }
   func smokePressCancel() { actions.arrangedSubviews.compactMap { $0 as? UIButton }.first { $0.title(for:.normal) == "キャンセル" }?.sendActions(for:.touchUpInside) }

@@ -46,8 +46,9 @@ def capture_ui(udid, stage, prefix, terminate_existing=True):
                              and all(result.get('playerGestureChecks', {}).values()))
     Path(f'dist/{prefix}-{stage}.json').write_text(json.dumps(result, indent=2) + '\n')
     if stage == 'recording-features':
-        for source in (ui_container/'Documents').glob('recording-*.png'):
-            shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
+        for pattern in ('recording-*.png', 'recording-opening-times.json'):
+            for source in (ui_container/'Documents').glob(pattern):
+                shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
     if (result.get('success') is not True or result.get('recordCount') != 4
         or result.get('theme') != 'neon-teal-dark'
         or result.get('uiEngine') != 'Swift / UIKit'

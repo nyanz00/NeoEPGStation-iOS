@@ -68,9 +68,15 @@ private final class NeoPagePushAnimator: NSObject, UIViewControllerAnimatedTrans
     width = max(1,context.containerView.bounds.width); incoming = to
     to.frame = context.finalFrame(for:target); context.containerView.addSubview(to)
     to.transform = CGAffineTransform(translationX:width,y:0)
-    let animator = UIViewPropertyAnimator(duration:transitionDuration(using:context),curve:.easeInOut) {
+    let animator = UIViewPropertyAnimator(duration:transitionDuration(using:context),curve:.easeOut) {
       to.transform = .identity; from.transform = CGAffineTransform(translationX:-self.width*0.25,y:0)
     }
+#if targetEnvironment(simulator)
+    if let page = target as? NeoPage, let began = page.smokeOpeningBegan {
+      page.smokeOpeningTimes["handlerToAnimatorMs"] = (CACurrentMediaTime()-began)*1000
+      NeoOpeningFrameProbe(page:page,width:width).start()
+    }
+#endif
     animator.addCompletion { position in
       from.transform = .identity; to.transform = .identity
       context.completeTransition(position == .end && !context.transitionWasCancelled)
@@ -88,6 +94,26 @@ private final class NeoPagePushAnimator: NSObject, UIViewControllerAnimatedTrans
   }
   func animationEnded(_ transitionCompleted: Bool) { animator = nil; incoming = nil }
 }
+
+#if targetEnvironment(simulator)
+// Observe presentation-layer movement, rather than treating a push request or
+// the configured duration as proof that the screen has started moving.
+private final class NeoOpeningFrameProbe: NSObject {
+  private weak var page: NeoPage?
+  private let width: CGFloat
+  private var link: CADisplayLink?
+  init(page: NeoPage, width: CGFloat) { self.page = page; self.width = width }
+  func start() { link = CADisplayLink(target:self,selector:#selector(tick)); link?.add(to:.main,forMode:.common) }
+  @objc private func tick() {
+    guard let page, let began = page.smokeOpeningBegan else { link?.invalidate(); link = nil; return }
+    let elapsed = CACurrentMediaTime()-began
+    if let layer = page.view.layer.presentation(), layer.affineTransform().tx < width-0.5 {
+      page.smokeOpeningTimes["handlerToFirstMovementMs"] = elapsed*1000
+      link?.invalidate(); link = nil
+    } else if elapsed > 1 { link?.invalidate(); link = nil }
+  }
+}
+#endif
 
 // UIKit creates the interactive context on a later run-loop iteration. Keep an
 // early update/end from a short drag until that context has actually started.
@@ -142,6 +168,10 @@ final class NeoPlayerTransition: NSObject, UIViewControllerTransitioningDelegate
 }
 
 class NeoPage: UIViewController {
+#if targetEnvironment(simulator)
+  var smokeOpeningBegan: CFTimeInterval?
+  var smokeOpeningTimes: [String:Double] = [:]
+#endif
   weak var shell: NeoShell?
   let header = UIView(), body = UIView()
   let titleLabel = NeoStyle.label(size: 20, bold: true)
@@ -248,6 +278,7 @@ final class NeoSidebar: UIView, UITableViewDataSource, UITableViewDelegate {
     super.init(frame: frame); backgroundColor = NeoStyle.paper
     [brand, logo, list].forEach(addSubview); logo.contentMode = .scaleAspectFit
     list.backgroundColor = .clear; list.separatorStyle = .none; list.rowHeight = 40
+    list.delaysContentTouches = false; list.panGestureRecognizer.delaysTouchesEnded = false
     list.contentInsetAdjustmentBehavior = .never; list.insetsContentViewsToSafeArea = false
     list.contentInset.top = 8; list.dataSource = self; list.delegate = self
     list.register(NeoSidebarCell.self, forCellReuseIdentifier: "navigation")
@@ -375,6 +406,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     sidebarBackPan.maximumNumberOfTouches = 1; sidebar.addGestureRecognizer(sidebarBackPan)
     backdropPan = UIPanGestureRecognizer(target: self, action: #selector(dragMenu(_:))); backdropPan.delegate = self
     backdropPan.maximumNumberOfTouches = 1; dim.addGestureRecognizer(backdropPan)
+    for pan in [contentPan,closingPan,sidebarBackPan,backdropPan] { pan?.delaysTouchesBegan = false; pan?.delaysTouchesEnded = false }
     rebuildBottom()
     setMenu(false, animated: false)
     if !smokeStage.isEmpty {
@@ -505,9 +537,24 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     else if canReturnToHistory { beginHistoryReturn(); finishHistoryReturn(true) }
   }
   func openDetail(_ recording: NeoRecording) {
+    let began = CACurrentMediaTime()
     dismissPopup()
     (active?.topViewController as? NeoRecordedPage)?.rememberDetail(recording.id)
-    active?.pushViewController(NeoDetailPage(item: recording, shell: self), animated: true)
+    pushPage(requestedAt:began) { NeoDetailPage(item:recording,shell:self) }
+  }
+  func pushPage(requestedAt: CFTimeInterval = CACurrentMediaTime(), _ make: () -> NeoPage) {
+#if targetEnvironment(simulator)
+    let began = requestedAt
+#endif
+    let page = make()
+#if targetEnvironment(simulator)
+    page.smokeOpeningBegan = began
+    page.smokeOpeningTimes["constructionMs"] = (CACurrentMediaTime()-began)*1000
+#endif
+    active?.pushViewController(page,animated:true)
+#if targetEnvironment(simulator)
+    page.smokeOpeningTimes["handlerToPushReturnedMs"] = (CACurrentMediaTime()-began)*1000
+#endif
   }
   func locateRecording(_ id: Int, position: NeoListPosition) {
     guard !routeBackRunning, popInteraction == nil else { return }
@@ -952,6 +999,26 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
 
 #if targetEnvironment(simulator)
+  func smokeMeasureOpening() async -> (checks:[String:Bool],timings:[String:[String:Double]]) {
+    var checks = [String:Bool](), timings = [String:[String:Double]]()
+    for kind in ["general","viewing","detail"] {
+      showRoute(kind == "detail" ? "recorded" : "settings"); active?.popToRootViewController(animated:false); view.layoutIfNeeded()
+      if kind == "detail" { openDetail(NeoRecordedPage.fixtures.records[0]) }
+      else if let root = active?.topViewController as? NeoSettingsPage {
+        checks["settingsTapDoesNotWaitForScroll"] = root.smokeTapDeliveryImmediate
+        root.smokeOpenCategory(kind == "general" ? .general : .viewing)
+      }
+      let page = active?.topViewController as? NeoPage
+      for _ in 0..<100 {
+        if page?.smokeOpeningTimes["handlerToFirstMovementMs"] != nil && active?.transitionCoordinator == nil { break }
+        try? await Task.sleep(nanoseconds:10_000_000)
+      }
+      timings[kind] = page?.smokeOpeningTimes ?? [:]
+      checks[kind+"FirstMovementMeasured"] = page?.smokeOpeningTimes["handlerToFirstMovementMs"] != nil
+      active?.popToRootViewController(animated:false)
+    }
+    return (checks,timings)
+  }
   func smokeShowFeaturePage(_ page: UIViewController) {
     showRoute("settings"); active?.pushViewController(page,animated:false); view.setNeedsLayout(); view.layoutIfNeeded()
   }

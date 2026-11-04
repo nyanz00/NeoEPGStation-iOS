@@ -162,6 +162,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   required init?(coder: NSCoder) { fatalError() }
   override func viewDidLoad() {
     super.viewDidLoad(); collection.backgroundColor = NeoStyle.background
+    collection.delaysContentTouches = false; collection.panGestureRecognizer.delaysTouchesEnded = false
     collection.dataSource = self; collection.delegate = self; collection.alwaysBounceVertical = true
     collection.register(NeoRecordedCard.self, forCellWithReuseIdentifier: "card")
     collection.register(NeoPaginationFooter.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionFooter, withReuseIdentifier: "pages")

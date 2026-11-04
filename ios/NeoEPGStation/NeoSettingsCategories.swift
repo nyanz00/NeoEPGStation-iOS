@@ -1,5 +1,62 @@
 import UIKit
 
+// SettingsPage's small outlined field / ContentPaste / contained connect /
+// error-colored disconnect share one row, including the empty and busy states.
+final class NeoAnnictTokenControl: UIView, UITextFieldDelegate {
+  let field = UITextField(), connect = UIButton(type:.system), remove = UIButton(type:.system)
+  private let paste = UIButton(type:.system)
+  var connected = false { didSet { refresh() } }
+  var allowed = false { didSet { refresh() } }
+  var busy = false { didSet { refresh() } }
+  var onChange: ((String?) -> Void)?
+  init(write: Bool) {
+    super.init(frame:.zero)
+    heightAnchor.constraint(equalToConstant:40).isActive = true
+    field.isSecureTextEntry = true; field.autocorrectionType = .no; field.autocapitalizationType = .none
+    field.textContentType = .password; field.font = .systemFont(ofSize:16); field.textColor = .white
+    field.placeholder = write ? "Annict書き込みアクセストークン" : "Annictアクセストークン"
+    field.attributedPlaceholder = NSAttributedString(string:field.placeholder!,attributes:[.foregroundColor:UIColor.white.withAlphaComponent(0.5)])
+    field.accessibilityIdentifier = write ? "annict-write-token" : "annict-read-token"
+    field.layer.cornerRadius = 6; field.layer.borderWidth = 1; field.delegate = self
+    let inset = UIView(frame:CGRect(x:0,y:0,width:14,height:40)); field.leftView = inset; field.leftViewMode = .always
+    field.addAction(UIAction { [weak self] _ in self?.refresh() },for:.editingChanged)
+    paste.setImage(NeoIcon.image("ContentPasteOutlined"),for:.normal); paste.tintColor = .white
+    paste.addAction(UIAction { [weak self] _ in self?.field.text = UIPasteboard.general.string; self?.refresh() },for:.touchUpInside)
+    paste.accessibilityLabel = write ? "書き込みトークンを貼り付け" : "読み取り専用トークンを貼り付け"
+    for (button,title) in [(connect,"接続"),(remove,"解除")] {
+      button.setTitle(title,for:.normal); button.titleLabel?.font = .systemFont(ofSize:14,weight:.medium)
+      button.layer.cornerRadius = 6; button.setTitleColor(UIColor.white.withAlphaComponent(0.3),for:.disabled)
+    }
+    connect.setTitleColor(.black,for:.normal)
+    remove.setTitleColor(UIColor(red:244/255,green:67/255,blue:54/255,alpha:1),for:.normal)
+    connect.addAction(UIAction { [weak self] _ in
+      guard let self, connect.isEnabled else { return }
+      let token = field.text?.trimmingCharacters(in:.whitespacesAndNewlines) ?? ""
+      guard !token.isEmpty else { return }; field.text = ""; field.resignFirstResponder(); refresh(); onChange?(token)
+    },for:.touchUpInside)
+    remove.addAction(UIAction { [weak self] _ in guard let self, remove.isEnabled else { return }; onChange?(nil) },for:.touchUpInside)
+    [field,paste,connect,remove].forEach(addSubview); refresh()
+  }
+  required init?(coder: NSCoder) { fatalError() }
+  private func refresh() {
+    connect.isEnabled = allowed && !busy && !(field.text?.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ?? true)
+    connect.backgroundColor = connect.isEnabled ? NeoStyle.accent : UIColor.white.withAlphaComponent(0.12)
+    remove.isHidden = !connected; remove.isEnabled = connected && allowed && !busy
+    field.isEnabled = allowed && !busy; paste.isEnabled = allowed && !busy
+    field.layer.borderColor = (field.isFirstResponder ? NeoStyle.accent : UIColor.white.withAlphaComponent(0.23)).cgColor
+    setNeedsLayout()
+  }
+  func textFieldDidBeginEditing(_ textField: UITextField) { refresh() }
+  func textFieldDidEndEditing(_ textField: UITextField) { refresh() }
+  override func layoutSubviews() {
+    super.layoutSubviews(); var right = bounds.width
+    if !remove.isHidden { right -= 64; remove.frame = CGRect(x:right,y:0,width:64,height:40); right -= 8 }
+    right -= 64; connect.frame = CGRect(x:right,y:2,width:64,height:36); right -= 8
+    right -= 40; paste.frame = CGRect(x:right,y:0,width:40,height:40); right -= 8
+    field.frame = CGRect(x:0,y:0,width:max(0,right),height:40)
+  }
+}
+
 enum NeoSettingsCategory: String, CaseIterable {
   case general, viewing, display, account, annict, discord, about
   var title: String {
@@ -16,6 +73,8 @@ final class NeoSettingsPage: NeoPage, UITableViewDataSource, UITableViewDelegate
   required init?(coder: NSCoder) { fatalError() }
   override func viewDidLoad() {
     super.viewDidLoad(); table.backgroundColor = NeoStyle.background; table.separatorColor = NeoStyle.border
+    table.delaysContentTouches = false
+    table.panGestureRecognizer.delaysTouchesEnded = false
     table.dataSource = self; table.delegate = self; table.rowHeight = UITableView.automaticDimension; table.estimatedRowHeight = 100
     table.register(UITableViewCell.self, forCellReuseIdentifier: "category"); body.addSubview(table)
   }
@@ -36,11 +95,16 @@ final class NeoSettingsPage: NeoPage, UITableViewDataSource, UITableViewDelegate
     return cell
   }
   func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+    let began = CACurrentMediaTime()
     tableView.deselectRow(at: indexPath, animated: true)
     guard let shell else { return }
-    navigationController?.pushViewController(NeoSettingsCategoryPage(category: NeoSettingsCategory.allCases[indexPath.row], shell: shell), animated: true)
+    shell.pushPage(requestedAt:began) { NeoSettingsCategoryPage(category:NeoSettingsCategory.allCases[indexPath.row],shell:shell) }
   }
 #if targetEnvironment(simulator)
+  func smokeOpenCategory(_ category: NeoSettingsCategory) {
+    tableView(table,didSelectRowAt:IndexPath(row:NeoSettingsCategory.allCases.firstIndex(of:category)!,section:0))
+  }
+  var smokeTapDeliveryImmediate: Bool { !table.delaysContentTouches && !table.panGestureRecognizer.delaysTouchesEnded }
   var smokeCategoryDescriptionsRemoved: Bool {
     (0..<NeoSettingsCategory.allCases.count).allSatisfy {
       let cell = tableView(table,cellForRowAt:IndexPath(row:$0,section:0))
@@ -67,11 +131,18 @@ final class NeoSettingsCategoryPage: NeoPage {
   private var task: Task<Void, Never>?
   private var firstAppearance = true
   private var annictMutation: Task<Void,Never>?
+  private var annictTokens: [NeoAnnictTokenControl] = []
   private var observers: [NSObjectProtocol] = []
   init(category: NeoSettingsCategory, shell: NeoShell) { self.category = category; super.init(title: category.title, shell: shell) }
   required init?(coder: NSCoder) { fatalError() }
   override func viewDidLoad() {
     super.viewDidLoad(); body.addSubview(scroll); stack.axis = .vertical; stack.spacing = 16
+    scroll.delaysContentTouches = false
+    scroll.panGestureRecognizer.delaysTouchesEnded = false
+    if category == .annict {
+      stack.backgroundColor = NeoStyle.paper; stack.layer.cornerRadius = 6; stack.layer.borderWidth = 1; stack.layer.borderColor = NeoStyle.border.cgColor
+      stack.isLayoutMarginsRelativeArrangement = true; stack.directionalLayoutMargins = NSDirectionalEdgeInsets(top:16,leading:16,bottom:16,trailing:16)
+    }
     stack.translatesAutoresizingMaskIntoConstraints = false; scroll.addSubview(stack)
     NSLayoutConstraint.activate([
       stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 16),
@@ -206,26 +277,20 @@ final class NeoSettingsCategoryPage: NeoPage {
   }
   @objc private func historyChanged() { shell?.api?.disablePlaybackHistory = historyToggle.isOn }
   private func buildAnnictPreferences(_ api: NeoAPI) {
-    let readStatus = NeoStyle.label(size:14,muted:true), writeStatus = NeoStyle.label(size:14,muted:true)
-    for (write,title,status) in [(false,"読み取り専用アクセストークン",readStatus),(true,"読み書きアクセストークン",writeStatus)] {
-      stack.addArrangedSubview(NeoStyle.label(title,size:16)); status.text = "確認中"; status.numberOfLines = 0; stack.addArrangedSubview(status)
-      info(write ? "視聴記録の更新に使用します。現在のアクティブユーザーのプロフィールに保存されます。" : "アニメ作品と放送予定の取得に使用します。トークンはサーバーだけに保存されます。")
-      let field = UITextField(); field.isSecureTextEntry = true; field.placeholder = "Annictアクセストークン"
-      field.textColor = .white; field.backgroundColor = NeoStyle.paper; field.borderStyle = .roundedRect
-      field.autocorrectionType = .no; field.autocapitalizationType = .none; field.heightAnchor.constraint(equalToConstant:44).isActive = true
-      field.accessibilityIdentifier = write ? "annict-write-token" : "annict-read-token"; stack.addArrangedSubview(field)
-      let paste = NeoStyle.button("貼り付け") { [weak field] in field?.text = UIPasteboard.general.string }
-      let connect = NeoStyle.button("接続",filled:true) { [weak self,weak field] in
-        guard let self, let token = field?.text?.trimmingCharacters(in:.whitespacesAndNewlines), !token.isEmpty,
-          api.accountReady, !write || api.profileHeaders["X-Viewer-Profile-Id"] != nil else { return }
-        field?.text = ""; self.updateAnnictToken(token,write:write,api:api)
-      }
-      let remove = NeoStyle.button("解除") { [weak self] in self?.updateAnnictToken(nil,write:write,api:api) }
-      connect.isEnabled = api.accountReady && (!write || api.profileHeaders["X-Viewer-Profile-Id"] != nil)
-      remove.isEnabled = false
-      let line = UIStackView(arrangedSubviews:[paste,connect,remove]); line.spacing = 8; line.distribution = .fillEqually
-      line.heightAnchor.constraint(equalToConstant:44).isActive = true; stack.addArrangedSubview(line)
-      status.tag = write ? 8002 : 8001; remove.tag = write ? 8004 : 8003
+    stack.addArrangedSubview(NeoStyle.label("Annict連携",size:20,bold:true))
+    annictTokens = []
+    for write in [false,true] {
+      stack.addArrangedSubview(NeoStyle.label(write ? "書き込みアクセストークン" : "読み取り専用アクセストークン",size:16))
+      let status = NeoStyle.label(size:13,muted:true); status.numberOfLines = 0
+      let description = write ? "視聴記録の更新に使用します。現在のアクティブユーザーのプロフィールに保存されます。" : "アニメ作品と放送予定の取得に使用します。トークンはサーバーだけに保存されます。"
+      status.textColor = UIColor.white.withAlphaComponent(0.5); status.text = description+" 現在: 確認中"; stack.addArrangedSubview(status)
+      let control = NeoAnnictTokenControl(write:write)
+      control.allowed = api.accountReady && (!write || api.profileHeaders["X-Viewer-Profile-Id"] != nil)
+      control.busy = annictMutation != nil
+      control.onChange = { [weak self] token in self?.updateAnnictToken(token,write:write,api:api) }
+      annictTokens.append(control); stack.addArrangedSubview(control)
+      let line = UIView(); line.backgroundColor = NeoStyle.border; line.heightAnchor.constraint(equalToConstant:1).isActive = true; stack.addArrangedSubview(line)
+      status.tag = write ? 8002 : 8001
     }
     if api.profileHeaders["X-Viewer-Profile-Id"] == nil { info("書き込み連携には、アカウント設定で通常ユーザーを選択してください。") }
     choice("自動視聴記録",values:[("disabled","自動記録しない"),("start","PLAY／STREAMING開始時"),("progress","指定割合まで視聴した時")],selected:NeoAnnictPreferences.mode) { NeoAnnictPreferences.mode = $0 }
@@ -245,21 +310,27 @@ final class NeoSettingsCategoryPage: NeoPage {
     rules.addAction(UIAction { [weak rules] _ in NeoAnnictPreferences.disableFinalRules = rules?.isOn ?? false },for:.valueChanged)
     row("最終話視聴後にルールを無効化する",explanation:"Annictに次話がなく、予約が残っていない、視聴したプロフィール所有のルールだけを無効化します。",control:rules)
     let revision = api.identityRevision
-    task = Task { [weak self,weak readStatus,weak writeStatus] in
+    task = Task { [weak self] in
       do {
         let value = try await api.annictStatus(); guard !Task.isCancelled, api.identityRevision == revision, let self else { return }
-        readStatus?.text = value.configured ? "接続済み" : "未設定"; writeStatus?.text = value.writeConfigured ? "接続済み" : "未設定"
-        (self.view.viewWithTag(8003) as? UIButton)?.isEnabled = value.configured
-        (self.view.viewWithTag(8004) as? UIButton)?.isEnabled = value.writeConfigured
-      } catch { if !Task.isCancelled, api.identityRevision == revision { readStatus?.text = "連携状態を取得できませんでした。"; writeStatus?.text = "連携状態を取得できませんでした。" } }
+        for (index,connected) in [value.configured,value.writeConfigured].enumerated() {
+          guard self.annictTokens.indices.contains(index) else { continue }
+          self.annictTokens[index].connected = connected
+          let status = self.view.viewWithTag(index == 0 ? 8001 : 8002) as? UILabel
+          status?.text = status?.text?.replacingOccurrences(of:"確認中",with:connected ? "接続済み" : "未設定")
+        }
+      } catch { if !Task.isCancelled, api.identityRevision == revision {
+        for tag in [8001,8002] { (self?.view.viewWithTag(tag) as? UILabel)?.text = "連携状態を取得できませんでした。" }
+      } }
     }
   }
   private func updateAnnictToken(_ token: String?, write: Bool, api: NeoAPI) {
     guard annictMutation == nil, api.accountReady else { return }
     let revision = api.identityRevision
     let user = api.viewer, headers = api.profileHeaders
+    annictTokens.forEach { $0.busy = true }
     annictMutation = Task { [weak self] in
-      guard let self else { return }; defer { self.annictMutation = nil }
+      guard let self else { return }; defer { self.annictMutation = nil; self.annictTokens.forEach { $0.busy = false } }
       guard !Task.isCancelled, api.identityRevision == revision else { return }
       do {
         try await api.annictToken(token,write:write,user:user,headers:headers)
@@ -363,12 +434,11 @@ final class NeoSettingsCategoryPage: NeoPage {
   }
 #if targetEnvironment(simulator)
   func smokeConnectAnnict(write: Bool, token: String) {
-    guard let index = stack.arrangedSubviews.firstIndex(where: { $0.accessibilityIdentifier == (write ? "annict-write-token" : "annict-read-token") }),
-      let field = stack.arrangedSubviews[index] as? UITextField,
-      let line = stack.arrangedSubviews[index+1] as? UIStackView else { return }
-    field.text = token
-    line.arrangedSubviews.compactMap { $0 as? UIButton }.first { $0.title(for:.normal) == "接続" }?.sendActions(for:.touchUpInside)
+    guard annictTokens.indices.contains(write ? 1 : 0) else { return }
+    let control = annictTokens[write ? 1 : 0]; control.field.text = token; control.field.sendActions(for:.editingChanged)
+    control.connect.sendActions(for:.touchUpInside)
   }
+  var smokeTokenControls: [NeoAnnictTokenControl] { annictTokens }
   var smokeRenderCount = 0
   var smokeSettingCount: Int { stack.arrangedSubviews.count }
   var smokeControlsWithinWidth: Bool {

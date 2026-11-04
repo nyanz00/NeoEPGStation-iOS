@@ -1,5 +1,22 @@
 import UIKit
 
+// MUI Stack direction=row, spacing=1, flexWrap=wrap. Long names are clipped
+// only when a single button exceeds the available line width.
+private final class NeoInfoFileChoices: UIView {
+  var buttons: [UIButton] = []
+  var availableWidth: CGFloat = 1 { didSet { if oldValue != availableWidth { invalidateIntrinsicContentSize(); setNeedsLayout() } } }
+  private func frames() -> [CGRect] {
+    var x: CGFloat = 0, y: CGFloat = 0
+    return buttons.map { button in
+      let width = min(availableWidth,max(64,ceil(button.titleLabel?.intrinsicContentSize.width ?? 0)+32))
+      if x > 0 && x+width > availableWidth { x = 0; y += 44 }
+      let frame = CGRect(x:x,y:y,width:width,height:36); x += width+8; return frame
+    }
+  }
+  override var intrinsicContentSize: CGSize { CGSize(width:UIView.noIntrinsicMetric,height:frames().last?.maxY ?? 0) }
+  override func layoutSubviews() { super.layoutSubviews(); for (button,frame) in zip(buttons,frames()) { button.frame = frame } }
+}
+
 // RecordedItemActions.tsx / VideoInfoView, including stale results and the
 // independent keyframe analysis lifecycle. The dialog appears before its GET.
 final class NeoRecordedInfoDialog: NeoLiveDialog {
@@ -7,11 +24,14 @@ final class NeoRecordedInfoDialog: NeoLiveDialog {
   override var titleInset: CGFloat? { 12 }
   override var contentBackground: UIColor { NeoStyle.paper }
   private let api: NeoAPI, files: [NeoVideoFile], revision: Int
-  private let bodyStack = UIStackView(), choices = UIStackView()
+  private let bodyStack = UIStackView(), choices = NeoInfoFileChoices()
   private let message = NeoStyle.label(size:14,muted:true)
   private var selected: Int, latest: [Int:NeoVideoInfo] = [:]
   private var task: Task<Void,Never>?
   private var reanalyze: UIButton!
+  private var bodyMinimum: NSLayoutConstraint!
+  private var retainedBodyHeight: CGFloat = 24
+  private var close: UIButton!
   init(item: NeoRecording, api: NeoAPI) {
     self.api = api; files = item.videoFiles ?? []; selected = files.first?.id ?? 0; revision = api.identityRevision
     super.init(title:"Info")
@@ -19,29 +39,32 @@ final class NeoRecordedInfoDialog: NeoLiveDialog {
   required init?(coder: NSCoder) { fatalError() }
   override func viewDidLoad() {
     super.viewDidLoad(); bodyStack.axis = .vertical; bodyStack.spacing = 8
-    message.numberOfLines = 0; choices.axis = .vertical; choices.spacing = 8
+    message.numberOfLines = 0; message.heightAnchor.constraint(greaterThanOrEqualToConstant:20).isActive = true
+    bodyMinimum = bodyStack.heightAnchor.constraint(greaterThanOrEqualToConstant:retainedBodyHeight); bodyMinimum.isActive = true
     if files.count > 1 {
       for file in files {
         let button = NeoStyle.button(file.name) { [weak self] in self?.select(file.id) }
-        button.titleLabel?.numberOfLines = 0; button.heightAnchor.constraint(greaterThanOrEqualToConstant:40).isActive = true
-        button.accessibilityIdentifier = "recording-info-file-\(file.id)"; button.tag = file.id; choices.addArrangedSubview(button)
+        button.titleLabel?.lineBreakMode = .byTruncatingTail
+        button.accessibilityIdentifier = "recording-info-file-\(file.id)"; button.tag = file.id
+        choices.buttons.append(button); choices.addSubview(button)
       }
       addView(choices)
     }
     addView(message); addView(bodyStack)
     reanalyze = addAction("Reanalyze",filled:true) { [weak self] in self?.load(force:true) }
     reanalyze.accessibilityIdentifier = "recording-info-reanalyze"
-    addAction("Close") { [weak self] in self?.cancel() }
+    close = addAction("閉じる") { [weak self] in self?.cancel() }
     select(selected)
   }
   private func select(_ id: Int) {
+    retainedBodyHeight = max(retainedBodyHeight,bodyStack.bounds.height); bodyMinimum.constant = retainedBodyHeight
     selected = id
-    for case let button as UIButton in choices.arrangedSubviews {
+    for button in choices.buttons {
       button.layer.borderWidth = 1; button.layer.cornerRadius = 6; button.layer.borderColor = NeoStyle.accent.cgColor
       button.backgroundColor = button.tag == id ? NeoStyle.accent : .clear
       button.tintColor = button.tag == id ? NeoStyle.successText : NeoStyle.accent
     }
-    render(); load(force:false)
+    UIView.performWithoutAnimation { render(); load(force:false); view.layoutIfNeeded() }
   }
   private func load(force: Bool) {
     task?.cancel(); guard selected > 0 else { return }
@@ -54,7 +77,8 @@ final class NeoRecordedInfoDialog: NeoLiveDialog {
         repeat {
           let value = try await api.videoInfo(id,force:force); force = false
           try Task.checkCancellation(); guard selected == id, api.identityRevision == revision else { return }
-          latest[id] = value; message.text = nil; reanalyze.isEnabled = true; render()
+          latest[id] = value; message.text = nil; reanalyze.isEnabled = true
+          UIView.performWithoutAnimation { render(); view.layoutIfNeeded() }
           if !["pending","analyzing"].contains(value.keyframes?.status ?? "") { break }
           try await Task.sleep(nanoseconds:3_000_000_000)
         } while !Task.isCancelled
@@ -80,6 +104,10 @@ final class NeoRecordedInfoDialog: NeoLiveDialog {
     [("Analyzed",info.analyzed),("Status",info.status)].forEach(row)
     view.setNeedsLayout()
   }
+  override func viewDidLayoutSubviews() {
+    choices.availableWidth = max(1,min(maximumWidth,view.bounds.width-24)-48)
+    super.viewDidLayoutSubviews()
+  }
   override func cancel() { task?.cancel(); super.cancel() }
   override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); task?.cancel() }
 #if targetEnvironment(simulator)
@@ -87,6 +115,9 @@ final class NeoRecordedInfoDialog: NeoLiveDialog {
   func smokeSelect(_ id: Int) { select(id) }
   func smokeReanalyze() { load(force:true) }
   var smokeMessage: String { message.text ?? "" }
+  var smokeChoiceFrames: [CGRect] { choices.layoutIfNeeded(); return choices.buttons.map(\.frame) }
+  var smokeBodyHeight: CGFloat { bodyStack.bounds.height }
+  var smokeCloseTitle: String? { close.title(for:.normal) }
 #endif
   deinit { task?.cancel() }
 }

@@ -8,6 +8,18 @@ enum NeoIcon {
     if let image = cache[cacheKey] { return image }
     let path = UIBezierPath()
     switch name {
+    case "ContentPasteOutlined":
+      path.usesEvenOddFillRule = true
+      path.move(to:CGPoint(x:19,y:2)); path.addLine(to:CGPoint(x:14.82,y:2))
+      path.addCurve(to:CGPoint(x:12,y:0),controlPoint1:CGPoint(x:14.4,y:0.84),controlPoint2:CGPoint(x:13.3,y:0))
+      path.addCurve(to:CGPoint(x:9.18,y:2),controlPoint1:CGPoint(x:10.7,y:0),controlPoint2:CGPoint(x:9.6,y:0.84))
+      path.addLine(to:CGPoint(x:5,y:2)); path.addCurve(to:CGPoint(x:3,y:4),controlPoint1:CGPoint(x:3.9,y:2),controlPoint2:CGPoint(x:3,y:2.9))
+      path.addLine(to:CGPoint(x:3,y:20)); path.addCurve(to:CGPoint(x:5,y:22),controlPoint1:CGPoint(x:3,y:21.1),controlPoint2:CGPoint(x:3.9,y:22))
+      path.addLine(to:CGPoint(x:19,y:22)); path.addCurve(to:CGPoint(x:21,y:20),controlPoint1:CGPoint(x:20.1,y:22),controlPoint2:CGPoint(x:21,y:21.1))
+      path.addLine(to:CGPoint(x:21,y:4)); path.addCurve(to:CGPoint(x:19,y:2),controlPoint1:CGPoint(x:21,y:2.9),controlPoint2:CGPoint(x:20.1,y:2)); path.close()
+      path.append(UIBezierPath(ovalIn:CGRect(x:11,y:2,width:2,height:2)))
+      path.move(to:CGPoint(x:19,y:20)); path.addLine(to:CGPoint(x:5,y:20)); path.addLine(to:CGPoint(x:5,y:4)); path.addLine(to:CGPoint(x:7,y:4))
+      path.addLine(to:CGPoint(x:7,y:7)); path.addLine(to:CGPoint(x:17,y:7)); path.addLine(to:CGPoint(x:17,y:4)); path.addLine(to:CGPoint(x:19,y:4)); path.close()
     case "CheckCircleOutlineOutlined":
       path.append(UIBezierPath(ovalIn:CGRect(x:2,y:2,width:20,height:20)))
       path.append(UIBezierPath(ovalIn:CGRect(x:4,y:4,width:16,height:16)).reversing())

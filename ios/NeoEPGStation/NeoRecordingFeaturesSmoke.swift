@@ -41,6 +41,7 @@ private final class NeoFeatureProtocol: URLProtocol {
       }
       if path.hasSuffix("/write-token") { Self.writes = method != "DELETE" } else { Self.reads = method != "DELETE" }
     } else if path.hasSuffix("/info") {
+      if id == 2 && method == "GET" { delay = 0.3 }
       Self.gets[id,default:0] += 1
       if method == "POST" { Self.forces += 1 }
       if Self.failRefresh { code = 500; Self.failRefresh = false; result = ["message":"fixture refresh failure"] }
@@ -82,12 +83,18 @@ private final class NeoFeatureProtocol: URLProtocol {
     let saved = keys.map { UserDefaults.standard.object(forKey:$0) }
     defer { for (key,value) in zip(keys,saved) { if let value { UserDefaults.standard.set(value,forKey:key) } else { UserDefaults.standard.removeObject(forKey:key) } }; session.invalidateAndCancel() }
     var checks = [String:Bool]()
+    let opening = await shell.smokeMeasureOpening()
+    checks.merge(opening.checks) { _,value in value }
+    if let data = try? JSONSerialization.data(withJSONObject:opening.timings,options:.prettyPrinted) {
+      try? data.write(to:NeoPiPSmoke.directory.appendingPathComponent("recording-opening-times.json"))
+    }
     func wait(_ condition: () -> Bool) async {
       for _ in 0..<100 { if condition() { return }; try? await Task.sleep(nanoseconds:50_000_000) }
     }
     func capture(_ name: String) {
-      shell.view.layoutIfNeeded()
-      let image = UIGraphicsImageRenderer(bounds:shell.view.bounds).image { _ in shell.view.drawHierarchy(in:shell.view.bounds,afterScreenUpdates:true) }
+      let surface = shell.view.window ?? shell.view!
+      surface.layoutIfNeeded()
+      let image = UIGraphicsImageRenderer(bounds:surface.bounds).image { _ in surface.drawHierarchy(in:surface.bounds,afterScreenUpdates:true) }
       try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent(name+".png"))
     }
     checks["openAnimation150ms"] = shell.smokePushAnimationDuration == 0.15
@@ -95,11 +102,24 @@ private final class NeoFeatureProtocol: URLProtocol {
     let settings = NeoSettingsCategoryPage(category:.annict,shell:shell); shell.smokeShowFeaturePage(settings)
     checks["settingsInitialBuildOnce"] = settings.smokeRenderCount == 1
     settings.smokeConnectAnnict(write:false,token:"fixture-token")
+    checks["tokenMutationDisablesControls"] = settings.smokeTokenControls.allSatisfy { !$0.connect.isEnabled && !$0.remove.isEnabled }
     await wait { settings.smokeRenderCount >= 2 }
     settings.smokeConnectAnnict(write:true,token:"fixture-token")
     await wait { settings.smokeRenderCount >= 3 }
     checks["tokensUseServerAPI"] = NeoFeatureProtocol.snapshot { NeoFeatureProtocol.reads && NeoFeatureProtocol.tokenSaved && NeoFeatureProtocol.readSaves == 1 && NeoFeatureProtocol.writeSaves == 1 }
     checks["recordingSettingsPopulated"] = settings.smokeSettingCount >= 10
+    await wait { settings.smokeTokenControls.allSatisfy { $0.connected } }
+    settings.view.layoutIfNeeded()
+    checks["connectedTokenButtonsMatchWeb"] = settings.smokeTokenControls.count == 2 && settings.smokeTokenControls.allSatisfy {
+      !$0.connect.isEnabled && !$0.remove.isHidden && $0.remove.isEnabled && $0.field.frame.maxX < $0.connect.frame.minX && $0.remove.titleColor(for:.normal) == UIColor(red:244/255,green:67/255,blue:54/255,alpha:1)
+    }
+    for control in settings.smokeTokenControls {
+      control.field.text = "   "; control.field.sendActions(for:.editingChanged)
+      let emptyDisabled = !control.connect.isEnabled
+      control.field.text = "replacement"; control.field.sendActions(for:.editingChanged)
+      checks[control.field.accessibilityIdentifier!+"InputEnablesConnect"] = emptyDisabled && control.connect.isEnabled
+      control.field.text = ""; control.field.sendActions(for:.editingChanged)
+    }
     capture("recording-annict-settings"); shell.smokePopFeaturePage()
     let detail = NeoDetailPage(item:NeoRecordedPage.fixtures.records[0],shell:shell); shell.smokeShowFeaturePage(detail)
     checks["detailAvoidsDuplicateInitialBuild"] = detail.smokeRenderCount <= (shell.tablet ? 2 : 1)
@@ -119,14 +139,22 @@ private final class NeoFeatureProtocol: URLProtocol {
     checks["pendingEpisodeRematches"] = pending.smokeEpisode?.state == "matched"
     let original = NeoRecordedPage.fixtures.records[0]
     let item = NeoRecording(id:original.id,name:original.name,startAt:original.startAt,endAt:original.endAt,isRecording:false,description:nil,extended:nil,channelId:nil,channelName:nil,thumbnails:nil,
-      videoFiles:[NeoVideoFile(id:1,name:"AV1",type:"encoded",size:0,filename:nil),NeoVideoFile(id:2,name:"TS",type:"ts",size:0,filename:nil)])
+      videoFiles:[NeoVideoFile(id:1,name:"AV1",type:"encoded",size:0,filename:nil),NeoVideoFile(id:2,name:"TS",type:"ts",size:0,filename:nil),NeoVideoFile(id:11,name:String(repeating:"Long filename ",count:8),type:"encoded",size:0,filename:nil)])
     let info = NeoRecordedInfoDialog(item:item,api:api); detail.present(info,animated:false)
     await wait { info.smokeRows.count == 21 }
     checks["infoAllWebRows"] = info.smokeRows.count == 21
     await wait { info.smokeRows.last?.1 == "OK" }
     checks["analysisPollsUntilReady"] = info.smokeRows.last?.1 == "OK" && NeoFeatureProtocol.snapshot { (NeoFeatureProtocol.gets[1] ?? 0) >= 2 }
+    info.view.layoutIfNeeded()
+    let frames = info.smokeChoiceFrames
+    checks["infoChoicesFlowHorizontallyAndWrap"] = frames.count == 3 && frames[0].minY == frames[1].minY && frames[1].minX > frames[0].maxX && frames[2].minY > frames[1].minY
+    checks["infoCloseIsJapanese"] = info.smokeCloseTitle == "閉じる"
     capture("recording-info")
-    info.smokeSelect(2); await wait { info.smokeRows.count == 14 }
+    let cardHeight = info.smokeCardHeight, bodyHeight = info.smokeBodyHeight
+    info.smokeSelect(2); info.view.layoutIfNeeded()
+    checks["uncachedInfoDoesNotCollapseOrShowPreviousFile"] = info.smokeRows.isEmpty && info.smokeBodyHeight >= bodyHeight-0.5 && abs(info.smokeCardHeight-cardHeight) < 0.5
+    capture("recording-info-loading")
+    await wait { info.smokeRows.count == 14 }
     checks["infoSwitchAndLegacyServer"] = info.smokeRows.count == 14 && info.smokeRows.last?.1.contains("unavailable") == true
     info.smokeReanalyze(); await wait { info.smokeRows.count == 21 }
     checks["infoReanalysisUsesPOST"] = info.smokeRows.count == 21 && NeoFeatureProtocol.snapshot { NeoFeatureProtocol.forces > 0 }

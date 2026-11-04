@@ -37,7 +37,15 @@ final class NeoDetailPage: NeoPage {
       stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 12),
       stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -24),
       stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -24)])
-    render(); loading.startAnimating()
+    wide = (navigationController?.view.bounds.width ?? view.bounds.width) >= 900
+    render()
+  }
+  override func viewDidAppear(_ animated: Bool) {
+    super.viewDidAppear(animated)
+    // The list already supplied enough metadata to draw this page. Fetch and
+    // rebuild the complete result after the push, away from its first frame.
+    if shell?.smokeStage.isEmpty != false { annict?.load() }
+    task?.cancel(); loading.startAnimating()
     let api = shell?.api, id = item.id
     task = Task { [weak self] in
       guard let self else { return }
@@ -66,7 +74,7 @@ final class NeoDetailPage: NeoPage {
     }
   }
   override func viewDidDisappear(_ animated: Bool) {
-    super.viewDidDisappear(animated); analysisTask?.cancel(); analysisTask = nil
+    super.viewDidDisappear(animated); task?.cancel(); analysisTask?.cancel(); analysisTask = nil
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews(); scroll.frame = body.bounds; loading.center = CGPoint(x: body.bounds.midX, y: 30)
@@ -80,7 +88,6 @@ final class NeoDetailPage: NeoPage {
       control.onVisibility = { [weak self,weak control] visible in self?.headerAccessory = visible ? control : nil }
       annict = control
     }
-    if shell?.smokeStage.isEmpty != false { annict?.load() }
   }
   func refreshCapabilities() {
     guard isViewLoaded else { return }
