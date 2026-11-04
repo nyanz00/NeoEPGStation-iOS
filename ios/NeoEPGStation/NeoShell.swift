@@ -1015,8 +1015,15 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       }
       timings[kind] = page?.smokeOpeningTimes ?? [:]
       checks[kind+"FirstMovementMeasured"] = page?.smokeOpeningTimes["handlerToFirstMovementMs"] != nil
+      if kind == "viewing", let window = view.window {
+        let image = UIGraphicsImageRenderer(bounds:window.bounds).image { _ in window.drawHierarchy(in:window.bounds,afterScreenUpdates:true) }
+        try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("recording-viewing-settings.png"))
+      }
       active?.popToRootViewController(animated:false)
     }
+    if let general = timings["general"]?["handlerToFirstMovementMs"], let viewing = timings["viewing"]?["handlerToFirstMovementMs"] {
+      checks["viewingOpeningAvoidsLongLayoutWait"] = viewing <= max(250,general*2)
+    } else { checks["viewingOpeningAvoidsLongLayoutWait"] = false }
     return (checks,timings)
   }
   func smokeShowFeaturePage(_ page: UIViewController) {

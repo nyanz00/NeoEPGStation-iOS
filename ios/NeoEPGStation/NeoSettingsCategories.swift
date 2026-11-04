@@ -1,5 +1,43 @@
 import UIKit
 
+// Keep each settings row's text sizing independent. A long vertical stack of
+// nested horizontal/vertical stacks made first layout a coupled constraint
+// problem even for controls far below the visible viewport.
+private final class NeoSettingsRow: UIView {
+  private let name: UILabel, detail: UILabel?, control: UIView
+  var availableWidth: CGFloat = 1 { didSet { if oldValue != availableWidth { invalidateIntrinsicContentSize(); setNeedsLayout() } } }
+  init(title: String, explanation: String, control: UIView) {
+    name = NeoStyle.label(title,size:16); name.numberOfLines = 0; name.lineBreakMode = .byWordWrapping
+    if explanation.isEmpty { detail = nil }
+    else { let label = NeoStyle.label(explanation,muted:true); label.numberOfLines = 0; label.lineBreakMode = .byWordWrapping; detail = label }
+    self.control = control; super.init(frame:.zero)
+    addSubview(name); if let detail { addSubview(detail) }; addSubview(control)
+  }
+  required init?(coder: NSCoder) { fatalError() }
+  private var controlSize: CGSize {
+    let intrinsic = control.intrinsicContentSize
+    let fixedWidth = control.constraints.first { $0.firstAttribute == .width && $0.secondItem == nil && $0.relation == .equal && $0.priority == .required }?.constant
+    let width = min(max(0,availableWidth-16),fixedWidth ?? (intrinsic.width > 0 ? intrinsic.width : 180))
+    let minimumHeight = control.constraints.filter { $0.firstAttribute == .height && $0.secondItem == nil && $0.relation != .lessThanOrEqual }.map(\.constant).max() ?? 0
+    let height = max(minimumHeight,intrinsic.height > 0 ? intrinsic.height : control.systemLayoutSizeFitting(CGSize(width:width,height:0),withHorizontalFittingPriority:.required,verticalFittingPriority:.fittingSizeLevel).height)
+    return CGSize(width:width,height:max(0,height))
+  }
+  override var intrinsicContentSize: CGSize {
+    let size = controlSize, width = max(0,availableWidth-size.width-16)
+    let textHeight = name.sizeThatFits(CGSize(width:width,height:.greatestFiniteMagnitude)).height + (detail.map { $0.sizeThatFits(CGSize(width:width,height:.greatestFiniteMagnitude)).height+4 } ?? 0)
+    return CGSize(width:UIView.noIntrinsicMetric,height:max(56,max(size.height,textHeight)))
+  }
+  override func layoutSubviews() {
+    super.layoutSubviews(); let size = controlSize, width = max(0,bounds.width-size.width-16)
+    let titleHeight = name.sizeThatFits(CGSize(width:width,height:.greatestFiniteMagnitude)).height
+    let detailHeight = detail?.sizeThatFits(CGSize(width:width,height:.greatestFiniteMagnitude)).height ?? 0
+    let total = titleHeight+(detail == nil ? 0 : detailHeight+4), top = (bounds.height-total)/2
+    name.frame = CGRect(x:0,y:top,width:width,height:titleHeight)
+    detail?.frame = CGRect(x:0,y:top+titleHeight+4,width:width,height:detailHeight)
+    control.frame = CGRect(x:bounds.width-size.width,y:(bounds.height-size.height)/2,width:size.width,height:size.height)
+  }
+}
+
 // SettingsPage's small outlined field / ContentPaste / contained connect /
 // error-colored disconnect share one row, including the empty and busy states.
 final class NeoAnnictTokenControl: UIView, UITextFieldDelegate {
@@ -156,10 +194,22 @@ final class NeoSettingsCategoryPage: NeoPage {
     render()
   }
   override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); if firstAppearance { firstAppearance = false } else { render() } }
-  override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); scroll.frame = body.bounds }
+  override func viewDidLayoutSubviews() {
+#if targetEnvironment(simulator)
+    let began = CACurrentMediaTime()
+#endif
+    super.viewDidLayoutSubviews(); scroll.frame = body.bounds
+    let width = max(0,body.bounds.width-32-(category == .annict ? 32 : 0))
+    for case let row as NeoSettingsRow in stack.arrangedSubviews { row.availableWidth = width }
+#if targetEnvironment(simulator)
+    smokeOpeningTimes["layoutCallbackWorkMs",default:0] += (CACurrentMediaTime()-began)*1000
+#endif
+  }
   private func render() {
 #if targetEnvironment(simulator)
     smokeRenderCount += 1
+    let renderBegan = CACurrentMediaTime()
+    defer { smokeOpeningTimes["renderWorkMs",default:0] += (CACurrentMediaTime()-renderBegan)*1000 }
 #endif
     task?.cancel(); stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
     guard let shell, let api = shell.api else { return }
@@ -412,20 +462,9 @@ final class NeoSettingsCategoryPage: NeoPage {
     button.heightAnchor.constraint(greaterThanOrEqualToConstant: 48).isActive = true; stack.addArrangedSubview(button)
   }
   private func row(_ title: String, explanation: String = "", control: UIView) {
-    let labels = UIStackView(); labels.axis = .vertical; labels.spacing = 4
-    let name = NeoStyle.label(title, size: 16); name.numberOfLines = 0; name.lineBreakMode = .byWordWrapping
-    name.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
-    name.setContentCompressionResistancePriority(.required,for:.vertical); labels.addArrangedSubview(name)
-    if !explanation.isEmpty {
-      let detail = NeoStyle.label(explanation, muted: true); detail.numberOfLines = 0; detail.lineBreakMode = .byWordWrapping
-      detail.setContentCompressionResistancePriority(.defaultLow,for:.horizontal)
-      detail.setContentCompressionResistancePriority(.required,for:.vertical); labels.addArrangedSubview(detail)
-    }
-    let row = UIStackView(arrangedSubviews: [labels, control]); row.axis = .horizontal; row.alignment = .center; row.spacing = 16
-    control.setContentHuggingPriority(.required, for: .horizontal); control.setContentCompressionResistancePriority(.required,for:.horizontal)
-    labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    labels.widthAnchor.constraint(greaterThanOrEqualToConstant:0).isActive = true
-    row.heightAnchor.constraint(greaterThanOrEqualToConstant: 56).isActive = true; stack.addArrangedSubview(row)
+    let row = NeoSettingsRow(title:title,explanation:explanation,control:control)
+    row.availableWidth = max(1,(navigationController?.view.bounds.width ?? view.bounds.width)-32-(category == .annict ? 32 : 0))
+    stack.addArrangedSubview(row)
   }
   private func toggle(_ title: String, explanation: String = "", on: Bool, action: @escaping (Bool) -> Void) {
     let toggle = UISwitch(); toggle.isOn = on; toggle.onTintColor = NeoStyle.accent; toggle.accessibilityLabel = title
