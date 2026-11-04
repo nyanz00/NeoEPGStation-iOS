@@ -134,7 +134,7 @@ if '--navigation-only' in sys.argv:
         run('xcrun', 'simctl', 'boot', pad['udid'])
     run('xcrun', 'simctl', 'bootstatus', pad['udid'], '-b', timeout=600)
     run('xcrun', 'simctl', 'install', pad['udid'], str(app), timeout=300)
-    capture_ui(pad['udid'], 'navigation', 'ui-ipad')
+    capture_ui(pad['udid'], 'navigation', 'ui-ipad', terminate_existing=False)
     sys.exit(0)
 if '--ui-only' in sys.argv:
     # Recheck navigation against the exact same binary independently of the
