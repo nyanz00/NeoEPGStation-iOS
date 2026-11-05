@@ -20,11 +20,31 @@ def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
     marker = ui_container / f'Documents/ui-{stage}-smoke.json'
     marker.unlink(missing_ok=True)
     os.environ['SIMCTL_CHILD_NEO_EPG_UI_SMOKE'] = stage
-    run('xcrun', 'simctl', 'launch', udid, 'io.github.nyanz00.NeoEPGStation')
+    launched_at = time.time()
+    launched = run('xcrun', 'simctl', 'launch',
+                  f'--stdout={ui_container}/Documents/ui-{stage}-stdout.txt',
+                  f'--stderr={ui_container}/Documents/ui-{stage}-stderr.txt',
+                  udid, 'io.github.nyanz00.NeoEPGStation')
     for _ in range(90):
         if marker.exists():
             break
         time.sleep(1)
+    # Preserve partial evidence even if the application never completes a test.
+    for pattern in (f'ui-{stage}-*.txt', 'recording-*.png', 'recording-*-geometry.json', 'recording-opening-times.json'):
+        for source in (ui_container/'Documents').glob(pattern):
+            shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
+    if not marker.exists():
+        pid = launched.rsplit(':', 1)[-1].strip()
+        process = subprocess.run(['ps','-p',pid,'-o','pid,state,etime,%cpu'],capture_output=True,text=True,timeout=10)
+        Path(f'dist/{prefix}-{stage}-startup.json').write_text(json.dumps({'success':False,'reason':'completion result missing','launch':launched,'process':process.stdout,'processError':process.stderr},indent=2))
+        try:
+            run('xcrun','simctl','io',udid,'screenshot',f'dist/{prefix}-{stage}-timeout.png',timeout=30)
+        except (subprocess.SubprocessError, OSError):
+            pass
+        for source in (Path.home()/'Library/Logs/DiagnosticReports').glob('NeoEPGStation*'):
+            if source.is_file() and source.stat().st_mtime >= launched_at-30:
+                shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
+        raise RuntimeError(f'{prefix}/{stage} did not finish; startup logs and partial screenshots were preserved')
     result = json.loads(marker.read_text())
     if prefix == 'ui-ipad' and stage == 'ipad-player':
         # UIKit on iPad can draw the small thumb while currentThumbImage is nil.
