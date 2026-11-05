@@ -1017,6 +1017,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       checks[kind+"FirstMovementMeasured"] = page?.smokeOpeningTimes["handlerToFirstMovementMs"] != nil
       if kind == "viewing", let settings = page as? NeoSettingsCategoryPage {
         checks["viewingListRendersVisibleRowsAndReachesBottom"] = settings.smokeViewingListScrolls()
+        checks["viewingVisibleControlsHaveSizeAndFit"] = settings.smokeVisibleViewingControlsFit
+        settings.smokeSaveRowGeometry()
       }
       if kind == "viewing", let window = view.window {
         let image = UIGraphicsImageRenderer(bounds:window.bounds).image { _ in window.drawHierarchy(in:window.bounds,afterScreenUpdates:true) }

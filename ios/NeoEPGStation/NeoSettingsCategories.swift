@@ -16,9 +16,11 @@ private final class NeoSettingsRow: UIView {
   required init?(coder: NSCoder) { fatalError() }
   private var controlSize: CGSize {
     let intrinsic = control.intrinsicContentSize
-    let fixedWidth = control.constraints.first { $0.firstAttribute == .width && $0.secondItem == nil && $0.relation == .equal && $0.priority == .required }?.constant
+    // A control also owns constraints for its internal labels and layout guides.
+    // Their zero-width constants must not become the width of the whole field.
+    let fixedWidth = control.constraints.first { $0.firstItem === control && $0.firstAttribute == .width && $0.secondItem == nil && $0.relation == .equal && $0.priority == .required }?.constant
     let width = min(max(0,availableWidth-16),fixedWidth ?? (intrinsic.width > 0 ? intrinsic.width : 180))
-    let minimumHeight = control.constraints.filter { $0.firstAttribute == .height && $0.secondItem == nil && $0.relation != .lessThanOrEqual }.map(\.constant).max() ?? 0
+    let minimumHeight = control.constraints.filter { $0.firstItem === control && $0.firstAttribute == .height && $0.secondItem == nil && $0.relation != .lessThanOrEqual }.map(\.constant).max() ?? 0
     let height = max(minimumHeight,intrinsic.height > 0 ? intrinsic.height : control.systemLayoutSizeFitting(CGSize(width:width,height:0),withHorizontalFittingPriority:.required,verticalFittingPriority:.fittingSizeLevel).height)
     return CGSize(width:width,height:max(0,height))
   }
@@ -36,6 +38,18 @@ private final class NeoSettingsRow: UIView {
     detail?.frame = CGRect(x:0,y:top+titleHeight+4,width:width,height:detailHeight)
     control.frame = CGRect(x:bounds.width-size.width,y:(bounds.height-size.height)/2,width:size.width,height:size.height)
   }
+#if targetEnvironment(simulator)
+  var smokeControlFits: Bool {
+    layoutIfNeeded(); control.layoutIfNeeded()
+    return control.bounds.width >= 44 && control.bounds.height >= 20 && bounds.insetBy(dx:-0.5,dy:-0.5).contains(control.frame)
+  }
+  var smokeGeometry: [String:Any] {
+    ["title":name.text ?? "", "control":String(describing:type(of:control)),
+      "rowFrame":NSStringFromCGRect(frame), "controlFrame":NSStringFromCGRect(control.frame),
+      "availableWidth":availableWidth, "fits":smokeControlFits,
+      "dimensionConstraints":control.constraints.filter { $0.secondItem == nil && [.width,.height].contains($0.firstAttribute) }.map { ["self":$0.firstItem === control,"attribute":$0.firstAttribute.rawValue,"constant":$0.constant] as [String:Any] }]
+  }
+#endif
 }
 
 private final class NeoSettingsFormCell: UITableViewCell {
@@ -585,6 +599,21 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
     let bottom = viewingTable.indexPathsForVisibleRows?.contains(last) == true
     viewingTable.scrollToRow(at:IndexPath(row:0,section:0),at:.top,animated:false); viewingTable.layoutIfNeeded()
     return lazy && lazyCreation && bottom
+  }
+  var smokeVisibleViewingControlsFit: Bool {
+    viewingTable.layoutIfNeeded()
+    func all(_ view: UIView) -> [UIView] { [view]+view.subviews.flatMap(all) }
+    let visible = viewingTable.visibleCells.flatMap { cell -> [UIView] in cell.layoutIfNeeded(); return all(cell.contentView) }
+    let choices = visible.compactMap { $0 as? NeoSelectButton }
+    return choices.count == 2 && choices.allSatisfy { $0.bounds.width >= 44 && $0.bounds.height >= 44 }
+      && visible.compactMap { $0 as? NeoSettingsRow }.allSatisfy { $0.smokeControlFits }
+  }
+  func smokeSaveRowGeometry() {
+    func all(_ view: UIView) -> [UIView] { [view]+view.subviews.flatMap(all) }
+    let rows = all(category == .viewing ? viewingTable : scroll).compactMap { $0 as? NeoSettingsRow }
+    if let data = try? JSONSerialization.data(withJSONObject:rows.map(\.smokeGeometry),options:.prettyPrinted) {
+      try? data.write(to:NeoPiPSmoke.directory.appendingPathComponent("recording-\(category.rawValue)-geometry.json"))
+    }
   }
   func smokeConnectAnnict(write: Bool, token: String) {
     guard annictTokens.indices.contains(write ? 1 : 0) else { return }

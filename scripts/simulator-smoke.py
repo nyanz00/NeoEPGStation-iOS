@@ -5,7 +5,6 @@ import subprocess
 import sys
 import time
 import shutil
-import signal
 import re
 import pty
 import select
@@ -25,16 +24,25 @@ def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
     marker.unlink(missing_ok=True)
     os.environ['SIMCTL_CHILD_NEO_EPG_UI_SMOKE'] = stage
     profiling = os.environ.get('SAMPLE_OPENING') == '1' and stage == 'recording-features'
-    launch_flags = ['--wait-for-debugger'] if profiling else []
-    launched = run('xcrun', 'simctl', 'launch', *launch_flags, udid, 'io.github.nyanz00.NeoEPGStation')
+    os.environ['SIMCTL_CHILD_NEO_EPG_OPENING_PROFILE'] = '1' if profiling else '0'
+    profile_ready = ui_container/'Documents/recording-opening-profile-ready'
+    profile_continue = ui_container/'Documents/recording-opening-profile-continue'
+    profile_ready.unlink(missing_ok=True)
+    profile_continue.unlink(missing_ok=True)
+    launched = run('xcrun', 'simctl', 'launch', udid, 'io.github.nyanz00.NeoEPGStation')
     sampler = None
     sample_output = None
     sample_master = None
     if profiling:
         pid = int(re.search(r':\s*(\d+)\s*$', launched).group(1))
-        # Pause only the app process just launched by this harness so sample
-        # can attach before the first settings page opens; always resume it.
-        os.kill(pid, signal.SIGSTOP)
+        # The application yields at the operation under investigation. Starting
+        # before main instead captured slow dyld work, not the page transition.
+        for _ in range(90):
+            if profile_ready.exists():
+                break
+            time.sleep(1)
+        if not profile_ready.exists():
+            raise RuntimeError('Application did not reach the opening profiling gate')
         try:
             sample_output = (ui_container/'Documents/recording-opening-sample-output.txt').open('wb')
             sample_master, sample_slave = pty.openpty()
@@ -52,9 +60,9 @@ def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
                 ready += chunk
                 sample_output.write(chunk)
             sample_output.flush()
-            (ui_container/'Documents/recording-opening-sample-ready.json').write_text(json.dumps({'readyBeforeResume': b'Sampling process' in ready, 'launchSuspended': True}))
+            (ui_container/'Documents/recording-opening-sample-ready.json').write_text(json.dumps({'readyBeforeResume': b'Sampling process' in ready, 'applicationOperationReady': True}))
         finally:
-            os.kill(pid, signal.SIGCONT)
+            profile_continue.write_text('continue')
     for _ in range(90):
         if marker.exists():
             break
@@ -99,7 +107,7 @@ def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
                              and all(result.get('playerGestureChecks', {}).values()))
     Path(f'dist/{prefix}-{stage}.json').write_text(json.dumps(result, indent=2) + '\n')
     if stage == 'recording-features':
-        for pattern in ('recording-*.png', 'recording-opening-times.json', 'recording-opening-sample-ready.json'):
+        for pattern in ('recording-*.png', 'recording-*-geometry.json', 'recording-opening-times.json', 'recording-opening-sample-ready.json'):
             for source in (ui_container/'Documents').glob(pattern):
                 shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
     if (result.get('success') is not True or result.get('recordCount') != 4
