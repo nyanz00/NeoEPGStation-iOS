@@ -5,6 +5,8 @@ import subprocess
 import sys
 import time
 import shutil
+import signal
+import re
 from pathlib import Path
 
 def run(*args, timeout=120):
@@ -20,11 +22,34 @@ def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
     marker = ui_container / f'Documents/ui-{stage}-smoke.json'
     marker.unlink(missing_ok=True)
     os.environ['SIMCTL_CHILD_NEO_EPG_UI_SMOKE'] = stage
-    run('xcrun', 'simctl', 'launch', udid, 'io.github.nyanz00.NeoEPGStation')
+    launched = run('xcrun', 'simctl', 'launch', udid, 'io.github.nyanz00.NeoEPGStation')
+    sampler = None
+    sample_output = None
+    if os.environ.get('SAMPLE_OPENING') == '1' and stage == 'recording-features' and prefix == 'ui-iphone':
+        pid = int(re.search(r':\s*(\d+)\s*$', launched).group(1))
+        # Pause only the app process just launched by this harness so sample
+        # can attach before the first settings page opens; always resume it.
+        os.kill(pid, signal.SIGSTOP)
+        try:
+            sample_output = (ui_container/'Documents/recording-opening-sample-output.txt').open('w')
+            sampler = subprocess.Popen(['sample', str(pid), '5', '1', '-file', str(ui_container/'Documents/recording-opening-stack.sample.txt')], stdout=sample_output, stderr=subprocess.STDOUT)
+            time.sleep(0.25)
+        finally:
+            os.kill(pid, signal.SIGCONT)
     for _ in range(90):
         if marker.exists():
             break
         time.sleep(1)
+    if sampler is not None:
+        try:
+            sampler.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            sampler.terminate()
+            sampler.wait(timeout=5)
+        finally:
+            sample_output.close()
+        for source in (ui_container/'Documents').glob('recording-opening-*.txt'):
+            shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
     result = json.loads(marker.read_text())
     if prefix == 'ui-ipad' and stage == 'ipad-player':
         # UIKit on iPad can draw the small thumb while currentThumbImage is nil.

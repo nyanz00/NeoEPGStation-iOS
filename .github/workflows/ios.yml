@@ -57,6 +57,11 @@ on:
         default: all
         type: choice
         options: [all, recorded, pagination, detail, record-actions, detail-actions, play-popup, list-actions, drop-dialog, menu, settings, gestures, navigation, recording-features]
+      profile_opening:
+        description: 'Diagnostic only: sample initial settings display on an unchanged simulator app'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -473,6 +478,7 @@ jobs:
       REUSE_RUN: ${{ inputs.reuse_run }}
       NATIVE_PIXEL_PROBE: ${{ inputs.native_pixel_probe }}
       UI_STAGE: ${{ inputs.ui_stage }}
+      SAMPLE_OPENING: ${{ inputs.profile_opening && '1' || '0' }}
       RECHECK_PLAYBACK: ${{ inputs.recheck_playback }}
       CHECK_SCOPE: ${{ inputs.check_scope }}
       NETWORK_PROBE: ${{ inputs.network_probe }}
