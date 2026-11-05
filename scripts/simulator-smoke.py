@@ -5,9 +5,6 @@ import subprocess
 import sys
 import time
 import shutil
-import re
-import pty
-import select
 from pathlib import Path
 
 def run(*args, timeout=120):
@@ -23,69 +20,11 @@ def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
     marker = ui_container / f'Documents/ui-{stage}-smoke.json'
     marker.unlink(missing_ok=True)
     os.environ['SIMCTL_CHILD_NEO_EPG_UI_SMOKE'] = stage
-    profiling = os.environ.get('SAMPLE_OPENING') == '1' and stage == 'recording-features'
-    os.environ['SIMCTL_CHILD_NEO_EPG_OPENING_PROFILE'] = '1' if profiling else '0'
-    profile_ready = ui_container/'Documents/recording-opening-profile-ready'
-    profile_continue = ui_container/'Documents/recording-opening-profile-continue'
-    profile_ready.unlink(missing_ok=True)
-    profile_continue.unlink(missing_ok=True)
-    launched = run('xcrun', 'simctl', 'launch', udid, 'io.github.nyanz00.NeoEPGStation')
-    sampler = None
-    sample_output = None
-    sample_master = None
-    if profiling:
-        pid = int(re.search(r':\s*(\d+)\s*$', launched).group(1))
-        # The application yields at the operation under investigation. Starting
-        # before main instead captured slow dyld work, not the page transition.
-        for _ in range(90):
-            if profile_ready.exists():
-                break
-            time.sleep(1)
-        if not profile_ready.exists():
-            raise RuntimeError('Application did not reach the opening profiling gate')
-        try:
-            sample_output = (ui_container/'Documents/recording-opening-sample-output.txt').open('wb')
-            sample_master, sample_slave = pty.openpty()
-            sampler = subprocess.Popen(['sample', str(pid), '10', '1', '-file', str(ui_container/'Documents/recording-opening-stack.sample.txt')], stdout=sample_slave, stderr=subprocess.STDOUT)
-            os.close(sample_slave)
-            ready = b''
-            deadline = time.monotonic()+5
-            while time.monotonic() < deadline and b'Sampling process' not in ready:
-                if not select.select([sample_master], [], [], 0.1)[0]:
-                    continue
-                try:
-                    chunk = os.read(sample_master, 65536)
-                except OSError:
-                    break
-                ready += chunk
-                sample_output.write(chunk)
-            sample_output.flush()
-            (ui_container/'Documents/recording-opening-sample-ready.json').write_text(json.dumps({'readyBeforeResume': b'Sampling process' in ready, 'applicationOperationReady': True}))
-        finally:
-            profile_continue.write_text('continue')
+    run('xcrun', 'simctl', 'launch', udid, 'io.github.nyanz00.NeoEPGStation')
     for _ in range(90):
         if marker.exists():
             break
         time.sleep(1)
-    if sampler is not None:
-        try:
-            sampler.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            sampler.terminate()
-            sampler.wait(timeout=5)
-        finally:
-            while select.select([sample_master], [], [], 0)[0]:
-                try:
-                    chunk = os.read(sample_master, 65536)
-                except OSError:
-                    break
-                if not chunk:
-                    break
-                sample_output.write(chunk)
-            os.close(sample_master)
-            sample_output.close()
-        for source in (ui_container/'Documents').glob('recording-opening-*.txt'):
-            shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
     result = json.loads(marker.read_text())
     if prefix == 'ui-ipad' and stage == 'ipad-player':
         # UIKit on iPad can draw the small thumb while currentThumbImage is nil.
@@ -107,7 +46,7 @@ def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
                              and all(result.get('playerGestureChecks', {}).values()))
     Path(f'dist/{prefix}-{stage}.json').write_text(json.dumps(result, indent=2) + '\n')
     if stage == 'recording-features':
-        for pattern in ('recording-*.png', 'recording-*-geometry.json', 'recording-opening-times.json', 'recording-opening-sample-ready.json'):
+        for pattern in ('recording-*.png', 'recording-*-geometry.json', 'recording-opening-times.json'):
             for source in (ui_container/'Documents').glob(pattern):
                 shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
     if (result.get('success') is not True or result.get('recordCount') != 4

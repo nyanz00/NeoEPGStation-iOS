@@ -57,6 +57,9 @@ private final class NeoPagePushAnimator: NSObject, UIViewControllerAnimatedTrans
   private var animator: UIViewPropertyAnimator?
   private weak var incoming: UIView?
   private var width: CGFloat = 1
+#if targetEnvironment(simulator)
+  var smokeIsRunning: Bool { animator?.state == .active && animator?.isRunning == true }
+#endif
   func transitionDuration(using context: UIViewControllerContextTransitioning?) -> TimeInterval {
     UIAccessibility.isReduceMotionEnabled ? 0.01 : 0.15
   }
@@ -1384,14 +1387,15 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       guard let nav = active else { checks[name+"NavigationExists"] = false; continue }
       nav.popToRootViewController(animated:false)
       let page: UIViewController = routeName == "settings" ? NeoSettingsCategoryPage(category:.general,shell:self) : NeoDetailPage(item:NeoRecordedPage.fixtures.records[0],shell:self)
-      let pushBegan = CACurrentMediaTime()
       nav.pushViewController(page,animated:true)
       try? await Task.sleep(nanoseconds:UInt64(delay))
       checks[name+"PushActuallyInProgress"] = nav.transitionCoordinator != nil && canDeferBackUntilPushCompletes
       checks[name+"EarlySwipeAccepted"] = classify()
       let hit = view.hitTest(swipeStart,with:nil)
       checks[name+"EarlySwipeSurfaceReceivesTouches"] = hit != nil && (hit === (tablet ? sidebar : content) || hit!.isDescendant(of:tablet ? sidebar : content))
+      let originalPush = pushingAnimator, pushWasRunning = pushingAnimator?.smokeIsRunning == true
       updateBack(state:.began,translation:0,velocity:500)
+      let handedOffImmediately = pushWasRunning && originalPush?.smokeIsRunning == false && (pendingBack != nil || popInteraction != nil)
       let initial = pendingBack?.initialProgress ?? backInitialProgress
       checks[name+"CapturesVisiblePushPosition"] = initial > 0 && initial < 1
       updateBack(state:.changed,translation:content.bounds.width*0.1,velocity:100)
@@ -1399,7 +1403,10 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         if popInteraction != nil && pendingBack == nil { break }
         try? await Task.sleep(nanoseconds:5_000_000)
       }
-      checks[name+"TakesOverBeforeOriginalPushEnds"] = popInteraction != nil && pendingBack == nil && pushingNavigation == nil && CACurrentMediaTime()-pushBegan < 0.14
+      // The operation starts before UIKit constructs/lays out the page. Its
+      // wall clock is not the push animation's elapsed time. Verify that the
+      // running animator stopped and accepted the back request in this turn.
+      checks[name+"TakesOverBeforeOriginalPushEnds"] = handedOffImmediately && initial > 0 && initial < 1 && popInteraction != nil && pendingBack == nil && pushingNavigation == nil
       try? await Task.sleep(nanoseconds:40_000_000)
       let expected = min(1,initial+0.1)
       let painted = (page.view.layer.presentation()?.affineTransform().tx ?? page.view.transform.tx)/max(1,content.bounds.width)

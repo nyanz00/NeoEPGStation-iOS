@@ -83,18 +83,6 @@ private final class NeoFeatureProtocol: URLProtocol {
     let saved = keys.map { UserDefaults.standard.object(forKey:$0) }
     defer { for (key,value) in zip(keys,saved) { if let value { UserDefaults.standard.set(value,forKey:key) } else { UserDefaults.standard.removeObject(forKey:key) } }; session.invalidateAndCancel() }
     var checks = [String:Bool]()
-    // A simulator-only handshake places the optional external sampler at the
-    // actual operation, after dyld and application launch have completed.
-    if ProcessInfo.processInfo.environment["NEO_EPG_OPENING_PROFILE"] == "1" {
-      let ready = NeoPiPSmoke.directory.appendingPathComponent("recording-opening-profile-ready")
-      let proceed = NeoPiPSmoke.directory.appendingPathComponent("recording-opening-profile-continue")
-      try? Data("ready".utf8).write(to:ready)
-      for _ in 0..<1800 {
-        if FileManager.default.fileExists(atPath:proceed.path) { break }
-        try? await Task.sleep(nanoseconds:50_000_000)
-      }
-      guard FileManager.default.fileExists(atPath:proceed.path) else { return ["openingProfilerResumed":false] }
-    }
     let opening = await shell.smokeMeasureOpening()
     checks.merge(opening.checks) { _,value in value }
     if let data = try? JSONSerialization.data(withJSONObject:opening.timings,options:.prettyPrinted) {

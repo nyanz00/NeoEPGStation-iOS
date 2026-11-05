@@ -1,5 +1,5 @@
 name: iOS prototype
-run-name: "iOS | source=${{ inputs.reuse_run || 'build' }} | mode=${{ inputs.network_probe && 'network' || inputs.recheck_playback && 'playback' || inputs.recheck_iphone && 'iphone' || inputs.reuse_run && 'ipad' || 'build' }} | codec=${{ inputs.network_codec || 'h264' }} | ipad=${{ inputs.check_ipad && 'yes' || 'no' }} | stage=${{ inputs.ui_stage || 'all' }} | scope=${{ inputs.check_scope || 'full' }} | profile=${{ inputs.profile_opening && 'opening' || 'none' }}"
+run-name: "iOS | source=${{ inputs.reuse_run || 'build' }} | mode=${{ inputs.network_probe && 'network' || inputs.recheck_playback && 'playback' || inputs.recheck_iphone && 'iphone' || inputs.reuse_run && 'ipad' || 'build' }} | codec=${{ inputs.network_codec || 'h264' }} | ipad=${{ inputs.check_ipad && 'yes' || 'no' }} | stage=${{ inputs.ui_stage || 'all' }} | scope=${{ inputs.check_scope || 'full' }}"
 
 on:
   push:
@@ -57,11 +57,6 @@ on:
         default: all
         type: choice
         options: [all, recorded, pagination, detail, record-actions, detail-actions, play-popup, list-actions, drop-dialog, menu, settings, gestures, navigation, recording-features]
-      profile_opening:
-        description: 'Diagnostic only: sample initial settings display on an unchanged simulator app'
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -315,7 +310,7 @@ jobs:
       - name: Check recorded Info, Annict and immediate display
         id: recording-feature-checks
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'recording-features' }}
-        run: python3 -u scripts/simulator-smoke.py --recording-features-only
+        run: python3 -u scripts/simulator-smoke.py --recording-features-only --navigation-after
       - name: Check live station UI, raw/transcoded TS, comments, switching and reconnect
         id: live-checks
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && contains(fromJSON('["live","player-feedback"]'), inputs.check_scope) && !contains(fromJSON('["navigation","recording-features"]'), inputs.ui_stage) }}
@@ -478,7 +473,6 @@ jobs:
       REUSE_RUN: ${{ inputs.reuse_run }}
       NATIVE_PIXEL_PROBE: ${{ inputs.native_pixel_probe }}
       UI_STAGE: ${{ inputs.ui_stage }}
-      SAMPLE_OPENING: ${{ inputs.profile_opening && '1' || '0' }}
       RECHECK_PLAYBACK: ${{ inputs.recheck_playback }}
       CHECK_SCOPE: ${{ inputs.check_scope }}
       NETWORK_PROBE: ${{ inputs.network_probe }}
@@ -516,11 +510,7 @@ jobs:
             if [ "$UI_STAGE" = "navigation" ]; then
               python3 -u scripts/simulator-smoke.py --navigation-only
             elif [ "$UI_STAGE" = "recording-features" ]; then
-              if [ "$SAMPLE_OPENING" = "1" ]; then
-                python3 -u scripts/simulator-smoke.py --recording-features-only --navigation-after
-              else
-                python3 -u scripts/simulator-smoke.py --recording-features-only
-              fi
+              python3 -u scripts/simulator-smoke.py --recording-features-only --navigation-after
             else
               python3 -u scripts/player-feedback-smoke.py
               python3 -u scripts/live-smoke.py

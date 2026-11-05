@@ -57,7 +57,16 @@ private final class NeoSettingsRow: UIView {
 }
 
 private final class NeoSettingsFormCell: UITableViewCell {
-  var setting: UIView? { didSet { oldValue?.removeFromSuperview(); if let setting { setting.translatesAutoresizingMaskIntoConstraints = true; contentView.addSubview(setting) }; setNeedsLayout() } }
+  var setting: UIView? {
+    didSet {
+      // A retained setting can already have moved to another visible cell.
+      // Reusing its former cell must not detach it from that new owner.
+      if oldValue?.superview === contentView { oldValue?.removeFromSuperview() }
+      if let setting { setting.translatesAutoresizingMaskIntoConstraints = true; contentView.addSubview(setting) }
+      setNeedsLayout()
+    }
+  }
+  override func prepareForReuse() { super.prepareForReuse(); setting = nil }
   override func layoutSubviews() {
     super.layoutSubviews(); setting?.frame = contentView.bounds.insetBy(dx:16,dy:8)
   }
