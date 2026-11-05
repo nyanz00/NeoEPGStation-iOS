@@ -261,6 +261,8 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
     switch category {
     case .viewing:
       buildViewingPreferences()
+      deferred { [weak self] in
+      guard let self else { return UIView() }
       let engine = NeoSelectButton(frame:.zero)
       engine.setTitle(NeoPlaybackExperiment.selected.title, for: .normal); engine.tintColor = NeoStyle.accent
       engine.titleLabel?.font = .systemFont(ofSize: 14); engine.titleLabel?.numberOfLines = 2
@@ -271,8 +273,11 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
           NeoPlaybackExperiment.selected = value; self?.render()
         }
       })
-      row("再生エンジン", explanation: "Aetherはエンコード済みPLAY・STREAMINGに使用します。コメント・字幕・PiP・視聴履歴は共通のプレイヤー機能を使います。TSはARIB字幕対応のVLCで再生します。診断用はAV1動画を比較します。次の再生から適用します。", control: engine)
+      return makeRow("再生エンジン", explanation: "Aetherはエンコード済みPLAY・STREAMINGに使用します。コメント・字幕・PiP・視聴履歴は共通のプレイヤー機能を使います。TSはARIB字幕対応のVLCで再生します。診断用はAV1動画を比較します。次の再生から適用します。", control: engine)
+      }
       if NeoPlaybackExperiment.selected == .checkpointPlayer {
+        deferred { [weak self] in
+        guard let self else { return UIView() }
         let checkpoint = NeoSelectButton(frame:.zero)
         checkpoint.setTitle(NeoPlaybackExperiment.checkpointMode.title, for: .normal)
         checkpoint.showsMenuAsPrimaryAction = true
@@ -281,14 +286,18 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
             NeoPlaybackExperiment.checkpointMode = value; self?.render()
           }
         })
-        row("チェックポイント", explanation: "1080p以下のAV1が対象です。自動はサーバー解析の最大間隔が10秒以上の場合に使用します。未解析・旧版は解析完了後に選択します。オフでは通常経路で再生します。過去60秒・先読み20秒、保持上限128MiB。次の再生から適用します。", control: checkpoint)
+        return makeRow("チェックポイント", explanation: "1080p以下のAV1が対象です。自動はサーバー解析の最大間隔が10秒以上の場合に使用します。未解析・旧版は解析完了後に選択します。オフでは通常経路で再生します。過去60秒・先読み20秒、保持上限128MiB。次の再生から適用します。", control: checkpoint)
+        }
       }
       toggle("リジューム再生", explanation: "保存された再生位置から続けて再生します。", on: api.resumePlayback) { api.resumePlayback = $0 }
+      deferred { [weak self] in
+      guard let self else { return UIView() }
       historyToggle.isOn = api.disablePlaybackHistory; historyToggle.onTintColor = NeoStyle.accent
       historyToggle.accessibilityLabel = "視聴履歴を送信しない"
       historyToggle.removeTarget(nil, action: nil, for: .valueChanged)
       historyToggle.addTarget(self, action: #selector(historyChanged), for: .valueChanged)
-      row("視聴履歴を送信しない", explanation: "このアプリからの送信だけを止めます。既存の履歴とリジューム位置は残ります。", control: historyToggle)
+      return makeRow("視聴履歴を送信しない", explanation: "このアプリからの送信だけを止めます。既存の履歴とリジューム位置は残ります。", control: historyToggle)
+      }
     case .general:
       toggle("下部ナビゲーションのラベルを表示", on: NeoViewingPreferences.navigationLabels) { [weak shell] in
         NeoViewingPreferences.navigationLabels = $0; shell?.refreshNavigationLabels()
@@ -453,6 +462,8 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
     toggle("HEVCでエンコード",on:NeoViewingPreferences.hevc) { NeoViewingPreferences.hevc = $0 }
     toggle("低遅延モード",on:NeoViewingPreferences.lowLatency) { NeoViewingPreferences.lowLatency = $0 }
     toggle("STREAMING開始バッファ",explanation:"先頭3セグメントを生成してから開始します。",on:NeoViewingPreferences.bufferedStart) { NeoViewingPreferences.bufferedStart = $0 }
+    deferred { [weak self] in
+    guard let self else { return UIView() }
     let priorities = UIStackView(); priorities.axis = .vertical; priorities.spacing = 8
     let saved = NeoViewingPreferences.subtitleKeywords
     for index in saved.indices {
@@ -479,32 +490,43 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
     add.accessibilityIdentifier = "viewing-subtitle-add"; add.layer.borderWidth = 1; add.layer.borderColor = NeoStyle.accent.cgColor
     add.heightAnchor.constraint(greaterThanOrEqualToConstant:44).isActive = true; priorities.addArrangedSubview(add)
     priorities.widthAnchor.constraint(equalToConstant:180).isActive = true
-    row("優先字幕",explanation:"上から順に弾幕と通常字幕を照合します。通常字幕は一致がなければオフになります。",control:priorities)
+    return makeRow("優先字幕",explanation:"上から順に弾幕と通常字幕を照合します。通常字幕は一致がなければオフになります。",control:priorities)
+    }
     toggle("コメントを表示",on:NeoViewingPreferences.commentsEnabled) { NeoViewingPreferences.commentsEnabled = $0 }
     toggle("字幕・コメントの準備を待ってPLAY再生を開始",on:NeoCommentOverlay.waitBeforePlayback) { NeoCommentOverlay.waitBeforePlayback = $0 }
+    deferred { [weak self] in
+    guard let self else { return UIView() }
     let network = UIStepper(); network.minimumValue = 1; network.maximumValue = 30; network.value = Double(NeoViewingPreferences.networkSeconds)
     network.accessibilityIdentifier = "viewing-network-cache"
     network.addAction(UIAction { [weak self,weak network] _ in NeoViewingPreferences.networkSeconds = Int(network?.value ?? 5); self?.render() },for:.valueChanged)
-    row("PLAYのネットワークキャッシュ：\(NeoViewingPreferences.networkSeconds)秒",explanation:"次の再生・再読み込みから適用します。",control:network)
+    return makeRow("PLAYのネットワークキャッシュ：\(NeoViewingPreferences.networkSeconds)秒",explanation:"次の再生・再読み込みから適用します。",control:network)
+    }
     choice("PLAYの巻き戻し用キャッシュ",values:NeoPlaybackCache.presets.map { (String($0),$0 == 0 ? "オフ" : "\($0)秒") },selected:String(NeoPlaybackCache.savedSeconds)) { UserDefaults.standard.set(Int($0) ?? 60,forKey:NeoPlaybackCache.preference) }
     for ts in [false,true] {
       for rewind in [false,true] {
         choice("\(ts ? "TS" : "エンコード済み")STREAMINGの\(rewind ? "巻き戻し用キャッシュ" : "先読み")",values:(rewind ? NeoStreamBuffer.rewindChoices : NeoStreamBuffer.aheadChoices).map { (String($0),NeoStreamBuffer.label($0,ts:ts)) },selected:String(NeoStreamBuffer.count(ts:ts,rewind:rewind))) { NeoStreamBuffer.save(Int($0) ?? 0,ts:ts,rewind:rewind) }
       }
     }
+    let sizeLabel = NeoStyle.label(String(format:"文字サイズ %.2f倍",NeoViewingPreferences.commentSize))
+    stack.addArrangedSubview(sizeLabel)
+    deferred { [weak sizeLabel] in
     let size = UISlider(); size.minimumValue = 0.5; size.maximumValue = 2; size.value = Float(NeoViewingPreferences.commentSize)
     size.minimumTrackTintColor = NeoStyle.accent; size.maximumTrackTintColor = NeoStyle.border
-    let sizeLabel = NeoStyle.label(String(format:"文字サイズ %.2f倍",NeoViewingPreferences.commentSize))
     size.accessibilityIdentifier = "viewing-comment-size"
     size.addAction(UIAction { [weak size,weak sizeLabel] _ in NeoViewingPreferences.commentSize = Double(size?.value ?? 1); sizeLabel?.text = String(format:"文字サイズ %.2f倍",NeoViewingPreferences.commentSize) },for:.valueChanged)
-    stack.addArrangedSubview(sizeLabel); stack.addArrangedSubview(size)
+    return size
+    }
+    let opacityLabel = NeoStyle.label("コメントの不透明度 \(Int(NeoViewingPreferences.commentOpacity*100))%")
+    stack.addArrangedSubview(opacityLabel)
+    deferred { [weak opacityLabel] in
     let opacity = UISlider(); opacity.minimumValue = 0; opacity.maximumValue = 1; opacity.value = NeoViewingPreferences.commentOpacity
     opacity.minimumTrackTintColor = NeoStyle.accent; opacity.maximumTrackTintColor = NeoStyle.border
-    let opacityLabel = NeoStyle.label("コメントの不透明度 \(Int(opacity.value*100))%")
     opacity.accessibilityIdentifier = "viewing-comment-opacity"
     opacity.addAction(UIAction { [weak opacity,weak opacityLabel] _ in NeoViewingPreferences.commentOpacity = opacity?.value ?? 1; opacityLabel?.text = "コメントの不透明度 \(Int(NeoViewingPreferences.commentOpacity*100))%" },for:.valueChanged)
-    stack.addArrangedSubview(opacityLabel); stack.addArrangedSubview(opacity)
+    return opacity
+    }
   }
+  private func deferred(_ build: @escaping () -> UIView) { stack.addArrangedSubview(NeoDeferredSettingsRow(build:build)) }
   private func info(_ text: String) { let label = NeoStyle.label(text, muted: true); label.numberOfLines = 0; stack.addArrangedSubview(label) }
   private func button(_ title: String, action: @escaping () -> Void) {
     let button = NeoStyle.button(title, action: action); button.contentHorizontalAlignment = .left
@@ -585,7 +607,7 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
     guard category == .account, let selector = stack.arrangedSubviews.flatMap({ $0.subviews }).first(where: { $0 is NeoUserSelector }) as? NeoUserSelector else { return false }
     return selector.bounds.size == CGSize(width: 160, height: 40) && selector.showsMenuAsPrimaryAction && selector.menu != nil
   }
-  func smokeSetHistoryDisabled(_ value: Bool) { historyToggle.isOn = value; historyToggle.sendActions(for: .valueChanged) }
+  func smokeSetHistoryDisabled(_ value: Bool) { _ = smokeAllSettingViews; historyToggle.isOn = value; historyToggle.sendActions(for: .valueChanged) }
 #endif
   deinit { task?.cancel(); annictMutation?.cancel(); observers.forEach(NotificationCenter.default.removeObserver) }
 }
