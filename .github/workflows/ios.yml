@@ -516,7 +516,11 @@ jobs:
             if [ "$UI_STAGE" = "navigation" ]; then
               python3 -u scripts/simulator-smoke.py --navigation-only
             elif [ "$UI_STAGE" = "recording-features" ]; then
-              python3 -u scripts/simulator-smoke.py --recording-features-only
+              if [ "$SAMPLE_OPENING" = "1" ]; then
+                python3 -u scripts/simulator-smoke.py --recording-features-only --navigation-after
+              else
+                python3 -u scripts/simulator-smoke.py --recording-features-only
+              fi
             else
               python3 -u scripts/player-feedback-smoke.py
               python3 -u scripts/live-smoke.py
