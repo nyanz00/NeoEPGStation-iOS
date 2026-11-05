@@ -1,5 +1,5 @@
 name: iOS prototype
-run-name: "iOS | source=${{ inputs.reuse_run || 'build' }} | mode=${{ inputs.network_probe && 'network' || inputs.recheck_playback && 'playback' || inputs.recheck_iphone && 'iphone' || inputs.reuse_run && 'ipad' || 'build' }} | codec=${{ inputs.network_codec || 'h264' }} | ipad=${{ inputs.check_ipad && 'yes' || 'no' }} | stage=${{ inputs.ui_stage || 'all' }} | scope=${{ inputs.check_scope || 'full' }}"
+run-name: "iOS | source=${{ inputs.reuse_run || 'build' }} | mode=${{ inputs.network_probe && 'network' || inputs.recheck_playback && 'playback' || inputs.recheck_iphone && 'iphone' || inputs.reuse_run && 'ipad' || 'build' }} | codec=${{ inputs.network_codec || 'h264' }} | ipad=${{ inputs.check_ipad && 'yes' || 'no' }} | stage=${{ inputs.ui_stage || 'all' }} | scope=${{ inputs.check_scope || 'full' }} | profile=${{ inputs.profile_opening && 'opening' || 'none' }}"
 
 on:
   push:

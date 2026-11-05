@@ -7,6 +7,8 @@ import time
 import shutil
 import signal
 import re
+import pty
+import select
 from pathlib import Path
 
 def run(*args, timeout=120):
@@ -22,18 +24,35 @@ def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
     marker = ui_container / f'Documents/ui-{stage}-smoke.json'
     marker.unlink(missing_ok=True)
     os.environ['SIMCTL_CHILD_NEO_EPG_UI_SMOKE'] = stage
-    launched = run('xcrun', 'simctl', 'launch', udid, 'io.github.nyanz00.NeoEPGStation')
+    profiling = os.environ.get('SAMPLE_OPENING') == '1' and stage == 'recording-features'
+    launch_flags = ['--wait-for-debugger'] if profiling else []
+    launched = run('xcrun', 'simctl', 'launch', *launch_flags, udid, 'io.github.nyanz00.NeoEPGStation')
     sampler = None
     sample_output = None
-    if os.environ.get('SAMPLE_OPENING') == '1' and stage == 'recording-features' and prefix == 'ui-iphone':
+    sample_master = None
+    if profiling:
         pid = int(re.search(r':\s*(\d+)\s*$', launched).group(1))
         # Pause only the app process just launched by this harness so sample
         # can attach before the first settings page opens; always resume it.
         os.kill(pid, signal.SIGSTOP)
         try:
-            sample_output = (ui_container/'Documents/recording-opening-sample-output.txt').open('w')
-            sampler = subprocess.Popen(['sample', str(pid), '5', '1', '-file', str(ui_container/'Documents/recording-opening-stack.sample.txt')], stdout=sample_output, stderr=subprocess.STDOUT)
-            time.sleep(0.25)
+            sample_output = (ui_container/'Documents/recording-opening-sample-output.txt').open('wb')
+            sample_master, sample_slave = pty.openpty()
+            sampler = subprocess.Popen(['sample', str(pid), '10', '1', '-file', str(ui_container/'Documents/recording-opening-stack.sample.txt')], stdout=sample_slave, stderr=subprocess.STDOUT)
+            os.close(sample_slave)
+            ready = b''
+            deadline = time.monotonic()+5
+            while time.monotonic() < deadline and b'Sampling process' not in ready:
+                if not select.select([sample_master], [], [], 0.1)[0]:
+                    continue
+                try:
+                    chunk = os.read(sample_master, 65536)
+                except OSError:
+                    break
+                ready += chunk
+                sample_output.write(chunk)
+            sample_output.flush()
+            (ui_container/'Documents/recording-opening-sample-ready.json').write_text(json.dumps({'readyBeforeResume': b'Sampling process' in ready, 'launchSuspended': True}))
         finally:
             os.kill(pid, signal.SIGCONT)
     for _ in range(90):
@@ -47,6 +66,15 @@ def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
             sampler.terminate()
             sampler.wait(timeout=5)
         finally:
+            while select.select([sample_master], [], [], 0)[0]:
+                try:
+                    chunk = os.read(sample_master, 65536)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                sample_output.write(chunk)
+            os.close(sample_master)
             sample_output.close()
         for source in (ui_container/'Documents').glob('recording-opening-*.txt'):
             shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
@@ -71,7 +99,7 @@ def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
                              and all(result.get('playerGestureChecks', {}).values()))
     Path(f'dist/{prefix}-{stage}.json').write_text(json.dumps(result, indent=2) + '\n')
     if stage == 'recording-features':
-        for pattern in ('recording-*.png', 'recording-opening-times.json'):
+        for pattern in ('recording-*.png', 'recording-opening-times.json', 'recording-opening-sample-ready.json'):
             for source in (ui_container/'Documents').glob(pattern):
                 shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
     if (result.get('success') is not True or result.get('recordCount') != 4
