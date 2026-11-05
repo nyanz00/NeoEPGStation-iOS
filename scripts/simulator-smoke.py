@@ -10,7 +10,7 @@ from pathlib import Path
 def run(*args, timeout=120):
     return subprocess.check_output(args, text=True, timeout=timeout).strip()
 
-def capture_ui(udid, stage, prefix, terminate_existing=True):
+def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
     print(f'UI smoke: starting {prefix}/{stage}', flush=True)
     if terminate_existing:
         subprocess.run(['xcrun', 'simctl', 'terminate', udid, 'io.github.nyanz00.NeoEPGStation'],
@@ -54,9 +54,13 @@ def capture_ui(udid, stage, prefix, terminate_existing=True):
         or result.get('uiEngine') != 'Swift / UIKit'
         or result.get('retainedList') is not True
         or result.get('route') != ('connection' if stage == 'ipad-connection' else 'settings' if stage.startswith('settings') else 'history' if stage == 'history' else 'recorded')):
-        raise RuntimeError(f'UI smoke failed: {result}')
+        if failures is None:
+            raise RuntimeError(f'UI smoke failed: {result}')
+        failures.append(f'{prefix}/{stage}: {[key for key, value in result.get("checks", {}).items() if value is not True]}')
     if prefix == 'ui-ipad' and result.get('sidebarWidth') != (0 if stage == 'ipad-connection' else 240):
-        raise RuntimeError(f"Unexpected iPad sidebar width: {result.get('sidebarWidth')}")
+        if failures is None:
+            raise RuntimeError(f"Unexpected iPad sidebar width: {result.get('sidebarWidth')}")
+        failures.append(f"{prefix}: unexpected sidebar width {result.get('sidebarWidth')}")
     run('xcrun', 'simctl', 'io', udid, 'screenshot', f'dist/{prefix}-{stage}.png')
     print(f'UI smoke: captured {prefix}/{stage}', flush=True)
 
@@ -130,7 +134,8 @@ run('xcrun', 'simctl', 'bootstatus', device['udid'], '-b', timeout=600)
 run('xcrun', 'simctl', 'install', device['udid'], str(app))
 if '--navigation-only' in sys.argv or '--recording-features-only' in sys.argv:
     focused_stage = 'recording-features' if '--recording-features-only' in sys.argv else 'navigation'
-    capture_ui(device['udid'], focused_stage, 'ui-iphone', terminate_existing=False)
+    failures = []
+    capture_ui(device['udid'], focused_stage, 'ui-iphone', terminate_existing=False, failures=failures)
     run('xcrun', 'simctl', 'shutdown', device['udid'], timeout=90)
     available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '--json'))['devices']
     runtime = next(key for key, values in available.items() if any(d['udid'] == device['udid'] for d in values))
@@ -139,7 +144,9 @@ if '--navigation-only' in sys.argv or '--recording-features-only' in sys.argv:
         run('xcrun', 'simctl', 'boot', pad['udid'])
     run('xcrun', 'simctl', 'bootstatus', pad['udid'], '-b', timeout=600)
     run('xcrun', 'simctl', 'install', pad['udid'], str(app), timeout=300)
-    capture_ui(pad['udid'], focused_stage, 'ui-ipad', terminate_existing=False)
+    capture_ui(pad['udid'], focused_stage, 'ui-ipad', terminate_existing=False, failures=failures)
+    if failures:
+        raise RuntimeError(f'Combined UI smoke failed: {failures}')
     sys.exit(0)
 if '--ui-only' in sys.argv:
     # Recheck navigation against the exact same binary independently of the
