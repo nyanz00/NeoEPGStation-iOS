@@ -51,6 +51,11 @@ on:
         required: false
         default: false
         type: boolean
+      recheck_ipad_only:
+        description: 'Reuse only iPad recording/navigation checks; preserve existing iPhone evidence'
+        required: false
+        default: false
+        type: boolean
       ui_stage:
         description: 'Optional single iPhone UI stage to recheck'
         required: false
@@ -474,6 +479,7 @@ jobs:
       NATIVE_PIXEL_PROBE: ${{ inputs.native_pixel_probe }}
       UI_STAGE: ${{ inputs.ui_stage }}
       RECHECK_PLAYBACK: ${{ inputs.recheck_playback }}
+      RECHECK_IPAD_ONLY: ${{ inputs.recheck_ipad_only }}
       CHECK_SCOPE: ${{ inputs.check_scope }}
       NETWORK_PROBE: ${{ inputs.network_probe }}
       NETWORK_CODEC: ${{ inputs.network_codec || 'h264' }}
@@ -506,14 +512,20 @@ jobs:
             python3 -u scripts/ts-resume-smoke.py
             python3 -u scripts/ts-resume-smoke.py mpeg2
           elif [ "$CHECK_SCOPE" = "player-feedback" ]; then
-            python3 -u scripts/simulator-smoke.py --prepare
-            if [ "$UI_STAGE" = "navigation" ]; then
-              python3 -u scripts/simulator-smoke.py --navigation-only
-            elif [ "$UI_STAGE" = "recording-features" ]; then
-              python3 -u scripts/simulator-smoke.py --recording-features-only --navigation-after
+            if [ "$RECHECK_IPAD_ONLY" = "true" ]; then
+              test "$UI_STAGE" = "recording-features"
+              python3 -u scripts/simulator-smoke.py --prepare --no-boot
+              python3 -u scripts/simulator-smoke.py --recording-features-only --navigation-after --only-ipad
             else
+              python3 -u scripts/simulator-smoke.py --prepare
+              if [ "$UI_STAGE" = "navigation" ]; then
+              python3 -u scripts/simulator-smoke.py --navigation-only
+              elif [ "$UI_STAGE" = "recording-features" ]; then
+              python3 -u scripts/simulator-smoke.py --recording-features-only --navigation-after
+              else
               python3 -u scripts/player-feedback-smoke.py
               python3 -u scripts/live-smoke.py
+              fi
             fi
           elif [ "$CHECK_SCOPE" = "aether-connected" ] || [ "$CHECK_SCOPE" = "aether-recovery" ]; then
             mkdir -p build/native-tests

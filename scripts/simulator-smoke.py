@@ -150,22 +150,28 @@ app = Path('build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation
 if '--ipad-only' in sys.argv:
     capture_ipad(app, device)
     sys.exit(0)
-run('xcrun', 'simctl', 'bootstatus', device['udid'], '-b', timeout=600)
-run('xcrun', 'simctl', 'install', device['udid'], str(app))
+focused = '--navigation-only' in sys.argv or '--recording-features-only' in sys.argv
+only_pad = '--only-ipad' in sys.argv
+if only_pad and not focused:
+    raise ValueError('--only-ipad requires a focused recording or navigation check')
+if not only_pad:
+    run('xcrun', 'simctl', 'bootstatus', device['udid'], '-b', timeout=600)
+    run('xcrun', 'simctl', 'install', device['udid'], str(app), timeout=600)
 if '--navigation-only' in sys.argv or '--recording-features-only' in sys.argv:
     focused_stage = 'recording-features' if '--recording-features-only' in sys.argv else 'navigation'
     failures = []
-    capture_ui(device['udid'], focused_stage, 'ui-iphone', terminate_existing=False, failures=failures)
-    if '--navigation-after' in sys.argv and focused_stage == 'recording-features':
-        capture_ui(device['udid'], 'navigation', 'ui-iphone', failures=failures)
-    run('xcrun', 'simctl', 'shutdown', device['udid'], timeout=90)
+    if not only_pad:
+        capture_ui(device['udid'], focused_stage, 'ui-iphone', terminate_existing=False, failures=failures)
+        if '--navigation-after' in sys.argv and focused_stage == 'recording-features':
+            capture_ui(device['udid'], 'navigation', 'ui-iphone', failures=failures)
+        run('xcrun', 'simctl', 'shutdown', device['udid'], timeout=90)
     available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '--json'))['devices']
     runtime = next(key for key, values in available.items() if any(d['udid'] == device['udid'] for d in values))
     pad = next(d for d in available[runtime] if d['isAvailable'] and d['name'].startswith('iPad Pro'))
     if pad['state'] == 'Shutdown':
         run('xcrun', 'simctl', 'boot', pad['udid'])
     run('xcrun', 'simctl', 'bootstatus', pad['udid'], '-b', timeout=600)
-    run('xcrun', 'simctl', 'install', pad['udid'], str(app), timeout=300)
+    run('xcrun', 'simctl', 'install', pad['udid'], str(app), timeout=600)
     capture_ui(pad['udid'], focused_stage, 'ui-ipad', terminate_existing=False, failures=failures)
     if '--navigation-after' in sys.argv and focused_stage == 'recording-features':
         capture_ui(pad['udid'], 'navigation', 'ui-ipad', failures=failures)
