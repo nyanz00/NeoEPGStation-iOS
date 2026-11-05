@@ -44,9 +44,11 @@ private final class NeoSettingsRow: UIView {
     return control.bounds.width >= 44 && control.bounds.height >= 20 && bounds.insetBy(dx:-0.5,dy:-0.5).contains(control.frame)
   }
   var smokeGeometry: [String:Any] {
-    ["title":name.text ?? "", "control":String(describing:type(of:control)),
-      "rowFrame":NSStringFromCGRect(frame), "controlFrame":NSStringFromCGRect(control.frame),
-      "availableWidth":availableWidth, "fits":smokeControlFits,
+    let fits = smokeControlFits
+    func numbers(_ rect: CGRect) -> [Double] { [Double(rect.minX),Double(rect.minY),Double(rect.width),Double(rect.height)] }
+    return ["title":name.text ?? "", "control":String(describing:type(of:control)),
+      "rowFrame":numbers(frame), "controlFrame":numbers(control.frame),
+      "availableWidth":availableWidth, "fits":fits,
       "dimensionConstraints":control.constraints.filter { $0.secondItem == nil && [.width,.height].contains($0.firstAttribute) }.map { ["self":$0.firstItem === control,"attribute":$0.firstAttribute.rawValue,"constant":$0.constant] as [String:Any] }]
   }
 #endif
@@ -605,7 +607,9 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
     func all(_ view: UIView) -> [UIView] { [view]+view.subviews.flatMap(all) }
     let visible = viewingTable.visibleCells.flatMap { cell -> [UIView] in cell.layoutIfNeeded(); return all(cell.contentView) }
     let choices = visible.compactMap { $0 as? NeoSelectButton }
-    return choices.count == 2 && choices.allSatisfy { $0.bounds.width >= 44 && $0.bounds.height >= 44 }
+    let required = Set(["viewing-エンコーダー","viewing-デフォルト画質"])
+    return choices.filter { required.contains($0.accessibilityIdentifier ?? "") }.count == 2
+      && choices.allSatisfy { $0.bounds.width >= 44 && $0.bounds.height >= 44 }
       && visible.compactMap { $0 as? NeoSettingsRow }.allSatisfy { $0.smokeControlFits }
   }
   func smokeSaveRowGeometry() {
