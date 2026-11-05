@@ -15,10 +15,10 @@ private final class NeoSettingsRow: UIView {
   }
   required init?(coder: NSCoder) { fatalError() }
   private var controlSize: CGSize {
-    let intrinsic = control.intrinsicContentSize
+    let intrinsic = control is UISwitch ? control.sizeThatFits(.zero) : control.intrinsicContentSize
     // A control also owns constraints for its internal labels and layout guides.
     // Their zero-width constants must not become the width of the whole field.
-    let fixedWidth = control.constraints.first { $0.firstItem === control && $0.firstAttribute == .width && $0.secondItem == nil && $0.relation == .equal && $0.priority == .required }?.constant
+    let fixedWidth = control.constraints.first { $0.firstItem === control && $0.firstAttribute == .width && $0.secondItem == nil && $0.relation == .equal && $0.priority == .required && $0.constant > 0 }?.constant
     let width = min(max(0,availableWidth-16),fixedWidth ?? (intrinsic.width > 0 ? intrinsic.width : 180))
     let minimumHeight = control.constraints.filter { $0.firstItem === control && $0.firstAttribute == .height && $0.secondItem == nil && $0.relation != .lessThanOrEqual }.map(\.constant).max() ?? 0
     let height = max(minimumHeight,intrinsic.height > 0 ? intrinsic.height : control.systemLayoutSizeFitting(CGSize(width:width,height:0),withHorizontalFittingPriority:.required,verticalFittingPriority:.fittingSizeLevel).height)
@@ -37,6 +37,8 @@ private final class NeoSettingsRow: UIView {
     name.frame = CGRect(x:0,y:top,width:width,height:titleHeight)
     detail?.frame = CGRect(x:0,y:top+titleHeight+4,width:width,height:detailHeight)
     control.frame = CGRect(x:bounds.width-size.width,y:(bounds.height-size.height)/2,width:size.width,height:size.height)
+    // UIKit can adjust a switch to its native dimensions after assigning frame.
+    control.frame.origin = CGPoint(x:bounds.width-control.bounds.width,y:(bounds.height-control.bounds.height)/2)
   }
 #if targetEnvironment(simulator)
   var smokeControlFits: Bool {
@@ -55,7 +57,7 @@ private final class NeoSettingsRow: UIView {
 }
 
 private final class NeoSettingsFormCell: UITableViewCell {
-  var setting: UIView? { didSet { oldValue?.removeFromSuperview(); if let setting { contentView.addSubview(setting) }; setNeedsLayout() } }
+  var setting: UIView? { didSet { oldValue?.removeFromSuperview(); if let setting { setting.translatesAutoresizingMaskIntoConstraints = true; contentView.addSubview(setting) }; setNeedsLayout() } }
   override func layoutSubviews() {
     super.layoutSubviews(); setting?.frame = contentView.bounds.insetBy(dx:16,dy:8)
   }
@@ -70,7 +72,8 @@ private final class NeoDeferredSettingsRow: UIView {
   required init?(coder: NSCoder) { fatalError() }
   func resolve() -> UIView {
     if let content { return content }
-    let view = build(); content = view; (view as? NeoSettingsRow)?.availableWidth = availableWidth; addSubview(view); return view
+    let view = build(); content = view; view.translatesAutoresizingMaskIntoConstraints = true
+    (view as? NeoSettingsRow)?.availableWidth = availableWidth; addSubview(view); return view
   }
   override var intrinsicContentSize: CGSize { resolve().intrinsicContentSize }
   override func layoutSubviews() { super.layoutSubviews(); resolve().frame = bounds }
@@ -269,7 +272,9 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
       if category == .viewing {
         viewingRows.forEach { $0.removeFromSuperview() }
         viewingRows = stack.arrangedSubviews
-        viewingRows.forEach { stack.removeArrangedSubview($0); $0.removeFromSuperview() }
+        // UIStackView turns autoresizing-mask translation off for arranged
+        // children. Cells below own these frames, so restore that ownership.
+        viewingRows.forEach { stack.removeArrangedSubview($0); $0.removeFromSuperview(); $0.translatesAutoresizingMaskIntoConstraints = true }
         viewingHeights.removeAll(); viewingTable.reloadData()
       }
     }
@@ -633,7 +638,8 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
     let surface: UIView = category == .viewing ? viewingTable : scroll
     return all(surface).filter { $0 is UISwitch || $0 is UIStepper || $0 is UITextField || $0 is UISlider }.allSatisfy {
       let rect = surface.convert($0.bounds,from:$0)
-      return rect.minX >= 15 && rect.maxX <= surface.bounds.width-15
+      let hasSize = category != .annict || ($0.bounds.width >= 24 && $0.bounds.height >= 20)
+      return hasSize && rect.minX >= 15 && rect.maxX <= surface.bounds.width-15
     }
   }
   var smokeAccountSelector: Bool {
