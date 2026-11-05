@@ -45,6 +45,21 @@ private final class NeoSettingsFormCell: UITableViewCell {
   }
 }
 
+private final class NeoDeferredSettingsRow: UIView {
+  private let build: () -> UIView
+  private var content: UIView?
+  var isResolved: Bool { content != nil }
+  var availableWidth: CGFloat = 1 { didSet { if oldValue != availableWidth { (content as? NeoSettingsRow)?.availableWidth = availableWidth; invalidateIntrinsicContentSize(); setNeedsLayout() } } }
+  init(build: @escaping () -> UIView) { self.build = build; super.init(frame:.zero) }
+  required init?(coder: NSCoder) { fatalError() }
+  func resolve() -> UIView {
+    if let content { return content }
+    let view = build(); content = view; (view as? NeoSettingsRow)?.availableWidth = availableWidth; addSubview(view); return view
+  }
+  override var intrinsicContentSize: CGSize { resolve().intrinsicContentSize }
+  override func layoutSubviews() { super.layoutSubviews(); resolve().frame = bounds }
+}
+
 // SettingsPage's small outlined field / ContentPaste / contained connect /
 // error-colored disconnect share one row, including the empty and busy states.
 final class NeoAnnictTokenControl: UIView, UITextFieldDelegate {
@@ -419,11 +434,15 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
     }
   }
   private func choice(_ title: String, values: [(String,String)], selected: String, save: @escaping (String) -> Void) {
-    let control = NeoSelectButton(frame:.zero)
-    control.setTitle(values.first { $0.0 == selected }?.1 ?? selected,for:.normal)
-    control.accessibilityIdentifier = "viewing-"+title
-    control.menu = UIMenu(children:values.map { key,text in UIAction(title:text,state:key == selected ? .on : .off) { [weak self] _ in save(key); self?.render() } })
-    row(title,control:control)
+    let build: () -> UIView = { [weak self] in
+      guard let self else { return UIView() }
+      let control = NeoSelectButton(frame:.zero)
+      control.setTitle(values.first { $0.0 == selected }?.1 ?? selected,for:.normal)
+      control.accessibilityIdentifier = "viewing-"+title
+      control.menu = UIMenu(children:values.map { key,text in UIAction(title:text,state:key == selected ? .on : .off) { [weak self] _ in save(key); self?.render() } })
+      return self.makeRow(title,control:control)
+    }
+    stack.addArrangedSubview(category == .viewing ? NeoDeferredSettingsRow(build:build) : build())
   }
   private func buildViewingPreferences() {
     let config = shell?.serverConfig
@@ -492,14 +511,21 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
     button.heightAnchor.constraint(greaterThanOrEqualToConstant: 48).isActive = true; stack.addArrangedSubview(button)
   }
   private func row(_ title: String, explanation: String = "", control: UIView) {
+    stack.addArrangedSubview(makeRow(title,explanation:explanation,control:control))
+  }
+  private func makeRow(_ title: String, explanation: String = "", control: UIView) -> UIView {
     let row = NeoSettingsRow(title:title,explanation:explanation,control:control)
     row.availableWidth = max(1,(navigationController?.view.bounds.width ?? view.bounds.width)-32-(category == .annict ? 32 : 0))
-    stack.addArrangedSubview(row)
+    return row
   }
   private func toggle(_ title: String, explanation: String = "", on: Bool, action: @escaping (Bool) -> Void) {
-    let toggle = UISwitch(); toggle.isOn = on; toggle.onTintColor = NeoStyle.accent; toggle.accessibilityLabel = title
-    toggle.addAction(UIAction { [weak toggle] _ in if let toggle { action(toggle.isOn) } }, for: .valueChanged)
-    row(title, explanation: explanation, control: toggle)
+    let build: () -> UIView = { [weak self] in
+      guard let self else { return UIView() }
+      let toggle = UISwitch(); toggle.isOn = on; toggle.onTintColor = NeoStyle.accent; toggle.accessibilityLabel = title
+      toggle.addAction(UIAction { [weak toggle] _ in if let toggle { action(toggle.isOn) } }, for:.valueChanged)
+      return self.makeRow(title,explanation:explanation,control:toggle)
+    }
+    stack.addArrangedSubview(category == .viewing ? NeoDeferredSettingsRow(build:build) : build())
   }
   func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { viewingRows.count }
   func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -509,6 +535,7 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
   func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
     if let height = viewingHeights[indexPath.row] { return height }
     let setting = viewingRows[indexPath.row], width = max(1,tableView.bounds.width-32)
+    if let deferred = setting as? NeoDeferredSettingsRow { deferred.availableWidth = width }
     if let row = setting as? NeoSettingsRow { row.availableWidth = width }
     let intrinsic = setting.intrinsicContentSize
     let height: CGFloat
@@ -519,18 +546,23 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
   }
 #if targetEnvironment(simulator)
   var smokeAllSettingViews: [UIView] {
-    func all(_ view: UIView) -> [UIView] { [view]+view.subviews.flatMap(all) }
+    func all(_ view: UIView) -> [UIView] {
+      if let deferred = view as? NeoDeferredSettingsRow { _ = deferred.resolve() }
+      return [view]+view.subviews.flatMap(all)
+    }
     return category == .viewing ? viewingRows.flatMap(all) : all(view)
   }
   func smokeViewingListScrolls() -> Bool {
     guard category == .viewing, viewingRows.count > 12 else { return false }
     viewingTable.layoutIfNeeded()
     let lazy = viewingTable.visibleCells.count < viewingRows.count
+    let deferred = viewingRows.compactMap { $0 as? NeoDeferredSettingsRow }
+    let lazyCreation = deferred.contains { !$0.isResolved }
     let last = IndexPath(row:viewingRows.count-1,section:0)
     viewingTable.scrollToRow(at:last,at:.bottom,animated:false); viewingTable.layoutIfNeeded()
     let bottom = viewingTable.indexPathsForVisibleRows?.contains(last) == true
     viewingTable.scrollToRow(at:IndexPath(row:0,section:0),at:.top,animated:false); viewingTable.layoutIfNeeded()
-    return lazy && bottom
+    return lazy && lazyCreation && bottom
   }
   func smokeConnectAnnict(write: Bool, token: String) {
     guard annictTokens.indices.contains(write ? 1 : 0) else { return }
