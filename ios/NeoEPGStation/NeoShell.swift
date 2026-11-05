@@ -1015,6 +1015,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       }
       timings[kind] = page?.smokeOpeningTimes ?? [:]
       checks[kind+"FirstMovementMeasured"] = page?.smokeOpeningTimes["handlerToFirstMovementMs"] != nil
+      if kind == "viewing", let settings = page as? NeoSettingsCategoryPage {
+        checks["viewingListRendersVisibleRowsAndReachesBottom"] = settings.smokeViewingListScrolls()
+      }
       if kind == "viewing", let window = view.window {
         let image = UIGraphicsImageRenderer(bounds:window.bounds).image { _ in window.drawHierarchy(in:window.bounds,afterScreenUpdates:true) }
         try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("recording-viewing-settings.png"))
@@ -1055,14 +1058,14 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     checks["annictSettingsPopulated"] = annictPage.smokeSettingCount > 0
     NeoViewingPreferences.subtitleKeywords = ["","",""]
     let viewing = NeoSettingsCategoryPage(category:.viewing,shell:self); active!.pushViewController(viewing,animated:false); view.layoutIfNeeded()
-    let views = all(viewing.view)
+    let views = viewing.smokeAllSettingViews
     let engine = views.contains { $0.accessibilityIdentifier == "playback-experiment-engine" }
     checks["engineInViewing"] = engine
     let network = views.first { $0.accessibilityIdentifier == "viewing-network-cache" } as? UIStepper
     network?.value = 7; network?.sendActions(for:.valueChanged)
     checks["globalNetworkPersists"] = NeoViewingPreferences.networkSeconds == 7
     let overlay = NeoCommentOverlay(frame:.zero)
-    func control(_ id: String) -> UIControl? { all(viewing.view).first { $0.accessibilityIdentifier == id } as? UIControl }
+    func control(_ id: String) -> UIControl? { viewing.smokeAllSettingViews.first { $0.accessibilityIdentifier == id } as? UIControl }
     control("viewing-subtitle-add")?.sendActions(for:.touchUpInside)
     control("viewing-subtitle-add")?.sendActions(for:.touchUpInside)
     let fourth = control("viewing-subtitle-priority-3") as? UITextField
@@ -1072,19 +1075,19 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     checks["priorityUIAddsAndSavesBeyondThree"] = NeoViewingPreferences.subtitleKeywords.count == 5 && NeoViewingPreferences.subtitleKeywords[4] == "Fifth priority"
     control("viewing-subtitle-remove-3")?.sendActions(for:.touchUpInside)
     checks["priorityUIRemovesAndRenumbers"] = NeoViewingPreferences.subtitleKeywords.count == 4 && (control("viewing-subtitle-priority-3") as? UITextField)?.text == "Fifth priority" && control("viewing-subtitle-remove-2") == nil
-    let visibility = all(viewing.view).compactMap { $0 as? UISwitch }.first { $0.accessibilityLabel == "コメントを表示" }
+    let visibility = viewing.smokeAllSettingViews.compactMap { $0 as? UISwitch }.first { $0.accessibilityLabel == "コメントを表示" }
     visibility?.isOn = false; visibility?.sendActions(for:.valueChanged)
     checks["globalVisibilityReachesPlayer"] = visibility != nil && !overlay.enabled && !NeoViewingPreferences.commentsEnabled
     overlay.enabled = true; viewing.viewWillAppear(false)
-    checks["playerVisibilityReachesGlobal"] = NeoViewingPreferences.commentsEnabled && all(viewing.view).compactMap { $0 as? UISwitch }.first { $0.accessibilityLabel == "コメントを表示" }?.isOn == true
-    checks["outlinedSelectKeepsNativeMenu"] = all(viewing.view).compactMap { $0 as? NeoSelectButton }.allSatisfy { $0.showsMenuAsPrimaryAction && $0.menu != nil && $0.layer.borderWidth == 1 }
-    let size = all(viewing.view).first { $0.accessibilityIdentifier == "viewing-comment-size" } as? UISlider
+    checks["playerVisibilityReachesGlobal"] = NeoViewingPreferences.commentsEnabled && viewing.smokeAllSettingViews.compactMap { $0 as? UISwitch }.first { $0.accessibilityLabel == "コメントを表示" }?.isOn == true
+    checks["outlinedSelectKeepsNativeMenu"] = viewing.smokeAllSettingViews.compactMap { $0 as? NeoSelectButton }.allSatisfy { $0.showsMenuAsPrimaryAction && $0.menu != nil && $0.layer.borderWidth == 1 }
+    let size = viewing.smokeAllSettingViews.first { $0.accessibilityIdentifier == "viewing-comment-size" } as? UISlider
     size?.value = 1.25; size?.sendActions(for:.valueChanged)
     checks["globalSizeReachesPlayer"] = overlay.sizeMultiplier == 1.25
-    let opacity = all(viewing.view).first { $0.accessibilityIdentifier == "viewing-comment-opacity" } as? UISlider
+    let opacity = viewing.smokeAllSettingViews.first { $0.accessibilityIdentifier == "viewing-comment-opacity" } as? UISlider
     opacity?.value = 0.65; opacity?.sendActions(for:.valueChanged)
     checks["globalOpacityReachesPlayer"] = abs(overlay.opacity-0.65)<0.001
-    let wait = all(viewing.view).compactMap { $0 as? UISwitch }.first { $0.accessibilityLabel == "字幕・コメントの準備を待ってPLAY再生を開始" }
+    let wait = viewing.smokeAllSettingViews.compactMap { $0 as? UISwitch }.first { $0.accessibilityLabel == "字幕・コメントの準備を待ってPLAY再生を開始" }
     wait?.isOn = true; wait?.sendActions(for:.valueChanged)
     checks["globalWaitSharesPlayerSetting"] = wait != nil && NeoCommentOverlay.waitBeforePlayback
     capture("feedback-viewing-settings")

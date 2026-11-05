@@ -38,6 +38,13 @@ private final class NeoSettingsRow: UIView {
   }
 }
 
+private final class NeoSettingsFormCell: UITableViewCell {
+  var setting: UIView? { didSet { oldValue?.removeFromSuperview(); if let setting { contentView.addSubview(setting) }; setNeedsLayout() } }
+  override func layoutSubviews() {
+    super.layoutSubviews(); setting?.frame = contentView.bounds.insetBy(dx:16,dy:8)
+  }
+}
+
 // SettingsPage's small outlined field / ContentPaste / contained connect /
 // error-colored disconnect share one row, including the empty and busy states.
 final class NeoAnnictTokenControl: UIView, UITextFieldDelegate {
@@ -162,9 +169,12 @@ final class NeoSettingsPage: NeoPage, UITableViewDataSource, UITableViewDelegate
 #endif
 }
 
-final class NeoSettingsCategoryPage: NeoPage {
+final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableViewDelegate {
   let category: NeoSettingsCategory
   private let scroll = UIScrollView(), stack = UIStackView()
+  private let viewingTable = UITableView(frame:.zero,style:.plain)
+  private var viewingRows: [UIView] = [], viewingHeights: [Int:CGFloat] = [:]
+  private var viewingWidth: CGFloat = 0
   private let historyToggle = UISwitch()
   private var task: Task<Void, Never>?
   private var firstAppearance = true
@@ -174,20 +184,28 @@ final class NeoSettingsCategoryPage: NeoPage {
   init(category: NeoSettingsCategory, shell: NeoShell) { self.category = category; super.init(title: category.title, shell: shell) }
   required init?(coder: NSCoder) { fatalError() }
   override func viewDidLoad() {
-    super.viewDidLoad(); body.addSubview(scroll); stack.axis = .vertical; stack.spacing = 16
+    super.viewDidLoad(); stack.axis = .vertical; stack.spacing = 16
     scroll.delaysContentTouches = false
     scroll.panGestureRecognizer.delaysTouchesEnded = false
     if category == .annict {
       stack.backgroundColor = NeoStyle.paper; stack.layer.cornerRadius = 6; stack.layer.borderWidth = 1; stack.layer.borderColor = NeoStyle.border.cgColor
       stack.isLayoutMarginsRelativeArrangement = true; stack.directionalLayoutMargins = NSDirectionalEdgeInsets(top:16,leading:16,bottom:16,trailing:16)
     }
-    stack.translatesAutoresizingMaskIntoConstraints = false; scroll.addSubview(stack)
-    NSLayoutConstraint.activate([
-      stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 16),
-      stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -24),
-      stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 16),
-      stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -16),
-      stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -32)])
+    if category == .viewing {
+      viewingTable.backgroundColor = NeoStyle.background; viewingTable.separatorStyle = .none
+      viewingTable.delaysContentTouches = false; viewingTable.panGestureRecognizer.delaysTouchesEnded = false
+      viewingTable.estimatedRowHeight = 72; viewingTable.contentInset = UIEdgeInsets(top:8,left:0,bottom:16,right:0)
+      viewingTable.dataSource = self; viewingTable.delegate = self
+      viewingTable.register(NeoSettingsFormCell.self,forCellReuseIdentifier:"setting"); body.addSubview(viewingTable)
+    } else {
+      body.addSubview(scroll); stack.translatesAutoresizingMaskIntoConstraints = false; scroll.addSubview(stack)
+      NSLayoutConstraint.activate([
+        stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 16),
+        stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -24),
+        stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 16),
+        stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -16),
+        stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -32)])
+    }
     observers.append(NotificationCenter.default.addObserver(forName: .neoAccountChanged, object: nil, queue: .main) { [weak self] note in
       guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }; self.annictMutation?.cancel(); self.render()
     })
@@ -199,6 +217,10 @@ final class NeoSettingsCategoryPage: NeoPage {
     let began = CACurrentMediaTime()
 #endif
     super.viewDidLayoutSubviews(); scroll.frame = body.bounds
+    if category == .viewing {
+      viewingTable.frame = body.bounds
+      if viewingWidth != body.bounds.width { viewingWidth = body.bounds.width; viewingHeights.removeAll(); viewingTable.reloadData() }
+    }
     let width = max(0,body.bounds.width-32-(category == .annict ? 32 : 0))
     for case let row as NeoSettingsRow in stack.arrangedSubviews { row.availableWidth = width }
 #if targetEnvironment(simulator)
@@ -212,6 +234,14 @@ final class NeoSettingsCategoryPage: NeoPage {
     defer { smokeOpeningTimes["renderWorkMs",default:0] += (CACurrentMediaTime()-renderBegan)*1000 }
 #endif
     task?.cancel(); stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+    defer {
+      if category == .viewing {
+        viewingRows.forEach { $0.removeFromSuperview() }
+        viewingRows = stack.arrangedSubviews
+        viewingRows.forEach { stack.removeArrangedSubview($0); $0.removeFromSuperview() }
+        viewingHeights.removeAll(); viewingTable.reloadData()
+      }
+    }
     guard let shell, let api = shell.api else { return }
     switch category {
     case .viewing:
@@ -471,7 +501,37 @@ final class NeoSettingsCategoryPage: NeoPage {
     toggle.addAction(UIAction { [weak toggle] _ in if let toggle { action(toggle.isOn) } }, for: .valueChanged)
     row(title, explanation: explanation, control: toggle)
   }
+  func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { viewingRows.count }
+  func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+    let cell = tableView.dequeueReusableCell(withIdentifier:"setting",for:indexPath) as! NeoSettingsFormCell
+    cell.backgroundColor = NeoStyle.background; cell.selectionStyle = .none; cell.setting = viewingRows[indexPath.row]; return cell
+  }
+  func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+    if let height = viewingHeights[indexPath.row] { return height }
+    let setting = viewingRows[indexPath.row], width = max(1,tableView.bounds.width-32)
+    if let row = setting as? NeoSettingsRow { row.availableWidth = width }
+    let intrinsic = setting.intrinsicContentSize
+    let height: CGFloat
+    if let label = setting as? UILabel { height = label.sizeThatFits(CGSize(width:width,height:.greatestFiniteMagnitude)).height }
+    else if intrinsic.height > 0 { height = intrinsic.height }
+    else { height = setting.systemLayoutSizeFitting(CGSize(width:width,height:0),withHorizontalFittingPriority:.required,verticalFittingPriority:.fittingSizeLevel).height }
+    let result = max(16,height+16); viewingHeights[indexPath.row] = result; return result
+  }
 #if targetEnvironment(simulator)
+  var smokeAllSettingViews: [UIView] {
+    func all(_ view: UIView) -> [UIView] { [view]+view.subviews.flatMap(all) }
+    return category == .viewing ? viewingRows.flatMap(all) : all(view)
+  }
+  func smokeViewingListScrolls() -> Bool {
+    guard category == .viewing, viewingRows.count > 12 else { return false }
+    viewingTable.layoutIfNeeded()
+    let lazy = viewingTable.visibleCells.count < viewingRows.count
+    let last = IndexPath(row:viewingRows.count-1,section:0)
+    viewingTable.scrollToRow(at:last,at:.bottom,animated:false); viewingTable.layoutIfNeeded()
+    let bottom = viewingTable.indexPathsForVisibleRows?.contains(last) == true
+    viewingTable.scrollToRow(at:IndexPath(row:0,section:0),at:.top,animated:false); viewingTable.layoutIfNeeded()
+    return lazy && bottom
+  }
   func smokeConnectAnnict(write: Bool, token: String) {
     guard annictTokens.indices.contains(write ? 1 : 0) else { return }
     let control = annictTokens[write ? 1 : 0]; control.field.text = token; control.field.sendActions(for:.editingChanged)
@@ -479,13 +539,14 @@ final class NeoSettingsCategoryPage: NeoPage {
   }
   var smokeTokenControls: [NeoAnnictTokenControl] { annictTokens }
   var smokeRenderCount = 0
-  var smokeSettingCount: Int { stack.arrangedSubviews.count }
+  var smokeSettingCount: Int { category == .viewing ? viewingRows.count : stack.arrangedSubviews.count }
   var smokeControlsWithinWidth: Bool {
     view.layoutIfNeeded()
     func all(_ view: UIView) -> [UIView] { [view]+view.subviews.flatMap(all) }
-    return all(stack).filter { $0 is UISwitch || $0 is UIStepper || $0 is UITextField || $0 is UISlider }.allSatisfy {
-      let rect = scroll.convert($0.bounds,from:$0)
-      return rect.minX >= 15 && rect.maxX <= scroll.bounds.width-15
+    let surface: UIView = category == .viewing ? viewingTable : scroll
+    return all(surface).filter { $0 is UISwitch || $0 is UIStepper || $0 is UITextField || $0 is UISlider }.allSatisfy {
+      let rect = surface.convert($0.bounds,from:$0)
+      return rect.minX >= 15 && rect.maxX <= surface.bounds.width-15
     }
   }
   var smokeAccountSelector: Bool {
