@@ -169,7 +169,9 @@ final class NeoSettingsPage: NeoPage, UITableViewDataSource, UITableViewDelegate
     table.register(UITableViewCell.self, forCellReuseIdentifier: "category"); body.addSubview(table)
   }
   override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); table.frame = body.bounds }
-  override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); prepared.removeAll() }
+  override func viewWillAppear(_ animated: Bool) {
+    super.viewWillAppear(animated); prepared.values.forEach { $0.discardPreparation() }; prepared.removeAll()
+  }
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated); prepareCategories()
   }
@@ -180,7 +182,10 @@ final class NeoSettingsPage: NeoPage, UITableViewDataSource, UITableViewDelegate
       for category in [NeoSettingsCategory.general,.viewing] {
         guard let self, !Task.isCancelled, let shell = self.shell, self.navigationController?.topViewController === self else { return }
         let page = NeoSettingsCategoryPage(category:category,shell:shell)
-        page.prepareOpening(size:shell.pageSize); self.prepared[category] = page
+        page.prepareOpening(size:shell.pageSize)
+        await page.prepareVisibleRows()
+        guard !Task.isCancelled, self.navigationController?.topViewController === self else { page.discardPreparation(); return }
+        shell.mountPreparedPage(page); self.prepared[category] = page
         await Task.yield()
       }
     }
@@ -206,6 +211,9 @@ final class NeoSettingsPage: NeoPage, UITableViewDataSource, UITableViewDelegate
     guard let shell else { return }
     preparation?.cancel()
     let category = NeoSettingsCategory.allCases[indexPath.row], page = prepared.removeValue(forKey:NeoSettingsCategory.allCases[indexPath.row])
+#if targetEnvironment(simulator)
+    if let page { page.smokeOpeningTimes["preparedVisibleCells"] = Double(page.smokePreparedCells) }
+#endif
     shell.pushPage(requestedAt:began) { page ?? NeoSettingsCategoryPage(category:category,shell:shell) }
   }
   deinit { preparation?.cancel() }
@@ -246,6 +254,19 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
   private var annictMutation: Task<Void,Never>?
   private var annictTokens: [NeoAnnictTokenControl] = []
   private var observers: [NSObjectProtocol] = []
+  // Resolve the upcoming viewport in small turns, so preparing the form does
+  // not monopolize the main thread with every setting/control at once.
+  func prepareVisibleRows() async {
+    guard category == .viewing else { return }
+    var y: CGFloat = 0
+    for index in viewingRows.indices {
+      guard !Task.isCancelled, y < body.bounds.height+80 else { return }
+      let height = tableView(viewingTable,heightForRowAt:IndexPath(row:index,section:0))
+      let setting = viewingRows[index]; setting.frame = CGRect(x:16,y:0,width:max(1,body.bounds.width-32),height:max(0,height-16))
+      setting.layoutIfNeeded(); y += height
+      await Task.yield()
+    }
+  }
   init(category: NeoSettingsCategory, shell: NeoShell) { self.category = category; super.init(title: category.title, shell: shell) }
   required init?(coder: NSCoder) { fatalError() }
   override func viewDidLoad() {
@@ -663,6 +684,7 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
   }
   var smokeTokenControls: [NeoAnnictTokenControl] { annictTokens }
   var smokeRenderCount = 0
+  var smokePreparedCells: Int { viewingTable.visibleCells.count }
   var smokeSettingCount: Int { category == .viewing ? viewingRows.count : stack.arrangedSubviews.count }
   var smokeControlsWithinWidth: Bool {
     view.layoutIfNeeded()

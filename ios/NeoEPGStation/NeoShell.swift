@@ -178,6 +178,12 @@ class NeoPage: UIViewController {
     guard size.width > 0, size.height > 0 else { return }
     loadViewIfNeeded(); view.frame = CGRect(origin:.zero,size:size); view.setNeedsLayout(); view.layoutIfNeeded()
   }
+  func discardPreparation() {
+    if navigationController == nil { viewIfLoaded?.removeFromSuperview() }
+  }
+  override func loadView() {
+    view = UIView(frame:CGRect(origin:.zero,size:shell?.initialPageSize ?? UIScreen.main.bounds.size))
+  }
 #if targetEnvironment(simulator)
   var smokeOpeningBegan: CFTimeInterval?
   var smokeOpeningTimes: [String:Double] = [:]
@@ -185,7 +191,7 @@ class NeoPage: UIViewController {
   weak var shell: NeoShell?
   let header = UIView(), body = UIView()
   let titleLabel = NeoStyle.label(size: 20, bold: true)
-  var headerAccessory: UIView? { didSet { oldValue?.removeFromSuperview(); if let headerAccessory { header.addSubview(headerAccessory) }; view.setNeedsLayout() } }
+  var headerAccessory: UIView? { didSet { guard oldValue !== headerAccessory else { return }; oldValue?.removeFromSuperview(); if let headerAccessory { header.addSubview(headerAccessory) }; view.setNeedsLayout() } }
   private var menu: UIButton!, back: UIButton!
   var actions: [UIView] = [] { didSet { oldValue.forEach { $0.removeFromSuperview() }; actions.forEach(header.addSubview); view.setNeedsLayout() } }
   init(title: String, shell: NeoShell) { super.init(nibName: nil, bundle: nil); self.shell = shell; titleLabel.text = title }
@@ -207,9 +213,13 @@ class NeoPage: UIViewController {
     back = NeoStyle.iconButton("ArrowBack", label: "戻る") { [weak self] in self?.shell?.goBack() }
     header.addSubview(menu); header.addSubview(back); header.addSubview(titleLabel)
     let line = UIView(); line.backgroundColor = UIColor.white.withAlphaComponent(0.18); line.tag = 701; header.addSubview(line)
+    layoutChrome()
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
+    layoutChrome()
+  }
+  private func layoutChrome() {
     let width = view.bounds.width; header.frame = CGRect(x: 0, y: 0, width: width, height: 56)
     body.frame = CGRect(x: 0, y: 56, width: width, height: max(0, view.bounds.height - 56))
     menu.frame = CGRect(x: 4, y: 6, width: 44, height: 44)
@@ -394,8 +404,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       view.window?.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
     }
 #if targetEnvironment(simulator)
-    guard !smokeStage.isEmpty else { return }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.runUISmoke() }
+    scheduleUISmoke()
 #endif
   }
   override func viewDidLoad() {
@@ -455,6 +464,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     sidebar.list.alwaysBounceVertical = !tablet
     bottom.layer.borderColor = NeoStyle.border.cgColor; bottom.layer.borderWidth = 0.5
     popup?.setNeedsLayout()
+#if targetEnvironment(simulator)
+    scheduleUISmoke()
+#endif
   }
   func connect(_ url: URL) {
     dismissPopup(); historyReturnSnapshot = nil; historyReturnRevision = nil; api = NeoAPI(base: url); channels = [:]; serverConfig = nil
@@ -550,7 +562,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let began = CACurrentMediaTime()
     dismissPopup()
     (active?.topViewController as? NeoRecordedPage)?.rememberDetail(recording.id)
-    let prepared = api?.cachedRecording(recording.id) == nil ? nil : preparedDetails.removeValue(forKey:detailPageKey(recording.id))
+    let candidate = preparedDetails.removeValue(forKey:detailPageKey(recording.id))
+    let prepared = api?.cachedRecording(recording.id) == nil || api?.cachedAnnictEpisode(recording.id) == nil ? nil : candidate
+    if prepared == nil { candidate?.discardPreparation() }
     pushPage(requestedAt:began) { prepared ?? NeoDetailPage(item:recording,shell:self) }
   }
   private var preparedDetails: [String:NeoDetailPage] = [:]
@@ -559,6 +573,18 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     "\(api?.base.absoluteString ?? ""):\(api?.identityRevision ?? -1):\(api?.isHalfWidthDisplayed ?? true):\(id):\(pageSize)"
   }
   var pageSize: CGSize { active?.view.bounds.size ?? content.bounds.size }
+  var initialPageSize: CGSize { content.bounds.width > 0 ? content.bounds.size : UIScreen.main.bounds.size }
+  func mountPreparedPage(_ page: NeoPage) {
+    page.prepareOpening(size:pageSize)
+    // UITableView postpones cell realization while detached from a window.
+    // Keep prepared views behind the opaque active navigation view; they have
+    // no child-controller appearance and cannot intercept foreground touches.
+    if page.view.superview == nil {
+      let host = (active?.topViewController as? NeoPage)?.view ?? content
+      host.insertSubview(page.view,at:0)
+    }
+    page.view.setNeedsLayout(); page.view.layoutIfNeeded()
+  }
   func prepareDetailPages(_ ids: [Int]) {
     guard let api, smokeStage.isEmpty else { return }
     warmingDetailIDs = Array(ids.prefix(2))
@@ -570,11 +596,12 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private func warmPreparedDetails() {
     guard let api, active?.topViewController is NeoRecordedPage || active?.topViewController is NeoHistoryPage else { return }
     let keys = warmingDetailIDs.map(detailPageKey)
+    for (key,page) in preparedDetails where !keys.contains(key) { page.discardPreparation() }
     preparedDetails = preparedDetails.filter { keys.contains($0.key) }
     for id in warmingDetailIDs {
       let key = detailPageKey(id)
       guard preparedDetails[key] == nil, let item = api.cachedRecording(id), api.cachedAnnictEpisode(id) != nil else { continue }
-      let page = NeoDetailPage(item:item,shell:self); page.prepareOpening(size:pageSize)
+      let page = NeoDetailPage(item:item,shell:self); mountPreparedPage(page)
       preparedDetails[key] = page
     }
   }
@@ -1044,7 +1071,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         let item = NeoRecordedPage.fixtures.records[0]
         if !cold, let api, let value = try? await api.recording(item.id) {
           _ = try? await api.annictEpisode(item.id)
-          let prepared = NeoDetailPage(item:value,shell:self); prepared.prepareOpening(size:pageSize)
+          let prepared = NeoDetailPage(item:value,shell:self); mountPreparedPage(prepared)
           preparedDetails[detailPageKey(item.id)] = prepared
         }
         openDetail(item)
@@ -1062,6 +1089,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       timings[name] = page?.smokeOpeningTimes ?? [:]
       checks[name+"FirstMovementMeasured"] = page?.smokeOpeningTimes["handlerToFirstMovementMs"] != nil
       if name == "viewing", let settings = page as? NeoSettingsCategoryPage {
+        checks["viewingPreparationRealizesVisibleCells"] = (settings.smokeOpeningTimes["preparedVisibleCells"] ?? 0) > 0
         checks["viewingListRendersVisibleRowsAndReachesBottom"] = settings.smokeViewingListScrolls()
         checks["viewingVisibleControlsHaveSizeAndFit"] = settings.smokeVisibleViewingControlsFit
         settings.smokeSaveRowGeometry()
@@ -1223,7 +1251,14 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       "recordedVisibleCellsFollowWidth": NeoRecordedPage.reflowSmoke(in: host),
       "detailBackCompletesFaster": NeoSwipeBackAnimator().transitionDuration(using: nil) == 0.22]
   }
+  private var uiSmokeScheduled = false
+  private func scheduleUISmoke() {
+    guard !smokeStage.isEmpty, !uiSmokeScheduled, viewIfLoaded?.window != nil else { return }
+    uiSmokeScheduled = true
+    DispatchQueue.main.asyncAfter(deadline:.now()+0.6) { [weak self] in self?.runUISmoke() }
+  }
   private func runUISmoke() {
+    try? Data("started\n".utf8).write(to:NeoPiPSmoke.directory.appendingPathComponent("ui-\(smokeStage)-progress.txt"))
     let recorded = controllers["recorded"]!.viewControllers.first as! NeoRecordedPage
     let original = recorded.collection
     showRoute("settings"); showRoute("recorded")

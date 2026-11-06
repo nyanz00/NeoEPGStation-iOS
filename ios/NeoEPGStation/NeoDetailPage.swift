@@ -61,10 +61,7 @@ final class NeoDetailPage: NeoPage {
 #endif
         guard let api else { return }
         let item = try await api.recording(id); try Task.checkCancellation()
-        let sameStructure = self.item.videoFiles?.map(\.id) == item.videoFiles?.map(\.id)
-          && self.item.thumbnails == item.thumbnails && self.metadataTexts.count == [item.description,item.extended].compactMap({ $0 }).count
-        self.item = item
-        if sameStructure { self.updateMetadata() } else { self.render() }
+        self.applyMetadata(item)
       } catch is CancellationError { return
       } catch { if !Task.isCancelled { self.alert(error.localizedDescription) } }
       self.loading.stopAnimating()
@@ -97,7 +94,7 @@ final class NeoDetailPage: NeoPage {
   }
   override func viewWillAppear(_ animated: Bool) {
     super.viewWillAppear(animated)
-    if let value = shell?.api?.cachedRecording(item.id) { item = value; updateMetadata() }
+    if let value = shell?.api?.cachedRecording(item.id) { applyMetadata(value) }
     annict?.load()
     if firstAppearance { firstAppearance = false } else { refreshMetadata(); annict?.load() }
   }
@@ -159,6 +156,12 @@ final class NeoDetailPage: NeoPage {
     dropStatus.font = .systemFont(ofSize:14,weight:hasErrors ? .bold : .regular)
     dropStatus.isUserInteractionEnabled = item.dropLogFile != nil
     dropStatus.accessibilityTraits = item.dropLogFile == nil ? .staticText : .button
+  }
+  private func applyMetadata(_ value: NeoRecording) {
+    let sameStructure = item.videoFiles?.map(\.id) == value.videoFiles?.map(\.id)
+      && item.thumbnails == value.thumbnails && metadataTexts.count == [value.description,value.extended].compactMap({ $0 }).count
+    item = value
+    if sameStructure { updateMetadata() } else { render() }
   }
   private func selectFile(fromBeginning: Bool = false) {
     shell?.showPopup(anchor: playButton, entries: (item.videoFiles ?? []).map { file in
