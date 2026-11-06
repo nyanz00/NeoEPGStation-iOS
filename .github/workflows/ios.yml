@@ -513,9 +513,13 @@ jobs:
             python3 -u scripts/ts-resume-smoke.py mpeg2
           elif [ "$CHECK_SCOPE" = "player-feedback" ]; then
             if [ "$RECHECK_IPAD_ONLY" = "true" ]; then
-              test "$UI_STAGE" = "recording-features"
               python3 -u scripts/simulator-smoke.py --prepare --no-boot
-              python3 -u scripts/simulator-smoke.py --recording-features-only --navigation-after --only-ipad
+              if [ "$UI_STAGE" = "navigation" ]; then
+                python3 -u scripts/simulator-smoke.py --navigation-only --only-ipad
+              else
+                test "$UI_STAGE" = "recording-features"
+                python3 -u scripts/simulator-smoke.py --recording-features-only --navigation-after --only-ipad
+              fi
             else
               python3 -u scripts/simulator-smoke.py --prepare
               if [ "$UI_STAGE" = "navigation" ]; then
