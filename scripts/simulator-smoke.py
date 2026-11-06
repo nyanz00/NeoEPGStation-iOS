@@ -171,11 +171,15 @@ if '--navigation-only' in sys.argv or '--recording-features-only' in sys.argv:
     # Do not boot the next device with the preceding phone's stage in the
     # simulator-child environment. Every launch below receives its own stage.
     os.environ.pop('SIMCTL_CHILD_NEO_EPG_UI_SMOKE', None)
-    if pad['state'] == 'Shutdown':
+    pad_was_shutdown = pad['state'] == 'Shutdown'
+    if pad_was_shutdown:
         run('xcrun', 'simctl', 'boot', pad['udid'])
     run('xcrun', 'simctl', 'bootstatus', pad['udid'], '-b', timeout=600)
     run('xcrun', 'simctl', 'install', pad['udid'], str(app), timeout=600)
-    capture_ui(pad['udid'], focused_stage, 'ui-ipad', failures=failures)
+    # A just-booted device has not launched this app. simctl terminate may
+    # stall while SpringBoard is still settling; there is nothing to stop.
+    # Later scenarios on this device still terminate the preceding process.
+    capture_ui(pad['udid'], focused_stage, 'ui-ipad', terminate_existing=not pad_was_shutdown, failures=failures)
     if '--navigation-after' in sys.argv and focused_stage == 'recording-features':
         capture_ui(pad['udid'], 'navigation', 'ui-ipad', failures=failures)
     if failures:
