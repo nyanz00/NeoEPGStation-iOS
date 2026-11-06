@@ -30,7 +30,7 @@ def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
             break
         time.sleep(1)
     # Preserve partial evidence even if the application never completes a test.
-    for pattern in (f'ui-{stage}-*.txt', 'ui-*-progress.txt', 'ui-*-smoke.json', 'recording-*.png', 'recording-*-geometry.json', 'recording-opening-times.json'):
+    for pattern in (f'ui-{stage}-*.txt', 'ui-*-progress.txt', 'ui-*-smoke.json', 'recording-*.png', 'recording-*-geometry.json', 'recording-opening-times.json', 'recording-scroll-times.json'):
         for source in (ui_container/'Documents').glob(pattern):
             shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
     if not marker.exists():
@@ -66,7 +66,7 @@ def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
                              and all(result.get('playerGestureChecks', {}).values()))
     Path(f'dist/{prefix}-{stage}.json').write_text(json.dumps(result, indent=2) + '\n')
     if stage == 'recording-features':
-        for pattern in ('recording-*.png', 'recording-*-geometry.json', 'recording-opening-times.json'):
+        for pattern in ('recording-*.png', 'recording-*-geometry.json', 'recording-opening-times.json', 'recording-scroll-times.json'):
             for source in (ui_container/'Documents').glob(pattern):
                 shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
     if (result.get('success') is not True or result.get('recordCount') != 4

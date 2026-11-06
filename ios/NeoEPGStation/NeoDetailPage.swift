@@ -1,6 +1,14 @@
 import UIKit
 
 final class NeoDetailPage: NeoPage {
+  override var defersOpeningContent: Bool { true }
+  private var fixturePresentation: Bool {
+#if targetEnvironment(simulator)
+    return shell?.smokeStage.isEmpty == false && shell?.api?.base.host != "recording-features.invalid"
+#else
+    return false
+#endif
+  }
   private var item: NeoRecording
   private let scroll = UIScrollView(), stack = UIStackView(), thumbnail = NeoThumbnail()
   private let loading = UIActivityIndicatorView(style: .medium)
@@ -9,7 +17,6 @@ final class NeoDetailPage: NeoPage {
   private var task: Task<Void, Never>?
   private var analysisTask: Task<Void, Never>?
   private var annict: NeoAnnictHeader?
-  private var firstAppearance = true
   private var metadataTitle: UILabel?, metadataTexts: [UILabel] = []
   private let dropStatus = NeoStyle.label(size: 14, muted: true)
   private lazy var playButton = NeoStyle.recordingButton("PLAY", icon: "PlayArrowOutlined") { [weak self] in self?.selectFile() }
@@ -25,6 +32,9 @@ final class NeoDetailPage: NeoPage {
     guard let self else { return }; self.showRecordingMenu(self.item, anchor: self.moreButton, detail: true)
   }
   init(item: NeoRecording, shell: NeoShell) {
+#if targetEnvironment(simulator)
+    NeoDetailPage.smokeConstructions += 1
+#endif
     self.item = shell.api?.cachedRecording(item.id) ?? item.displayed(halfWidth:shell.api?.isHalfWidthDisplayed ?? true)
     super.init(title: "録画詳細", shell: shell)
   }
@@ -42,13 +52,37 @@ final class NeoDetailPage: NeoPage {
       stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -24),
       stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -24)])
     wide = (navigationController?.view.bounds.width ?? view.bounds.width) >= 900
-    render()
-    if let api = shell?.api {
+  }
+  override func buildOpeningContent() async {
+    if !fixturePresentation, let api = shell?.api {
+      let id = item.id
+      async let detail = try? api.recording(id)
+      async let episode = try? api.annictEpisode(id)
+      let (value,_) = await (detail,episode)
+      guard !Task.isCancelled, shell?.api === api else { return }
+      if let value { item = value }
+    }
+    guard !Task.isCancelled else { return }
+    let info = beginBody()
+    await NeoContentFrame.next(); guard !Task.isCancelled else { return }
+    appendMetadata(to:info)
+    await NeoContentFrame.next(); guard !Task.isCancelled else { return }
+    appendActions(to:info)
+    metadataTexts.removeAll()
+    for text in [item.description,item.extended].compactMap({ $0 }) {
+      await NeoContentFrame.next(); guard !Task.isCancelled else { return }
+      appendText(text)
+    }
+    updateMetadata()
+    if !fixturePresentation, let api = shell?.api {
       let control = NeoAnnictHeader(api:api,recordingID:item.id,host:self)
       control.onVisibility = { [weak self,weak control] visible in self?.headerAccessory = visible ? control : nil }
-      annict = control; control.load()
+      annict = control
+      if api.cachedAnnictEpisode(item.id) != nil { control.load() }
+      else if api.accountReady { control.showUnavailable() }
+      prefetchCheckpointAnalysis(api:api)
     }
-    refreshMetadata()
+    view.setNeedsLayout(); view.layoutIfNeeded()
   }
   private func refreshMetadata() {
     task?.cancel()
@@ -69,7 +103,7 @@ final class NeoDetailPage: NeoPage {
   }
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
-    if let api = shell?.api { prefetchCheckpointAnalysis(api:api) }
+    if openingContentFinished, let api = shell?.api { prefetchCheckpointAnalysis(api:api) }
   }
   private func prefetchCheckpointAnalysis(api: NeoAPI) {
     guard NeoPlaybackExperiment.selected == .checkpointPlayer, NeoPlaybackExperiment.checkpointMode == .automatic,
@@ -90,13 +124,14 @@ final class NeoDetailPage: NeoPage {
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews(); scroll.frame = body.bounds; loading.center = CGPoint(x: body.bounds.midX, y: 30)
     let isWide = body.bounds.width >= 900
-    if wide != isWide { wide = isWide; render() }
+    if wide != isWide { wide = isWide; if openingContentFinished { render() } }
   }
   override func viewWillAppear(_ animated: Bool) {
     super.viewWillAppear(animated)
+    guard openingContentFinished else { return }
     if let value = shell?.api?.cachedRecording(item.id) { applyMetadata(value) }
     annict?.load()
-    if firstAppearance { firstAppearance = false } else { refreshMetadata(); annict?.load() }
+    refreshMetadata()
   }
   func refreshCapabilities() {
     guard isViewLoaded else { return }
@@ -105,6 +140,12 @@ final class NeoDetailPage: NeoPage {
     buttons.append(encodeButton); buttonRow.setButtons(buttons)
   }
   private func render() {
+    let info = beginBody(); appendMetadata(to:info); appendActions(to:info)
+    metadataTexts.removeAll()
+    for text in [item.description,item.extended].compactMap({ $0 }) { appendText(text) }
+    updateMetadata()
+  }
+  private func beginBody() -> UIStackView {
 #if targetEnvironment(simulator)
     smokeRenderCount += 1
 #endif
@@ -122,27 +163,30 @@ final class NeoDetailPage: NeoPage {
     thumbnailSize = [thumbnail.heightAnchor.constraint(equalTo: thumbnail.widthAnchor, multiplier: 9/16)]
     if wide { thumbnailSize.append(thumbnail.widthAnchor.constraint(equalToConstant: 400)) }
     NSLayoutConstraint.activate(thumbnailSize)
+    return info
+  }
+  private func appendMetadata(to info: UIStackView) {
     let title = NeoStyle.label(item.name, size: 20, bold: true); title.numberOfLines = 0; info.addArrangedSubview(title); metadataTitle = title
     let channel = item.channelName ?? item.channelId.flatMap { shell?.channels[$0] } ?? item.channelId.map(String.init) ?? ""
     info.addArrangedSubview(NeoStyle.label(channel, size: 16))
     info.addArrangedSubview(NeoStyle.label(NeoProgramText.interval(start: item.startAt, end: item.endAt), size: 14, muted: true))
     info.addArrangedSubview(dropStatus)
+  }
+  private func appendActions(to info: UIStackView) {
     moreButton.isEnabled = !(item.videoFiles ?? []).isEmpty
     if !(item.videoFiles ?? []).isEmpty {
       refreshCapabilities()
       info.setCustomSpacing(12, after: dropStatus)
       info.addArrangedSubview(buttonRow)
     } else { info.addArrangedSubview(NeoStyle.label("再生できるファイルがありません。", muted: true)) }
-    stack.setCustomSpacing(24, after: top)
+    if let top = stack.arrangedSubviews.first { stack.setCustomSpacing(24, after:top) }
     if !(item.videoFiles ?? []).isEmpty, shell?.api?.resumePlayback == true,
       Int(shell?.api?.viewer ?? "master").map({ $0 > 0 }) == true {
       stack.addArrangedSubview(beginningButton)
     }
-    metadataTexts.removeAll()
-    for text in [item.description, item.extended].compactMap({ $0 }) {
-      let label = NeoStyle.label(text); label.numberOfLines = 0; stack.addArrangedSubview(label); metadataTexts.append(label)
-    }
-    updateMetadata()
+  }
+  private func appendText(_ text: String) {
+    let label = NeoStyle.label(text); label.numberOfLines = 0; stack.addArrangedSubview(label); metadataTexts.append(label)
   }
   private func updateMetadata() {
     if metadataTitle?.text != item.name { metadataTitle?.text = item.name }
@@ -205,6 +249,7 @@ final class NeoDetailPage: NeoPage {
     present(dialog, animated: shell.smokeStage.isEmpty)
   }
 #if targetEnvironment(simulator)
+  static var smokeConstructions = 0
   func smokeOpenPlay() { scroll.setContentOffset(.zero, animated: false); view.layoutIfNeeded(); selectFile() }
   var smokeRenderCount = 0
   func smokeAnnictControl() -> NeoAnnictHeader? { annict?.load(); return annict }

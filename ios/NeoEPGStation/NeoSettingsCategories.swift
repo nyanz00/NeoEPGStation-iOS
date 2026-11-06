@@ -157,8 +157,6 @@ enum NeoSettingsCategory: String, CaseIterable {
 
 final class NeoSettingsPage: NeoPage, UITableViewDataSource, UITableViewDelegate {
   private let table = UITableView(frame: .zero, style: .plain)
-  private var prepared: [NeoSettingsCategory:NeoSettingsCategoryPage] = [:]
-  private var preparation: Task<Void,Never>?
   init(shell: NeoShell) { super.init(title: "設定", shell: shell) }
   required init?(coder: NSCoder) { fatalError() }
   override func viewDidLoad() {
@@ -169,27 +167,6 @@ final class NeoSettingsPage: NeoPage, UITableViewDataSource, UITableViewDelegate
     table.register(UITableViewCell.self, forCellReuseIdentifier: "category"); body.addSubview(table)
   }
   override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); table.frame = body.bounds }
-  override func viewWillAppear(_ animated: Bool) {
-    super.viewWillAppear(animated); prepared.values.forEach { $0.discardPreparation() }; prepared.removeAll()
-  }
-  override func viewDidAppear(_ animated: Bool) {
-    super.viewDidAppear(animated); prepareCategories()
-  }
-  private func prepareCategories() {
-    preparation?.cancel()
-    preparation = Task { [weak self] in
-      await Task.yield()
-      for category in [NeoSettingsCategory.general,.viewing] {
-        guard let self, !Task.isCancelled, let shell = self.shell, self.navigationController?.topViewController === self else { return }
-        let page = NeoSettingsCategoryPage(category:category,shell:shell)
-        page.prepareOpening(size:shell.pageSize)
-        await page.prepareVisibleRows()
-        guard !Task.isCancelled, self.navigationController?.topViewController === self else { page.discardPreparation(); return }
-        shell.mountPreparedPage(page); self.prepared[category] = page
-        await Task.yield()
-      }
-    }
-  }
   func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { NeoSettingsCategory.allCases.count }
   func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
     let category = NeoSettingsCategory.allCases[indexPath.row]
@@ -209,16 +186,10 @@ final class NeoSettingsPage: NeoPage, UITableViewDataSource, UITableViewDelegate
     let began = CACurrentMediaTime()
     tableView.deselectRow(at: indexPath, animated: true)
     guard let shell else { return }
-    preparation?.cancel()
-    let category = NeoSettingsCategory.allCases[indexPath.row], page = prepared.removeValue(forKey:NeoSettingsCategory.allCases[indexPath.row])
-#if targetEnvironment(simulator)
-    if let page { page.smokeOpeningTimes["preparedVisibleCells"] = Double(page.smokePreparedCells) }
-#endif
-    shell.pushPage(requestedAt:began) { page ?? NeoSettingsCategoryPage(category:category,shell:shell) }
+    let category = NeoSettingsCategory.allCases[indexPath.row]
+    shell.pushPage(requestedAt:began) { NeoSettingsCategoryPage(category:category,shell:shell) }
   }
-  deinit { preparation?.cancel() }
 #if targetEnvironment(simulator)
-  func smokePrepareOpening() async { prepareCategories(); await preparation?.value }
   func smokeOpenCategory(_ category: NeoSettingsCategory) {
     tableView(table,didSelectRowAt:IndexPath(row:NeoSettingsCategory.allCases.firstIndex(of:category)!,section:0))
   }
@@ -243,6 +214,7 @@ final class NeoSettingsPage: NeoPage, UITableViewDataSource, UITableViewDelegate
 }
 
 final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableViewDelegate {
+  override var defersOpeningContent: Bool { true }
   let category: NeoSettingsCategory
   private let scroll = UIScrollView(), stack = UIStackView()
   private let viewingTable = UITableView(frame:.zero,style:.plain)
@@ -250,7 +222,6 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
   private var viewingWidth: CGFloat = 0
   private let historyToggle = UISwitch()
   private var task: Task<Void, Never>?
-  private var firstAppearance = true
   private var annictMutation: Task<Void,Never>?
   private var annictTokens: [NeoAnnictTokenControl] = []
   private var observers: [NSObjectProtocol] = []
@@ -259,18 +230,32 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
   func prepareVisibleRows() async {
     guard category == .viewing else { return }
     var y: CGFloat = 0
+    var batchBegan = CACurrentMediaTime()
     for index in viewingRows.indices {
-      guard !Task.isCancelled, y < body.bounds.height+80 else { return }
+      guard !Task.isCancelled, viewingRows.indices.contains(index), y < body.bounds.height+80 else { return }
       let height = tableView(viewingTable,heightForRowAt:IndexPath(row:index,section:0))
       let setting = viewingRows[index]; setting.frame = CGRect(x:16,y:0,width:max(1,body.bounds.width-32),height:max(0,height-16))
       setting.layoutIfNeeded(); y += height
-      await Task.yield()
+      if CACurrentMediaTime()-batchBegan >= 0.003 { await NeoContentFrame.next(); batchBegan = CACurrentMediaTime() }
     }
   }
   init(category: NeoSettingsCategory, shell: NeoShell) { self.category = category; super.init(title: category.title, shell: shell) }
   required init?(coder: NSCoder) { fatalError() }
   override func viewDidLoad() {
-    super.viewDidLoad(); stack.axis = .vertical; stack.spacing = 16
+    super.viewDidLoad()
+  }
+  private var contentConfigured = false
+  override func buildOpeningContent() async {
+    if !contentConfigured { configureContent(); contentConfigured = true }
+    let revision = shell?.api?.identityRevision
+    render(); await prepareVisibleRows()
+    guard !Task.isCancelled else { return }
+    if revision != shell?.api?.identityRevision { render(); await prepareVisibleRows() }
+    guard !Task.isCancelled else { return }
+    view.setNeedsLayout(); view.layoutIfNeeded()
+  }
+  private func configureContent() {
+    stack.axis = .vertical; stack.spacing = 16
     scroll.delaysContentTouches = false
     scroll.panGestureRecognizer.delaysTouchesEnded = false
     if category == .annict {
@@ -293,11 +278,12 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
         stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -32)])
     }
     observers.append(NotificationCenter.default.addObserver(forName: .neoAccountChanged, object: nil, queue: .main) { [weak self] note in
-      guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }; self.annictMutation?.cancel(); self.render()
+      guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
+      self.annictMutation?.cancel()
+      if self.openingContentFinished, self.viewIfLoaded?.window != nil, self.navigationController?.topViewController === self { self.render() }
     })
-    render()
   }
-  override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); if firstAppearance { firstAppearance = false } else { render() } }
+  override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); if openingContentFinished { render() } }
   override func viewDidLayoutSubviews() {
 #if targetEnvironment(simulator)
     let began = CACurrentMediaTime()
@@ -461,7 +447,7 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
       stack.addArrangedSubview(NeoStyle.label(write ? "書き込みアクセストークン" : "読み取り専用アクセストークン",size:16))
       let status = NeoStyle.label(size:13,muted:true); status.numberOfLines = 0
       let description = write ? "視聴記録の更新に使用します。現在のアクティブユーザーのプロフィールに保存されます。" : "アニメ作品と放送予定の取得に使用します。トークンはサーバーだけに保存されます。"
-      status.textColor = UIColor.white.withAlphaComponent(0.5); status.text = description+" 現在: 確認中"; stack.addArrangedSubview(status)
+      status.textColor = UIColor.white.withAlphaComponent(0.5); status.text = description+(api.accountReady ? " 現在: 確認中" : " 現在: 未確認"); stack.addArrangedSubview(status)
       let control = NeoAnnictTokenControl(write:write)
       control.allowed = api.accountReady && (!write || api.profileHeaders["X-Viewer-Profile-Id"] != nil)
       control.busy = annictMutation != nil
@@ -487,6 +473,7 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
     rules.accessibilityLabel = "最終話視聴後にルールを無効化する"
     rules.addAction(UIAction { [weak rules] _ in NeoAnnictPreferences.disableFinalRules = rules?.isOn ?? false },for:.valueChanged)
     row("最終話視聴後にルールを無効化する",explanation:"Annictに次話がなく、予約が残っていない、視聴したプロフィール所有のルールだけを無効化します。",control:rules)
+    guard api.accountReady else { return }
     let revision = api.identityRevision
     task = Task { [weak self] in
       do {
@@ -685,7 +672,10 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
   var smokeTokenControls: [NeoAnnictTokenControl] { annictTokens }
   var smokeRenderCount = 0
   var smokePreparedCells: Int { viewingTable.visibleCells.count }
-  var smokeSettingCount: Int { category == .viewing ? viewingRows.count : stack.arrangedSubviews.count }
+  var smokeSettingCount: Int {
+    if !contentConfigured { configureContent(); contentConfigured = true; render() }
+    return category == .viewing ? viewingRows.count : stack.arrangedSubviews.count
+  }
   var smokeControlsWithinWidth: Bool {
     view.layoutIfNeeded()
     func all(_ view: UIView) -> [UIView] { [view]+view.subviews.flatMap(all) }
@@ -700,7 +690,10 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
     guard category == .account, let selector = stack.arrangedSubviews.flatMap({ $0.subviews }).first(where: { $0 is NeoUserSelector }) as? NeoUserSelector else { return false }
     return selector.bounds.size == CGSize(width: 160, height: 40) && selector.showsMenuAsPrimaryAction && selector.menu != nil
   }
-  func smokeSetHistoryDisabled(_ value: Bool) { _ = smokeAllSettingViews; historyToggle.isOn = value; historyToggle.sendActions(for: .valueChanged) }
+  func smokeSetHistoryDisabled(_ value: Bool) {
+    if !contentConfigured { configureContent(); contentConfigured = true; render() }
+    _ = smokeAllSettingViews; historyToggle.isOn = value; historyToggle.sendActions(for:.valueChanged)
+  }
 #endif
   deinit { task?.cancel(); annictMutation?.cancel(); observers.forEach(NotificationCenter.default.removeObserver) }
 }

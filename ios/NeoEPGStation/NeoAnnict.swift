@@ -142,11 +142,15 @@ final class NeoAnnictPlayback: NSObject {
       } catch {
         guard !Task.isCancelled, api.identityRevision == attempt else { return }
         if method != "GET" { render(); hostAlert("Annictの記録を更新できませんでした。"); return }
-        episodeButton.setTitle("Annict ⚠",for:.normal); episodeButton.accessibilityLabel = "Annict連携情報を再取得"
-        layer.borderColor = UIColor(red:1,green:167/255,blue:38/255,alpha:1).cgColor
-        markButton.isEnabled = false; onVisibility?(true)
+        showUnavailable()
       }
     }
+  }
+  func showUnavailable() {
+    guard api.accountReady else { onVisibility?(false); return }
+    episodeButton.setTitle("Annict ⚠",for:.normal); episodeButton.accessibilityLabel = "Annict連携情報を再取得"
+    layer.borderColor = UIColor(red:1,green:167/255,blue:38/255,alpha:1).cgColor
+    markButton.isEnabled = false; onVisibility?(true)
   }
   private func render() {
     guard let value else { onVisibility?(false); return }

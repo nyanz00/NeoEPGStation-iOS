@@ -7,6 +7,7 @@ private final class NeoFeatureProtocol: URLProtocol {
   static var readSaves = 0, writeSaves = 0
   static var profileRequests = 0, historyRequests = 0
   static var detailRequests = 0, episodeGets = 0
+  static var sessionCode = 200, listRequests = 0
   static var widths: [String:Bool] = [:]
   static var watched = Set<Int>(), failRefresh = false, reads = false, writes = true, authenticated = true, tokenSaved = false
   private var cancelled = false
@@ -20,17 +21,22 @@ private final class NeoFeatureProtocol: URLProtocol {
     Self.lock.lock()
     let user = request.value(forHTTPHeaderField:"X-EPGStation-User-Id") ?? ""
     Self.authenticated = Self.authenticated && ["7","9"].contains(user)
-    if path.hasSuffix("/playback") || path.hasSuffix("/playbackHistory") {
+    let historyPath = path.contains("/playbackHistory") || path.hasSuffix("/playback")
+    let publicPath = path == "/api/recorded" || path == "/api/recorded/\(id)" || path == "/api/users" || path == "/api/viewer-profiles" || path.hasSuffix("/session")
+    if historyPath {
       // Playback history deliberately uses only the active user, without a
       // locked-profile session (same public endpoint as the Web client).
       Self.historyRequests += 1
       Self.authenticated = Self.authenticated && request.value(forHTTPHeaderField:"X-Viewer-Session") == nil && request.value(forHTTPHeaderField:"X-Viewer-Profile-Id") == nil
-    } else {
+    } else if !publicPath {
       Self.profileRequests += 1
       Self.authenticated = Self.authenticated && request.value(forHTTPHeaderField:"X-Viewer-Session") == "fixture-session" && request.value(forHTTPHeaderField:"X-Viewer-Profile-Id") == (user == "7" ? "21" : "22")
     }
     var code = 200, delay = 0.0, result: [String:Any] = [:]
-    if path.hasSuffix("/annict/status") { result = ["configured":Self.reads,"writeConfigured":Self.writes,"viewerProfileId":21] }
+    if path == "/api/users" { result = ["users":[["id":7,"name":"Fixture user"],["id":9,"name":"Other user"]]] }
+    else if path == "/api/viewer-profiles" { result = ["profiles":[["id":21,"name":"Fixture profile","tvUserId":7,"lockRequired":true],["id":22,"name":"Other profile","tvUserId":9,"lockRequired":false]]] }
+    else if path.hasSuffix("/session") { code = Self.sessionCode; result = code == 200 ? ["valid":true] : ["message":"fixture session check failure"] }
+    else if path.hasSuffix("/annict/status") { result = ["configured":Self.reads,"writeConfigured":Self.writes,"viewerProfileId":21] }
     else if path.hasSuffix("/token") || path.hasSuffix("/write-token") {
       var body = request.httpBody ?? Data()
       if body.isEmpty, let input = request.httpBodyStream {
@@ -61,11 +67,16 @@ private final class NeoFeatureProtocol: URLProtocol {
       if id == 6 { delay = 0.2 }
     } else if path.hasSuffix("/playbackHistory") {
       Self.widths["history"] = URLComponents(url:request.url!,resolvingAgainstBaseURL:false)?.queryItems?.first(where: { $0.name == "isHalfWidth" })?.value == "true"
-      var item = Self.recording(id:101); item.removeValue(forKey:"dropLogFile")
-      result = ["items":[["recorded":item,"playback":["position":0,"duration":100,"watchedSeconds":0]]]]
+      result = ["items":(101..<105).map { id -> [String:Any] in
+        var value = Self.recording(id:id); value.removeValue(forKey:"dropLogFile")
+        return ["recorded":value,"playback":["position":0,"duration":100,"watchedSeconds":0]]
+      }]
+    } else if path.hasSuffix("/playbackHistory/settings") {
+      result = ["enabled":true,"limit":100]
     } else if path == "/api/recorded" {
       Self.widths["list"] = URLComponents(url:request.url!,resolvingAgainstBaseURL:false)?.queryItems?.first(where: { $0.name == "isHalfWidth" })?.value == "true"
-      result = ["records":[Self.recording(id:101)],"total":1]
+      Self.listRequests += 1; delay = 0.2
+      result = ["records":(101..<105).map { Self.recording(id:$0) },"total":4]
     } else if path == "/api/recorded/\(id)" {
       Self.detailRequests += 1; delay = 0.15
       Self.widths["detail"] = URLComponents(url:request.url!,resolvingAgainstBaseURL:false)?.queryItems?.first(where: { $0.name == "isHalfWidth" })?.value == "true"
@@ -88,6 +99,7 @@ private final class NeoFeatureProtocol: URLProtocol {
   }
   static func snapshot<T>(_ read: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return read() }
   static func failNextRefresh() { lock.lock(); failRefresh = true; lock.unlock() }
+  static func setSessionCode(_ value: Int) { lock.lock(); sessionCode = value; lock.unlock() }
 }
 
 @MainActor enum NeoRecordingFeaturesSmoke {
@@ -100,8 +112,10 @@ private final class NeoFeatureProtocol: URLProtocol {
     let saved = keys.map { UserDefaults.standard.object(forKey:$0) }
     defer { for (key,value) in zip(keys,saved) { if let value { UserDefaults.standard.set(value,forKey:key) } else { UserDefaults.standard.removeObject(forKey:key) } }; session.invalidateAndCancel() }
     var checks = [String:Bool]()
+    func progress(_ phase: String) { try? Data(phase.utf8).write(to:NeoPiPSmoke.directory.appendingPathComponent("ui-recording-features-progress.txt")) }
     api.isHalfWidthDisplayed = true
     let opening = await shell.smokeMeasureOpening()
+    progress("opening measured")
     checks.merge(opening.checks) { _,value in value }
     if let data = try? JSONSerialization.data(withJSONObject:opening.timings,options:.prettyPrinted) {
       try? data.write(to:NeoPiPSmoke.directory.appendingPathComponent("recording-opening-times.json"))
@@ -123,6 +137,8 @@ private final class NeoFeatureProtocol: URLProtocol {
     checks["visiblePreparationDeduplicatesRequests"] = NeoFeatureProtocol.snapshot { NeoFeatureProtocol.detailRequests == beforeDetails+1 }
     if let item = history?.items.first?.recorded {
       let prepared = NeoDetailPage(item:item,shell:shell); shell.smokeShowFeaturePage(prepared)
+      checks["detailBodyDeferredUntilSlide"] = prepared.smokeRenderCount == 0 && !prepared.openingContentFinished
+      await wait { prepared.openingContentFinished }
       checks["initialDetailUsesPreparedDropAndText"] = prepared.smokeDropText.contains("drop: 239") && prepared.smokeDropIsError && prepared.smokeTitleText == "第4話 テスト!"
       checks["initialDetailIncludesCachedAnnict"] = prepared.headerAccessory is NeoAnnictHeader
       let count = prepared.smokeRenderCount
@@ -140,6 +156,8 @@ private final class NeoFeatureProtocol: URLProtocol {
     checks["openAnimation150ms"] = shell.smokePushAnimationDuration == 0.15
     NeoAnnictPreferences.mode = "progress"; NeoAnnictPreferences.threshold = 90
     let settings = NeoSettingsCategoryPage(category:.annict,shell:shell); shell.smokeShowFeaturePage(settings)
+    progress("metadata and text preferences checked")
+    await wait { settings.openingContentFinished }
     checks["settingsInitialBuildOnce"] = settings.smokeRenderCount == 1
     settings.smokeConnectAnnict(write:false,token:"fixture-token")
     checks["tokenMutationDisablesControls"] = settings.smokeTokenControls.allSatisfy { !$0.connect.isEnabled && !$0.remove.isEnabled }
@@ -164,6 +182,7 @@ private final class NeoFeatureProtocol: URLProtocol {
     settings.smokeSaveRowGeometry()
     capture("recording-annict-settings"); shell.smokePopFeaturePage()
     let detail = NeoDetailPage(item:NeoRecordedPage.fixtures.records[0],shell:shell); shell.smokeShowFeaturePage(detail)
+    await wait { detail.openingContentFinished }
     checks["detailAvoidsDuplicateInitialBuild"] = detail.smokeRenderCount <= (shell.tablet ? 2 : 1)
     let header = detail.smokeAnnictControl()
     await wait { header?.smokeEpisode != nil }
@@ -204,6 +223,62 @@ private final class NeoFeatureProtocol: URLProtocol {
     info.smokeReanalyze(); await wait { !info.smokeMessage.isEmpty }
     checks["infoKeepsResultsWhenRefreshFails"] = info.smokeRows.count == 21 && info.smokeMessage.contains("Could not refresh")
     info.dismiss(animated:false); shell.smokePopFeaturePage()
+    let cancelledDetail = NeoDetailPage(item:original,shell:shell)
+    shell.smokeShowFeaturePage(cancelledDetail); shell.smokePopFeaturePage()
+    try? await Task.sleep(nanoseconds:150_000_000)
+    checks["returnCancelsUnstartedBodyConstruction"] = cancelledDetail.smokeRenderCount == 0 && !cancelledDetail.openingContentFinished
+
+    let list = NeoRecordedPage(shell:shell); shell.smokeShowFeaturePage(list)
+    progress("authentication failure checks")
+    await wait { list.smokeLoadSettled }
+    let secrets = NeoProfileSecrets(server:base), stored = String(repeating:"s",count:40)
+    try? secrets.save(21,token:stored)
+    NeoFeatureProtocol.setSessionCode(500)
+    list.smokeReload(); shell.account?.restore()
+    try? await Task.sleep(nanoseconds:50_000_000)
+    checks["oldRequestDoesNotStopNewLoading"] = list.smokeLoading
+    await wait { shell.account?.busy == false && shell.presentedViewController is UIAlertController }
+    await wait { list.smokeLoadSettled }
+    checks["sameUserVerificationFailureDoesNotHangList"] = list.smokeLoadSettled && api.viewer == "7" && !api.accountReady
+    checks["temporaryFailureKeepsSavedSession"] = (try? secrets.read(21)) == stored
+    let confirmation = shell.presentedViewController as? UIAlertController
+    checks["temporaryFailureDoesNotOfferMasterFallback"] = confirmation != nil && confirmation?.actions.contains(where: { $0.title == "masterへ戻る" }) == false
+    confirmation?.dismiss(animated:false)
+    let historyPage = NeoHistoryPage(shell:shell); shell.smokeShowFeaturePage(historyPage)
+    await wait { historyPage.smokeReady }
+    checks["historyReadableDuringAuthenticationFailure"] = historyPage.smokeReady && !api.accountReady
+    let privateBefore = NeoFeatureProtocol.snapshot { NeoFeatureProtocol.episodeGets }
+    _ = try? await api.annictEpisode(390)
+    checks["protectedFeaturesStayBlockedWhileUnverified"] = NeoFeatureProtocol.snapshot { NeoFeatureProtocol.episodeGets == privateBefore }
+    shell.smokePopFeaturePage()
+    NeoFeatureProtocol.setSessionCode(401)
+    let expired = try? await api.validateProfile(21,token:stored)
+    checks["explicitSessionRejectionIsInvalidAuthentication"] = expired == false
+    NeoFeatureProtocol.setSessionCode(200)
+    shell.account?.restore(); await wait { api.accountReady && shell.account?.busy == false }
+    checks["verificationRetryRestoresSelectedUser"] = api.accountReady && api.viewer == "7"
+    api.activate(user:"7",headers:["X-Viewer-Profile-Id":"21","X-Viewer-Session":"fixture-session"])
+    secrets.remove(21); await wait { list.smokeLoadSettled }
+
+    let baseline = NeoScrollFrameProbe(); baseline.start()
+    progress("scroll checks")
+    try? await Task.sleep(nanoseconds:300_000_000); let baselineTimes = baseline.finish()
+    list.smokePrefetchAllowed = true
+    let constructions = NeoDetailPage.smokeConstructions, detailGets = NeoFeatureProtocol.snapshot { NeoFeatureProtocol.detailRequests }
+    let scrolling = NeoScrollFrameProbe(); scrolling.start(); list.smokeScrollStart()
+    try? await Task.sleep(nanoseconds:600_000_000)
+    let scrollTimes = scrolling.finish()
+    checks["animatedScrollingWasExercised"] = list.smokeScrollOffset > 100 && scrollTimes.count > 5
+    checks["scrollingStartsNoDetailPrefetch"] = NeoFeatureProtocol.snapshot { NeoFeatureProtocol.detailRequests == detailGets }
+    checks["scrollingCreatesNoDetailScreens"] = NeoDetailPage.smokeConstructions == constructions
+    list.smokeScrollEnd()
+    await wait { NeoFeatureProtocol.snapshot { NeoFeatureProtocol.detailRequests > detailGets } }
+    checks["settledListFetchesOnlyData"] = NeoFeatureProtocol.snapshot { NeoFeatureProtocol.detailRequests > detailGets } && NeoDetailPage.smokeConstructions == constructions
+    if let data = try? JSONSerialization.data(withJSONObject:["baselineFrameIntervalsMs":baselineTimes,"scrollFrameIntervalsMs":scrollTimes],options:.prettyPrinted) {
+      try? data.write(to:NeoPiPSmoke.directory.appendingPathComponent("recording-scroll-times.json"))
+    }
+    list.smokePrefetchAllowed = false; api.pauseDetailPreparation(); shell.smokePopFeaturePage()
+    progress("automatic Annict checks")
     NeoAnnictPreferences.mode = "start"
     let start = NeoAnnictPlayback(api:api,recordingID:3)
     start.sample(0,duration:100,running:false,seeking:false,rate:1)
@@ -241,5 +316,12 @@ private final class NeoFeatureProtocol: URLProtocol {
     shell.showRoute("recorded")
     return checks
   }
+}
+
+@MainActor private final class NeoScrollFrameProbe: NSObject {
+  private var link: CADisplayLink?, last: CFTimeInterval?, samples: [Double] = []
+  func start() { link = CADisplayLink(target:self,selector:#selector(tick)); link?.add(to:.main,forMode:.common) }
+  @objc private func tick() { let now = CACurrentMediaTime(); if let last { samples.append((now-last)*1000) }; last = now }
+  func finish() -> [Double] { link?.invalidate(); link = nil; return samples }
 }
 #endif

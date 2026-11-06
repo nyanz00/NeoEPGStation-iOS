@@ -2,8 +2,9 @@ import Foundation
 
 struct NeoError: LocalizedError {
   let message: String
+  var statusCode: Int? = nil
   var errorDescription: String? { message }
-  init(_ message: String) { self.message = message }
+  init(_ message: String, statusCode: Int? = nil) { self.message = message; self.statusCode = statusCode }
 }
 enum NeoServerURL {
   static func normalize(_ input: String) throws -> URL {
@@ -482,7 +483,6 @@ final class NeoAPI {
   @MainActor private var episodeRevisions: [String:Int] = [:]
   @MainActor private var preparationQueue: [Int] = []
   @MainActor private var preparationWorkers: [UUID:Task<Void,Never>] = [:]
-  @MainActor var onPreparedDetail: (() -> Void)?
   private let headersLock = NSLock()
   private var authenticationHeaders: [String: String] = [:]
   var profileHeaders: [String: String] {
@@ -509,6 +509,10 @@ final class NeoAPI {
     headersLock.unlock()
     accountReady = true; identityRevision += 1
     NotificationCenter.default.post(name: .neoAccountChanged, object: self)
+  }
+  func suspendAuthentication() {
+    accountReady = false; profileHeaders = [:]; identityRevision += 1
+    NotificationCenter.default.post(name:.neoAccountChanged,object:self)
   }
   private func identitySnapshot() -> (String, [String: String]) {
     headersLock.lock(); defer { headersLock.unlock() }
@@ -597,9 +601,11 @@ final class NeoAPI {
       body: ["password": password.precomposedStringWithCanonicalMapping], headers: [:])
   }
   func validateProfile(_ id: Int, token: String) async throws -> Bool {
-    let value: NeoSessionValidity = try await request(url("/viewer-profiles/\(id)/session"),
-      headers: ["X-Viewer-Profile-Id": String(id), "X-Viewer-Session": token])
-    return value.valid
+    do {
+      let value: NeoSessionValidity = try await request(url("/viewer-profiles/\(id)/session"),
+        headers: ["X-Viewer-Profile-Id": String(id), "X-Viewer-Session": token])
+      return value.valid
+    } catch let error as NeoError where error.statusCode == 401 || error.statusCode == 403 { return false }
   }
   func playback(_ id: Int, user: String) async throws -> NeoPlayback {
     try await request(url("/recorded/\(id)/playback"), user: user, timeout: 3, headers: [:])
@@ -648,8 +654,11 @@ final class NeoAPI {
   func videoInfo(_ id: Int, force: Bool = false) async throws -> NeoVideoInfo {
     try await request(url("/videos/\(id)/info"),method:force ? "POST" : "GET")
   }
-  func annictStatus() async throws -> NeoAnnictStatus { try await request(url("/annict/status")) }
+  func annictStatus() async throws -> NeoAnnictStatus {
+    guard accountReady else { throw CancellationError() }; return try await request(url("/annict/status"))
+  }
   @MainActor func annictToken(_ token: String?, write: Bool, user: String? = nil, headers: [String:String]? = nil) async throws {
+    guard accountReady, user == nil || user == viewer, headers == nil || headers == profileHeaders else { throw CancellationError() }
     _ = try await response(url(write ? "/annict/write-token" : "/annict/token"),method:token == nil ? "DELETE" : "PUT",body:token.map { ["accessToken":$0] },user:user,headers:headers)
     episodeCache.removeAll(); episodeRequests.values.forEach { $0.cancel() }; episodeRequests.removeAll()
     for key in Array(episodeRevisions.keys) { episodeRevisions[key,default:0] += 1 }
@@ -681,15 +690,15 @@ final class NeoAPI {
     defer { if method == "GET", episodeRevisions[key,default:0] == generation { episodeRequests.removeValue(forKey:key) } }
     return try await active.value
   }
-  // Only the visible window is prepared. Two workers, at most four HTTP
+  // Only the settled visible window is prepared. One worker, at most two HTTP
   // requests, 16 pending records and 64 cached results bound work and memory.
   @MainActor func prepareDetails(_ ids: [Int]) {
     guard accountReady else { return }
     preparationQueue = Array(NSOrderedSet(array:ids).array.compactMap { $0 as? Int }.prefix(16))
     let revision = identityRevision, halfWidth = isHalfWidthDisplayed
-    while preparationWorkers.count < 2 && !preparationQueue.isEmpty {
+    while preparationWorkers.count < 1 && !preparationQueue.isEmpty {
       let token = UUID()
-      preparationWorkers[token] = Task { [weak self] in
+      preparationWorkers[token] = Task(priority:.utility) { [weak self] in
         guard let self else { return }
         defer {
           preparationWorkers.removeValue(forKey:token)
@@ -700,11 +709,11 @@ final class NeoAPI {
           async let detail = try? recording(id)
           async let episode = try? annictEpisode(id)
           _ = await (detail,episode)
-          if identityRevision == revision, isHalfWidthDisplayed == halfWidth { onPreparedDetail?() }
         }
       }
     }
   }
+  @MainActor func pauseDetailPreparation() { preparationQueue.removeAll() }
   @MainActor func checkpointVideoInfo(_ id: Int) async throws -> NeoCheckpointVideoInfo {
     let key = "\(identityRevision):\(id)"
     if let active = checkpointRequests[key] { return try await active.value }
@@ -751,9 +760,13 @@ final class NeoAPI {
       let message = (json?["errors"] as? String) ?? (json?["message"] as? String)
       if message == "視聴者プロフィールのロックを解除してください",
         let profile = request.value(forHTTPHeaderField: "X-Viewer-Profile-Id").flatMap(Int.init) {
-        DispatchQueue.main.async { [weak self] in self?.onLocked?(profile) }
+        let token = request.value(forHTTPHeaderField:"X-Viewer-Session")
+        DispatchQueue.main.async { [weak self] in
+          guard let self, self.profileHeaders["X-Viewer-Profile-Id"] == String(profile), self.profileHeaders["X-Viewer-Session"] == token else { return }
+          self.onLocked?(profile)
+        }
       }
-      throw NeoError(message ?? ([401,403].contains(http.statusCode) ? "アクセスできません。認証設定を確認してください。" : "サーバーがエラーを返しました（HTTP \(http.statusCode)）。"))
+      throw NeoError(message ?? ([401,403].contains(http.statusCode) ? "アクセスできません。認証設定を確認してください。" : "サーバーがエラーを返しました（HTTP \(http.statusCode)）。"),statusCode:http.statusCode)
     }
     return data
   }

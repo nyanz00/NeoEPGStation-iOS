@@ -33,6 +33,7 @@ final class NeoProfileSecrets {
 }
 
 @MainActor final class NeoAccountCoordinator {
+  private enum ResolutionFailure: Error { case missingUser }
   let api: NeoAPI
   private weak var shell: NeoShell?
   private let secrets: NeoProfileSecrets
@@ -48,8 +49,7 @@ final class NeoProfileSecrets {
   }
   func restore() {
     guard current, !busy, let user = Int(api.viewer), user > 0 else { return }
-    api.accountReady = false; api.identityRevision += 1
-    NotificationCenter.default.post(name: .neoAccountChanged, object: api)
+    api.suspendAuthentication()
     resolve(String(user), restoring: true)
   }
   // Deferred native menu stays anchored to the shared outlined selector.
@@ -93,8 +93,7 @@ final class NeoProfileSecrets {
         guard current, attempt == revision else { return }
         self.users = users.users; self.profiles = profiles.profiles
         guard let target = users.users.first(where: { String($0.id) == user && $0.id > 0 }) else {
-          if restoring { commit("master", profile: nil, token: nil) }
-          throw NeoError("選択したユーザーが見つかりません。")
+          throw ResolutionFailure.missingUser
         }
         let profile = profiles.profiles.first { $0.tvUserId == target.id }
         var token: String?
@@ -116,10 +115,12 @@ final class NeoProfileSecrets {
         guard current, attempt == revision else { return }
         busy = false
         if restoring { api.accountReady = false }
-        let alert = UIAlertController(title: "ユーザーを確認できません", message: error.localizedDescription, preferredStyle: .alert)
+        let missing = error is ResolutionFailure
+        let alert = UIAlertController(title:missing ? "ユーザーが見つかりません" : "ユーザー確認を完了できません",
+          message:missing ? "選択したユーザーが見つかりません。" : "ユーザーの選択は維持しています。接続を確認して再試行してください。",preferredStyle:.alert)
         alert.addAction(UIAlertAction(title: "再試行", style: .default) { [weak self] _ in self?.resolve(user, restoring: restoring) })
-        alert.addAction(UIAlertAction(title: restoring ? "masterへ戻る" : "キャンセル", style: .cancel) { [weak self] _ in
-          if restoring { self?.commit("master", profile: nil, token: nil) }
+        alert.addAction(UIAlertAction(title:restoring && missing ? "masterへ戻る" : "閉じる",style:.cancel) { [weak self] _ in
+          if restoring && missing { self?.commit("master", profile:nil,token:nil) }
         })
         host()?.present(alert, animated: true)
       }
@@ -180,10 +181,10 @@ final class NeoProfileSecrets {
     commit("master", profile: nil, token: nil)
   }
   private func sessionExpired(_ profile: Int) {
-    secrets.remove(profile)
     guard current, api.profileHeaders["X-Viewer-Profile-Id"] == String(profile) else { return }
+    secrets.remove(profile)
     let previous = api.viewer
-    commit("master", profile: nil, token: nil)
+    api.suspendAuthentication()
     resolve(previous, restoring: false)
   }
 #if targetEnvironment(simulator)

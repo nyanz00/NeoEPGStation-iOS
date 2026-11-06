@@ -138,7 +138,9 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   private var userFilterExplicit = false, users: [NeoViewer] = []
   private let userButton = NeoUserSelector()
   private var usersTask: Task<Void, Never>?, observers: [NSObjectProtocol] = []
-  private var preparationScheduled = false
+  private var preparationTask: Task<Void,Never>?
+  private var interacting = false, loadGeneration = 0
+  private var identityReloadNeeded = false
   private var returnRecordingID: Int?, returnOffset: CGPoint?, highlightID: Int?, highlightGeneration = 0
   private(set) var lastFadeDuration: TimeInterval = 0
   private let spinner = UIActivityIndicatorView(style: .medium)
@@ -177,8 +179,12 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
       guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
       if !self.userFilterExplicit {
         let id = Int(api.viewer).flatMap { $0 > 0 ? $0 : nil }
-        if id != self.locatedUserID { self.locatedUserID = id; self.clearCache(); self.reload(targetPage: 1) }
+        self.locatedUserID = id
       }
+      self.clearCache(); self.identityReloadNeeded = true
+      if self.viewIfLoaded?.window != nil, self.navigationController?.topViewController === self {
+        self.identityReloadNeeded = false; self.reload(targetPage:self.page)
+      } else { self.task?.cancel() }
       self.loadUsers()
       self.prepareVisibleDetails()
     })
@@ -220,6 +226,10 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
       if !collection.indexPathsForVisibleItems.contains(path) { collection.scrollToItem(at: path, at: .centeredVertically, animated: false) }
       showHighlight(id)
     }
+  }
+  override func viewWillAppear(_ animated: Bool) {
+    super.viewWillAppear(animated)
+    if identityReloadNeeded { identityReloadNeeded = false; reload(targetPage:page) }
   }
   func rememberDetail(_ id: Int) { returnRecordingID = id; returnOffset = collection.contentOffset; clearHighlight() }
   private func showHighlight(_ id: Int) {
@@ -275,7 +285,8 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   }
   @objc private func refreshList() { cache.removeAll(); cacheOrder.removeAll(); reload() }
   private func reload(targetPage: Int? = nil) {
-    task?.cancel(); spinner.startAnimating(); message.text = nil
+    task?.cancel(); loadGeneration += 1; let attempt = loadGeneration
+    spinner.startAnimating(); message.text = nil
     clearHighlight()
     let requestedPage = targetPage ?? page, query = keyword, oldest = reverse
     self.requestedPage = requestedPage
@@ -284,16 +295,19 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     let key = NeoRecordingQuery(page: requestedPage, keyword: query, reverse: oldest, userID: userID, filters: search, limit: limit)
     let entry = cache[key]
     let cached = entry.flatMap { Date().timeIntervalSince($0.stored) < 30 ? $0.result : nil }
-    collection.layer.removeAllAnimations(); collection.alpha = 0
+    collection.layer.removeAllAnimations(); collection.alpha = records.isEmpty ? 0 : 1
     let api = shell?.api, revision = shell?.api?.identityRevision, halfWidth = shell?.api?.isHalfWidthDisplayed
     task = Task { [weak self] in
       guard let self else { return }
+      defer {
+        if self.loadGeneration == attempt { self.spinner.stopAnimating(); self.refresh.endRefreshing(); self.collection.alpha = 1 }
+      }
       do {
         let result: NeoRecords
         if let cached { result = cached }
         else {
 #if targetEnvironment(simulator)
-        if self.shell?.smokeStage.isEmpty == false { result = Self.fixtures }
+        if self.shell?.smokeStage.isEmpty == false, api?.base.host != "recording-features.invalid" { result = Self.fixtures }
         else { guard let requestAPI = api else { return }; result = try await requestAPI.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search) }
 #else
         guard let requestAPI = api else { return }; result = try await requestAPI.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search)
@@ -337,24 +351,44 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
           self.shell?.showConnection(message: error.localizedDescription)
         } else { self.alert(error.localizedDescription) }
       }
-      self.spinner.stopAnimating(); self.refresh.endRefreshing()
     }
   }
   private func prepareVisibleDetails() {
-    guard !preparationScheduled, shell?.smokeStage.isEmpty == true else { return }
-    preparationScheduled = true
-    DispatchQueue.main.async { [weak self] in
-      guard let self else { return }; self.preparationScheduled = false
+    preparationTask?.cancel()
+#if targetEnvironment(simulator)
+    if shell?.smokeStage.isEmpty == false && !smokePrefetchAllowed { return }
+#endif
+    guard !interacting, !collection.isDragging, !collection.isDecelerating, viewIfLoaded?.window != nil,
+      navigationController?.topViewController === self else { return }
+    preparationTask = Task { [weak self] in
+      try? await Task.sleep(nanoseconds:250_000_000)
+      guard let self, !Task.isCancelled, !self.interacting, !self.collection.isDragging, !self.collection.isDecelerating,
+        self.navigationController?.topViewController === self else { return }
       let ids = self.collection.indexPathsForVisibleItems.sorted().compactMap { self.records.indices.contains($0.item) ? self.records[$0.item].id : nil }
       self.shell?.api?.prepareDetails(ids)
-      self.shell?.prepareDetailPages(Array(ids.prefix(2)))
     }
   }
+  func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { interacting = true; preparationTask?.cancel(); shell?.api?.pauseDetailPreparation() }
+  func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) { if !decelerate { interacting = false; prepareVisibleDetails() } }
+  func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { interacting = false; prepareVisibleDetails() }
+  override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); preparationTask?.cancel(); shell?.api?.pauseDetailPreparation() }
   private func selectPage(_ value: Int) {
     guard value != page, (1...max(1, Int(ceil(Double(total) / Double(pageLength))))).contains(value) else { return }
     reload(targetPage: value)
   }
 #if targetEnvironment(simulator)
+  var smokePrefetchAllowed = false
+  var smokeLoading: Bool { spinner.isAnimating }
+  func smokeReload() { reload() }
+  func smokeScrollStart() {
+    preparationTask?.cancel(); scrollViewWillBeginDragging(collection)
+    let original = Self.fixtures.records[0]
+    records = (300..<360).map { NeoRecording(id:$0,name:original.name,startAt:original.startAt,endAt:original.endAt,isRecording:false,description:original.description,extended:nil,channelId:nil,channelName:nil,thumbnails:nil,videoFiles:original.videoFiles) }
+    total = records.count; collection.reloadData(); collection.layoutIfNeeded()
+    collection.setContentOffset(CGPoint(x:0,y:min(collection.contentSize.height-collection.bounds.height,1200)),animated:true)
+  }
+  func smokeScrollEnd() { scrollViewDidEndDragging(collection,willDecelerate:false) }
+  var smokeScrollOffset: CGFloat { collection.contentOffset.y }
   var smokeCurrentPage: Int { page }
   var smokeSelectorAligned: Bool {
     view.layoutIfNeeded()
@@ -438,7 +472,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     footer.configure(page: page, count: max(1, Int(ceil(Double(total) / Double(pageLength)))), mobile: collection.bounds.width <= 500) { [weak self] value in self?.selectPage(value) }
     return footer
   }
-  deinit { task?.cancel(); usersTask?.cancel(); observers.forEach(NotificationCenter.default.removeObserver) }
+  deinit { task?.cancel(); usersTask?.cancel(); preparationTask?.cancel(); observers.forEach(NotificationCenter.default.removeObserver) }
 #if targetEnvironment(simulator)
   func smokeOpenSearch() { search() }
   func smokeListFeatures() async -> Bool {

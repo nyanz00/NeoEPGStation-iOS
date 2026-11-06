@@ -174,12 +174,48 @@ final class NeoPlayerTransition: NSObject, UIViewControllerTransitioningDelegate
 }
 
 class NeoPage: UIViewController {
-  func prepareOpening(size: CGSize) {
-    guard size.width > 0, size.height > 0 else { return }
-    loadViewIfNeeded(); view.frame = CGRect(origin:.zero,size:size); view.setNeedsLayout(); view.layoutIfNeeded()
+  var defersOpeningContent: Bool { false }
+  private(set) var openingContentFinished = false
+  private var openingLink: CADisplayLink?, openingTask: Task<Void,Never>?
+  private var openingTicks = 0
+  private var openingGeneration = 0
+  private let openingSpinner = UIActivityIndicatorView(style:.medium)
+  func buildOpeningContent() async { }
+  override func viewWillAppear(_ animated: Bool) {
+    super.viewWillAppear(animated)
+    guard defersOpeningContent, !openingContentFinished, openingTask == nil else { return }
+    body.alpha = 0; openingSpinner.startAnimating(); openingTicks = 0
+    openingLink?.invalidate(); openingLink = CADisplayLink(target:self,selector:#selector(openingFrame))
+    openingLink?.add(to:.main,forMode:.common)
   }
-  func discardPreparation() {
-    if navigationController == nil { viewIfLoaded?.removeFromSuperview() }
+  @objc private func openingFrame() {
+    guard view.window != nil, navigationController?.topViewController === self else { return }
+    openingTicks += 1; guard openingTicks >= 2 else { return }
+    if transitionCoordinator != nil {
+      guard let layer = view.layer.presentation(), layer.affineTransform().tx < view.bounds.width-0.5 else { return }
+    }
+    openingLink?.invalidate(); openingLink = nil
+    openingGeneration += 1; let attempt = openingGeneration
+    openingTask = Task { [weak self] in
+      guard let self else { return }
+#if targetEnvironment(simulator)
+      if let began = smokeOpeningBegan { smokeOpeningTimes["handlerToContentStartMs"] = (CACurrentMediaTime()-began)*1000 }
+#endif
+      await buildOpeningContent()
+      guard !Task.isCancelled, openingGeneration == attempt, navigationController?.topViewController === self else {
+        if openingGeneration == attempt { openingTask = nil }; return
+      }
+      openingContentFinished = true; openingSpinner.stopAnimating(); openingTask = nil
+#if targetEnvironment(simulator)
+      if let began = smokeOpeningBegan { smokeOpeningTimes["handlerToContentReadyMs"] = (CACurrentMediaTime()-began)*1000 }
+#endif
+      UIView.animate(withDuration:UIAccessibility.isReduceMotionEnabled ? 0 : 0.1) { self.body.alpha = 1; self.headerAccessory?.alpha = 1 }
+    }
+  }
+  override func viewWillDisappear(_ animated: Bool) {
+    super.viewWillDisappear(animated); openingLink?.invalidate(); openingLink = nil
+    openingGeneration += 1
+    openingTask?.cancel(); openingTask = nil; openingSpinner.stopAnimating()
   }
   override func loadView() {
     view = UIView(frame:CGRect(origin:.zero,size:shell?.initialPageSize ?? UIScreen.main.bounds.size))
@@ -191,7 +227,7 @@ class NeoPage: UIViewController {
   weak var shell: NeoShell?
   let header = UIView(), body = UIView()
   let titleLabel = NeoStyle.label(size: 20, bold: true)
-  var headerAccessory: UIView? { didSet { guard oldValue !== headerAccessory else { return }; oldValue?.removeFromSuperview(); if let headerAccessory { header.addSubview(headerAccessory) }; view.setNeedsLayout() } }
+  var headerAccessory: UIView? { didSet { guard oldValue !== headerAccessory else { return }; oldValue?.removeFromSuperview(); if let headerAccessory { headerAccessory.alpha = body.alpha; header.addSubview(headerAccessory) }; view.setNeedsLayout() } }
   private var menu: UIButton!, back: UIButton!
   var actions: [UIView] = [] { didSet { oldValue.forEach { $0.removeFromSuperview() }; actions.forEach(header.addSubview); view.setNeedsLayout() } }
   init(title: String, shell: NeoShell) { super.init(nibName: nil, bundle: nil); self.shell = shell; titleLabel.text = title }
@@ -213,6 +249,7 @@ class NeoPage: UIViewController {
     back = NeoStyle.iconButton("ArrowBack", label: "戻る") { [weak self] in self?.shell?.goBack() }
     header.addSubview(menu); header.addSubview(back); header.addSubview(titleLabel)
     let line = UIView(); line.backgroundColor = UIColor.white.withAlphaComponent(0.18); line.tag = 701; header.addSubview(line)
+    if defersOpeningContent { body.alpha = 0; view.addSubview(openingSpinner) }
     layoutChrome()
   }
   override func viewDidLayoutSubviews() {
@@ -222,6 +259,7 @@ class NeoPage: UIViewController {
   private func layoutChrome() {
     let width = view.bounds.width; header.frame = CGRect(x: 0, y: 0, width: width, height: 56)
     body.frame = CGRect(x: 0, y: 56, width: width, height: max(0, view.bounds.height - 56))
+    openingSpinner.center = CGPoint(x:width/2,y:body.frame.minY+40)
     menu.frame = CGRect(x: 4, y: 6, width: 44, height: 44)
     menu.isHidden = shell?.api == nil
     let canBack = (navigationController?.viewControllers.count ?? 1) > 1 || shell?.canReturnToHistory == true
@@ -241,6 +279,19 @@ class NeoPage: UIViewController {
     let alert = UIAlertController(title: nil, message: text, preferredStyle: .alert)
     alert.addAction(UIAlertAction(title: "閉じる", style: .cancel)); present(alert, animated: true)
   }
+  deinit { openingLink?.invalidate(); openingTask?.cancel() }
+}
+
+@MainActor enum NeoContentFrame {
+  static func next() async {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void,Never>) in NeoContentFrameWaiter(continuation).start() }
+  }
+}
+@MainActor private final class NeoContentFrameWaiter: NSObject {
+  private var continuation: CheckedContinuation<Void,Never>?, link: CADisplayLink?
+  init(_ continuation: CheckedContinuation<Void,Never>) { self.continuation = continuation }
+  func start() { link = CADisplayLink(target:self,selector:#selector(tick)); link?.add(to:.main,forMode:.common) }
+  @objc private func tick() { link?.invalidate(); link = nil; continuation?.resume(); continuation = nil }
 }
 
 // The same drawer content is used by navigation and fullscreen playback.
@@ -562,49 +613,10 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let began = CACurrentMediaTime()
     dismissPopup()
     (active?.topViewController as? NeoRecordedPage)?.rememberDetail(recording.id)
-    let candidate = preparedDetails.removeValue(forKey:detailPageKey(recording.id))
-    let prepared = api?.cachedRecording(recording.id) == nil || api?.cachedAnnictEpisode(recording.id) == nil ? nil : candidate
-    if prepared == nil { candidate?.discardPreparation() }
-    pushPage(requestedAt:began) { prepared ?? NeoDetailPage(item:recording,shell:self) }
-  }
-  private var preparedDetails: [String:NeoDetailPage] = [:]
-  private var warmingDetailIDs: [Int] = []
-  private func detailPageKey(_ id: Int) -> String {
-    "\(api?.base.absoluteString ?? ""):\(api?.identityRevision ?? -1):\(api?.isHalfWidthDisplayed ?? true):\(id):\(pageSize)"
+    pushPage(requestedAt:began) { NeoDetailPage(item:recording,shell:self) }
   }
   var pageSize: CGSize { active?.view.bounds.size ?? content.bounds.size }
   var initialPageSize: CGSize { content.bounds.width > 0 ? content.bounds.size : UIScreen.main.bounds.size }
-  func mountPreparedPage(_ page: NeoPage) {
-    page.prepareOpening(size:pageSize)
-    // UITableView postpones cell realization while detached from a window.
-    // Keep prepared views behind the opaque active navigation view; they have
-    // no child-controller appearance and cannot intercept foreground touches.
-    if page.view.superview == nil {
-      let host = (active?.topViewController as? NeoPage)?.view ?? content
-      host.insertSubview(page.view,at:0)
-    }
-    page.view.setNeedsLayout(); page.view.layoutIfNeeded()
-  }
-  func prepareDetailPages(_ ids: [Int]) {
-    guard let api, smokeStage.isEmpty else { return }
-    warmingDetailIDs = Array(ids.prefix(2))
-    api.onPreparedDetail = { [weak self,weak api] in
-      guard let self, let api, self.api === api else { return }; self.warmPreparedDetails()
-    }
-    warmPreparedDetails()
-  }
-  private func warmPreparedDetails() {
-    guard let api, active?.topViewController is NeoRecordedPage || active?.topViewController is NeoHistoryPage else { return }
-    let keys = warmingDetailIDs.map(detailPageKey)
-    for (key,page) in preparedDetails where !keys.contains(key) { page.discardPreparation() }
-    preparedDetails = preparedDetails.filter { keys.contains($0.key) }
-    for id in warmingDetailIDs {
-      let key = detailPageKey(id)
-      guard preparedDetails[key] == nil, let item = api.cachedRecording(id), api.cachedAnnictEpisode(id) != nil else { continue }
-      let page = NeoDetailPage(item:item,shell:self); mountPreparedPage(page)
-      preparedDetails[key] = page
-    }
-  }
   func pushPage(requestedAt: CFTimeInterval = CACurrentMediaTime(), _ make: () -> NeoPage) {
 #if targetEnvironment(simulator)
     let began = requestedAt
@@ -1069,27 +1081,26 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       showRoute(kind == "detail" ? "recorded" : "settings"); active?.popToRootViewController(animated:false); view.layoutIfNeeded()
       if kind == "detail" {
         let item = NeoRecordedPage.fixtures.records[0]
-        if !cold, let api, let value = try? await api.recording(item.id) {
+        if !cold, let api {
+          _ = try? await api.recording(item.id)
           _ = try? await api.annictEpisode(item.id)
-          let prepared = NeoDetailPage(item:value,shell:self); mountPreparedPage(prepared)
-          preparedDetails[detailPageKey(item.id)] = prepared
         }
         openDetail(item)
       }
       else if let root = active?.topViewController as? NeoSettingsPage {
-        if !cold { await root.smokePrepareOpening() }
         checks["settingsTapDoesNotWaitForScroll"] = root.smokeTapDeliveryImmediate
         root.smokeOpenCategory(kind == "general" ? .general : .viewing)
       }
       let page = active?.topViewController as? NeoPage
       for _ in 0..<100 {
-        if page?.smokeOpeningTimes["handlerToFirstMovementMs"] != nil && active?.transitionCoordinator == nil { break }
+        if page?.smokeOpeningTimes["handlerToFirstMovementMs"] != nil && page?.openingContentFinished == true && active?.transitionCoordinator == nil { break }
         try? await Task.sleep(nanoseconds:10_000_000)
       }
       timings[name] = page?.smokeOpeningTimes ?? [:]
       checks[name+"FirstMovementMeasured"] = page?.smokeOpeningTimes["handlerToFirstMovementMs"] != nil
+      checks[name+"ContentBuiltAfterSlideStarted"] = (page?.smokeOpeningTimes["handlerToContentStartMs"] ?? 0)+1 >= (page?.smokeOpeningTimes["handlerToFirstMovementMs"] ?? .infinity)
       if name == "viewing", let settings = page as? NeoSettingsCategoryPage {
-        checks["viewingPreparationRealizesVisibleCells"] = (settings.smokeOpeningTimes["preparedVisibleCells"] ?? 0) > 0
+        checks["viewingBuildStartsAfterFirstMovement"] = (settings.smokeOpeningTimes["handlerToContentStartMs"] ?? 0)+1 >= (settings.smokeOpeningTimes["handlerToFirstMovementMs"] ?? .infinity)
         checks["viewingListRendersVisibleRowsAndReachesBottom"] = settings.smokeViewingListScrolls()
         checks["viewingVisibleControlsHaveSizeAndFit"] = settings.smokeVisibleViewingControlsFit
         settings.smokeSaveRowGeometry()
@@ -1100,7 +1111,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       }
       active?.popToRootViewController(animated:false)
     }
-    checks["preparedOpeningWithin100ms"] = ["general","viewing","detail"].allSatisfy { (timings[$0]?["handlerToFirstMovementMs"] ?? .infinity) <= 100 }
+    checks["cachedDataOpeningWithin100ms"] = ["general","viewing","detail"].allSatisfy { (timings[$0]?["handlerToFirstMovementMs"] ?? .infinity) <= 100 }
     checks["coldOpeningWithin100ms"] = ["generalCold","viewingCold","detailCold"].allSatisfy { (timings[$0]?["handlerToFirstMovementMs"] ?? .infinity) <= 100 }
     return (checks,timings)
   }
