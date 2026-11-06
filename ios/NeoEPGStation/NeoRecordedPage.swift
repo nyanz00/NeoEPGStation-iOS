@@ -138,6 +138,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   private var userFilterExplicit = false, users: [NeoViewer] = []
   private let userButton = NeoUserSelector()
   private var usersTask: Task<Void, Never>?, observers: [NSObjectProtocol] = []
+  private var preparationScheduled = false
   private var returnRecordingID: Int?, returnOffset: CGPoint?, highlightID: Int?, highlightGeneration = 0
   private(set) var lastFadeDuration: TimeInterval = 0
   private let spinner = UIActivityIndicatorView(style: .medium)
@@ -179,11 +180,16 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         if id != self.locatedUserID { self.locatedUserID = id; self.clearCache(); self.reload(targetPage: 1) }
       }
       self.loadUsers()
+      self.prepareVisibleDetails()
     })
     observers.append(NotificationCenter.default.addObserver(forName: .neoRecordingPreferencesChanged, object: nil, queue: .main) { [weak self] note in
       guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
       if !api.highlightRecorded { self.clearHighlight() }
       if self.pageLength != api.recordedLength { self.pageLength = api.recordedLength; self.clearCache(); self.reload(targetPage: 1) }
+    })
+    observers.append(NotificationCenter.default.addObserver(forName:.neoTextPreferencesChanged,object:nil,queue:.main) { [weak self] note in
+      guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
+      self.task?.cancel(); self.clearCache(); self.records = []; self.collection.reloadData(); self.reload(targetPage:self.page)
     })
     actions = [NeoStyle.iconButton("SearchOutlined", label: "録画検索") { [weak self] in self?.search() },
       NeoStyle.iconButton("MoreVert", label: "録画一覧メニュー") { [weak self] in self?.showOptions() }]
@@ -204,6 +210,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   func reloadLabels() { collection.reloadData() }
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
+    prepareVisibleDetails()
     guard let id = returnRecordingID else { return }
     returnRecordingID = nil
     collection.layoutIfNeeded()
@@ -278,7 +285,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     let entry = cache[key]
     let cached = entry.flatMap { Date().timeIntervalSince($0.stored) < 30 ? $0.result : nil }
     collection.layer.removeAllAnimations(); collection.alpha = 0
-    let api = shell?.api
+    let api = shell?.api, revision = shell?.api?.identityRevision, halfWidth = shell?.api?.isHalfWidthDisplayed
     task = Task { [weak self] in
       guard let self else { return }
       do {
@@ -291,6 +298,8 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
 #else
         guard let api else { return }; result = try await api.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search)
 #endif
+          try Task.checkCancellation()
+          guard self.shell?.api === api, api?.identityRevision == revision, api?.isHalfWidthDisplayed == halfWidth else { return }
           self.cache[key] = (result, Date()); self.cacheOrder.removeAll { $0 == key }; self.cacheOrder.append(key)
           if self.cacheOrder.count > 12 { self.cache.removeValue(forKey: self.cacheOrder.removeFirst()) }
         }
@@ -301,12 +310,13 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         // Show the list immediately. Cells share asynchronous thumbnail loads;
         // preparing every image first held the entire list for up to 400ms.
         let late = Set(urls)
-        guard self.shell?.api === api else { return }
+        guard self.shell?.api === api, api?.identityRevision == revision, api?.isHalfWidthDisplayed == halfWidth else { return }
         self.page = requestedPage; self.records = result.records; self.total = result.total
         self.lateThumbnails = late
         self.message.text = result.records.isEmpty ? "録画がありません" : nil
         self.collection.reloadData(); self.collection.setContentOffset(.zero, animated: false)
         self.collection.layoutIfNeeded()
+        self.prepareVisibleDetails()
         if let id = self.focusedRecordingID, let index = result.records.firstIndex(where: { $0.id == id }) {
           self.collection.scrollToItem(at: IndexPath(item: index, section: 0), at: .centeredVertically, animated: false)
           self.showHighlight(id)
@@ -328,6 +338,16 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         } else { self.alert(error.localizedDescription) }
       }
       self.spinner.stopAnimating(); self.refresh.endRefreshing()
+    }
+  }
+  private func prepareVisibleDetails() {
+    guard !preparationScheduled, shell?.smokeStage.isEmpty == true else { return }
+    preparationScheduled = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }; self.preparationScheduled = false
+      let ids = self.collection.indexPathsForVisibleItems.sorted().compactMap { self.records.indices.contains($0.item) ? self.records[$0.item].id : nil }
+      self.shell?.api?.prepareDetails(ids)
+      self.shell?.prepareDetailPages(Array(ids.prefix(2)))
     }
   }
   private func selectPage(_ value: Int) {
@@ -399,6 +419,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   }
   func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) { shell?.openDetail(records[indexPath.item]) }
   func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+    prepareVisibleDetails()
     (cell as? NeoRecordedCard)?.mobile = mobile
   }
   func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize { CGSize(width: itemWidth, height: cardHeight) }

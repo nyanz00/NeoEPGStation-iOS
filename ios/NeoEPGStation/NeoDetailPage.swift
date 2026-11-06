@@ -10,6 +10,7 @@ final class NeoDetailPage: NeoPage {
   private var analysisTask: Task<Void, Never>?
   private var annict: NeoAnnictHeader?
   private var firstAppearance = true
+  private var metadataTitle: UILabel?, metadataTexts: [UILabel] = []
   private let dropStatus = NeoStyle.label(size: 14, muted: true)
   private lazy var playButton = NeoStyle.recordingButton("PLAY", icon: "PlayArrowOutlined") { [weak self] in self?.selectFile() }
   private lazy var streamingButton = NeoStyle.recordingButton("STREAMING", icon: "PlayCircleOutlineOutlined") { [weak self] in self?.selectStreamingFile() }
@@ -23,7 +24,10 @@ final class NeoDetailPage: NeoPage {
   private lazy var moreButton: UIButton = NeoStyle.iconButton("MoreVert", label: "詳細メニューを開く") { [weak self] in
     guard let self else { return }; self.showRecordingMenu(self.item, anchor: self.moreButton, detail: true)
   }
-  init(item: NeoRecording, shell: NeoShell) { self.item = item; super.init(title: "録画詳細", shell: shell) }
+  init(item: NeoRecording, shell: NeoShell) {
+    self.item = shell.api?.cachedRecording(item.id) ?? item.displayed(halfWidth:shell.api?.isHalfWidthDisplayed ?? true)
+    super.init(title: "録画詳細", shell: shell)
+  }
   required init?(coder: NSCoder) { fatalError() }
   override func viewDidLoad() {
     super.viewDidLoad(); body.addSubview(scroll); body.addSubview(loading)
@@ -39,26 +43,36 @@ final class NeoDetailPage: NeoPage {
       stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -24)])
     wide = (navigationController?.view.bounds.width ?? view.bounds.width) >= 900
     render()
+    if let api = shell?.api {
+      let control = NeoAnnictHeader(api:api,recordingID:item.id,host:self)
+      control.onVisibility = { [weak self,weak control] visible in self?.headerAccessory = visible ? control : nil }
+      annict = control; control.load()
+    }
+    refreshMetadata()
   }
-  override func viewDidAppear(_ animated: Bool) {
-    super.viewDidAppear(animated)
-    // The list already supplied enough metadata to draw this page. Fetch and
-    // rebuild the complete result after the push, away from its first frame.
-    if shell?.smokeStage.isEmpty != false { annict?.load() }
-    task?.cancel(); loading.startAnimating()
+  private func refreshMetadata() {
+    task?.cancel()
     let api = shell?.api, id = item.id
     task = Task { [weak self] in
       guard let self else { return }
       do {
 #if targetEnvironment(simulator)
-        if self.shell?.smokeStage.isEmpty == false { self.loading.stopAnimating(); return }
+        if self.shell?.smokeStage.isEmpty == false, api?.base.host != "recording-features.invalid" { self.loading.stopAnimating(); return }
 #endif
         guard let api else { return }
         let item = try await api.recording(id); try Task.checkCancellation()
-        self.item = item; self.render(); self.prefetchCheckpointAnalysis(api: api)
+        let sameStructure = self.item.videoFiles?.map(\.id) == item.videoFiles?.map(\.id)
+          && self.item.thumbnails == item.thumbnails && self.metadataTexts.count == [item.description,item.extended].compactMap({ $0 }).count
+        self.item = item
+        if sameStructure { self.updateMetadata() } else { self.render() }
+      } catch is CancellationError { return
       } catch { if !Task.isCancelled { self.alert(error.localizedDescription) } }
       self.loading.stopAnimating()
     }
+  }
+  override func viewDidAppear(_ animated: Bool) {
+    super.viewDidAppear(animated)
+    if let api = shell?.api { prefetchCheckpointAnalysis(api:api) }
   }
   private func prefetchCheckpointAnalysis(api: NeoAPI) {
     guard NeoPlaybackExperiment.selected == .checkpointPlayer, NeoPlaybackExperiment.checkpointMode == .automatic,
@@ -82,12 +96,10 @@ final class NeoDetailPage: NeoPage {
     if wide != isWide { wide = isWide; render() }
   }
   override func viewWillAppear(_ animated: Bool) {
-    super.viewWillAppear(animated); if firstAppearance { firstAppearance = false } else { render() }
-    if annict == nil, let api = shell?.api {
-      let control = NeoAnnictHeader(api:api,recordingID:item.id,host:self)
-      control.onVisibility = { [weak self,weak control] visible in self?.headerAccessory = visible ? control : nil }
-      annict = control
-    }
+    super.viewWillAppear(animated)
+    if let value = shell?.api?.cachedRecording(item.id) { item = value; updateMetadata() }
+    annict?.load()
+    if firstAppearance { firstAppearance = false } else { refreshMetadata(); annict?.load() }
   }
   func refreshCapabilities() {
     guard isViewLoaded else { return }
@@ -113,16 +125,10 @@ final class NeoDetailPage: NeoPage {
     thumbnailSize = [thumbnail.heightAnchor.constraint(equalTo: thumbnail.widthAnchor, multiplier: 9/16)]
     if wide { thumbnailSize.append(thumbnail.widthAnchor.constraint(equalToConstant: 400)) }
     NSLayoutConstraint.activate(thumbnailSize)
-    let title = NeoStyle.label(item.name, size: 20, bold: true); title.numberOfLines = 0; info.addArrangedSubview(title)
+    let title = NeoStyle.label(item.name, size: 20, bold: true); title.numberOfLines = 0; info.addArrangedSubview(title); metadataTitle = title
     let channel = item.channelName ?? item.channelId.flatMap { shell?.channels[$0] } ?? item.channelId.map(String.init) ?? ""
     info.addArrangedSubview(NeoStyle.label(channel, size: 16))
     info.addArrangedSubview(NeoStyle.label(NeoProgramText.interval(start: item.startAt, end: item.endAt), size: 14, muted: true))
-    dropStatus.text = NeoProgramText.dropSummary(item)
-    let hasErrors = item.dropLogFile?.hasErrors == true
-    dropStatus.textColor = hasErrors ? .systemRed : NeoStyle.muted
-    dropStatus.font = .systemFont(ofSize: 14, weight: hasErrors ? .bold : .regular)
-    dropStatus.isUserInteractionEnabled = item.dropLogFile != nil
-    dropStatus.accessibilityTraits = item.dropLogFile == nil ? .staticText : .button
     info.addArrangedSubview(dropStatus)
     moreButton.isEnabled = !(item.videoFiles ?? []).isEmpty
     if !(item.videoFiles ?? []).isEmpty {
@@ -135,9 +141,24 @@ final class NeoDetailPage: NeoPage {
       Int(shell?.api?.viewer ?? "master").map({ $0 > 0 }) == true {
       stack.addArrangedSubview(beginningButton)
     }
+    metadataTexts.removeAll()
     for text in [item.description, item.extended].compactMap({ $0 }) {
-      let label = NeoStyle.label(text); label.numberOfLines = 0; stack.addArrangedSubview(label)
+      let label = NeoStyle.label(text); label.numberOfLines = 0; stack.addArrangedSubview(label); metadataTexts.append(label)
     }
+    updateMetadata()
+  }
+  private func updateMetadata() {
+    if metadataTitle?.text != item.name { metadataTitle?.text = item.name }
+    for (label,text) in zip(metadataTexts,[item.description,item.extended].compactMap({ $0 })) {
+      if label.text != text { label.text = text }
+    }
+    let text = NeoProgramText.dropSummary(item)
+    if dropStatus.text != text { dropStatus.text = text }
+    let hasErrors = item.dropLogFile?.hasErrors == true
+    dropStatus.textColor = hasErrors ? .systemRed : NeoStyle.muted
+    dropStatus.font = .systemFont(ofSize:14,weight:hasErrors ? .bold : .regular)
+    dropStatus.isUserInteractionEnabled = item.dropLogFile != nil
+    dropStatus.accessibilityTraits = item.dropLogFile == nil ? .staticText : .button
   }
   private func selectFile(fromBeginning: Bool = false) {
     shell?.showPopup(anchor: playButton, entries: (item.videoFiles ?? []).map { file in
@@ -186,6 +207,8 @@ final class NeoDetailPage: NeoPage {
   func smokeAnnictControl() -> NeoAnnictHeader? { annict?.load(); return annict }
   func smokeOpenMenu() { showRecordingMenu(item, anchor: moreButton, detail: true) }
   var smokeDropText: String { dropStatus.text ?? "" }
+  var smokeTitleText: String { metadataTitle?.text ?? "" }
+  var smokeDropIsError: Bool { dropStatus.textColor == .systemRed }
   var smokePlayFrame: CGRect { playButton.convert(playButton.bounds, to: shell?.view) }
   var smokeButtonsInOneRow: Bool { buttonRow.buttons.count == 3 && buttonRow.buttons.allSatisfy { $0.frame.minY == 0 && $0.frame.maxX <= buttonRow.bounds.width + 0.5 } }
   var smokeButtonTitles: [String] { buttonRow.buttons.compactMap { $0.configuration?.title } }

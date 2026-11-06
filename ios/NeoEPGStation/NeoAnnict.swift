@@ -127,6 +127,9 @@ final class NeoAnnictPlayback: NSObject {
     task?.cancel(); revision = api.identityRevision; let attempt = revision
     let user = api.viewer, headers = api.profileHeaders
     guard api.accountReady else { onVisibility?(false); return }
+    if method == "GET", let cached = api.cachedAnnictEpisode(recordingID) {
+      value = cached; render(); return
+    }
     markButton.isEnabled = false
     task = Task { [weak self] in
       guard let self, !Task.isCancelled, api.identityRevision == attempt else { return }
@@ -135,6 +138,7 @@ final class NeoAnnictPlayback: NSObject {
         guard !Task.isCancelled, api.identityRevision == attempt else { return }
         value = info; render()
         if method == "PUT" || method == "DELETE" { NotificationCenter.default.post(name:.neoAnnictChanged,object:api,userInfo:["recordingID":recordingID]) }
+      } catch is CancellationError { return
       } catch {
         guard !Task.isCancelled, api.identityRevision == attempt else { return }
         if method != "GET" { render(); hostAlert("Annictの記録を更新できませんでした。"); return }

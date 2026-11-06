@@ -24,8 +24,8 @@ struct NeoVideoFile: Decodable {
   let id: Int; let name: String; let type: String; let size: Double; let filename: String?
 }
 struct NeoRecording: Decodable {
-  let id: Int; let name: String; let startAt: Double; let endAt: Double; let isRecording: Bool
-  let description: String?; let extended: String?; let channelId: Int?; let channelName: String?
+  let id: Int; var name: String; let startAt: Double; let endAt: Double; let isRecording: Bool
+  var description: String?; var extended: String?; let channelId: Int?; let channelName: String?
   let thumbnails: [Int]?; let videoFiles: [NeoVideoFile]?
   var ruleId: Int? = nil
   var isProtected: Bool? = nil
@@ -34,6 +34,12 @@ struct NeoRecording: Decodable {
   var genre1: Int? = nil; var subGenre1: Int? = nil
   var genre2: Int? = nil; var subGenre2: Int? = nil
   var genre3: Int? = nil; var subGenre3: Int? = nil
+  func displayed(halfWidth: Bool) -> Self {
+    guard halfWidth else { return self }
+    var copy = self; copy.name = NeoProgramText.halfWidth(name)
+    copy.description = description.map(NeoProgramText.halfWidth); copy.extended = extended.map(NeoProgramText.halfWidth)
+    return copy
+  }
 }
 struct NeoDropLog: Decodable {
   let id: Int; let errorCnt: Int; let dropCnt: Int; let scramblingCnt: Int
@@ -327,8 +333,16 @@ enum NeoProgramText {
   static func dropSummary(_ item: NeoRecording) -> String {
     let drop = item.dropLogFile
     let total = (item.videoFiles ?? []).reduce(0) { $0 + $1.size }
-    return "drop: \(drop?.dropCnt ?? 0), error: \(drop?.errorCnt ?? 0), scrambling: \(drop?.scramblingCnt ?? 0)"
+    return (drop.map { "drop: \($0.dropCnt), error: \($0.errorCnt), scrambling: \($0.scramblingCnt)" } ?? "drop: —, error: —, scrambling: —")
       + (total > 0 ? " \(bytes(total))" : "")
+  }
+  // src/util/StrUtil.ts toHalf. Do not use NFKC: it also changes kana and
+  // compatibility characters that the Web leaves alone.
+  static func halfWidth(_ text: String) -> String {
+    let replacements: [UInt32:UInt32] = [0x201d:0x22,0x2019:0x27,0x2018:0x60,0xffe5:0x5c,0x3000:0x20,0x301c:0x7e]
+    return String(String.UnicodeScalarView(text.unicodeScalars.map { scalar in
+      UnicodeScalar((0xff01...0xff5e).contains(scalar.value) ? scalar.value-0xfee0 : replacements[scalar.value] ?? scalar.value)!
+    }))
   }
 }
 struct NeoViewer: Decodable { let id: Int; let name: String }
@@ -452,6 +466,7 @@ extension Notification.Name {
   static let neoHistoryChanged = Notification.Name("NeoHistoryChanged")
   static let neoRecordingPreferencesChanged = Notification.Name("NeoRecordingPreferencesChanged")
   static let neoAnnictChanged = Notification.Name("NeoAnnictChanged")
+  static let neoTextPreferencesChanged = Notification.Name("NeoTextPreferencesChanged")
 }
 private final class NeoAPIRedirectPolicy: NSObject, URLSessionTaskDelegate {
   func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -460,6 +475,14 @@ private final class NeoAPIRedirectPolicy: NSObject, URLSessionTaskDelegate {
 final class NeoAPI {
   let base: URL; let session: URLSession
   @MainActor private var checkpointRequests: [String: Task<NeoCheckpointVideoInfo, Error>] = [:]
+  @MainActor private var detailCache: [String:(value:NeoRecording,stored:Date)] = [:]
+  @MainActor private var episodeCache: [String:(value:NeoAnnictEpisode,stored:Date)] = [:]
+  @MainActor private var detailRequests: [String:Task<NeoRecording,Error>] = [:]
+  @MainActor private var episodeRequests: [String:Task<NeoAnnictEpisode,Error>] = [:]
+  @MainActor private var episodeRevisions: [String:Int] = [:]
+  @MainActor private var preparationQueue: [Int] = []
+  @MainActor private var preparationWorkers: [UUID:Task<Void,Never>] = [:]
+  @MainActor var onPreparedDetail: (() -> Void)?
   private let headersLock = NSLock()
   private var authenticationHeaders: [String: String] = [:]
   var profileHeaders: [String: String] {
@@ -508,6 +531,14 @@ final class NeoAPI {
     set { UserDefaults.standard.set(min(1000, max(1, newValue)), forKey: "recorded.length." + base.absoluteString)
       NotificationCenter.default.post(name: .neoRecordingPreferencesChanged, object: self) }
   }
+  var isHalfWidthDisplayed: Bool {
+    get { UserDefaults.standard.object(forKey:"display.halfWidth."+base.absoluteString) as? Bool ?? true }
+    set {
+      guard newValue != isHalfWidthDisplayed else { return }
+      UserDefaults.standard.set(newValue,forKey:"display.halfWidth."+base.absoluteString)
+      NotificationCenter.default.post(name:.neoTextPreferencesChanged,object:self)
+    }
+  }
   var highlightRecorded: Bool {
     get { UserDefaults.standard.object(forKey: "recorded.highlight." + base.absoluteString) as? Bool ?? true }
     set { UserDefaults.standard.set(newValue, forKey: "recorded.highlight." + base.absoluteString)
@@ -521,22 +552,39 @@ final class NeoAPI {
   func url(_ path: String) -> URL { URL(string: base.absoluteString + "/api" + path)! }
   func recordings(page: Int, keyword: String = "", reverse: Bool = false, userID: Int? = nil, filters: NeoRecordedFilters? = nil) async throws -> NeoRecords {
     var parts = URLComponents(url: url("/recorded"), resolvingAgainstBaseURL: false)!
-    parts.queryItems = [URLQueryItem(name: "isHalfWidth", value: "true"), URLQueryItem(name: "isReverse", value: reverse ? "true" : "false"),
+    let halfWidth = isHalfWidthDisplayed
+    parts.queryItems = [URLQueryItem(name: "isHalfWidth", value: String(halfWidth)), URLQueryItem(name: "isReverse", value: reverse ? "true" : "false"),
       URLQueryItem(name: "limit", value: String(recordedLength)), URLQueryItem(name: "offset", value: String(max(0, page - 1) * recordedLength))]
     var search = filters ?? NeoRecordedFilters(); if filters == nil { search.keyword = keyword }
     parts.queryItems! += try search.queryItems()
     if let userID, userID > 0 { parts.queryItems!.append(URLQueryItem(name: "userId", value: String(userID))) }
     let result: NeoRecords = try await request(parts.url!)
     guard result.total >= 0, result.records.allSatisfy({ $0.id > 0 }) else { throw NeoError("録画一覧の応答形式が一致しません。") }
-    return result
+    return NeoRecords(records:result.records.map { $0.displayed(halfWidth:halfWidth) },total:result.total)
   }
-  func recording(_ id: Int) async throws -> NeoRecording {
-    let value: NeoRecording = try await request(url("/recorded/\(id)?isHalfWidth=true"))
-    guard value.id == id else { throw NeoError("録画情報の応答形式が一致しません。") }
+  @MainActor private func detailKey(_ id: Int) -> String { "\(identityRevision):\(isHalfWidthDisplayed):\(id)" }
+  @MainActor func cachedRecording(_ id: Int) -> NeoRecording? {
+    guard let entry = detailCache[detailKey(id)], Date().timeIntervalSince(entry.stored) < 60 else { return nil }; return entry.value
+  }
+  @MainActor func recording(_ id: Int, refresh: Bool = false) async throws -> NeoRecording {
+    if !refresh, let cached = cachedRecording(id) { return cached }
+    let key = detailKey(id), revision = identityRevision, halfWidth = isHalfWidthDisplayed
+    if let active = detailRequests[key] { return try await active.value }
+    let user = viewer, headers = profileHeaders
+    let active = Task<NeoRecording,Error> {
+      let value: NeoRecording = try await self.request(self.url("/recorded/\(id)?isHalfWidth=\(halfWidth)"),user:user,headers:headers)
+      guard value.id == id else { throw NeoError("録画情報の応答形式が一致しません。") }
+      guard self.identityRevision == revision, self.isHalfWidthDisplayed == halfWidth else { throw CancellationError() }
+      return value.displayed(halfWidth:halfWidth)
+    }
+    detailRequests[key] = active; defer { detailRequests.removeValue(forKey:key) }
+    let value = try await active.value
+    detailCache[key] = (value,Date())
+    if detailCache.count > 64, let oldest = detailCache.min(by:{ $0.value.stored < $1.value.stored })?.key { detailCache.removeValue(forKey:oldest) }
     return value
   }
   func channels() async throws -> [NeoChannel] { try await request(url("/channels")) }
-  func broadcasting() async throws -> [NeoLiveSchedule] { try await request(url("/schedules/broadcasting?isHalfWidth=true")) }
+  func broadcasting() async throws -> [NeoLiveSchedule] { try await request(url("/schedules/broadcasting?isHalfWidth=\(isHalfWidthDisplayed)")) }
   func liveForces() async throws -> [NeoLiveForce] { try await request(url("/channels/jikkyo")) }
   func liveJikkyo(_ channel: Int) async throws -> NeoLiveJikkyoInfo { try await request(url("/channels/\(channel)/jikkyo"), timeout: 8) }
   func viewers() async throws -> NeoViewers { try await request(url("/users"), headers: [:]) }
@@ -554,7 +602,9 @@ final class NeoAPI {
     try await request(url("/recorded/\(id)/playback"), user: user, timeout: 3, headers: [:])
   }
   func history(user: String) async throws -> NeoHistory {
-    try await request(url("/recorded/playbackHistory?isHalfWidth=true"), user: user, timeout: 10, headers: [:])
+    let halfWidth = isHalfWidthDisplayed
+    let result: NeoHistory = try await request(url("/recorded/playbackHistory?isHalfWidth=\(halfWidth)"), user: user, timeout: 10, headers: [:])
+    return NeoHistory(items:result.items.map { NeoHistoryItem(recorded:$0.recorded.displayed(halfWidth:halfWidth),playback:$0.playback) })
   }
   func historySettings(user: String) async throws -> NeoHistorySettings {
     try await request(url("/recorded/playbackHistory/settings"), user: user, headers: [:])
@@ -583,22 +633,73 @@ final class NeoAPI {
   func rule(_ id: Int) async throws -> NeoRule { try await request(url("/rules/\(id)")) }
   func relatedRecordings(ruleId: Int?, keyword: String) async throws -> NeoRecords {
     var parts = URLComponents(url: url("/recorded"), resolvingAgainstBaseURL: false)!
-    parts.queryItems = [URLQueryItem(name: "isHalfWidth", value: "true"), URLQueryItem(name: "isReverse", value: "true"),
+    let halfWidth = isHalfWidthDisplayed
+    parts.queryItems = [URLQueryItem(name: "isHalfWidth", value: String(halfWidth)), URLQueryItem(name: "isReverse", value: "true"),
       URLQueryItem(name: "limit", value: "100"), URLQueryItem(name: "offset", value: "0")]
     if let ruleId { parts.queryItems!.append(URLQueryItem(name: "ruleId", value: String(ruleId))) }
     else { parts.queryItems!.append(URLQueryItem(name: "keyword", value: keyword)) }
-    return try await request(parts.url!)
+    let result: NeoRecords = try await request(parts.url!)
+    return NeoRecords(records:result.records.map { $0.displayed(halfWidth:halfWidth) },total:result.total)
   }
   func configuration() async throws -> NeoServerConfig { try await request(url("/config")) }
   func videoInfo(_ id: Int, force: Bool = false) async throws -> NeoVideoInfo {
     try await request(url("/videos/\(id)/info"),method:force ? "POST" : "GET")
   }
   func annictStatus() async throws -> NeoAnnictStatus { try await request(url("/annict/status")) }
-  func annictToken(_ token: String?, write: Bool, user: String? = nil, headers: [String:String]? = nil) async throws {
+  @MainActor func annictToken(_ token: String?, write: Bool, user: String? = nil, headers: [String:String]? = nil) async throws {
     _ = try await response(url(write ? "/annict/write-token" : "/annict/token"),method:token == nil ? "DELETE" : "PUT",body:token.map { ["accessToken":$0] },user:user,headers:headers)
+    episodeCache.removeAll(); episodeRequests.values.forEach { $0.cancel() }; episodeRequests.removeAll()
+    for key in Array(episodeRevisions.keys) { episodeRevisions[key,default:0] += 1 }
   }
-  func annictEpisode(_ id: Int, method: String = "GET", user: String? = nil, headers: [String:String]? = nil) async throws -> NeoAnnictEpisode {
-    try await request(url("/recorded/\(id)/annictEpisode"),method:method,body:method == "PUT" ? NeoAnnictPreferences.watchOptions : nil,user:user,headers:headers)
+  @MainActor private func episodeKey(_ id: Int) -> String { "\(identityRevision):\(id)" }
+  @MainActor func cachedAnnictEpisode(_ id: Int) -> NeoAnnictEpisode? {
+    guard let entry = episodeCache[episodeKey(id)], Date().timeIntervalSince(entry.stored) < 60 else { return nil }; return entry.value
+  }
+  @MainActor func annictEpisode(_ id: Int, method: String = "GET", user: String? = nil, headers: [String:String]? = nil, refresh: Bool = false) async throws -> NeoAnnictEpisode {
+    let user = user ?? viewer, headers = headers ?? profileHeaders
+    guard accountReady, user == viewer, headers == profileHeaders else { throw CancellationError() }
+    let key = episodeKey(id), revision = identityRevision
+    if method == "GET", !refresh, let cached = cachedAnnictEpisode(id) { return cached }
+    if method == "GET", let active = episodeRequests[key] { return try await active.value }
+    if method != "GET" {
+      episodeRevisions[key,default:0] += 1
+      episodeRequests.removeValue(forKey:key)?.cancel()
+    }
+    let generation = episodeRevisions[key,default:0]
+    let active = Task<NeoAnnictEpisode,Error> {
+      let value: NeoAnnictEpisode = try await self.request(self.url("/recorded/\(id)/annictEpisode"),method:method,body:method == "PUT" ? NeoAnnictPreferences.watchOptions : nil,user:user,headers:headers)
+      guard self.identityRevision == revision, self.episodeRevisions[key,default:0] == generation else { throw CancellationError() }
+      self.episodeCache[key] = (value,Date())
+      if self.episodeCache.count > 64, let oldest = self.episodeCache.min(by:{ $0.value.stored < $1.value.stored })?.key { self.episodeCache.removeValue(forKey:oldest) }
+      return value
+    }
+    if method == "GET" { episodeRequests[key] = active }
+    defer { if method == "GET", episodeRevisions[key,default:0] == generation { episodeRequests.removeValue(forKey:key) } }
+    return try await active.value
+  }
+  // Only the visible window is prepared. Two workers, at most four HTTP
+  // requests, 16 pending records and 64 cached results bound work and memory.
+  @MainActor func prepareDetails(_ ids: [Int]) {
+    guard accountReady else { return }
+    preparationQueue = Array(NSOrderedSet(array:ids).array.compactMap { $0 as? Int }.prefix(16))
+    let revision = identityRevision, halfWidth = isHalfWidthDisplayed
+    while preparationWorkers.count < 2 && !preparationQueue.isEmpty {
+      let token = UUID()
+      preparationWorkers[token] = Task { [weak self] in
+        guard let self else { return }
+        defer {
+          preparationWorkers.removeValue(forKey:token)
+          if !preparationQueue.isEmpty { prepareDetails(preparationQueue) }
+        }
+        while !preparationQueue.isEmpty, identityRevision == revision, isHalfWidthDisplayed == halfWidth {
+          let id = preparationQueue.removeFirst()
+          async let detail = try? recording(id)
+          async let episode = try? annictEpisode(id)
+          _ = await (detail,episode)
+          if identityRevision == revision, isHalfWidthDisplayed == halfWidth { onPreparedDetail?() }
+        }
+      }
+    }
   }
   @MainActor func checkpointVideoInfo(_ id: Int) async throws -> NeoCheckpointVideoInfo {
     let key = "\(identityRevision):\(id)"

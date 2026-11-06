@@ -69,11 +69,11 @@ final class NeoHistoryPage: NeoPage, UITableViewDataSource, UITableViewDelegate 
     [saveTitle, save, hint, message].forEach(banner.addSubview); save.onTintColor = NeoStyle.accent
     save.accessibilityLabel = "視聴履歴を保存"; save.addTarget(self, action: #selector(saveChanged), for: .valueChanged)
     actions = [NeoStyle.iconButton("Refresh", label: "視聴履歴を更新") { [weak self] in self?.reload() }]
-    for name in [Notification.Name.neoAccountChanged, .neoHistoryChanged] {
+    for name in [Notification.Name.neoAccountChanged, .neoHistoryChanged, .neoTextPreferencesChanged] {
       observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
         guard let self else { return }
         if let api = note.object as? NeoAPI, self.shell?.api !== api { return }
-        if name == .neoAccountChanged { self.task?.cancel(); self.items = []; self.owner = nil; self.settings = nil; self.table.reloadData() }
+        if name == .neoAccountChanged || name == .neoTextPreferencesChanged { self.task?.cancel(); self.items = []; self.owner = nil; self.settings = nil; self.table.reloadData() }
         if self.view.window != nil, self.navigationController?.topViewController === self, self.shell?.presentedViewController == nil { self.reload() }
       })
     }
@@ -102,7 +102,7 @@ final class NeoHistoryPage: NeoPage, UITableViewDataSource, UITableViewDelegate 
       message.text = nil; table.reloadData(); layoutBanner(); return
     }
 #endif
-    task?.cancel(); let user = api.viewer, revision = api.identityRevision
+    task?.cancel(); let user = api.viewer, revision = api.identityRevision, halfWidth = api.isHalfWidthDisplayed
     if owner != user { items = []; settings = nil; table.reloadData() }; owner = user
     save.isEnabled = false
     guard api.accountReady, Int(user).map({ $0 > 0 }) == true else {
@@ -119,8 +119,9 @@ final class NeoHistoryPage: NeoPage, UITableViewDataSource, UITableViewDelegate 
       var errors: [String] = []
       do {
         let history = try await historyResult
-        guard !Task.isCancelled, self.shell?.api === api, api.identityRevision == revision else { return }
+        guard !Task.isCancelled, self.shell?.api === api, api.identityRevision == revision, api.isHalfWidthDisplayed == halfWidth else { return }
         items = history.items; table.reloadData()
+        prepareVisibleDetails()
         if items.isEmpty { errors.append("このユーザーの視聴履歴はありません。") }
       } catch { errors.append("視聴履歴を更新できませんでした。\(error.localizedDescription)") }
       do {
@@ -157,6 +158,13 @@ final class NeoHistoryPage: NeoPage, UITableViewDataSource, UITableViewDelegate 
     return cell
   }
   func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) { shell?.openDetail(items[indexPath.row].recorded) }
+  func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) { prepareVisibleDetails() }
+  private func prepareVisibleDetails() {
+    guard shell?.smokeStage.isEmpty == true else { return }
+    let paths = table.indexPathsForVisibleRows ?? Array(items.prefix(8).indices).map { IndexPath(row:$0,section:0) }
+    let ids = paths.compactMap { items.indices.contains($0.row) ? items[$0.row].recorded.id : nil }
+    shell?.api?.prepareDetails(ids); shell?.prepareDetailPages(Array(ids.prefix(2)))
+  }
   private func remove(_ id: Int) {
     guard let api = shell?.api, let owner, api.viewer == owner, !pending else { return }
     let revision = api.identityRevision; pending = true; table.reloadData()

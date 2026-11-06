@@ -70,6 +70,9 @@ private final class NeoPagePushAnimator: NSObject, UIViewControllerAnimatedTrans
       let target = context.viewController(forKey:.to) else { fatalError("Missing navigation push views") }
     width = max(1,context.containerView.bounds.width); incoming = to
     to.frame = context.finalFrame(for:target); context.containerView.addSubview(to)
+    // Resolve destination geometry before recording transform animations.
+    // Prepared pages already completed this work while their source was idle.
+    to.setNeedsLayout(); to.layoutIfNeeded()
     to.transform = CGAffineTransform(translationX:width,y:0)
     let animator = UIViewPropertyAnimator(duration:transitionDuration(using:context),curve:.easeOut) {
       to.transform = .identity; from.transform = CGAffineTransform(translationX:-self.width*0.25,y:0)
@@ -171,6 +174,10 @@ final class NeoPlayerTransition: NSObject, UIViewControllerTransitioningDelegate
 }
 
 class NeoPage: UIViewController {
+  func prepareOpening(size: CGSize) {
+    guard size.width > 0, size.height > 0 else { return }
+    loadViewIfNeeded(); view.frame = CGRect(origin:.zero,size:size); view.setNeedsLayout(); view.layoutIfNeeded()
+  }
 #if targetEnvironment(simulator)
   var smokeOpeningBegan: CFTimeInterval?
   var smokeOpeningTimes: [String:Double] = [:]
@@ -190,7 +197,7 @@ class NeoPage: UIViewController {
     super.viewDidAppear(animated)
     guard presentedViewController == nil, shell?.tablet != true else { return }
     setNeedsUpdateOfSupportedInterfaceOrientations()
-    view.window?.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
+    if let scene = view.window?.windowScene, !scene.interfaceOrientation.isPortrait { scene.requestGeometryUpdate(.iOS(interfaceOrientations:.portrait)) }
   }
   override func viewDidLoad() {
     super.viewDidLoad(); view.backgroundColor = NeoStyle.background; header.backgroundColor = NeoStyle.paper
@@ -543,7 +550,33 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let began = CACurrentMediaTime()
     dismissPopup()
     (active?.topViewController as? NeoRecordedPage)?.rememberDetail(recording.id)
-    pushPage(requestedAt:began) { NeoDetailPage(item:recording,shell:self) }
+    let prepared = api?.cachedRecording(recording.id) == nil ? nil : preparedDetails.removeValue(forKey:detailPageKey(recording.id))
+    pushPage(requestedAt:began) { prepared ?? NeoDetailPage(item:recording,shell:self) }
+  }
+  private var preparedDetails: [String:NeoDetailPage] = [:]
+  private var warmingDetailIDs: [Int] = []
+  private func detailPageKey(_ id: Int) -> String {
+    "\(api?.base.absoluteString ?? ""):\(api?.identityRevision ?? -1):\(api?.isHalfWidthDisplayed ?? true):\(id):\(pageSize)"
+  }
+  var pageSize: CGSize { active?.view.bounds.size ?? content.bounds.size }
+  func prepareDetailPages(_ ids: [Int]) {
+    guard let api, smokeStage.isEmpty else { return }
+    warmingDetailIDs = Array(ids.prefix(2))
+    api.onPreparedDetail = { [weak self,weak api] in
+      guard let self, let api, self.api === api else { return }; self.warmPreparedDetails()
+    }
+    warmPreparedDetails()
+  }
+  private func warmPreparedDetails() {
+    guard let api, active?.topViewController is NeoRecordedPage || active?.topViewController is NeoHistoryPage else { return }
+    let keys = warmingDetailIDs.map(detailPageKey)
+    preparedDetails = preparedDetails.filter { keys.contains($0.key) }
+    for id in warmingDetailIDs {
+      let key = detailPageKey(id)
+      guard preparedDetails[key] == nil, let item = api.cachedRecording(id), api.cachedAnnictEpisode(id) != nil else { continue }
+      let page = NeoDetailPage(item:item,shell:self); page.prepareOpening(size:pageSize)
+      preparedDetails[key] = page
+    }
   }
   func pushPage(requestedAt: CFTimeInterval = CACurrentMediaTime(), _ make: () -> NeoPage) {
 #if targetEnvironment(simulator)
@@ -1004,10 +1037,20 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
 #if targetEnvironment(simulator)
   func smokeMeasureOpening() async -> (checks:[String:Bool],timings:[String:[String:Double]]) {
     var checks = [String:Bool](), timings = [String:[String:Double]]()
-    for kind in ["general","viewing","detail"] {
+    for name in ["generalCold","viewingCold","detailCold","general","viewing","detail"] {
+      let kind = name.replacingOccurrences(of:"Cold",with:""), cold = name.hasSuffix("Cold")
       showRoute(kind == "detail" ? "recorded" : "settings"); active?.popToRootViewController(animated:false); view.layoutIfNeeded()
-      if kind == "detail" { openDetail(NeoRecordedPage.fixtures.records[0]) }
+      if kind == "detail" {
+        let item = NeoRecordedPage.fixtures.records[0]
+        if !cold, let api, let value = try? await api.recording(item.id) {
+          _ = try? await api.annictEpisode(item.id)
+          let prepared = NeoDetailPage(item:value,shell:self); prepared.prepareOpening(size:pageSize)
+          preparedDetails[detailPageKey(item.id)] = prepared
+        }
+        openDetail(item)
+      }
       else if let root = active?.topViewController as? NeoSettingsPage {
+        if !cold { await root.smokePrepareOpening() }
         checks["settingsTapDoesNotWaitForScroll"] = root.smokeTapDeliveryImmediate
         root.smokeOpenCategory(kind == "general" ? .general : .viewing)
       }
@@ -1016,22 +1059,21 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         if page?.smokeOpeningTimes["handlerToFirstMovementMs"] != nil && active?.transitionCoordinator == nil { break }
         try? await Task.sleep(nanoseconds:10_000_000)
       }
-      timings[kind] = page?.smokeOpeningTimes ?? [:]
-      checks[kind+"FirstMovementMeasured"] = page?.smokeOpeningTimes["handlerToFirstMovementMs"] != nil
-      if kind == "viewing", let settings = page as? NeoSettingsCategoryPage {
+      timings[name] = page?.smokeOpeningTimes ?? [:]
+      checks[name+"FirstMovementMeasured"] = page?.smokeOpeningTimes["handlerToFirstMovementMs"] != nil
+      if name == "viewing", let settings = page as? NeoSettingsCategoryPage {
         checks["viewingListRendersVisibleRowsAndReachesBottom"] = settings.smokeViewingListScrolls()
         checks["viewingVisibleControlsHaveSizeAndFit"] = settings.smokeVisibleViewingControlsFit
         settings.smokeSaveRowGeometry()
       }
-      if kind == "viewing", let window = view.window {
+      if name == "viewing", let window = view.window {
         let image = UIGraphicsImageRenderer(bounds:window.bounds).image { _ in window.drawHierarchy(in:window.bounds,afterScreenUpdates:true) }
         try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("recording-viewing-settings.png"))
       }
       active?.popToRootViewController(animated:false)
     }
-    if let general = timings["general"]?["handlerToFirstMovementMs"], let viewing = timings["viewing"]?["handlerToFirstMovementMs"] {
-      checks["viewingOpeningAvoidsLongLayoutWait"] = viewing <= max(250,general*2)
-    } else { checks["viewingOpeningAvoidsLongLayoutWait"] = false }
+    checks["preparedOpeningWithin100ms"] = ["general","viewing","detail"].allSatisfy { (timings[$0]?["handlerToFirstMovementMs"] ?? .infinity) <= 100 }
+    checks["coldOpeningWithin100ms"] = ["generalCold","viewingCold","detailCold"].allSatisfy { (timings[$0]?["handlerToFirstMovementMs"] ?? .infinity) <= 100 }
     return (checks,timings)
   }
   func smokeShowFeaturePage(_ page: UIViewController) {

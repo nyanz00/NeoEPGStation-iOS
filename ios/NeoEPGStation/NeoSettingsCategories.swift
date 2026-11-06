@@ -157,6 +157,8 @@ enum NeoSettingsCategory: String, CaseIterable {
 
 final class NeoSettingsPage: NeoPage, UITableViewDataSource, UITableViewDelegate {
   private let table = UITableView(frame: .zero, style: .plain)
+  private var prepared: [NeoSettingsCategory:NeoSettingsCategoryPage] = [:]
+  private var preparation: Task<Void,Never>?
   init(shell: NeoShell) { super.init(title: "設定", shell: shell) }
   required init?(coder: NSCoder) { fatalError() }
   override func viewDidLoad() {
@@ -167,6 +169,22 @@ final class NeoSettingsPage: NeoPage, UITableViewDataSource, UITableViewDelegate
     table.register(UITableViewCell.self, forCellReuseIdentifier: "category"); body.addSubview(table)
   }
   override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); table.frame = body.bounds }
+  override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); prepared.removeAll() }
+  override func viewDidAppear(_ animated: Bool) {
+    super.viewDidAppear(animated); prepareCategories()
+  }
+  private func prepareCategories() {
+    preparation?.cancel()
+    preparation = Task { [weak self] in
+      await Task.yield()
+      for category in [NeoSettingsCategory.general,.viewing] {
+        guard let self, !Task.isCancelled, let shell = self.shell, self.navigationController?.topViewController === self else { return }
+        let page = NeoSettingsCategoryPage(category:category,shell:shell)
+        page.prepareOpening(size:shell.pageSize); self.prepared[category] = page
+        await Task.yield()
+      }
+    }
+  }
   func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { NeoSettingsCategory.allCases.count }
   func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
     let category = NeoSettingsCategory.allCases[indexPath.row]
@@ -186,9 +204,13 @@ final class NeoSettingsPage: NeoPage, UITableViewDataSource, UITableViewDelegate
     let began = CACurrentMediaTime()
     tableView.deselectRow(at: indexPath, animated: true)
     guard let shell else { return }
-    shell.pushPage(requestedAt:began) { NeoSettingsCategoryPage(category:NeoSettingsCategory.allCases[indexPath.row],shell:shell) }
+    preparation?.cancel()
+    let category = NeoSettingsCategory.allCases[indexPath.row], page = prepared.removeValue(forKey:NeoSettingsCategory.allCases[indexPath.row])
+    shell.pushPage(requestedAt:began) { page ?? NeoSettingsCategoryPage(category:category,shell:shell) }
   }
+  deinit { preparation?.cancel() }
 #if targetEnvironment(simulator)
+  func smokePrepareOpening() async { prepareCategories(); await preparation?.value }
   func smokeOpenCategory(_ category: NeoSettingsCategory) {
     tableView(table,didSelectRowAt:IndexPath(row:NeoSettingsCategory.allCases.firstIndex(of:category)!,section:0))
   }
@@ -329,6 +351,7 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
       return makeRow("視聴履歴を送信しない", explanation: "このアプリからの送信だけを止めます。既存の履歴とリジューム位置は残ります。", control: historyToggle)
       }
     case .general:
+      toggle("半角表示", explanation:"強制的に半角表示にする", on:api.isHalfWidthDisplayed) { api.isHalfWidthDisplayed = $0 }
       toggle("下部ナビゲーションのラベルを表示", on: NeoViewingPreferences.navigationLabels) { [weak shell] in
         NeoViewingPreferences.navigationLabels = $0; shell?.refreshNavigationLabels()
       }

@@ -183,7 +183,7 @@ jobs:
         if: ${{ inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'recording-features' }}
         run: |
           mkdir -p build/native-tests dist
-          swiftc -frontend -parse ios/NeoEPGStation/NeoAnnict.swift ios/NeoEPGStation/NeoRecordedInfo.swift ios/NeoEPGStation/NeoRecordingFeaturesSmoke.swift
+          swiftc -frontend -parse ios/NeoEPGStation/NeoAnnict.swift ios/NeoEPGStation/NeoRecordedInfo.swift ios/NeoEPGStation/NeoRecordingFeaturesSmoke.swift ios/NeoEPGStation/NeoShell.swift ios/NeoEPGStation/NeoDetailPage.swift ios/NeoEPGStation/NeoRecordedPage.swift ios/NeoEPGStation/NeoHistoryPage.swift ios/NeoEPGStation/NeoSettingsCategories.swift ios/NeoEPGStation/NeoOnAirPage.swift
           swiftc ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift ios/NeoEPGStation/NeoPlaybackHistory.swift tests/recording-features/main.swift -o build/native-tests/recording-features
           build/native-tests/recording-features | tee dist/recording-feature-models.txt
       - name: Native UI type checks

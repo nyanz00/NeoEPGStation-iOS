@@ -26,6 +26,14 @@ object["ts"] = NSNull(); object["streams"] = []; object["width"] = NSNull()
 let empty = try JSONDecoder().decode(NeoVideoInfo.self,from:JSONSerialization.data(withJSONObject:object))
 check("missing optional values",empty.rows[5].1 == "-" && empty.rows[8].1 == "-" && empty.rows[10].1 == "-")
 let defaults = UserDefaults.standard
+check("Web half-width Latin and punctuation",NeoProgramText.halfWidth("ＡＢＣ１２３！～　”’‘￥〜") == "ABC123!~ \"'`\\~")
+check("half-width preserves Japanese and kana",NeoProgramText.halfWidth("ガラス ｶﾞ ①㍿ 第４話") == "ガラス ｶﾞ ①㍿ 第4話")
+let textRecord = NeoRecording(id:101,name:"第４話　テスト！",startAt:0,endAt:1,isRecording:false,description:"ＡＢＣ",extended:"＃４",channelId:nil,channelName:nil,thumbnails:nil,videoFiles:nil)
+check("half-width off preserves source",textRecord.displayed(halfWidth:false).name == "第４話　テスト！")
+check("half-width applied to all detail text",textRecord.displayed(halfWidth:true).name == "第4話 テスト!" && textRecord.displayed(halfWidth:true).description == "ABC" && textRecord.displayed(halfWidth:true).extended == "#4")
+check("missing drop is never zero",NeoProgramText.dropSummary(textRecord).contains("drop: —"))
+var zeroRecord = textRecord; zeroRecord.dropLogFile = .init(id:1,errorCnt:0,dropCnt:0,scramblingCnt:0)
+check("known zero remains zero",NeoProgramText.dropSummary(zeroRecord).contains("drop: 0") && zeroRecord.dropLogFile?.hasErrors == false)
 let names = ["annict.autoWatchMode","annict.threshold","annict.markFinal","annict.disableFinalRules"]
 let old = names.map { defaults.object(forKey:$0) }; names.forEach { defaults.removeObject(forKey:$0) }
 defer { for (name,value) in zip(names,old) { if let value { defaults.set(value,forKey:name) } else { defaults.removeObject(forKey:name) } } }

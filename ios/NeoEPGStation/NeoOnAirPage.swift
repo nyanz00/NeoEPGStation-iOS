@@ -122,6 +122,8 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
   private var schedules: [NeoLiveSchedule] = [], forces: [Int:Int] = [:], buttons: [UIButton] = []
   private var visible: [NeoLiveSchedule] = [], waves: [String] = [], wave = "", active = false
   private var pins = Set<Int>()
+  private var textObserver: NSObjectProtocol?
+  private var reloadID = UUID()
   private var pinKey: String { "onair.pins."+(shell?.api?.base.absoluteString ?? "") }
   init(shell: NeoShell) { super.init(title:"放映中",shell:shell) }
   required init?(coder: NSCoder) { fatalError() }
@@ -136,6 +138,10 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     refresh.addAction(UIAction { [weak self] _ in self?.reload() },for:.valueChanged)
     message.textAlignment = .center; message.numberOfLines = 0; message.isHidden = true
     actions = [NeoStyle.iconButton("Refresh",label:"放映中を更新") { [weak self] in self?.reload() }]
+    textObserver = NotificationCenter.default.addObserver(forName:.neoTextPreferencesChanged,object:nil,queue:.main) { [weak self] note in
+      guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
+      self.task?.cancel(); self.task = nil; self.schedules = []; self.visible = []; self.list.reloadData(); self.reload()
+    }
     reload()
   }
   override func viewDidAppear(_ animated: Bool) {
@@ -149,17 +155,20 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
   func reload() {
     guard task == nil, let api = shell?.api else { return }
     if schedules.isEmpty { spinner.startAnimating() }
+    let halfWidth = api.isHalfWidthDisplayed
+    let attempt = UUID(); reloadID = attempt
     task = Task { [weak self, api] in
-      guard let self else { return }; defer { self.task = nil; self.spinner.stopAnimating(); self.refresh.endRefreshing() }
+      guard let self else { return }
+      defer { if self.reloadID == attempt { self.task = nil; self.spinner.stopAnimating(); self.refresh.endRefreshing() } }
       do {
         async let schedule = api.broadcasting()
         async let status = try? api.liveForces()
         if self.shell?.serverConfig == nil { await self.shell?.refreshServerConfig() }
         let result = try await schedule, forceValues = await status
-        try Task.checkCancellation(); guard self.shell?.api === api else { return }
+        try Task.checkCancellation(); guard self.shell?.api === api, api.isHalfWidthDisplayed == halfWidth else { return }
         self.schedules = result; self.forces = Dictionary((forceValues ?? []).compactMap { item in item.force.map { (item.channelId,$0) } },uniquingKeysWith: { _,new in new })
         self.rebuild()
-      } catch { if self.schedules.isEmpty { self.message.text = "番組情報を取得できませんでした。"; self.message.isHidden = false } }
+      } catch { if !Task.isCancelled, self.reloadID == attempt, self.schedules.isEmpty { self.message.text = "番組情報を取得できませんでした。"; self.message.isHidden = false } }
     }
   }
   private func rebuild() {
@@ -335,7 +344,7 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     }
   }
 #endif
-  deinit { task?.cancel(); timer?.invalidate(); progressTimer?.invalidate() }
+  deinit { task?.cancel(); timer?.invalidate(); progressTimer?.invalidate(); if let textObserver { NotificationCenter.default.removeObserver(textObserver) } }
 }
 
 // Same compact, centered outlined dialog surface as the mobile Web player.
