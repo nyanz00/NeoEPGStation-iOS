@@ -123,6 +123,11 @@ private final class NeoFeatureProtocol: URLProtocol {
     func wait(_ condition: () -> Bool) async {
       for _ in 0..<100 { if condition() { return }; try? await Task.sleep(nanoseconds:50_000_000) }
     }
+    func dismiss(_ controller: UIViewController) async {
+      await withCheckedContinuation { (continuation: CheckedContinuation<Void,Never>) in
+        controller.dismiss(animated:false) { continuation.resume() }
+      }
+    }
     func capture(_ name: String) {
       let surface = shell.view.window ?? shell.view!
       surface.layoutIfNeeded()
@@ -222,7 +227,7 @@ private final class NeoFeatureProtocol: URLProtocol {
     NeoFeatureProtocol.failNextRefresh()
     info.smokeReanalyze(); await wait { !info.smokeMessage.isEmpty }
     checks["infoKeepsResultsWhenRefreshFails"] = info.smokeRows.count == 21 && info.smokeMessage.contains("Could not refresh")
-    info.dismiss(animated:false); shell.smokePopFeaturePage()
+    await dismiss(info); shell.smokePopFeaturePage()
     let cancelledDetail = NeoDetailPage(item:original,shell:shell)
     shell.smokeShowFeaturePage(cancelledDetail); shell.smokePopFeaturePage()
     try? await Task.sleep(nanoseconds:150_000_000)
@@ -243,8 +248,9 @@ private final class NeoFeatureProtocol: URLProtocol {
     checks["temporaryFailureKeepsSavedSession"] = (try? secrets.read(21)) == stored
     let confirmation = shell.presentedViewController as? UIAlertController
     checks["temporaryFailureDoesNotOfferMasterFallback"] = confirmation != nil && confirmation?.actions.contains(where: { $0.title == "masterへ戻る" }) == false
-    confirmation?.dismiss(animated:false)
+    if let confirmation { await dismiss(confirmation) }
     let historyPage = NeoHistoryPage(shell:shell); shell.smokeShowFeaturePage(historyPage)
+    checks["historyFailureTestReachedVisiblePage"] = shell.smokeFeaturePageVisible(historyPage)
     await wait { historyPage.smokeReady }
     checks["historyReadableDuringAuthenticationFailure"] = historyPage.smokeReady && !api.accountReady
     let privateBefore = NeoFeatureProtocol.snapshot { NeoFeatureProtocol.episodeGets }
@@ -262,6 +268,7 @@ private final class NeoFeatureProtocol: URLProtocol {
 
     let baseline = NeoScrollFrameProbe(); baseline.start()
     progress("scroll checks")
+    checks["scrollTestReachedVisibleList"] = shell.smokeFeaturePageVisible(list)
     try? await Task.sleep(nanoseconds:300_000_000); let baselineTimes = baseline.finish()
     list.smokePrefetchAllowed = true
     let constructions = NeoDetailPage.smokeConstructions, detailGets = NeoFeatureProtocol.snapshot { NeoFeatureProtocol.detailRequests }

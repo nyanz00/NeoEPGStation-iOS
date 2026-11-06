@@ -1119,6 +1119,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     showRoute("settings"); active?.pushViewController(page,animated:false); view.setNeedsLayout(); view.layoutIfNeeded()
   }
   func smokePopFeaturePage() { active?.popViewController(animated:false); view.layoutIfNeeded() }
+  func smokeFeaturePageVisible(_ page: UIViewController) -> Bool {
+    active?.topViewController === page && page.viewIfLoaded?.window != nil && presentedViewController == nil
+  }
   var smokePushAnimationDuration: Double { NeoPagePushAnimator().transitionDuration(using:nil) }
   func runViewingSettingsProbe(base: URL) -> [String:Bool] {
     let keys = ["player.network.seconds","player.comments.size","player.comments.absoluteOpacity","player.comments.enabled","player.comments.waitBeforePlayback","neoepgstation.navigation.labels","watch.subtitleKeywords"]
