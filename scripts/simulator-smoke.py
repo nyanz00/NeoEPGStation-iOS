@@ -30,7 +30,7 @@ def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
             break
         time.sleep(1)
     # Preserve partial evidence even if the application never completes a test.
-    for pattern in (f'ui-{stage}-*.txt', 'recording-*.png', 'recording-*-geometry.json', 'recording-opening-times.json'):
+    for pattern in (f'ui-{stage}-*.txt', 'ui-*-progress.txt', 'ui-*-smoke.json', 'recording-*.png', 'recording-*-geometry.json', 'recording-opening-times.json'):
         for source in (ui_container/'Documents').glob(pattern):
             shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
     if not marker.exists():
@@ -161,18 +161,21 @@ if '--navigation-only' in sys.argv or '--recording-features-only' in sys.argv:
     focused_stage = 'recording-features' if '--recording-features-only' in sys.argv else 'navigation'
     failures = []
     if not only_pad:
-        capture_ui(device['udid'], focused_stage, 'ui-iphone', terminate_existing=False, failures=failures)
+        capture_ui(device['udid'], focused_stage, 'ui-iphone', failures=failures)
         if '--navigation-after' in sys.argv and focused_stage == 'recording-features':
             capture_ui(device['udid'], 'navigation', 'ui-iphone', failures=failures)
         run('xcrun', 'simctl', 'shutdown', device['udid'], timeout=90)
     available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '--json'))['devices']
     runtime = next(key for key, values in available.items() if any(d['udid'] == device['udid'] for d in values))
     pad = next(d for d in available[runtime] if d['isAvailable'] and d['name'].startswith('iPad Pro'))
+    # Do not boot the next device with the preceding phone's stage in the
+    # simulator-child environment. Every launch below receives its own stage.
+    os.environ.pop('SIMCTL_CHILD_NEO_EPG_UI_SMOKE', None)
     if pad['state'] == 'Shutdown':
         run('xcrun', 'simctl', 'boot', pad['udid'])
     run('xcrun', 'simctl', 'bootstatus', pad['udid'], '-b', timeout=600)
     run('xcrun', 'simctl', 'install', pad['udid'], str(app), timeout=600)
-    capture_ui(pad['udid'], focused_stage, 'ui-ipad', terminate_existing=False, failures=failures)
+    capture_ui(pad['udid'], focused_stage, 'ui-ipad', failures=failures)
     if '--navigation-after' in sys.argv and focused_stage == 'recording-features':
         capture_ui(pad['udid'], 'navigation', 'ui-ipad', failures=failures)
     if failures:
