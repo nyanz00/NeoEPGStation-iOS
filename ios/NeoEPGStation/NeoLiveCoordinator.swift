@@ -62,7 +62,8 @@ final class NeoLiveCoordinator: NSObject {
     metadataTask = Task { [weak self] in
       guard let self else { return }; defer { self.metadataTask = nil }
       do {
-        let (data,response) = try await self.apiSession.data(for:self.request("/schedules/broadcasting?isHalfWidth=true"))
+        let halfWidth = NeoAPI.halfWidthDisplayed(base:self.base)
+        let (data,response) = try await self.apiSession.data(for:self.request("/schedules/broadcasting?isHalfWidth=\(halfWidth)"))
         guard (response as? HTTPURLResponse)?.statusCode == 200, !self.closed, self.generation == token else { return }
         let schedules = try JSONDecoder().decode([NeoLiveSchedule].self,from:data)
         guard let current = schedules.first(where: { $0.channel.id == self.channelID }) else { return }

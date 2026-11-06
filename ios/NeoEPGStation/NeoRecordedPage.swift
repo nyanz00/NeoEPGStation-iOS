@@ -294,9 +294,9 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         else {
 #if targetEnvironment(simulator)
         if self.shell?.smokeStage.isEmpty == false { result = Self.fixtures }
-        else { guard let api else { return }; result = try await api.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search) }
+        else { guard let requestAPI = api else { return }; result = try await requestAPI.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search) }
 #else
-        guard let api else { return }; result = try await api.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search)
+        guard let requestAPI = api else { return }; result = try await requestAPI.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search)
 #endif
           try Task.checkCancellation()
           guard self.shell?.api === api, api?.identityRevision == revision, api?.isHalfWidthDisplayed == halfWidth else { return }

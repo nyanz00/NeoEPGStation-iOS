@@ -532,12 +532,15 @@ final class NeoAPI {
       NotificationCenter.default.post(name: .neoRecordingPreferencesChanged, object: self) }
   }
   var isHalfWidthDisplayed: Bool {
-    get { UserDefaults.standard.object(forKey:"display.halfWidth."+base.absoluteString) as? Bool ?? true }
+    get { Self.halfWidthDisplayed(base:base) }
     set {
       guard newValue != isHalfWidthDisplayed else { return }
       UserDefaults.standard.set(newValue,forKey:"display.halfWidth."+base.absoluteString)
       NotificationCenter.default.post(name:.neoTextPreferencesChanged,object:self)
     }
+  }
+  static func halfWidthDisplayed(base: URL) -> Bool {
+    UserDefaults.standard.object(forKey:"display.halfWidth."+base.absoluteString) as? Bool ?? true
   }
   var highlightRecorded: Bool {
     get { UserDefaults.standard.object(forKey: "recorded.highlight." + base.absoluteString) as? Bool ?? true }
@@ -668,6 +671,7 @@ final class NeoAPI {
     let generation = episodeRevisions[key,default:0]
     let active = Task<NeoAnnictEpisode,Error> {
       let value: NeoAnnictEpisode = try await self.request(self.url("/recorded/\(id)/annictEpisode"),method:method,body:method == "PUT" ? NeoAnnictPreferences.watchOptions : nil,user:user,headers:headers)
+      try Task.checkCancellation()
       guard self.identityRevision == revision, self.episodeRevisions[key,default:0] == generation else { throw CancellationError() }
       self.episodeCache[key] = (value,Date())
       if self.episodeCache.count > 64, let oldest = self.episodeCache.min(by:{ $0.value.stored < $1.value.stored })?.key { self.episodeCache.removeValue(forKey:oldest) }
