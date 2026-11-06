@@ -22,7 +22,7 @@ struct NeoDestination {
 // UINavigationController's private edge-gesture implementation.
 @objc(NeoSwipeBackAnimator)
 final class NeoSwipeBackAnimator: NSObject, UIViewControllerAnimatedTransitioning {
-  var duration: TimeInterval = 0.22
+  var duration: TimeInterval = 0.15
   private var animator: UIViewPropertyAnimator?
   var curve: UIView.AnimationCurve = .linear
   var onCompletion: ((Bool) -> Void)?
@@ -161,7 +161,7 @@ final class NeoPlayerTransition: NSObject, UIViewControllerTransitioningDelegate
   }
   func animationController(forDismissed dismissed: UIViewController) -> UIViewControllerAnimatedTransitioning? {
     let animator = NeoSwipeBackAnimator()
-    animator.duration = 0.3 // Player dismissal keeps its existing timing.
+    animator.duration = 0.15
     animator.curve = interactive ? .linear : .easeOut
     animator.onCompletion = { [weak self] completed in
       guard let self else { return }; self.interaction = nil; self.onCompletion?(completed)
@@ -946,7 +946,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
   private func finishHistoryReturn(_ finish: Bool) {
     guard routeBackRunning, let active else { return }
-    UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.22, delay: 0,
+    UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.15, delay: 0,
       options: [.beginFromCurrentState, .curveEaseOut], animations: {
         active.view.transform = finish ? CGAffineTransform(translationX: self.content.bounds.width, y: 0) : .identity
       }, completion: { [weak self] _ in
@@ -967,7 +967,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       let animator = NeoPagePushAnimator(); pushingAnimator = animator; return animator
     }
     if operation == .pop && popInteraction != nil { fromVC.view.transform = .identity }
-    return operation == .pop && popInteraction != nil ? NeoSwipeBackAnimator() : nil
+    if operation == .pop {
+      let animator = NeoSwipeBackAnimator(); animator.curve = popInteraction == nil ? .easeOut : .linear
+      return animator
+    }
+    return nil
   }
   func navigationController(_ navigationController: UINavigationController,
     interactionControllerFor animationController: UIViewControllerAnimatedTransitioning) -> UIViewControllerInteractiveTransitioning? {
@@ -1270,7 +1274,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     }
     return ["sidebarSafeAreaAndReusedRowsAligned": aligned, "bottomIconsAndTitlesStayCentered": centered,
       "recordedVisibleCellsFollowWidth": NeoRecordedPage.reflowSmoke(in: host),
-      "detailBackCompletesFaster": NeoSwipeBackAnimator().transitionDuration(using: nil) == 0.22]
+      "detailBackCompletesFaster": NeoSwipeBackAnimator().transitionDuration(using: nil) == 0.15]
   }
   private var uiSmokeScheduled = false
   private func scheduleUISmoke() {

@@ -8,6 +8,11 @@ enum NeoIcon {
     if let image = cache[cacheKey] { return image }
     let path = UIBezierPath()
     switch name {
+    case "PageFirst", "PageLast":
+      let points: [CGPoint] = [CGPoint(x:18.41,y:16.59),CGPoint(x:13.83,y:12),CGPoint(x:18.41,y:7.41),CGPoint(x:17,y:6),CGPoint(x:11,y:12),CGPoint(x:17,y:18)]
+      let flip = name == "PageLast"
+      for (index,point) in points.enumerated() { let p = CGPoint(x:flip ? 24-point.x : point.x,y:point.y); if index == 0 { path.move(to:p) } else { path.addLine(to:p) } }
+      path.close(); path.append(UIBezierPath(rect:CGRect(x:flip ? 16 : 6,y:6,width:2,height:12)))
     case "ContentPasteOutlined":
       path.usesEvenOddFillRule = true
       path.move(to:CGPoint(x:19,y:2)); path.addLine(to:CGPoint(x:14.82,y:2))

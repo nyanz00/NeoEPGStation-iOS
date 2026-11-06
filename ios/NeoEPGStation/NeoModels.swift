@@ -292,6 +292,10 @@ struct NeoRecordedOptions: Decodable {
 struct NeoRuleKeyword: Decodable { let id: Int; let keyword: String }
 struct NeoRuleKeywords: Decodable { let items: [NeoRuleKeyword] }
 enum NeoPagination {
+  static func jump(_ text: String, count: Int) -> Int? {
+    guard !text.isEmpty, text.utf8.allSatisfy({ (48...57).contains($0) }), let value = Int(text), (1...max(1,count)).contains(value) else { return nil }
+    return value
+  }
   // VueCompatiblePagination.tsx: five consecutive mobile buttons.
   static func mobile(page: Int, count: Int) -> [Int] {
     let count = max(1, count), page = min(max(1, page), max(1, count))
@@ -534,6 +538,14 @@ final class NeoAPI {
     get { min(1000, max(1, UserDefaults.standard.object(forKey: "recorded.length." + base.absoluteString) as? Int ?? 24)) }
     set { UserDefaults.standard.set(min(1000, max(1, newValue)), forKey: "recorded.length." + base.absoluteString)
       NotificationCenter.default.post(name: .neoRecordingPreferencesChanged, object: self) }
+  }
+  var topRecordedPagination: Bool {
+    get { UserDefaults.standard.bool(forKey:"recorded.pagination.top."+base.absoluteString) }
+    set { UserDefaults.standard.set(newValue,forKey:"recorded.pagination.top."+base.absoluteString); NotificationCenter.default.post(name:.neoRecordingPreferencesChanged,object:self) }
+  }
+  var extendedPagination: Bool {
+    get { UserDefaults.standard.bool(forKey:"recorded.pagination.extended."+base.absoluteString) }
+    set { UserDefaults.standard.set(newValue,forKey:"recorded.pagination.extended."+base.absoluteString); NotificationCenter.default.post(name:.neoRecordingPreferencesChanged,object:self) }
   }
   var isHalfWidthDisplayed: Bool {
     get { Self.halfWidthDisplayed(base:base) }

@@ -382,6 +382,8 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
     case .annict: buildAnnictPreferences(api)
     case .discord: break
     case .display:
+      toggle("録画済みの上部にページ切り替えを表示", on:api.topRecordedPagination) { api.topRecordedPagination = $0 }
+      toggle("拡張ページ切り替え", explanation:"現在のページ番号から移動先を入力できます。幅に余裕がある場合は先頭・末尾ボタンも表示します。", on:api.extendedPagination) { api.extendedPagination = $0 }
       toggle("THUMBボタンを表示しない", on: shell.storage.hideRecordedThumbnailButton) { [weak shell] in shell?.storage.hideRecordedThumbnailButton = $0 }
       toggle("録画済みへ戻った番組を強調表示", explanation: "録画詳細や視聴履歴から一覧へ移動した際、対象の録画を約1秒間ハイライトします。", on: api.highlightRecorded) { api.highlightRecorded = $0 }
       let length = UITextField(); length.text = String(api.recordedLength); length.keyboardType = .numberPad; length.textColor = .white

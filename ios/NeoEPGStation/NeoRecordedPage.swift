@@ -80,10 +80,12 @@ final class NeoRecordedCard: UICollectionViewCell {
 
 final class NeoPaginationFooter: UICollectionReusableView {
   var onPage: ((Int) -> Void)?
+  var onJump: (() -> Void)?
+  private var extended = false
   private var page = 1, count = 1, mobile = true
   private var lastWidth: CGFloat = -1
-  func configure(page: Int, count: Int, mobile: Bool, action: @escaping (Int) -> Void) {
-    self.page = page; self.count = count; self.mobile = mobile; onPage = action; lastWidth = -1; setNeedsLayout()
+  func configure(page: Int, count: Int, mobile: Bool, extended: Bool = false, jump: (() -> Void)? = nil, action: @escaping (Int) -> Void) {
+    self.page = page; self.count = count; self.mobile = mobile; self.extended = extended; onJump = jump; onPage = action; lastWidth = -1; setNeedsLayout()
   }
   override func layoutSubviews() {
     super.layoutSubviews(); guard lastWidth != bounds.width else { return }; lastWidth = bounds.width
@@ -112,14 +114,57 @@ final class NeoPaginationFooter: UICollectionReusableView {
       button.layer.shadowOffset = CGSize(width: 0, height: 2); button.layer.shadowRadius = 2
       button.accessibilityLabel = icon == "ChevronLeft" ? "前のページ" : icon == "ChevronRight" ? "次のページ" : "\(value ?? 0)ページ"
       if selected { button.accessibilityTraits.insert(.selected) }
-      if let value { button.addAction(UIAction { [weak self] _ in self?.onPage?(value) }, for: .touchUpInside) }
+      if selected && extended { button.accessibilityHint = "タップして移動するページ番号を入力" }
+      if let value { button.addAction(UIAction { [weak self] _ in
+        guard let self else { return }
+        if icon == nil && value == self.page && self.extended { self.onJump?() } else { self.onPage?(value) }
+      }, for: .touchUpInside) }
       addSubview(button)
     }
     add(page - 1, icon: "ChevronLeft", enabled: page > 1); x += arrowGap
     values.forEach { add($0, enabled: $0 != nil) }; x += arrowGap
     add(page + 1, icon: "ChevronRight", enabled: page < count)
+    if extended && bounds.width-total >= 2*(side+gap+4) {
+      x = 4; add(1,icon:"PageFirst",enabled:page > 1)
+      subviews.last?.accessibilityLabel = "最初のページ"
+      x = bounds.width-side-4; add(count,icon:"PageLast",enabled:page < count)
+      subviews.last?.accessibilityLabel = "最後のページ"
+    }
     accessibilityIdentifier = "recorded-pagination"
   }
+}
+
+private final class NeoPageJumpDialog: NeoLiveDialog {
+  let field = UITextField()
+  private(set) var move: UIButton!
+  private let count: Int, onMove: (Int) -> Void
+  private var observer: NSObjectProtocol?
+  init(page: Int, count: Int, onMove: @escaping (Int) -> Void) {
+    self.count = count; self.onMove = onMove; super.init(title:"ページを指定")
+    addText("移動するページ番号を入力してください（1〜\(count)）。")
+    addText("ページ番号")
+    field.text = String(page); field.keyboardType = .numberPad; field.textColor = .white
+    field.font = .systemFont(ofSize:16); field.accessibilityLabel = "ページ番号"
+    field.layer.cornerRadius = 7; field.layer.borderWidth = 1; field.layer.borderColor = UIColor.white.withAlphaComponent(0.23).cgColor
+    field.backgroundColor = UIColor.white.withAlphaComponent(0.025)
+    let padding = UIView(frame:CGRect(x:0,y:0,width:14,height:44)); field.leftView = padding; field.leftViewMode = .always
+    field.heightAnchor.constraint(equalToConstant:44).isActive = true; addView(field)
+    field.addAction(UIAction { [weak self] _ in guard let self else { return }; self.move.isEnabled = NeoPagination.jump(self.field.text ?? "",count:self.count) != nil },for:.editingChanged)
+    let cancel = addAction("キャンセル") { [weak self] in self?.cancel() }; cancel.layer.borderWidth = 0; cancel.tintColor = NeoStyle.accent
+    move = addAction("移動",filled:true) { [weak self] in
+      guard let self, let value = NeoPagination.jump(self.field.text ?? "",count:self.count) else { return }
+      self.view.endEditing(true); self.dismiss(animated:true) { self.onMove(value) }
+    }
+    observer = NotificationCenter.default.addObserver(forName:UIResponder.keyboardWillChangeFrameNotification,object:nil,queue:.main) { [weak self] note in
+      guard let self, let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
+      let local = self.view.convert(frame,from:nil)
+      self.bottomAvoidance = local.width >= self.view.bounds.width*0.8 && local.maxY >= self.view.bounds.maxY-1 ? max(0,self.view.bounds.maxY-local.minY) : 0
+      UIView.animate(withDuration:(note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.2) { self.view.setNeedsLayout(); self.view.layoutIfNeeded() }
+    }
+  }
+  required init?(coder: NSCoder) { fatalError() }
+  override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); field.becomeFirstResponder() }
+  deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
 }
 
 final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
@@ -169,6 +214,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     collection.dataSource = self; collection.delegate = self; collection.alwaysBounceVertical = true
     collection.register(NeoRecordedCard.self, forCellWithReuseIdentifier: "card")
     collection.register(NeoPaginationFooter.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionFooter, withReuseIdentifier: "pages")
+    collection.register(NeoPaginationFooter.self, forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader, withReuseIdentifier: "pages")
     refresh.tintColor = NeoStyle.accent; refresh.addTarget(self, action: #selector(refreshList), for: .valueChanged)
     collection.refreshControl = refresh; body.addSubview(collection); body.addSubview(message); body.addSubview(spinner)
     message.numberOfLines = 0; message.textAlignment = .center
@@ -192,6 +238,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
       guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
       if !api.highlightRecorded { self.clearHighlight() }
       if self.pageLength != api.recordedLength { self.pageLength = api.recordedLength; self.clearCache(); self.reload(targetPage: 1) }
+      else { self.collection.reloadData(); self.collection.collectionViewLayout.invalidateLayout() }
     })
     observers.append(NotificationCenter.default.addObserver(forName:.neoTextPreferencesChanged,object:nil,queue:.main) { [weak self] note in
       guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
@@ -376,6 +423,50 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     guard value != page, (1...max(1, Int(ceil(Double(total) / Double(pageLength))))).contains(value) else { return }
     reload(targetPage: value)
   }
+  private func jumpToPage() {
+    let count = max(1,Int(ceil(Double(total)/Double(pageLength))))
+    present(NeoPageJumpDialog(page:page,count:count) { [weak self] in self?.selectPage($0) },animated:true)
+  }
+#if targetEnvironment(simulator)
+  func smokePaginationChecks() async -> [String:Bool] {
+    guard let api = shell?.api else { return ["paginationHasAPI":false] }
+    let oldTop = api.topRecordedPagination, oldExtended = api.extendedPagination, oldOffset = collection.contentOffset
+    defer { api.topRecordedPagination = oldTop; api.extendedPagination = oldExtended; collection.setContentOffset(oldOffset,animated:false) }
+    api.topRecordedPagination = true; api.extendedPagination = true
+    collection.setContentOffset(.zero,animated:false); collection.layoutIfNeeded()
+    let header = collection.supplementaryView(forElementKind:UICollectionView.elementKindSectionHeader,at:IndexPath(item:0,section:0)) as? NeoPaginationFooter
+    var result = ["topPaginationAppearsWhenEnabled":header != nil && header!.bounds.height == 72]
+    let sample = NeoPaginationFooter(frame:CGRect(x:0,y:0,width:375,height:72))
+    var jumped = false, moved = 0
+    sample.configure(page:3,count:100,mobile:true,extended:true,jump:{ jumped = true }) { moved = $0 }
+    sample.layoutIfNeeded()
+    let smallButtons = sample.subviews.compactMap { $0 as? UIButton }
+    let selected = smallButtons.first { $0.title(for:.normal) == "3" }
+    selected?.sendActions(for:.touchUpInside)
+    result["narrowPaginationKeepsFiveNumbersAndHidesEdges"] = smallButtons.filter { $0.title(for:.normal) != nil }.count == 5 && !smallButtons.contains { $0.accessibilityLabel == "最初のページ" }
+    result["currentPageOpensJumpInsteadOfReload"] = jumped && moved == 0
+    sample.frame.size.width = 700; sample.layoutIfNeeded()
+    let wide = sample.subviews.compactMap { $0 as? UIButton }
+    result["spareWidthAddsEdgesWithoutMovingNumbers"] = wide.contains { $0.accessibilityLabel == "最初のページ" } && wide.contains { $0.accessibilityLabel == "最後のページ" } && wide.allSatisfy { $0.frame.minX >= 0 && $0.frame.maxX <= 700 }
+    wide.first { $0.accessibilityLabel == "最後のページ" }?.sendActions(for:.touchUpInside)
+    result["lastPageButtonTargetsLastPage"] = moved == 100
+    header?.onJump?()
+    for _ in 0..<100 {
+      if let shown = presentedViewController, !shown.isBeingPresented, shown.transitionCoordinator == nil, shown.viewIfLoaded?.window != nil { break }
+      try? await Task.sleep(nanoseconds:20_000_000)
+    }
+    if let dialog = presentedViewController as? NeoPageJumpDialog {
+      let field = dialog.field, move = dialog.move!
+      field.text = "999999"; field.sendActions(for:.editingChanged); let invalid = !move.isEnabled
+      field.text = "2"; field.sendActions(for:.editingChanged)
+      result["jumpDialogRejectsInvalidPageAndAcceptsValid"] = invalid && move.isEnabled && field.keyboardType == .numberPad
+      await withCheckedContinuation { (continuation: CheckedContinuation<Void,Never>) in dialog.dismiss(animated:false) { continuation.resume() } }
+    } else { result["jumpDialogRejectsInvalidPageAndAcceptsValid"] = false }
+    api.topRecordedPagination = false; collection.layoutIfNeeded()
+    result["topPaginationCanBeHiddenWithoutRemovingFooter"] = self.collectionView(collection,layout:collection.collectionViewLayout,referenceSizeForHeaderInSection:0).height == 0 && self.collectionView(collection,layout:collection.collectionViewLayout,referenceSizeForFooterInSection:0).height == 72
+    return result
+  }
+#endif
 #if targetEnvironment(simulator)
   var smokePrefetchAllowed = false
   var smokeLoading: Bool { spinner.isAnimating }
@@ -467,9 +558,13 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, referenceSizeForFooterInSection section: Int) -> CGSize {
     CGSize(width: collectionView.bounds.width, height: total > pageLength ? 72 : 0)
   }
+  func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, referenceSizeForHeaderInSection section: Int) -> CGSize {
+    CGSize(width:collectionView.bounds.width,height:shell?.api?.topRecordedPagination == true && total > pageLength ? 72 : 0)
+  }
   func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
     let footer = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "pages", for: indexPath) as! NeoPaginationFooter
-    footer.configure(page: page, count: max(1, Int(ceil(Double(total) / Double(pageLength)))), mobile: collection.bounds.width <= 500) { [weak self] value in self?.selectPage(value) }
+    footer.configure(page: page, count: max(1, Int(ceil(Double(total) / Double(pageLength)))), mobile: collection.bounds.width <= 500,
+      extended:shell?.api?.extendedPagination == true,jump:{ [weak self] in self?.jumpToPage() }) { [weak self] value in self?.selectPage(value) }
     return footer
   }
   deinit { task?.cancel(); usersTask?.cancel(); preparationTask?.cancel(); observers.forEach(NotificationCenter.default.removeObserver) }

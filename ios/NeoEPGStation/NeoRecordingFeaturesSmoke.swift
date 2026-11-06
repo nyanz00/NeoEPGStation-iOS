@@ -1,5 +1,6 @@
 #if targetEnvironment(simulator)
 import UIKit
+import CoreMedia
 
 private final class NeoFeatureProtocol: URLProtocol {
   static let lock = NSLock()
@@ -120,6 +121,7 @@ private final class NeoFeatureProtocol: URLProtocol {
     let opening = await shell.smokeMeasureOpening()
     progress("opening measured")
     checks.merge(opening.checks) { _,value in value }
+    checks.merge(NeoCaptionStyleSmoke.run()) { _,value in value }
     if let data = try? JSONSerialization.data(withJSONObject:opening.timings,options:.prettyPrinted) {
       try? data.write(to:NeoPiPSmoke.directory.appendingPathComponent("recording-opening-times.json"))
     }
@@ -285,6 +287,7 @@ private final class NeoFeatureProtocol: URLProtocol {
     list.smokeScrollEnd()
     await wait { NeoFeatureProtocol.snapshot { NeoFeatureProtocol.detailRequests > detailGets } }
     checks["settledListFetchesOnlyData"] = NeoFeatureProtocol.snapshot { NeoFeatureProtocol.detailRequests > detailGets } && NeoDetailPage.smokeConstructions == constructions
+    checks.merge(await list.smokePaginationChecks()) { _,value in value }
     if let data = try? JSONSerialization.data(withJSONObject:["baselineFrameIntervalsMs":baselineTimes,"scrollFrameIntervalsMs":scrollTimes],options:.prettyPrinted) {
       try? data.write(to:NeoPiPSmoke.directory.appendingPathComponent("recording-scroll-times.json"))
     }
@@ -334,5 +337,57 @@ private final class NeoFeatureProtocol: URLProtocol {
   func start() { link = CADisplayLink(target:self,selector:#selector(tick)); link?.add(to:.main,forMode:.common) }
   @objc private func tick() { let now = CACurrentMediaTime(); if let last { samples.append((now-last)*1000) }; last = now }
   func finish() -> [Double] { link?.invalidate(); link = nil; return samples }
+}
+
+@MainActor private enum NeoCaptionStyleSmoke {
+  static func run() -> [String:Bool] {
+    let subtitlePreference = UserDefaults.standard.object(forKey:"player.subtitle.name")
+    defer { if let subtitlePreference { UserDefaults.standard.set(subtitlePreference,forKey:"player.subtitle.name") } else { UserDefaults.standard.removeObject(forKey:"player.subtitle.name") } }
+    let renderer = NeoASSSubtitleRenderer(), size = CGSize(width:1920,height:1080)
+    let srt = "1\n00:00:01,000 --> 00:00:03,000\n字幕テスト Caption"
+    let loaded = renderer.loadText(srt)
+    let image = renderer.image(atMilliseconds:1500,size:size)
+    let pipImage = renderer.image(atMilliseconds:1500,size:CGSize(width:1280,height:720))
+    if let image { try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("recording-caption-srt.png")) }
+    var result = ["ordinaryCaptionLoadsAndClearsAtCueEnd":loaded && image != nil && renderer.image(atMilliseconds:3500,size:size) == nil]
+    result["ordinaryCaptionSharesScreenAndPiPImageCache"] = image != nil && image === pipImage
+    let sink = NeoCaptionProbeSink(), backend = NeoAetherBackend()
+    backend.view.frame = CGRect(origin:.zero,size:size); backend.layout(); backend.frameSink = sink
+    let file = NeoPiPSmoke.directory.appendingPathComponent("1-Caption.srt")
+    try? Data(srt.replacingOccurrences(of:"00:00:01,000",with:"00:00:00,000").utf8).write(to:file)
+    backend.addSubtitle(url:file,selected:true)
+    result["aetherOrdinaryCaptionReachesScreenAndPiPSink"] = sink.image != nil && backend.view.subviews.compactMap { $0 as? UIImageView }.contains { $0.image === sink.image } && backend.subtitleTracks.contains { $0["selected"] as? Bool == true }
+    if let image = sink.image { try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("recording-caption-aether.png")) }
+    backend.selectSubtitle(-1)
+    result["aetherOrdinaryCaptionOffClearsScreenAndPiPSink"] = sink.image == nil && backend.view.subviews.compactMap { $0 as? UIImageView }.allSatisfy { $0.image == nil }
+    if let cg = image?.cgImage, let data = cg.dataProvider?.data, let bytes = CFDataGetBytePtr(data) {
+      var band = 0, glyph = 0
+      for y in 0..<cg.height { for x in 0..<cg.width { let i = y*cg.bytesPerRow+x*4
+        if bytes[i] == 0 && bytes[i+1] == 0 && bytes[i+2] == 0 && (126...129).contains(Int(bytes[i+3])) { band += 1 }
+        if bytes[i] > 220 && bytes[i+1] > 220 && bytes[i+2] > 220 { glyph += 1 }
+      } }
+      result["ordinaryCaptionHasTranslucentBandAndWhiteGlyphs"] = band > 100 && glyph > 20
+    } else { result["ordinaryCaptionHasTranslucentBandAndWhiteGlyphs"] = false }
+    let positioned = NeoSubtitleScript.ass(srt).replacingOccurrences(of:"字幕テスト Caption",with:"{\\pos(256,230)}字幕テスト Caption")
+    _ = renderer.loadText(positioned); let single = renderer.image(atMilliseconds:1500,size:size)?.cgImage
+    let event = positioned.components(separatedBy:"\n").first { $0.hasPrefix("Dialogue:") } ?? ""
+    _ = renderer.loadText(positioned+"\n"+event); let overlapping = renderer.image(atMilliseconds:1500,size:size)
+    if let overlapping { try? overlapping.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("recording-caption-overlap.png")) }
+    if let one = single, let two = overlapping?.cgImage, let a = one.dataProvider?.data, let b = two.dataProvider?.data,
+      let first = CFDataGetBytePtr(a), let second = CFDataGetBytePtr(b), CFDataGetLength(a) == CFDataGetLength(b) {
+      var samples = 0, unchanged = 0
+      for i in stride(from:0,to:CFDataGetLength(a)-3,by:4) where first[i] == 0 && first[i+1] == 0 && first[i+2] == 0 && (126...129).contains(Int(first[i+3])) {
+        samples += 1; if (126...129).contains(Int(second[i+3])) { unchanged += 1 }
+      }
+      result["overlappingCaptionBandsDoNotBecomeDarker"] = samples > 100 && Double(unchanged)/Double(samples) > 0.9
+    } else { result["overlappingCaptionBandsDoNotBecomeDarker"] = false }
+    return result
+  }
+}
+private final class NeoCaptionProbeSink: NSObject, NeoVideoFrameSink {
+  var capturingForPiP: Bool { true }
+  var image: UIImage?
+  func receiveSubtitleImage(_ image: UIImage?) { self.image = image }
+  func receiveVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer) { }
 }
 #endif

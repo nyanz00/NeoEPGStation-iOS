@@ -474,7 +474,8 @@ final class NeoAetherBackend: NSObject {
     chosenSubtitle = index; nativeSubtitle = false; ass.clear(); caption.image = nil; frameSink?.receiveSubtitleImage(nil)
     guard index >= 0 else { engine?.clearSubtitle(); NeoSubtitlePreference.save(""); refreshTracks(); return }
     if let url = choices[index], let text = try? String(contentsOf:url,encoding:.utf8) {
-      _ = ass.loadText(NeoSubtitleScript.ass(text)); engine?.clearSubtitle()
+      // Shared ordinary-caption renderer applies the Web style to ASS/SRT.
+      _ = ass.loadText(text); engine?.clearSubtitle()
       NeoSubtitlePreference.save(subtitleName(url))
     } else {
       nativeSubtitle = true; engine?.selectSubtitleTrack(index:index)

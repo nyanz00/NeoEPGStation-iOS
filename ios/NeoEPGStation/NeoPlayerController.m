@@ -5,6 +5,7 @@
 #import <VLCKit/VLCKit.h>
 #import "NeoEPGStation-Swift.h"
 #import "NeoVLCFrameTap.h"
+#import "NeoASSSubtitleRenderer.h"
 #import <stdio.h>
 
 static BOOL NeoAV1HardwareSupported(void) {
@@ -281,6 +282,11 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 @property (nonatomic) NSTimeInterval liveOpenedAt, liveVideoAt;
 @property (nonatomic) NSUInteger liveDecoded, liveDecodedAudio;
 @property (nonatomic) NeoStreamingSubtitles *streamingSubtitles;
+@property (nonatomic) NeoASSSubtitleRenderer *ordinaryRenderer;
+@property (nonatomic) NSMutableDictionary<NSNumber *,NSURL *> *ordinaryFiles;
+@property (nonatomic) UIImageView *ordinaryCaption;
+@property (nonatomic) CADisplayLink *ordinaryCaptionLink;
+@property (nonatomic) NSInteger ordinarySelected;
 @property (nonatomic) NSMutableSet<NSURL *> *attachedSubtitles;
 @property (nonatomic) BOOL streamSubtitleUserSelected;
 @property (nonatomic) NSURL *playbackURL;
@@ -613,8 +619,19 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.annictTracker.onChange = ^{ [weakSelf updateControls]; };
   [self showControls];
   if ([self isLive]) { [self startLive]; return; }
-  if (![self isStreaming] && ![self.recordingContext[@"videoFileType"] isEqual:@"ts"] &&
-      (self.aether || [NeoCommentOverlay waitBeforePlayback])) {
+  if (!self.aether && ![self.recordingContext[@"videoFileType"] isEqual:@"ts"]) {
+    self.ordinaryRenderer = [NeoASSSubtitleRenderer new]; self.ordinaryFiles = [NSMutableDictionary new]; self.ordinarySelected = -1;
+    self.ordinaryCaption = [[UIImageView alloc] initWithFrame:self.movieView.bounds];
+    self.ordinaryCaption.contentMode = UIViewContentModeScaleAspectFit; self.ordinaryCaption.userInteractionEnabled = NO;
+    self.ordinaryCaption.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+    [self.movieView addSubview:self.ordinaryCaption];
+    self.ordinaryCaptionLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateOrdinaryCaption)];
+    self.ordinaryCaptionLink.preferredFrameRateRange = CAFrameRateRangeMake(15,60,30);
+    [self.ordinaryCaptionLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+    NeoASSSubtitleRenderer *renderer = self.ordinaryRenderer;
+    [self.commentPiP useSubtitleProvider:^UIImage *(double time, CGSize size) { return [renderer imageAtMilliseconds:(int64_t)llround(time*1000) size:size]; }];
+  }
+  if (![self isStreaming] && ![self.recordingContext[@"videoFileType"] isEqual:@"ts"]) {
     self.streamingSubtitles = [[NeoStreamingSubtitles alloc] initWithSource:self.sourceURL username:self.username password:self.password];
     self.streamingSubtitles.onChange = ^{ [weakSelf attachStreamingSubtitles]; };
     [self.streamingSubtitles start];
@@ -676,8 +693,34 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     BOOL selected = !self.streamSubtitleUserSelected && preferred >= 0 &&
       [[url.lastPathComponent componentsSeparatedByString:@"-"].firstObject integerValue] == preferred;
     if (self.aether) { [self.aether addSubtitleURL:url selected:selected]; [self.attachedSubtitles addObject:url]; }
-    else if ([self.player addPlaybackSlave:url type:VLCMediaPlaybackSlaveTypeSubtitle enforce:selected] == 0) { [self.attachedSubtitles addObject:url]; }
+    else if (self.ordinaryRenderer) {
+      NSNumber *index = @([[url.lastPathComponent componentsSeparatedByString:@"-"].firstObject integerValue]);
+      self.ordinaryFiles[index] = url; [self.attachedSubtitles addObject:url];
+      NSString *saved = [NeoSubtitlePreference savedName];
+      NSString *name = [[url.URLByDeletingPathExtension.lastPathComponent componentsSeparatedByString:@"-"] componentsJoinedByString:@"-"];
+      BOOL explicitMatch = self.streamSubtitleUserSelected && saved.length && [name hasSuffix:saved];
+      if (selected || explicitMatch) { [self selectOrdinarySubtitle:index.integerValue]; }
+    }
   }
+}
+- (void)selectOrdinarySubtitle:(NSInteger)index {
+  self.ordinarySelected = index; [self.ordinaryRenderer clear]; self.ordinaryCaption.image = nil;
+  NSURL *url = self.ordinaryFiles[@(index)];
+  if (url) {
+    NSString *text = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:nil];
+    if (text) { [self.ordinaryRenderer loadText:text]; }
+    NSString *name = [[[url.URLByDeletingPathExtension.lastPathComponent componentsSeparatedByString:@"-"] subarrayWithRange:NSMakeRange(1,[[url.URLByDeletingPathExtension.lastPathComponent componentsSeparatedByString:@"-"] count]-1)] componentsJoinedByString:@"-"];
+    [NeoSubtitlePreference save:name];
+  } else { [NeoSubtitlePreference save:@""]; }
+  [self updateOrdinaryCaption];
+}
+- (void)updateOrdinaryCaption {
+  if (self.closing || !self.ordinaryRenderer) { return; }
+  CGSize size = self.transportVideoSize;
+  VLCMediaVideoTrack *video = self.player.media.videoTracks.firstObject.video;
+  if (video.sourceAspectRatio > 0 && video.sourceAspectRatioDenominator > 0) { size.width *= (double)video.sourceAspectRatio/video.sourceAspectRatioDenominator; }
+  UIImage *image = [self.ordinaryRenderer imageAtMilliseconds:[self mediaTime] size:size];
+  if (self.ordinaryCaption.image != image) { self.ordinaryCaption.image = image; }
 }
 - (void)armStreamingClockAt:(int64_t)time {
   if (![self isStreaming]) { return; }
@@ -1055,6 +1098,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     self.streamSubtitleUserSelected = YES;
     NSInteger index = [action substringFromIndex:9].integerValue;
     if (self.aether) { [self.aether selectSubtitle:index]; [self updateSubtitleSettings]; return; }
+    if (self.ordinaryFiles.count) { [self selectOrdinarySubtitle:index]; [self updateSubtitleSettings]; return; }
     if (index < 0) {
       [NeoSubtitlePreference save:@""]; self.subtitleSignature = nil;
       for (VLCMediaPlayerTrack *track in self.player.textTracks) {
@@ -1890,6 +1934,16 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 - (void)updateSubtitleSettings {
   [self attachStreamingSubtitles];
   if (self.aether) { [self.chrome updateSubtitleTracks:self.aether.subtitleTracks]; return; }
+  if (self.ordinaryFiles.count) {
+    for (VLCMediaPlayerTrack *track in self.player.textTracks) { if ([self isOrdinarySubtitle:track] && track.isSelected) { track.selected = NO; } }
+    NSMutableArray *tracks = [NSMutableArray new];
+    for (NSNumber *index in [self.ordinaryFiles.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+      NSURL *url = self.ordinaryFiles[index]; NSArray *parts = [url.URLByDeletingPathExtension.lastPathComponent componentsSeparatedByString:@"-"];
+      NSString *name = [[parts subarrayWithRange:NSMakeRange(1,parts.count-1)] componentsJoinedByString:@"-"];
+      [tracks addObject:@{@"index":index,@"name":name,@"detail":@"",@"selected":@(index.integerValue == self.ordinarySelected)}];
+    }
+    [self.chrome updateSubtitleTracks:tracks]; return;
+  }
   [self restoreSubtitlePreference];
   NSMutableArray *tracks = [NSMutableArray new]; NSInteger index = 0;
   for (VLCMediaPlayerTrack *track in self.player.textTracks) {
@@ -4036,6 +4090,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   dispatch_block_t reloadCompletion = self.reloadCompletion; self.reloadCompletion = nil;
   if (reloadCompletion) { reloadCompletion(); }
   [self.streamingSubtitles close]; self.streamingSubtitles.onChange = nil;
+  [self.ordinaryCaptionLink invalidate]; self.ordinaryCaptionLink = nil;
+  [self.commentPiP useSubtitleProvider:nil]; [self.ordinaryRenderer clear]; self.ordinaryCaption.image = nil;
   [self.streamingSession close]; self.streamingSession.onChange = nil; self.streamingSession.onTransportFailure = nil;
   [self.rewindCache close]; self.rewindCache.onChange = nil; self.rewindCache.onTransportFailure = nil;
   self.view.userInteractionEnabled = NO;

@@ -111,6 +111,10 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
   private var state = CommentCompositionState(timeline: nil, version: -1, enabled: false, size: 1, opacity: 1)
   private var current: CapturedVideoFrame?
   private var subtitleImage: CGImage?
+  private var subtitleProvider: ((Double,CGSize) -> UIImage?)?
+  @objc func useSubtitleProvider(_ provider: ((Double,CGSize) -> UIImage?)?) {
+    work.async { [weak self] in self?.subtitleProvider = provider; self?.dirty = true }
+  }
   private var image: CGImage?
   private let videoConverter = PiPVideoConverter()
   private var outputSize = CGSize.zero
@@ -366,8 +370,9 @@ final class NeoCommentPiP: NSObject, NeoVideoFrameSink,
       let layer = displayLayer
       if layer.status == .failed { layer.flush() }
       guard layer.isReadyForMoreMediaData else { return }
+      let subtitle = subtitleProvider != nil ? subtitleProvider?(time,outputSize)?.cgImage : subtitleImage
       guard let output = try Self.compose(image: image, size: outputSize, pool: pool, renderer: renderer,
-        state: composition, time: time, schedulingTime: clock.schedulingTime, subtitle: subtitleImage) else { return }
+        state: composition, time: time, schedulingTime: clock.schedulingTime, subtitle: subtitle) else { return }
       let sample = try Self.makeSample(output, hostTime: now)
       layer.enqueue(sample)
       frameLock.lock(); composed += 1; frameLock.unlock()

@@ -1,8 +1,8 @@
 import Foundation
 
-// Server sends video without burned captions. Keep extracted ordinary ASS
-// separate and let VLC/libass render its complete styles, alongside the native
-// comment worker. TS ARIB remains a native track in the HLS TS payload.
+// Server sends video without burned captions. Extract ordinary ASS/SRT for
+// the shared styled caption renderer in VLC and Aether, separate from comments.
+// TS ARIB remains a native track in the HLS TS payload.
 @objc(NeoStreamingSubtitles)
 final class NeoStreamingSubtitles: NSObject {
   private let loader: NeoCommentLoader

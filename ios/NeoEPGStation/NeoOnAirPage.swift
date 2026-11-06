@@ -349,6 +349,7 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
 
 // Same compact, centered outlined dialog surface as the mobile Web player.
 class NeoLiveDialog: UIViewController {
+  var bottomAvoidance: CGFloat = 0
   var maximumWidth: CGFloat { 444 }
   var titleInset: CGFloat? { nil }
   var contentBackground: UIColor { UIColor.white.withAlphaComponent(0.08) }
@@ -415,8 +416,9 @@ class NeoLiveDialog: UIViewController {
     let content = stack.systemLayoutSizeFitting(CGSize(width:width-48,height:UIView.layoutFittingCompressedSize.height),withHorizontalFittingPriority:.required,verticalFittingPriority:.fittingSizeLevel).height
     let inset = titleInset ?? NeoStyle.dialogTitleInset(viewportWidth:view.bounds.width)
     let header = headingLabel.sizeThatFits(CGSize(width:width-2*inset,height:CGFloat.greatestFiniteMagnitude)).height+2*inset
-    let height = min(max(200,header+content+92),max(200,view.bounds.height-view.safeAreaInsets.top-view.safeAreaInsets.bottom-32))
-    card.frame = CGRect(x:(view.bounds.width-width)/2,y:(view.bounds.height-height)/2,width:width,height:height)
+    let availableHeight = view.bounds.height-bottomAvoidance
+    let height = min(max(200,header+content+92),max(200,availableHeight-view.safeAreaInsets.top-view.safeAreaInsets.bottom-32))
+    card.frame = CGRect(x:(view.bounds.width-width)/2,y:(availableHeight-height)/2,width:width,height:height)
     headingLabel.frame = CGRect(x:inset,y:inset,width:width-2*inset,height:header-2*inset)
     contentFill.frame = CGRect(x:0,y:header,width:width,height:height-header-60)
     topLine.frame = CGRect(x:0,y:header,width:width,height:1); bottomLine.frame = CGRect(x:0,y:height-60,width:width,height:1)
