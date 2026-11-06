@@ -4,7 +4,7 @@ enum NeoSubtitleScript {
   // Preserve ASS styles verbatim. The server can also extract SRT/WebVTT;
   // convert those text formats into the same libass presentation pipeline.
   static func ass(_ text: String) -> String {
-    if text.contains("[Events]") { return text }
+    if text.range(of:"[Events]",options:.caseInsensitive) != nil { return text }
     let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
     var events: [String] = []
     func seconds(_ value: String) -> Double? {
@@ -103,7 +103,7 @@ enum NeoSubtitleScript {
         }
         fields[textIndex] = body; main.append("Dialogue:"+fields.joined(separator:","))
         body = body.replacingOccurrences(of:#"\\(?:[123]c|c)&H[0-9A-Fa-f]+&?"#,with:"",options:.regularExpression)
-          .replacingOccurrences(of:#"\\[12]a&H[0-9A-Fa-f]+&?"#,with:"",options:.regularExpression)
+          .replacingOccurrences(of:#"\\[123]a&H[0-9A-Fa-f]+&?"#,with:"",options:.regularExpression)
           .replacingOccurrences(of:#"\\(?:xbord|ybord|bord)[-+\d.]+"#,with:"",options:.regularExpression)
           .replacingOccurrences(of:"\\4c",with:"\\3c").replacingOccurrences(of:"\\4a",with:"\\3a")
           .replacingOccurrences(of:"\\alpha",with:"\\3a")
@@ -127,6 +127,23 @@ enum NeoSubtitleScript {
       return [start,end,Double(field("layer").trimmingCharacters(in:.whitespaces)) ?? 0,field("text").contains("\\pos(") && !field("text").contains("\\move(") ? 1 : 0]
     }
   }
+  static func layers(_ source: String) -> [String] {
+    let text = ass(source).replacingOccurrences(of:"\r\n",with:"\n"), lines = text.components(separatedBy:"\n")
+    var format = "layer,start,end,style,name,marginl,marginr,marginv,effect,text".components(separatedBy:","), events = false
+    var groups: [Int:[String]] = [:], header: [String] = []
+    for raw in lines {
+      let line = raw.trimmingCharacters(in:.whitespaces), lower = line.lowercased()
+      if line.hasPrefix("[") { events = lower == "[events]" }
+      if events && lower.hasPrefix("format:") { format = line.dropFirst(7).lowercased().components(separatedBy:",").map { $0.trimmingCharacters(in:.whitespaces) } }
+      guard events && lower.hasPrefix("dialogue:") else { header.append(raw); continue }
+      let values = line.dropFirst(9).split(separator:",",maxSplits:max(0,format.count-1),omittingEmptySubsequences:false)
+      let field = format.firstIndex(of:"layer") ?? 0
+      let layer = values.indices.contains(field) ? Int(values[field].trimmingCharacters(in:.whitespaces)) ?? 0 : 0
+      groups[layer,default:[]].append(raw)
+    }
+    guard groups.count > 1 else { return [text] }
+    return groups.keys.sorted().map { (header+["[Events]","Format: "+format.joined(separator:",")]+(groups[$0] ?? [])).joined(separator:"\n") }
+  }
 }
 
 #if canImport(ObjectiveC)
@@ -135,5 +152,6 @@ enum NeoSubtitleScript {
     NeoSubtitleScript.presentation(text,font:font,aspect:aspect)
   }
   @objc static func intervals(_ text: String) -> [[Double]] { NeoSubtitleScript.positionedIntervals(NeoSubtitleScript.ass(text)) }
+  @objc static func layers(_ text: String) -> [String] { NeoSubtitleScript.layers(text) }
 }
 #endif

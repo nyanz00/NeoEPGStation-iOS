@@ -381,6 +381,28 @@ private final class NeoFeatureProtocol: URLProtocol {
       }
       result["overlappingCaptionBandsDoNotBecomeDarker"] = samples > 100 && Double(unchanged)/Double(samples) > 0.9
     } else { result["overlappingCaptionBandsDoNotBecomeDarker"] = false }
+    let layerBase = NeoSubtitleScript.ass(srt).replacingOccurrences(of:"字幕テスト Caption",with:"{\\pos(256,230)}I")
+    _ = renderer.loadText(layerBase); let bottom = renderer.image(atMilliseconds:1500,size:size)
+    let topEvent = (layerBase.components(separatedBy:"\n").first { $0.hasPrefix("Dialogue:") } ?? "")
+      .replacingOccurrences(of:"Dialogue: 0,",with:"Dialogue: 1,")
+      .replacingOccurrences(of:"{\\pos(256,230)}I",with:"{\\pos(256,230)\\1a&HFF&}WWWWWWWW")
+    _ = renderer.loadText(layerBase+"\n"+topEvent); let layered = renderer.image(atMilliseconds:1500,size:size)
+    if let layered { try? layered.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("recording-caption-layers.png")) }
+    func rgba(_ image: CGImage) -> [UInt8]? {
+      var bytes = [UInt8](repeating:0,count:image.width*image.height*4)
+      let ready = bytes.withUnsafeMutableBytes { buffer -> Bool in
+        guard let context = CGContext(data:buffer.baseAddress,width:image.width,height:image.height,bitsPerComponent:8,bytesPerRow:image.width*4,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGBitmapInfo.byteOrder32Big.rawValue|CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+        context.draw(image,in:CGRect(x:0,y:0,width:CGFloat(image.width),height:CGFloat(image.height))); return true
+      }
+      return ready ? bytes : nil
+    }
+    if let one = bottom?.cgImage, let two = layered?.cgImage, let a = rgba(one), let b = rgba(two), a.count == b.count {
+      var samples = 0, covered = 0
+      for i in stride(from:0,to:a.count-3,by:4) where a[i] > 220 && a[i+1] > 220 && a[i+2] > 220 && a[i+3] > 220 {
+        samples += 1; if b[i] < 200 && b[i+1] < 200 && b[i+2] < 200 { covered += 1 }
+      }
+      result["upperCaptionLayerBandCoversLowerLayerGlyphs"] = samples > 20 && Double(covered)/Double(samples) > 0.9
+    } else { result["upperCaptionLayerBandCoversLowerLayerGlyphs"] = false }
     return result
   }
 }

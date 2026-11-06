@@ -77,4 +77,10 @@ let broadcastStyle = NeoSubtitleScript.presentation(broadcast,font:"Hiragino Mar
 check("broadcast caption uses Web 36px metric correction",broadcastStyle[2] == "36" && broadcastStyle[7] == "0" && broadcastStyle[16] == "2")
 let opaque = NeoSubtitleScript.presentation(subtitle.replacingOccurrences(of:"&H80000000",with:"&H00000000"),font:"Hiragino Maru Gothic ProN",aspect:16/9)[1]
 check("opaque black SRT background becomes translucent",opaque.components(separatedBy:"\n").first { $0.hasPrefix("Style:") }!.components(separatedBy:",")[5] == "&H80000000")
+let bottomEvent = positioned.components(separatedBy:"\n").first { $0.hasPrefix("Dialogue:") }!
+let upperEvent = bottomEvent.replacingOccurrences(of:"Dialogue: 0,",with:"Dialogue: 2,")
+let layered = NeoSubtitleScript.layers((positioned+"\n"+upperEvent).replacingOccurrences(of:"\n",with:"\r\n"))
+check("ASS layer separation keeps source event order and header",layered.count == 2 && layered.allSatisfy { $0.contains("[V4+ Styles]") && $0.contains("[Events]") } && layered[0].components(separatedBy:"\n").filter { $0.hasPrefix("Dialogue:") }.count == 1)
+check("layer separation preserves exact layer ids",layered[0].contains("Dialogue: 0,") && !layered[0].contains("Dialogue: 2,") && layered[1].contains("Dialogue: 2,") && NeoSubtitleScript.ass(positioned.lowercased()).contains("[events]"))
+check("stroke alpha never overwrites caption band alpha",!NeoSubtitleScript.presentation(positioned.replacingOccurrences(of:"\\fnArial",with:"\\fnArial\\3a&H00&"),font:"Hiragino Maru Gothic ProN",aspect:16/9)[1].contains("\\3a&H00&"))
 print("Recording feature model checks: \(count) passed")

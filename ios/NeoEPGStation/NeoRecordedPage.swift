@@ -429,6 +429,11 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   }
 #if targetEnvironment(simulator)
   func smokePaginationChecks() async -> [String:Bool] {
+    func capture(_ name: String) {
+      guard let window = view.window else { return }
+      let image = UIGraphicsImageRenderer(bounds:window.bounds).image { _ in window.drawHierarchy(in:window.bounds,afterScreenUpdates:true) }
+      try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent(name+".png"))
+    }
     guard let api = shell?.api else { return ["paginationHasAPI":false] }
     let oldTop = api.topRecordedPagination, oldExtended = api.extendedPagination, oldOffset = collection.contentOffset
     defer { api.topRecordedPagination = oldTop; api.extendedPagination = oldExtended; collection.setContentOffset(oldOffset,animated:false) }
@@ -436,6 +441,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     collection.setContentOffset(.zero,animated:false); collection.layoutIfNeeded()
     let header = collection.supplementaryView(forElementKind:UICollectionView.elementKindSectionHeader,at:IndexPath(item:0,section:0)) as? NeoPaginationFooter
     var result = ["topPaginationAppearsWhenEnabled":header != nil && header!.bounds.height == 72]
+    capture("recording-pagination-top")
     let sample = NeoPaginationFooter(frame:CGRect(x:0,y:0,width:375,height:72))
     var jumped = false, moved = 0
     sample.configure(page:3,count:100,mobile:true,extended:true,jump:{ jumped = true }) { moved = $0 }
@@ -460,6 +466,8 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
       field.text = "999999"; field.sendActions(for:.editingChanged); let invalid = !move.isEnabled
       field.text = "2"; field.sendActions(for:.editingChanged)
       result["jumpDialogRejectsInvalidPageAndAcceptsValid"] = invalid && move.isEnabled && field.keyboardType == .numberPad
+      try? await Task.sleep(nanoseconds:350_000_000)
+      capture("recording-page-jump")
       await withCheckedContinuation { (continuation: CheckedContinuation<Void,Never>) in dialog.dismiss(animated:false) { continuation.resume() } }
     } else { result["jumpDialogRejectsInvalidPageAndAcceptsValid"] = false }
     api.topRecordedPagination = false; collection.layoutIfNeeded()

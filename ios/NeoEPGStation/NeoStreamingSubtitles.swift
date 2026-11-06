@@ -9,6 +9,8 @@ final class NeoStreamingSubtitles: NSObject {
   private let directory = FileManager.default.temporaryDirectory.appendingPathComponent("neo-captions-"+UUID().uuidString)
   private var closed = false
   private var settled = false
+  @objc private(set) var finished = false
+  private var pendingTracks = 0
   private var readyCallbacks: [() -> Void] = []
   @objc var initialTrackIndex: NSNumber?
   @objc private(set) var preferredIndex = -1
@@ -37,7 +39,9 @@ final class NeoStreamingSubtitles: NSObject {
     loader.ordinaryTracks { [weak self] result in
       DispatchQueue.main.async {
       guard let self, !self.closed else { return }
-      guard case .success(let tracks) = result else { self.finishPreparation(); return }
+      guard case .success(let tracks) = result else { self.finished = true; self.finishPreparation(); self.onChange?(); return }
+      self.pendingTracks = tracks.count
+      if tracks.isEmpty { self.finished = true }
       self.preferredIndex = self.initialTrackIndex?.intValue ?? NeoCommentPreference.priority(tracks)?.subtitleIndex ?? -1
       if !tracks.contains(where: { $0.subtitleIndex == self.preferredIndex }) { self.finishPreparation() }
       for track in tracks {
@@ -45,7 +49,11 @@ final class NeoStreamingSubtitles: NSObject {
           guard let self else { return }
           DispatchQueue.main.async {
             guard !self.closed else { return }
-            defer { if track.subtitleIndex == self.preferredIndex { self.finishPreparation() } }
+            defer {
+              if track.subtitleIndex == self.preferredIndex { self.finishPreparation() }
+              self.pendingTracks -= 1
+              if self.pendingTracks == 0 { self.finished = true; self.onChange?() }
+            }
             guard case .success(let text) = result else { return }
             do {
               try FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true)

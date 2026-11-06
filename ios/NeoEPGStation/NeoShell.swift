@@ -1469,7 +1469,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private func writeIPadSmoke(_ recorded: NeoRecordedPage, checks: [String: Bool], retained: Bool) {
     NeoNative.writeSmoke("ui-\(smokeStage)-smoke", ["success": checks.values.allSatisfy { $0 }, "checks": checks,
       "stage": smokeStage, "route": route, "recordCount": recorded.records.count, "theme": "neon-teal-dark",
-      "uiEngine": "Swift / UIKit", "retainedList": retained, "sidebarWidth": api == nil ? 0 : 240])
+      "uiEngine": "Swift / UIKit", "retainedList": retained, "sidebarWidth": api == nil ? 0 : 240,
+      "backDetails": backSmokeDetails])
   }
   private func runNavigationTimingSmoke() async -> [String:Bool] {
     var checks = [String:Bool]()
@@ -1516,6 +1517,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       updateBack(state:.changed,translation:content.bounds.width*0.15,velocity:100)
       try? await Task.sleep(nanoseconds:40_000_000)
       let paintedAgain = (page.view.layer.presentation()?.affineTransform().tx ?? page.view.transform.tx)/max(1,content.bounds.width)
+      backSmokeDetails[name] = ["initial":initial,"expected":expected,"painted":painted,"paintedAgain":paintedAgain,
+        "pushWasRunning":pushWasRunning,"handedOffImmediately":handedOffImmediately,
+        "pending":pendingBack != nil,"interactive":popInteraction != nil,"pushing":pushingNavigation != nil]
       checks[name+"ContinuesFollowingFinger"] = abs(paintedAgain-min(1,initial+0.15))<0.05
       updateBack(state:.ended,translation:content.bounds.width*0.5,velocity:500)
       await settle()

@@ -26,6 +26,7 @@ extern ASS_Image *ass_render_frame(ASS_Renderer *, ASS_Track *, long long, int *
   UIImage *_image; CGSize _size; BOOL _rendered;
   NSString *_source, *_font; double _aspect;
   NSArray<NSArray<NSNumber *> *> *_intervals;
+  NSMutableArray *_layers; NSArray *_layerImages, *_layerIntervals; NSArray<NSString *> *_layerSources;
 }
 - (instancetype)init {
   if ((self = [super init])) {
@@ -40,7 +41,7 @@ extern ASS_Image *ass_render_frame(ASS_Renderer *, ASS_Track *, long long, int *
   }
   return self;
 }
-- (void)clear { @synchronized(self) { if (_track) { ass_free_track(_track); _track = NULL; } if (_bands) { ass_free_track(_bands); _bands = NULL; } _source = nil; _intervals = nil; _image = nil; _rendered = NO; } }
+- (void)clear { @synchronized(self) { if (_track) { ass_free_track(_track); _track = NULL; } if (_bands) { ass_free_track(_bands); _bands = NULL; } _source = nil; _intervals = nil; _layers = nil; _layerImages = nil; _layerIntervals = nil; _layerSources = nil; _image = nil; _rendered = NO; } }
 - (void)addFont:(NSData *)font name:(NSString *)name {
   @synchronized(self) {
   if (_library && font.length > 0 && font.length <= INT_MAX) {
@@ -64,11 +65,50 @@ extern ASS_Image *ass_render_frame(ASS_Renderer *, ASS_Track *, long long, int *
 }
 - (BOOL)loadText:(NSString *)text {
   @synchronized(self) { [self clear]; if (!_renderer || !_bandRenderer) { return NO; }
+    NSArray<NSString *> *layers = [NeoCaptionStyle layers:text];
+    if (layers.count > 1) {
+      _layerSources = layers; _layers = [NSMutableArray new]; NSMutableArray *intervals = [NSMutableArray new];
+      for (NSString *layer in layers) { [_layers addObject:NSNull.null]; [intervals addObject:[NeoCaptionStyle intervals:layer]]; }
+      _layerIntervals = intervals; return YES;
+    }
     _source = [text copy]; _intervals = [NeoCaptionStyle intervals:text]; return [self prepareAspect:16.0/9.0];
   }
 }
 - (UIImage *)imageAtMilliseconds:(int64_t)time size:(CGSize)size {
   @synchronized(self) {
+  if (_layers.count) {
+    NSMutableArray *images = [NSMutableArray new]; UIImage *first = nil; BOOL changed = _layerImages.count != _layers.count;
+    NSMutableIndexSet *active = [NSMutableIndexSet new]; NSUInteger resident = 0;
+    for (NSUInteger index=0; index<_layers.count; index++) {
+      BOOL visible = NO;
+      for (NSArray<NSNumber *> *interval in _layerIntervals[index]) { if (interval[0].doubleValue <= time/1000.0 && time/1000.0 < interval[1].doubleValue) { visible = YES; break; } }
+      UIImage *image = nil;
+      if (visible && ![_layers[index] isKindOfClass:NSString.class]) {
+        [active addIndex:index];
+        if (_layers[index] == NSNull.null) {
+          NeoASSSubtitleRenderer *renderer = [NeoASSSubtitleRenderer new];
+          _layers[index] = [renderer loadText:_layerSources[index]] ? (id)renderer : @"invalid";
+        }
+        if ([_layers[index] isKindOfClass:NeoASSSubtitleRenderer.class]) { image = [_layers[index] imageAtMilliseconds:time size:size]; }
+      }
+      if ([_layers[index] isKindOfClass:NeoASSSubtitleRenderer.class]) { resident++; }
+      if (image && !first) { first = image; }
+      id value = image ?: NSNull.null;
+      if (index >= _layerImages.count || _layerImages[index] != value) { changed = YES; } [images addObject:value];
+    }
+    // Create renderers only for visible layers and retain at most four idle
+    // caches. A file with many successive layer numbers must not prebuild them.
+    for (NSUInteger index=0; index<_layers.count && resident>MAX((NSUInteger)4,active.count); index++) {
+      if (![active containsIndex:index] && [_layers[index] isKindOfClass:NeoASSSubtitleRenderer.class]) { _layers[index] = NSNull.null; resident--; }
+    }
+    if (!changed) { return _image; }
+    _layerImages = images; _image = nil; if (!first) { return nil; }
+    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat defaultFormat]; format.scale = 1; format.opaque = NO; format.preferredRange = UIGraphicsImageRendererFormatRangeStandard;
+    UIGraphicsImageRenderer *canvas = [[UIGraphicsImageRenderer alloc] initWithSize:first.size format:format];
+    _image = [canvas imageWithActions:^(UIGraphicsImageRendererContext *context) {
+      for (id value in images) { if ([value isKindOfClass:UIImage.class]) { [(UIImage *)value drawInRect:(CGRect){CGPointZero,first.size}]; } }
+    }]; return _image;
+  }
   if (!_track || !_renderer || !isfinite(size.width) || !isfinite(size.height) || size.width < 1 || size.height < 1) { return nil; }
   double aspect = size.width/size.height;
   if (fabs(aspect-_aspect) > 0.001 && ![self prepareAspect:aspect]) { return nil; }

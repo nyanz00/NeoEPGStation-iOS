@@ -704,6 +704,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
 }
 - (void)selectOrdinarySubtitle:(NSInteger)index {
+  // Selection happens in the extraction callback too, between control ticks.
+  // Disable native captions before showing the shared image in that turn.
+  for (VLCMediaPlayerTrack *track in self.player.textTracks) { if ([self isOrdinarySubtitle:track] && track.isSelected) { track.selected = NO; } }
   self.ordinarySelected = index; [self.ordinaryRenderer clear]; self.ordinaryCaption.image = nil;
   NSURL *url = self.ordinaryFiles[@(index)];
   if (url) {
@@ -1504,6 +1507,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   VLCMedia *media = [VLCMedia mediaWithURL:self.playbackURL ?: self.sourceURL];
   // `any` retains fallback for unsupported video, audio and subtitle codecs.
   [media addOption:@":codec=videotoolbox,any"];
+  if (self.ordinaryRenderer) { [media addOption:@":sub-track=-1"]; }
   [media addOption:@":videotoolbox-hw-decoder-only"];
   BOOL av1Hardware = NeoAV1HardwareSupported();
   [media addOption:av1Hardware ? @":videotoolbox-av1-hardware=1" : @":videotoolbox-av1-hardware=0"];
@@ -1933,6 +1937,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 - (void)updateSubtitleSettings {
   [self attachStreamingSubtitles];
+  if (self.streamingSubtitles && (!self.streamingSubtitles.finished || self.streamingSubtitles.files.count > 0) && self.attachedSubtitles.count == 0) {
+    [self.chrome updateSubtitleTracks:@[]]; return;
+  }
   if (self.aether) { [self.chrome updateSubtitleTracks:self.aether.subtitleTracks]; return; }
   if (self.ordinaryFiles.count) {
     for (VLCMediaPlayerTrack *track in self.player.textTracks) { if ([self isOrdinarySubtitle:track] && track.isSelected) { track.selected = NO; } }
