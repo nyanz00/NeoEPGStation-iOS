@@ -176,10 +176,13 @@ final class NeoAetherBackend: NSObject {
     super.init()
     view.backgroundColor = .black; view.isUserInteractionEnabled = false
     surface.autoresizingMask = [.flexibleWidth,.flexibleHeight]
-    caption.autoresizingMask = [.flexibleWidth,.flexibleHeight]; caption.contentMode = .scaleToFill
+    caption.autoresizingMask = []; caption.contentMode = .scaleAspectFit
     view.addSubview(surface); view.addSubview(caption)
   }
-  @objc func layout() { surface.frame = view.bounds; caption.frame = view.bounds }
+  @objc func layout() {
+    surface.frame = view.bounds
+    caption.frame = videoSize.width > 0 && videoSize.height > 0 ? AVMakeRect(aspectRatio:videoSize,insideRect:view.bounds) : view.bounds
+  }
   @objc(loadURL:startMilliseconds:playing:)
   func load(url: URL, startMilliseconds: Int64, playing: Bool) {
     guard !closed else { return }
@@ -494,6 +497,7 @@ final class NeoAetherBackend: NSObject {
     }
   }
   private func updateCaption() {
+    layout()
     guard chosenSubtitle >= 0 else { return }
     let size = videoSize == .zero ? view.bounds.size : videoSize
     if !nativeSubtitle {
@@ -582,6 +586,11 @@ final class NeoAetherBackend: NSObject {
   }
   @objc var effectiveVolume: Float { engine?.volume ?? 0 }
   @objc var subtitleVisible: Bool { caption.image != nil }
+#if targetEnvironment(simulator)
+  func smokeCaptionLayout(video: CGSize, container: CGSize) -> CGRect {
+    videoSize = video; view.frame = CGRect(origin:.zero,size:container); layout(); return caption.frame
+  }
+#endif
   @objc func simulateFailureForProbe() { requestRecovery() }
   @objc func saveProbePicture(_ name: String) -> Bool {
     guard let pixel = snapshotPixel,

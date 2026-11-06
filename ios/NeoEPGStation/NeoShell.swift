@@ -1288,6 +1288,10 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let original = recorded.collection
     showRoute("settings"); showRoute("recorded")
     let retained = original === recorded.collection
+    if smokeStage == "captions" {
+      writeIPadSmoke(recorded,checks:NeoCaptionStyleSmoke.run(),retained:retained)
+      return
+    }
     if smokeStage == "recording-features" {
       Task { [self] in
         let checks = await NeoRecordingFeaturesSmoke.run(shell:self)

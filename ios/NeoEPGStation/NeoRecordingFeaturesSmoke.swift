@@ -339,7 +339,7 @@ private final class NeoFeatureProtocol: URLProtocol {
   func finish() -> [Double] { link?.invalidate(); link = nil; return samples }
 }
 
-@MainActor private enum NeoCaptionStyleSmoke {
+@MainActor enum NeoCaptionStyleSmoke {
   static func run() -> [String:Bool] {
     let subtitlePreference = UserDefaults.standard.object(forKey:"player.subtitle.name")
     defer { if let subtitlePreference { UserDefaults.standard.set(subtitlePreference,forKey:"player.subtitle.name") } else { UserDefaults.standard.removeObject(forKey:"player.subtitle.name") } }
@@ -360,6 +360,20 @@ private final class NeoFeatureProtocol: URLProtocol {
     if let image = sink.image { try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("recording-caption-aether.png")) }
     backend.selectSubtitle(-1)
     result["aetherOrdinaryCaptionOffClearsScreenAndPiPSink"] = sink.image == nil && backend.view.subviews.compactMap { $0 as? UIImageView }.allSatisfy { $0.image == nil }
+    backend.addSubtitle(url:file,selected:true)
+    let full = backend.smokeCaptionLayout(video:CGSize(width:1920,height:1080),container:CGSize(width:844,height:390))
+    let fullImage = sink.image
+    let panel = backend.smokeCaptionLayout(video:CGSize(width:1920,height:1080),container:CGSize(width:562,height:390))
+    result["aetherPanelCaptionPreservesAspectAndFitsActualVideo"] = abs(full.width/full.height-16/9)<0.00001 && abs(panel.width/panel.height-16/9)<0.00001 && abs(panel.midY-195)<0.001 && panel.height < 390
+    result["aetherPanelResizeReusesUnstretchedCaptionImage"] = fullImage != nil && sink.image === fullImage
+    func captureBackend(_ name: String) {
+      let image = UIGraphicsImageRenderer(bounds:backend.view.bounds).image { ctx in backend.view.layer.render(in:ctx.cgContext) }
+      try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent(name+".png"))
+    }
+    captureBackend("recording-caption-panel")
+    _ = backend.smokeCaptionLayout(video:CGSize(width:1920,height:1080),container:CGSize(width:844,height:390))
+    captureBackend("recording-caption-full")
+    backend.selectSubtitle(-1)
     if let cg = image?.cgImage, let data = cg.dataProvider?.data, let bytes = CFDataGetBytePtr(data) {
       var band = 0, glyph = 0
       for y in 0..<cg.height { for x in 0..<cg.width { let i = y*cg.bytesPerRow+x*4
@@ -403,6 +417,28 @@ private final class NeoFeatureProtocol: URLProtocol {
       }
       result["upperCaptionLayerBandCoversLowerLayerGlyphs"] = samples > 20 && Double(covered)/Double(samples) > 0.9
     } else { result["upperCaptionLayerBandCoversLowerLayerGlyphs"] = false }
+    let bands = """
+    [Script Info]
+    PlayResX: 960
+    PlayResY: 540
+    [V4+ Styles]
+    Format: Name,Fontname,Fontsize,PrimaryColour,BackColour,OutlineColour,Alignment,MarginL,MarginR,MarginV,Outline
+    Style: Default,Arial,20,&H0000FFFF,&H80000000,&H00000000,7,0,0,0,1
+    Style: Ruby,Arial,10,&H0000FFFF,&H80000000,&H00000000,7,0,0,0,1
+    [Events]
+    Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+    Dialogue: 0,0:00:00.00,0:00:04.00,Default,,0,0,0,,{\\pos(100,400)}左　{\\b1}右
+    Dialogue: 0,0:00:00.00,0:00:04.00,Ruby,,0,0,0,,{\\pos(100,370)}よみ
+    Dialogue: 0,0:00:01.00,0:00:03.00,Ruby,,0,0,0,,{\\pos(600,100)}別の字幕
+    """
+    _ = renderer.loadText(bands)
+    let connected = renderer.image(atMilliseconds:1500,size:size)
+    if let connected { try? connected.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("recording-caption-bands.png")) }
+    if let cg = connected?.cgImage, let pixels = rgba(cg) {
+      func band(_ x: Int, _ y: Int) -> Bool { let i = (y*cg.width+x)*4; return pixels[i] == 0 && pixels[i+1] == 0 && pixels[i+2] == 0 && (126...129).contains(Int(pixels[i+3])) }
+      result["captionBandContinuesAcrossSpaceAndStyleChange"] = band(260,820)
+      result["rubyBandJoinsEvenWithUnrelatedActiveCaption"] = band(210,790)
+    } else { result["captionBandContinuesAcrossSpaceAndStyleChange"] = false; result["rubyBandJoinsEvenWithUnrelatedActiveCaption"] = false }
     return result
   }
 }

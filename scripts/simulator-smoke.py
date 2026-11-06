@@ -150,15 +150,15 @@ app = Path('build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation
 if '--ipad-only' in sys.argv:
     capture_ipad(app, device)
     sys.exit(0)
-focused = '--navigation-only' in sys.argv or '--recording-features-only' in sys.argv
+focused = '--navigation-only' in sys.argv or '--recording-features-only' in sys.argv or '--captions-only' in sys.argv
 only_pad = '--only-ipad' in sys.argv
 if only_pad and not focused:
     raise ValueError('--only-ipad requires a focused recording or navigation check')
 if not only_pad:
     run('xcrun', 'simctl', 'bootstatus', device['udid'], '-b', timeout=600)
     run('xcrun', 'simctl', 'install', device['udid'], str(app), timeout=600)
-if '--navigation-only' in sys.argv or '--recording-features-only' in sys.argv:
-    focused_stage = 'recording-features' if '--recording-features-only' in sys.argv else 'navigation'
+if focused:
+    focused_stage = 'captions' if '--captions-only' in sys.argv else 'recording-features' if '--recording-features-only' in sys.argv else 'navigation'
     failures = []
     if not only_pad:
         capture_ui(device['udid'], focused_stage, 'ui-iphone', failures=failures)
