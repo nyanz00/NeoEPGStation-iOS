@@ -110,7 +110,10 @@ private final class NeoFeatureProtocol: URLProtocol {
     api.activate(user:"7",headers:["X-Viewer-Profile-Id":"21","X-Viewer-Session":"fixture-session"]); shell.smokeUseAPI(api)
     let keys = ["annict.autoWatchMode","annict.threshold","annict.markFinal","annict.disableFinalRules","display.halfWidth."+base.absoluteString]
     let saved = keys.map { UserDefaults.standard.object(forKey:$0) }
-    defer { for (key,value) in zip(keys,saved) { if let value { UserDefaults.standard.set(value,forKey:key) } else { UserDefaults.standard.removeObject(forKey:key) } }; session.invalidateAndCancel() }
+    // The shell still owns this API after the checks return (including its
+    // final recorded-list reload). Keep its session valid until process exit;
+    // the harness launches each scenario in a separate process.
+    defer { for (key,value) in zip(keys,saved) { if let value { UserDefaults.standard.set(value,forKey:key) } else { UserDefaults.standard.removeObject(forKey:key) } } }
     var checks = [String:Bool]()
     func progress(_ phase: String) { try? Data(phase.utf8).write(to:NeoPiPSmoke.directory.appendingPathComponent("ui-recording-features-progress.txt")) }
     api.isHalfWidthDisplayed = true
@@ -134,6 +137,7 @@ private final class NeoFeatureProtocol: URLProtocol {
       let image = UIGraphicsImageRenderer(bounds:surface.bounds).image { _ in surface.drawHierarchy(in:surface.bounds,afterScreenUpdates:true) }
       try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent(name+".png"))
     }
+    checks["fixtureAuthenticationSurvivesLaunchActivation"] = api.accountReady && api.profileHeaders["X-Viewer-Session"] == "fixture-session" && shell.presentedViewController == nil
     let history = try? await api.history(user:api.viewer)
     checks["historyNormalizesTextBeforeRendering"] = history?.items.first?.recorded.name == "第4話 テスト!"
     let beforeDetails = NeoFeatureProtocol.snapshot { NeoFeatureProtocol.detailRequests }
