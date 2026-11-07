@@ -3828,6 +3828,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   return state;
 }
 - (void)gopBenchmarkSeek:(int64_t)milliseconds { [self seekBy:milliseconds-[self mediaTime] completion:^{}]; }
+- (NSData *)gopBenchmarkLuma { return [self.aether gopBenchmarkLuma]; }
 - (void)gopBenchmarkFinish { [self closePlayer]; }
 - (void)pause { [self setPlaybackIntent:NO]; }
 - (void)seekBy:(int64_t)offset completion:(dispatch_block_t)completion {

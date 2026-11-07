@@ -164,6 +164,23 @@ final class NeoAetherBackend: NSObject {
   @objc var onGOPBenchmarkEvent: (([String:Any]) -> Void)?
   private var benchmarkSeekSerial = 0
   private var benchmarkPictureEvidence: [String:Any] = [:]
+  private lazy var benchmarkImageContext = CIContext(options:[.cacheIntermediates:false])
+  // Opt-in only. Display readback may lose the source timestamp attachments.
+  // Match its pixels against PC-decoded references instead of inventing a PTS.
+  @objc func gopBenchmarkLuma() -> Data? {
+    guard options["gopBenchmark"] as? Bool == true,
+      let layer = layers(surface.layer).compactMap({ $0 as? AVSampleBufferDisplayLayer }).first,
+      let pixel = layer.sampleBufferRenderer.displayedPixelBuffer() else { return nil }
+    let image = CIImage(cvPixelBuffer:pixel)
+    let scaled = image.applyingFilter("CILanczosScaleTransform",parameters:[kCIInputScaleKey:32/image.extent.width,kCIInputAspectRatioKey:(18/image.extent.height)/(32/image.extent.width)])
+    var rgba = [UInt8](repeating:0,count:32*18*4)
+    rgba.withUnsafeMutableBytes { bytes in
+      benchmarkImageContext.render(scaled,toBitmap:bytes.baseAddress!,rowBytes:32*4,bounds:CGRect(x:0,y:0,width:32,height:18),format:.RGBA8,colorSpace:CGColorSpace(name:CGColorSpace.sRGB))
+    }
+    return Data((0..<576).map { i in
+      let j = i*4; return UInt8(clamping:Int((0.2126*Double(rgba[j])+0.7152*Double(rgba[j+1])+0.0722*Double(rgba[j+2])).rounded()))
+    })
+  }
   @objc var gopBenchmarkSnapshot: [String:Any] {
     ["route":engine?.videoRoute.rawValue ?? "unloaded","codec":engine?.sourceVideoCodecName ?? "unknown",
      "checkpointEnabled":checkpoints != nil,"subtitleVisible":caption.image != nil,

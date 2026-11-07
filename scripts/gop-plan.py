@@ -5,10 +5,12 @@ program title, server URL or credentials are written into the plan.
 """
 import argparse,json,random,shutil,statistics,subprocess
 from pathlib import Path
+from gop_reference import references
 
-p=argparse.ArgumentParser();p.add_argument('directory',type=Path);p.add_argument('output',type=Path);p.add_argument('--ffprobe',default=shutil.which('ffprobe'));a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('directory',type=Path);p.add_argument('output',type=Path);p.add_argument('--ffprobe',default=shutil.which('ffprobe'));p.add_argument('--ffmpeg',default=shutil.which('ffmpeg'));a=p.parse_args()
 if not a.ffprobe:raise SystemExit('Supply --ffprobe with the installed ffprobe executable')
-profiles=[]
+if not a.ffmpeg:a.ffmpeg=str(Path(a.ffprobe).with_name('ffmpeg.exe' if str(a.ffprobe).endswith('.exe') else 'ffmpeg'))
+profiles=[];movies=[]
 for movie in sorted(a.directory.iterdir()):
  if not movie.is_file() or movie.suffix.lower() not in ('.mkv','.mp4','.mov'):continue
  meta=json.loads(subprocess.check_output([a.ffprobe,'-v','error','-show_streams','-show_format','-of','json',str(movie)],timeout=60))
@@ -20,10 +22,15 @@ for movie in sorted(a.directory.iterdir()):
  if not (label.lower()=='default' or label.lower().startswith('gop') and label[3:].isdigit()):label=f'profile-{len(profiles)+1}'
  profiles.append(dict(label=label,bytes=movie.stat().st_size,duration=float(meta['format']['duration'])-origin,fps=fps,keys=keys,
   sourceTimeOrigin=origin,codec=video['codec_name'],pixelFormat=video.get('pix_fmt'),width=video['width'],height=video['height'],gapMedian=statistics.median(gaps),gapMax=max(gaps)))
+ movies.append(movie)
 assert profiles and len(set(x['bytes'] for x in profiles))==len(profiles),'Input sizes must identify profiles uniquely'
 duration=min(x['duration'] for x in profiles);assert duration>100
 rng=random.Random(20261107)
 targets=[round(40+(i+.2+.6*rng.random())*(duration-80)/24,3) for i in range(24)]
+positions=sorted(set(targets+[round(t+d,3) for t in targets for d in (-10,10)]))
+for movie,profile in zip(movies,profiles):
+ print('Preparing image references:',profile['label'],flush=True)
+ profile['references']=references(movie,positions,profile['fps'],a.ffmpeg,profile['sourceTimeOrigin'])
 a.output.parent.mkdir(parents=True,exist_ok=True)
 a.output.write_text(json.dumps(dict(schema=1,targets=targets,profiles=profiles),ensure_ascii=False,separators=(',',':'))+'\n',encoding='utf-8')
 print('Saved',len(profiles),'profiles and',len(targets),'common target positions to',a.output)

@@ -31,6 +31,7 @@ import UniformTypeIdentifiers
       if let json = urls.first(where: { $0.pathExtension.lowercased() == "json" }) {
         let data = try Data(contentsOf:json); guard data.count < 4*1024*1024 else { throw failure("測定計画が大きすぎます。") }
         let value = try JSONDecoder().decode(NeoGOPBenchmark.Plan.self,from:data); guard value.valid else { throw failure("測定計画が無効です。") }; plan = value
+        guard value.profiles.allSatisfy({ !($0.references ?? []).isEmpty }) else { throw failure("画像照合付きの測定計画JSONを選択してください。") }
       }
       guard let plan else { throw failure("PCで作成した測定計画JSONも一緒に選択してください。") }
       var selected: [(URL,NeoGOPBenchmark.Profile)] = []
@@ -89,6 +90,7 @@ import UniformTypeIdentifiers
   private var task: Task<Void,Never>?, done = false, events: [[String:Any]] = [], rows: [[String:Any]] = [], report: [String:Any] = [:]
   private let badge = UILabel()
   private var oldIdle = false
+  private var references: [NeoGOPBenchmark.Reference] = []
   @objc(initWithPlayer:configuration:) init(player: NeoPlayerController,configuration: [String:Any]) { self.player = player; self.configuration = configuration; super.init() }
   @objc func observe(_ event: [String:Any]) { if !done { events.append(event); if events.count > 16 { events.removeFirst(events.count-16) } } }
   @objc func start() {
@@ -111,10 +113,12 @@ import UniformTypeIdentifiers
       let data = try JSONSerialization.data(withJSONObject:configuration["profile"] ?? [:]), profile = try JSONDecoder().decode(NeoGOPBenchmark.Profile.self,from:data)
       let targets = configuration["targets"] as? [Double] ?? [], rounds = configuration["rounds"] as? Int ?? 1
       guard (1...3).contains(rounds), NeoGOPBenchmark.Plan(schema:1,targets:targets,profiles:[profile]).valid else { throw error("invalid-plan") }
+      references = profile.references ?? []
       report = ["schema":1,"label":profile.label,"bytes":profile.bytes,"fps":profile.fps,"keys":profile.keys,
         "build":Bundle.main.object(forInfoDictionaryKey:"CFBundleVersion") as? String ?? "","os":UIDevice.current.systemVersion,"device":UIDevice.current.model,
         "local":true,"checkpoint":false,"audio":true,"comments":false,"subtitles":false,"pollIntervalMs":1000/60.0,"targetToleranceSeconds":max(0.03,2/profile.fps),
-        "timing":"normal-controller-seek-entry-to-displayed-target-picture","engineCompletionMeaning":"engine seek return, independent of displayed picture"]
+        "timing":"normal-controller-seek-entry-to-displayed-target-picture","engineCompletionMeaning":"engine seek return, independent of displayed picture",
+        "referenceReadback":"32x18 luma; MAE <= 9/255, correlation >= 0.985; unchanged/flat pictures excluded"]
       report["startedAt"] = ISO8601DateFormatter().string(from:Date())
       badge.text = "GOP測定：再生準備中…"
       for _ in 0..<1500 {
@@ -132,6 +136,11 @@ import UniformTypeIdentifiers
       for (index,step) in steps.enumerated() {
         try check(); badge.text = index < warmup.count ? "GOP測定：ウォームアップ" : "GOP測定 \(index-warmup.count+1)/\(measured.count) · \(step.forward ? "送り" : "戻し")"
         let staging = try await seek(step.stage)
+        if staging["status"] as? String == "ambiguous-image" {
+          var skipped = staging; skipped["status"] = "ambiguous-preparation"; skipped["forward"] = step.forward
+          skipped["round"] = step.round; skipped["sampleKind"] = index < warmup.count ? "warmup" : "measured"
+          rows.append(skipped); save("running"); continue
+        }
         guard staging["status"] as? String == "verified" else { report["preparationFailure"] = staging; report["failureState"] = state(); throw error("preparation-picture-not-verified") }
         try await Task.sleep(nanoseconds:300_000_000); try check()
         var row = try await seek(step.target)
@@ -140,7 +149,7 @@ import UniformTypeIdentifiers
         row["thermalState"] = ProcessInfo.processInfo.thermalState.rawValue
         row["viewportWidth"] = state()["width"]; row["viewportHeight"] = state()["height"]
         rows.append(row); save("running")
-        failures = row["status"] as? String == "verified" ? 0 : failures+1
+        failures = ["verified","ambiguous-image"].contains(row["status"] as? String ?? "") ? 0 : failures+1
         if failures >= 3 { throw error("three-unverified-results") }
         try await Task.sleep(nanoseconds:300_000_000)
       }
@@ -152,16 +161,37 @@ import UniformTypeIdentifiers
   }
   private func seek(_ target: Double) async throws -> [String:Any] {
     try check(); events = []
+    let candidates = references.filter { abs($0.target-target)<0.0001 }
+    let previous = player?.gopBenchmarkLuma()
+    let flatReferences = !candidates.isEmpty && candidates.allSatisfy { !NeoGOPBenchmark.imageMatches($0.luma,$0.luma) }
+    let unchanged = flatReferences || (previous.map { image in candidates.contains { NeoGOPBenchmark.imageMatches(image,$0.luma) } } ?? false)
     let invoked = CACurrentMediaTime(), from = state()["time"] as? Double ?? -1
     player?.gopBenchmarkSeek(Int64((target*1000).rounded()))
     let serial = events.first(where: { $0["event"] as? String == "started" })?["serial"] as? Int
     guard let serial else { throw error("seek-rejected") }
     var picture: [String:Any]?, engine: [String:Any]?
+    var matched: NeoGOPBenchmark.Reference?, matchedHost = 0.0, bestScore = Double.infinity, readbackMs = 0.0
+    var bestImage: Data?
     for _ in 0..<800 {
       try check()
       picture = events.first { $0["serial"] as? Int == serial && $0["event"] as? String == "picture" }
       engine = events.first { $0["serial"] as? Int == serial && $0["event"] as? String == "engineCompletion" }
-      if let picture, engine != nil || CACurrentMediaTime()-(picture["host"] as? Double ?? 0)>0.25 { break }
+      if let picture {
+        if picture["verified"] as? Bool != true, !candidates.isEmpty, !unchanged {
+          let readbackStart = CACurrentMediaTime()
+          if let image = player?.gopBenchmarkLuma() {
+            for reference in candidates {
+              let score = NeoGOPBenchmark.imageScore(image,reference.luma)
+              if score < bestScore { bestScore = score; bestImage = image }
+              if NeoGOPBenchmark.imageMatches(image,reference.luma) { matched = reference; matchedHost = CACurrentMediaTime(); break }
+            }
+          }
+          readbackMs += (CACurrentMediaTime()-readbackStart)*1000
+        }
+        if picture["verified"] as? Bool == true || matched != nil || unchanged {
+          if engine != nil || CACurrentMediaTime()-(picture["host"] as? Double ?? 0)>0.25 { break }
+        }
+      }
       try await Task.sleep(nanoseconds:10_000_000)
     }
     var row: [String:Any] = ["target":target,"from":from,"route":state()["route"] ?? "unknown","status":"timeout"]
@@ -170,6 +200,16 @@ import UniformTypeIdentifiers
       row["status"] = verified ? "verified" : "unverified-picture-time"; row["picturePTS"] = picture["pts"]
       row["verification"] = picture["verification"]
       row[verified ? "displayMs" : "decodedPictureMs"] = (host-invoked)*1000
+    }
+    if picture?["verified"] as? Bool != true {
+      row.removeValue(forKey:"picturePTS") // Queue PTS is not a displayed PTS.
+      row["referenceReadbackMs"] = readbackMs
+      if bestScore.isFinite { row["referenceBestMAE"] = bestScore }
+      if let matched {
+        row["status"] = "verified"; row["verification"] = "displayed-picture-reference"
+        row["referencePTS"] = matched.pts; row["displayMs"] = (matchedHost-invoked)*1000
+      } else if unchanged { row["status"] = "ambiguous-image" }
+      else { row["referenceDebugLuma"] = bestImage?.base64EncodedString() }
     }
     if let host = engine?["host"] as? Double { row["engineCompletionMs"] = (host-invoked)*1000 }
     return row

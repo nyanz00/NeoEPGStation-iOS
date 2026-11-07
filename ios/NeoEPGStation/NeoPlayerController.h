@@ -15,6 +15,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *gopBenchmarkConfiguration;
 @property (nonatomic, copy, nullable) void (^onGOPBenchmarkResult)(NSDictionary<NSString *, id> *result);
 - (NSDictionary<NSString *, id> *)gopBenchmarkState;
+- (nullable NSData *)gopBenchmarkLuma;
 - (void)gopBenchmarkPrepare;
 - (void)gopBenchmarkSeek:(int64_t)milliseconds;
 - (void)gopBenchmarkFinish;

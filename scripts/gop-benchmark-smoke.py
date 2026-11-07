@@ -30,7 +30,8 @@ assert result['status']=='completed',result
 assert result['checkpoint'] is False and result['audio'] is True and result['local'] is True,result
 assert len(rows)==8 and sum(r['sampleKind']=='warmup' for r in rows)==2,result
 measured=[r for r in rows if r['sampleKind']=='measured']
-assert len(measured)==6 and all(r['status']=='verified' and r['displayMs']>0 and abs(r['picturePTS']-r['target'])<=2/24 for r in measured),result
+assert len(measured)==6 and all(r['status']=='verified' and r['displayMs']>0 and abs(r.get('picturePTS',r.get('referencePTS',-1))-r['target'])<=2/24 for r in measured),result
+assert all(r['verification'] in ('displayed-surface-source-PTS','avplayer-item-display-time-buffer','displayed-picture-reference') for r in measured),result
 assert sum(r['forward'] for r in measured)==3 and all('engineCompletionMs' in r and 'distanceFromKey' in r for r in measured),result
 assert captured,'No running foreground image captured'
 print('PASS: local AV1 normal player, 2 warmup + 6 measured seeks, displayed PTS, independent engine timing, forward/back summaries and JSON export')
