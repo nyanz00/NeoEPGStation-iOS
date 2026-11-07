@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 @MainActor final class NeoGOPTrialController: UIViewController, UIDocumentPickerDelegate {
   private var plan: NeoGOPBenchmark.Plan?, files: [(URL,NeoGOPBenchmark.Profile)] = []
-  private var reports: [[String:Any]] = [], next = 0, running = false, latest: [String:Any]?
+  private var reports: [[String:Any]] = [], fileIndex = 0, running = false, latest: [String:Any]?
   private let status = NeoStyle.label("測定計画JSONと比較する動画を「ファイル」から選択してください。動画はアプリ内へコピーされます。",size:15)
   private let rounds = UIStepper(), roundLabel = NeoStyle.label(), startButton = UIButton(type:.system)
   private let stack = UIStackView()
@@ -46,10 +46,10 @@ import UniformTypeIdentifiers
     refresh()
   }
   private func failure(_ message: String) -> NSError { NSError(domain:"GOP",code:1,userInfo:[NSLocalizedDescriptionKey:message]) }
-  private func begin() { guard plan != nil, !files.isEmpty else { return }; files.shuffle(); reports = []; next = 0; running = true; refresh(); playNext() }
+  private func begin() { guard plan != nil, !files.isEmpty else { return }; files.shuffle(); reports = []; fileIndex = 0; running = true; refresh(); playNext() }
   private func playNext() {
-    guard running, next < files.count, let plan else { running = false; status.text = "測定終了。結果を共有できます。"; refresh(); return }
-    let (url,profile) = files[next]
+    guard running, fileIndex < files.count, let plan else { running = false; status.text = "測定終了。結果を共有できます。"; refresh(); return }
+    let (url,profile) = files[fileIndex]
     let owner = NeoPlayerController(url:url,title:"GOP シーク測定 · "+profile.label,username:"",password:"",networkCaching:5000)
     owner.aetherOptions = ["checkpointEnabled":false,"gopBenchmark":true,"gopTolerance":max(0.03,2/profile.fps)]
     owner.recordingContext = ["videoFileType":"encoded","disableHistory":true]
@@ -61,7 +61,7 @@ import UniformTypeIdentifiers
       guard let self else { return }
       if let latest = self.latest { self.reports.append(latest); self.save() }
       let complete = self.latest?["status"] as? String == "completed"
-      self.next += 1
+      self.fileIndex += 1
       Task { [weak self,weak owner] in
         for _ in 0..<100 { if owner?.presentingViewController == nil { break }; try? await Task.sleep(nanoseconds:20_000_000) }
         guard let self else { return }
