@@ -180,9 +180,16 @@ final class NeoAetherBackend: NSObject {
     rgba.withUnsafeMutableBytes { bytes in
       benchmarkImageContext.render(scaled,toBitmap:bytes.baseAddress!,rowBytes:32*4,bounds:CGRect(x:0,y:0,width:32,height:18),format:.RGBA8,colorSpace:CGColorSpace(name:CGColorSpace.sRGB))
     }
-    return Data((0..<576).map { i in
-      let j = i*4; return UInt8(clamping:Int((0.2126*Double(rgba[j])+0.7152*Double(rgba[j+1])+0.0722*Double(rgba[j+2])).rounded()))
-    })
+    var luma = [UInt8](repeating:0,count:576)
+    for i in 0..<576 {
+      let j = i*4
+      let red = Double(rgba[j])*0.2126
+      let green = Double(rgba[j+1])*0.7152
+      let blue = Double(rgba[j+2])*0.0722
+      let value = Int((red+green+blue).rounded())
+      luma[i] = UInt8(clamping:value)
+    }
+    return Data(luma)
   }
   @objc var gopBenchmarkSnapshot: [String:Any] {
     ["route":engine?.videoRoute.rawValue ?? "unloaded","codec":engine?.sourceVideoCodecName ?? "unknown",
