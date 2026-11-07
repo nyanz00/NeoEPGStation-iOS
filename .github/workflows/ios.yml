@@ -544,6 +544,8 @@ jobs:
               python3 -u scripts/simulator-smoke.py --navigation-only
               elif [ "$UI_STAGE" = "recording-features" ]; then
               python3 -u scripts/simulator-smoke.py --recording-features-only --navigation-after
+              elif [ "$UI_STAGE" = "gop-benchmark" ]; then
+              python3 -u scripts/gop-benchmark-smoke.py
               else
               python3 -u scripts/player-feedback-smoke.py
               python3 -u scripts/live-smoke.py
