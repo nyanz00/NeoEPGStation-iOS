@@ -346,6 +346,9 @@ final class NeoAetherBackend: NSObject {
     settleSeek(false); seekTask?.cancel()
     let target = min(max(0,Double(milliseconds)/1000),max(0,engine.duration-0.01))
     pendingTarget = target; pendingGeneration = lastGeneration; pendingBegan = CACurrentMediaTime()
+    if options["gopBenchmark"] as? Bool == true {
+      decodedFrames.armBenchmarkTarget(target,tolerance:options["gopTolerance"] as? Double ?? 0.085,previous:pendingGeneration)
+    }
     benchmarkSeekSerial += 1; let benchmarkSerial = benchmarkSeekSerial
     onGOPBenchmarkEvent?(["event":"started","serial":benchmarkSerial,"host":pendingBegan,"target":target,"from":Double(timeMs)/1000])
     pipFrames.discontinuity()
@@ -404,9 +407,14 @@ final class NeoAetherBackend: NSObject {
           benchmarkPictureEvidence = ["hasIOSurface":io != nil,"hasCVPTS":cvPTS != nil,"hasSurfacePTS":ioPTS != nil,
             "displayPTS":pts ?? -1,"enqueuedPTS":decoded?.time ?? -1]
         }
-        let position = pts ?? decoded?.time
+        // The enqueue observer can advance several frames between main-loop
+        // ticks. Retain the target's decode evidence for the opt-in benchmark;
+        // the independently read DISPLAYED pixels still have to match its
+        // reference before the trial records a presentation success.
+        let candidate = options["gopBenchmark"] as? Bool == true && pendingTarget != nil ? decodedFrames.benchmarkTarget() : nil
+        let position = pts ?? candidate?.time ?? decoded?.time
         guard let position, position.isFinite else { continue }
-        return (pixel,position,generation ?? decoded?.generation,pts != nil)
+        return (pixel,position,generation ?? candidate?.generation ?? decoded?.generation,pts != nil)
       }
     } else if let item = outputItem, let output {
       let current = item.currentTime(); var shown = CMTime.invalid

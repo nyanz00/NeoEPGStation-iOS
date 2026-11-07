@@ -62,10 +62,20 @@ final class NeoAetherDecodedFrames: @unchecked Sendable {
   struct Frame { let time: Double; let generation: UInt64 }
   private let lock = NSLock()
   private var frame: Frame?
+  private var target: (time: Double, tolerance: Double, previous: UInt64?)?
+  private var targetFrame: Frame?
+  func armBenchmarkTarget(_ time: Double, tolerance: Double, previous: UInt64?) {
+    lock.lock(); defer { lock.unlock() }
+    target = (time,tolerance,previous); targetFrame = nil
+  }
+  func benchmarkTarget() -> Frame? { lock.lock(); defer { lock.unlock() }; return targetFrame }
   func accept(_ value: SoftwareVideoFrameTime) {
     let seconds = value.presentation.seconds
     guard seconds.isFinite else { return }
-    lock.lock(); frame = Frame(time: seconds, generation: value.generation); lock.unlock()
+    lock.lock(); defer { lock.unlock() }
+    let next = Frame(time:seconds,generation:value.generation); frame = next
+    if let target, targetFrame == nil, value.generation != target.previous,
+       abs(seconds-target.time) <= target.tolerance { targetFrame = next }
   }
   func latest() -> Frame? { lock.lock(); defer { lock.unlock() }; return frame }
 }
