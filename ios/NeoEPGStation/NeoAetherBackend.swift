@@ -163,11 +163,12 @@ final class NeoAetherBackend: NSObject {
   @objc var subtitleTracks: [[String: Any]] = []
   @objc var onGOPBenchmarkEvent: (([String:Any]) -> Void)?
   private var benchmarkSeekSerial = 0
+  private var benchmarkPictureEvidence: [String:Any] = [:]
   @objc var gopBenchmarkSnapshot: [String:Any] {
     ["route":engine?.videoRoute.rawValue ?? "unloaded","codec":engine?.sourceVideoCodecName ?? "unknown",
      "checkpointEnabled":checkpoints != nil,"subtitleVisible":caption.image != nil,
      "ready":ready,"seekable":seekable,"failed":failed || recovering,"duration":Double(durationMs)/1000,
-     "time":Double(timeMs)/1000,"rate":rate]
+     "time":Double(timeMs)/1000,"rate":rate,"pictureEvidence":benchmarkPictureEvidence]
   }
   @objc var downloadedRanges: [[NSNumber]] {
     guard let engine, durationMs > 0 else { return [] }
@@ -362,9 +363,20 @@ final class NeoAetherBackend: NSObject {
       for layer in layers(surface.layer).compactMap({ $0 as? AVSampleBufferDisplayLayer }) {
         guard layer.isReadyForDisplay, let pixel = layer.sampleBufferRenderer.displayedPixelBuffer() else { continue }
         let io = CVPixelBufferGetIOSurface(pixel)?.takeUnretainedValue()
-        let pts = io.flatMap { IOSurfaceCopyValue($0,"NeoAetherSourcePTS" as CFString) as? NSNumber }?.doubleValue
-        let generation = io.flatMap { IOSurfaceCopyValue($0,"NeoAetherPictureGeneration" as CFString) as? NSNumber }?.uint64Value
+        // Some display implementations preserve the CVBuffer attachments while
+        // others return an alias exposing only the backing IOSurface values.
+        // Read evidence from that displayed buffer, never substitute queue PTS
+        // for a verified presentation timestamp.
+        let cvPTS = CVBufferGetAttachment(pixel,"NeoAetherSourcePTS" as CFString,nil)?.takeUnretainedValue() as? NSNumber
+        let ioPTS = io.flatMap { IOSurfaceCopyValue($0,"NeoAetherSourcePTS" as CFString) as? NSNumber }
+        let pts = (cvPTS ?? ioPTS)?.doubleValue
+        let cvGeneration = CVBufferGetAttachment(pixel,"NeoAetherPictureGeneration" as CFString,nil)?.takeUnretainedValue() as? NSNumber
+        let generation = (cvGeneration ?? io.flatMap { IOSurfaceCopyValue($0,"NeoAetherPictureGeneration" as CFString) as? NSNumber })?.uint64Value
         let decoded = decodedFrames.latest()
+        if options["gopBenchmark"] as? Bool == true {
+          benchmarkPictureEvidence = ["hasIOSurface":io != nil,"hasCVPTS":cvPTS != nil,"hasSurfacePTS":ioPTS != nil,
+            "displayPTS":pts ?? -1,"enqueuedPTS":decoded?.time ?? -1]
+        }
         let position = pts ?? decoded?.time
         guard let position, position.isFinite else { continue }
         return (pixel,position,generation ?? decoded?.generation,pts != nil)

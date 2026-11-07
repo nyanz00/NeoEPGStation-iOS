@@ -22,7 +22,7 @@ for _ in range(180):
     run('xcrun','simctl','io',device,'screenshot','dist/gop-benchmark-running.png',timeout=30);captured=True
   except (OSError,ValueError):pass
  time.sleep(1)
-for name in ['gop-benchmark-smoke.json','gop-seek-current.json','gop-stdout.txt','gop-stderr.txt']:
+for name in ['gop-benchmark-smoke.json','gop-seek-current.json','gop-benchmark-diagnostics.json','gop-stdout.txt','gop-stderr.txt']:
  if (docs/name).exists():shutil.copyfile(docs/name,Path('dist')/name)
 assert marker.exists(),'Benchmark result missing; inspect preserved diagnostics'
 result=json.loads(marker.read_text());rows=result.get('rows',[])

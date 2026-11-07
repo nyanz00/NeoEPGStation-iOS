@@ -132,7 +132,7 @@ import UniformTypeIdentifiers
       for (index,step) in steps.enumerated() {
         try check(); badge.text = index < warmup.count ? "GOP測定：ウォームアップ" : "GOP測定 \(index-warmup.count+1)/\(measured.count) · \(step.forward ? "送り" : "戻し")"
         let staging = try await seek(step.stage)
-        guard staging["status"] as? String == "verified" else { throw error("preparation-picture-not-verified") }
+        guard staging["status"] as? String == "verified" else { report["preparationFailure"] = staging; report["failureState"] = state(); throw error("preparation-picture-not-verified") }
         try await Task.sleep(nanoseconds:300_000_000); try check()
         var row = try await seek(step.target)
         row["forward"] = step.forward; row["round"] = step.round; row["sampleKind"] = index < warmup.count ? "warmup" : "measured"

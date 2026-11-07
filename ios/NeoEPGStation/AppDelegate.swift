@@ -31,6 +31,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         controller.gopBenchmarkConfiguration = configuration
         controller.onGOPBenchmarkResult = { result in
           NeoPiPSmoke.save("gop-benchmark-smoke",result)
+          if let url = NeoPlaybackDiagnostics.exportURL(), let bytes = try? Data(contentsOf:url) { try? bytes.write(to:directory.appendingPathComponent("gop-benchmark-diagnostics.json")) }
         }
         controller.modalPresentationStyle = .fullScreen
         window.rootViewController?.present(controller,animated:false)
