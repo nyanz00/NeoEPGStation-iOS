@@ -172,7 +172,10 @@ final class NeoAetherBackend: NSObject {
       let layer = layers(surface.layer).compactMap({ $0 as? AVSampleBufferDisplayLayer }).first,
       let pixel = layer.sampleBufferRenderer.displayedPixelBuffer() else { return nil }
     let image = CIImage(cvPixelBuffer:pixel)
-    let scaled = image.applyingFilter("CILanczosScaleTransform",parameters:[kCIInputScaleKey:32/image.extent.width,kCIInputAspectRatioKey:(18/image.extent.height)/(32/image.extent.width)])
+    // Lanczos aspectRatio is an additional HORIZONTAL scale (Apple API).
+    let scale = 18/image.extent.height
+    let scaled = image.applyingFilter("CILanczosScaleTransform",parameters:[kCIInputScaleKey:scale,kCIInputAspectRatioKey:(32/image.extent.width)/scale])
+    guard abs(scaled.extent.width-32)<0.01, abs(scaled.extent.height-18)<0.01 else { return nil }
     var rgba = [UInt8](repeating:0,count:32*18*4)
     rgba.withUnsafeMutableBytes { bytes in
       benchmarkImageContext.render(scaled,toBitmap:bytes.baseAddress!,rowBytes:32*4,bounds:CGRect(x:0,y:0,width:32,height:18),format:.RGBA8,colorSpace:CGColorSpace(name:CGColorSpace.sRGB))
