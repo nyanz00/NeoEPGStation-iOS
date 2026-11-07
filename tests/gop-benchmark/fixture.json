@@ -1,0 +1,19 @@
+{
+  "profile": {
+    "label": "synthetic-av1",
+    "bytes": 1050408,
+    "duration": 72.021,
+    "fps": 24,
+    "keys": [
+      0.0,
+      24.0,
+      48.0
+    ]
+  },
+  "targets": [
+    22.137,
+    35.651,
+    48.307
+  ],
+  "rounds": 1
+}

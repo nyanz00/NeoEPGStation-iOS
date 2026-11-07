@@ -12,6 +12,12 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong, nullable) NeoAnnictPlayback *annictTracker;
 @property (nonatomic) double initialPosition;
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *aetherOptions;
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *gopBenchmarkConfiguration;
+@property (nonatomic, copy, nullable) void (^onGOPBenchmarkResult)(NSDictionary<NSString *, id> *result);
+- (NSDictionary<NSString *, id> *)gopBenchmarkState;
+- (void)gopBenchmarkPrepare;
+- (void)gopBenchmarkSeek:(int64_t)milliseconds;
+- (void)gopBenchmarkFinish;
 - (instancetype)initWithURL:(NSURL *)url title:(NSString *)title
                   username:(NSString *)username password:(NSString *)password
             networkCaching:(NSInteger)networkCaching;

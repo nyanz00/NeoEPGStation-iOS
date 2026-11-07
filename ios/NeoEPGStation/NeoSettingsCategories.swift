@@ -321,6 +321,13 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
     case .viewing:
       buildViewingPreferences()
       deferred { [weak self] in
+        guard let self else { return UIView() }
+        let button = NeoStyle.button("測定画面を開く") { [weak self] in
+          let controller = NeoGOPTrialController(); controller.modalPresentationStyle = .fullScreen; self?.present(controller,animated:true)
+        }
+        return makeRow("GOPシーク測定（ローカル）",explanation:"ファイルから動画と測定計画JSONを選び、通常のエーテル画面で比較します。",control:button)
+      }
+      deferred { [weak self] in
       guard let self else { return UIView() }
       let engine = NeoSelectButton(frame:.zero)
       engine.setTitle(NeoPlaybackExperiment.selected.title, for: .normal); engine.tintColor = NeoStyle.accent

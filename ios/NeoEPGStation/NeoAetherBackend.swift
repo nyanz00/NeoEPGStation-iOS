@@ -161,6 +161,14 @@ final class NeoAetherBackend: NSObject {
     }
   }
   @objc var subtitleTracks: [[String: Any]] = []
+  @objc var onGOPBenchmarkEvent: (([String:Any]) -> Void)?
+  private var benchmarkSeekSerial = 0
+  @objc var gopBenchmarkSnapshot: [String:Any] {
+    ["route":engine?.videoRoute.rawValue ?? "unloaded","codec":engine?.sourceVideoCodecName ?? "unknown",
+     "checkpointEnabled":checkpoints != nil,"subtitleVisible":caption.image != nil,
+     "ready":ready,"seekable":seekable,"failed":failed || recovering,"duration":Double(durationMs)/1000,
+     "time":Double(timeMs)/1000,"rate":rate]
+  }
   @objc var downloadedRanges: [[NSNumber]] {
     guard let engine, durationMs > 0 else { return [] }
     return engine.residentRanges.map { [NSNumber(value: $0.lowerBound/Double(durationMs)*1000), NSNumber(value: $0.upperBound/Double(durationMs)*1000)] }
@@ -310,12 +318,15 @@ final class NeoAetherBackend: NSObject {
     settleSeek(false); seekTask?.cancel()
     let target = min(max(0,Double(milliseconds)/1000),max(0,engine.duration-0.01))
     pendingTarget = target; pendingGeneration = lastGeneration; pendingBegan = CACurrentMediaTime()
+    benchmarkSeekSerial += 1; let benchmarkSerial = benchmarkSeekSerial
+    onGOPBenchmarkEvent?(["event":"started","serial":benchmarkSerial,"host":pendingBegan,"target":target,"from":Double(timeMs)/1000])
     pipFrames.discontinuity()
     seekCompletion = completion; stalledSince = 0; ended = false
     let token = epoch
     seekTask = Task { [weak self, engine] in
       await engine.seek(to:target)
       guard let self, !self.closed, self.epoch == token else { return }
+      self.onGOPBenchmarkEvent?(["event":"engineCompletion","serial":benchmarkSerial,"host":CACurrentMediaTime(),"target":target])
       if self.pipActive, engine.videoRoute != .software { self.configurePiPFrames() }
       self.applyIntent()
     }
@@ -401,8 +412,11 @@ final class NeoAetherBackend: NSObject {
         timeMs = Int64(max(0,pts)*1000)
       }
       if !ready { ready = true; buffering = false; onChange?() }
-      if let target = pendingTarget, abs(pts-target) <= 0.5,
+      let tolerance = options["gopBenchmark"] as? Bool == true ? (options["gopTolerance"] as? Double ?? 0.085) : 0.5
+      if let target = pendingTarget, abs(pts-target) <= tolerance,
         generation == nil || generation != pendingGeneration {
+        onGOPBenchmarkEvent?(["event":"picture","serial":benchmarkSeekSerial,"host":now,"target":target,"pts":pts,"verified":displayTimeVerified,
+          "verification":engine.videoRoute == .software ? "displayed-surface-source-PTS" : "avplayer-item-display-time-buffer"])
         if displayTimeVerified {
           NeoPlaybackDiagnostics.record("seek.videoResume",fields:["engine":"aether","durationMs":(now-pendingBegan)*1000,"mediaMs":pts*1000,"targetMs":target*1000,"verification":"displayedPixelBuffer"])
         } else {

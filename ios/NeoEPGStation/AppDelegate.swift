@@ -20,6 +20,23 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     let window = UIWindow(frame: UIScreen.main.bounds)
     window.rootViewController = NeoShell(); self.window = window; window.makeKeyAndVisible()
 #if targetEnvironment(simulator)
+    if let name = ProcessInfo.processInfo.environment["NEO_EPG_GOP_BENCHMARK"] {
+      DispatchQueue.main.asyncAfter(deadline:.now()+0.8) {
+        let directory = NeoPiPSmoke.directory
+        guard let data = try? Data(contentsOf:directory.appendingPathComponent("gop-fixture.json")),
+          let configuration = try? JSONSerialization.jsonObject(with:data) as? [String:Any] else { return }
+        let controller = NeoPlayerController(url:directory.appendingPathComponent(name),title:"Synthetic GOP benchmark",username:"",password:"",networkCaching:5000)
+        controller.aetherOptions = ["checkpointEnabled":false,"gopBenchmark":true,"gopTolerance":2.0/24]
+        controller.recordingContext = ["videoFileType":"encoded","disableHistory":true]
+        controller.gopBenchmarkConfiguration = configuration
+        controller.onGOPBenchmarkResult = { result in
+          NeoPiPSmoke.save("gop-benchmark-smoke",result)
+        }
+        controller.modalPresentationStyle = .fullScreen
+        window.rootViewController?.present(controller,animated:false)
+      }
+      return true
+    }
     if let raw = ProcessInfo.processInfo.environment["NEO_EPG_FEEDBACK_BASE"], let url = URL(string:raw+"/api/videos/1"), let host = window.rootViewController {
       NeoCommentOverlay.waitBeforePlayback = true; NeoCommentPreference.save("Comments A")
       UserDefaults.standard.set(true,forKey:"player.comments.enabled")

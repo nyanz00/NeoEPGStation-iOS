@@ -286,6 +286,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 @property (nonatomic) NSMutableDictionary<NSNumber *,NSURL *> *ordinaryFiles;
 @property (nonatomic) UIImageView *ordinaryCaption;
 @property (nonatomic) CADisplayLink *ordinaryCaptionLink;
+@property (nonatomic) NeoGOPPlaybackRun *gopRun;
 @property (nonatomic) NSInteger ordinarySelected;
 @property (nonatomic) NSMutableSet<NSURL *> *attachedSubtitles;
 @property (nonatomic) BOOL streamSubtitleUserSelected;
@@ -487,6 +488,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
   if (self.aetherOptions) {
     self.aether = [NeoAetherBackend new]; self.aether.options = self.aetherOptions;
+    if (self.gopBenchmarkConfiguration) { self.aether.onGOPBenchmarkEvent = ^(NSDictionary *event) { [uiSelf.gopRun observe:event]; }; }
     self.videoOutputView = self.aether.view;
     [self.movieView addSubview:self.aether.view];
     __weak typeof(self) owner = self;
@@ -594,7 +596,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     [self.commentPiP beginCompositionSmoke];
   } else
 #endif
-  { if ([self isLive]) { [self.comments configureLive]; }
+  { if (self.gopBenchmarkConfiguration) { /* Local baseline: no server comment requests. */ }
+    else if ([self isLive]) { [self.comments configureLive]; }
     else { [self.comments configureWithSource:self.sourceURL username:self.username password:self.password
       jikkyo:[self.recordingContext[@"videoFileType"] isEqual:@"ts"]]; } }
   if ([self.recordingContext[@"videoFileType"] isEqual:@"ts"]) { self.aribClock = [NeoARIBCaptionClock new]; }
@@ -618,6 +621,10 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   }
   self.annictTracker.onChange = ^{ [weakSelf updateControls]; };
   [self showControls];
+  if (self.gopBenchmarkConfiguration) {
+    self.gopRun = [[NeoGOPPlaybackRun alloc] initWithPlayer:self configuration:self.gopBenchmarkConfiguration];
+    [self.gopRun start];
+  }
   if ([self isLive]) { [self startLive]; return; }
   if (!self.aether && ![self.recordingContext[@"videoFileType"] isEqual:@"ts"]) {
     self.ordinaryRenderer = [NeoASSSubtitleRenderer new]; self.ordinaryFiles = [NSMutableDictionary new]; self.ordinarySelected = -1;
@@ -631,7 +638,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     NeoASSSubtitleRenderer *renderer = self.ordinaryRenderer;
     [self.commentPiP useSubtitleProvider:^UIImage *(double time, CGSize size) { return [renderer imageAtMilliseconds:(int64_t)llround(time*1000) size:size]; }];
   }
-  if (![self isStreaming] && ![self.recordingContext[@"videoFileType"] isEqual:@"ts"]) {
+  if (!self.gopBenchmarkConfiguration && ![self isStreaming] && ![self.recordingContext[@"videoFileType"] isEqual:@"ts"]) {
     self.streamingSubtitles = [[NeoStreamingSubtitles alloc] initWithSource:self.sourceURL username:self.username password:self.password];
     self.streamingSubtitles.onChange = ^{ [weakSelf attachStreamingSubtitles]; };
     [self.streamingSubtitles start];
@@ -1025,6 +1032,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   self.wantsPlayback = YES; self.liveAttempts = 0; [self startLive]; return YES;
 }
 - (void)performPlayerAction:(NSString *)action {
+  if (self.gopRun.active) { [self.gopRun cancel:@"manual-player-input"]; }
   if (self.closing) { return; }
   if ([action hasPrefix:@"back-"]) {
     if ([action isEqualToString:@"back-begin"]) { [self beginPlayerDismissal:YES]; }
@@ -1438,7 +1446,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 - (void)startWhenCommentsReady {
   if (self.closing || self.transportSuspended || self.reloading) { return; }
-  if (![NeoCommentOverlay waitBeforePlayback]) { [self restartMedia]; return; }
+  if (self.gopBenchmarkConfiguration || ![NeoCommentOverlay waitBeforePlayback]) { [self restartMedia]; return; }
   self.awaitingComments = YES; [self updateLoadingState]; self.statusLabel.text = @"コメントを準備しています…";
   __weak typeof(self) weakSelf = self;
   dispatch_block_t ready = ^{
@@ -3808,6 +3816,19 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 #endif
 - (void)play { [self setPlaybackIntent:YES]; }
+- (void)gopBenchmarkPrepare {
+  self.playbackRate = 1; [self.aether setPlaybackRate:1]; [self setPlaybackIntent:YES]; [self setOrientation:@"landscape"];
+}
+- (NSDictionary<NSString *,id> *)gopBenchmarkState {
+  NSMutableDictionary *state = [self.aether.gopBenchmarkSnapshot mutableCopy] ?: [NSMutableDictionary new];
+  state[@"foreground"] = @(UIApplication.sharedApplication.applicationState == UIApplicationStateActive && self.view.window != nil && !self.inputInBackground);
+  state[@"pip"] = @(self.pipActive); state[@"closing"] = @(self.closing);
+  state[@"playing"] = @(self.wantsPlayback); state[@"commentCount"] = @(self.comments.panelComments.count);
+  state[@"width"] = @(self.view.bounds.size.width); state[@"height"] = @(self.view.bounds.size.height);
+  return state;
+}
+- (void)gopBenchmarkSeek:(int64_t)milliseconds { [self seekBy:milliseconds-[self mediaTime] completion:^{}]; }
+- (void)gopBenchmarkFinish { [self closePlayer]; }
 - (void)pause { [self setPlaybackIntent:NO]; }
 - (void)seekBy:(int64_t)offset completion:(dispatch_block_t)completion {
   if ([self isLive]) { completion(); return; }
@@ -4063,6 +4084,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 - (BOOL)isMediaPlaying { return self.transportPlaying; }
 
 - (void)closePlayer {
+  [self.gopRun cancel:@"user-closed"];
   [NeoVLCFrameTap bindFrameArrival:self.movieView handler:nil];
   [self beginPlayerDismissal:NO];
 }
@@ -4076,6 +4098,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   } else { [self dismissViewControllerAnimated:YES completion:nil]; }
 }
 - (void)completePlayerDismissal {
+  [self.gopRun cancel:@"player-dismissed"];
   if (self.closing) { return; }
   // A cancelled drag never tears down playback. On success the UI has already
   // returned; retain native resources until VLC's asynchronous stop completes.

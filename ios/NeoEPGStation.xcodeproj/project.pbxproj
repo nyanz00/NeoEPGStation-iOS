@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+    BCAC00000000000000000003 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000003; };
+    BCAC00000000000000000004 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000004; };
     BCAC00000000000000000001 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000001; };
     BCAC00000000000000000002 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000002; };
     B11C00000000000000000001 = {isa = PBXBuildFile; fileRef = A11C00000000000000000001; };
@@ -74,6 +76,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+    ACAC00000000000000000003 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoGOPBenchmark.swift; sourceTree = "<group>"; };
+    ACAC00000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoGOPTrialController.swift; sourceTree = "<group>"; };
     ACAC00000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoCaptionLayout.swift; sourceTree = "<group>"; };
     ACAC00000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoCanvasCaptionRenderer.swift; sourceTree = "<group>"; };
     A11C00000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoRecordingFeaturesSmoke.swift; path = NeoEPGStation/NeoRecordingFeaturesSmoke.swift; sourceTree = "<group>"; };
@@ -165,6 +169,8 @@
 			children = (
         ADEF0000000000000000003D,
         ACAC00000000000000000001,
+        ACAC00000000000000000003,
+        ACAC00000000000000000004,
         ACAC00000000000000000002,
         ADEF0000000000000000003C,
         ADEF0000000000000000003B,
@@ -416,6 +422,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+        BCAC00000000000000000003,
+        BCAC00000000000000000004,
         BCAC00000000000000000001,
         BCAC00000000000000000002,
         BDEF0000000000000000003C,

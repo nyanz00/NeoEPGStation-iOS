@@ -61,7 +61,7 @@ on:
         required: false
         default: all
         type: choice
-        options: [all, recorded, pagination, detail, record-actions, detail-actions, play-popup, list-actions, drop-dialog, menu, settings, gestures, navigation, recording-features, captions]
+        options: [all, recorded, pagination, detail, record-actions, detail-actions, play-popup, list-actions, drop-dialog, menu, settings, gestures, navigation, recording-features, captions, gop-benchmark]
 
 permissions:
   contents: read
@@ -173,7 +173,7 @@ jobs:
           build/native-tests/live | tee dist/live-model-checks.txt
       - name: Check player feedback models
         id: player-feedback-models
-        if: ${{ inputs.check_scope == 'player-feedback' && inputs.ui_stage != 'captions' }}
+        if: ${{ inputs.check_scope == 'player-feedback' && !contains(fromJSON('["captions","gop-benchmark"]'), inputs.ui_stage) }}
         run: |
           mkdir -p build/native-tests dist
           swiftc ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift ios/NeoEPGStation/NeoASSComments.swift ios/NeoEPGStation/NeoCommentLoader.swift tests/player-feedback/main.swift -o build/native-tests/player-feedback
@@ -192,6 +192,12 @@ jobs:
           mkdir -p build/native-tests dist
           swiftc ios/NeoEPGStation/NeoCaptionLayout.swift ios/NeoEPGStation/NeoSubtitleScript.swift tests/captions/main.swift -o build/native-tests/captions
           build/native-tests/captions tests/captions/web-oracle.json | tee dist/caption-layout-models.txt
+      - name: Check GOP benchmark models
+        if: ${{ inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'gop-benchmark' }}
+        run: |
+          mkdir -p build/native-tests dist
+          swiftc ios/NeoEPGStation/NeoGOPBenchmark.swift tests/gop-benchmark/main.swift -o build/native-tests/gop-benchmark
+          build/native-tests/gop-benchmark | tee dist/gop-benchmark-models.txt
       - name: Native UI type checks
         # Recording changes exercise model formatting, cumulative watch rules and
         # request/UI integration without rerunning unrelated playback suites.
@@ -312,7 +318,7 @@ jobs:
           exit "$comparison_failed"
       - name: Check player feedback interactions
         id: player-feedback-checks
-        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && !contains(fromJSON('["navigation","recording-features","captions"]'), inputs.ui_stage) }}
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && !contains(fromJSON('["navigation","recording-features","captions","gop-benchmark"]'), inputs.ui_stage) }}
         run: python3 -u scripts/player-feedback-smoke.py
       - name: Check immediate navigation swipes on iPhone and iPad
         id: navigation-checks
@@ -325,9 +331,12 @@ jobs:
       - name: Check ordinary captions on iPhone and iPad
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'captions' }}
         run: python3 -u scripts/simulator-smoke.py --captions-only
+      - name: Check foreground local GOP benchmark
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'gop-benchmark' }}
+        run: python3 -u scripts/gop-benchmark-smoke.py
       - name: Check live station UI, raw/transcoded TS, comments, switching and reconnect
         id: live-checks
-        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && contains(fromJSON('["live","player-feedback"]'), inputs.check_scope) && !contains(fromJSON('["navigation","recording-features","captions"]'), inputs.ui_stage) }}
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && contains(fromJSON('["live","player-feedback"]'), inputs.check_scope) && !contains(fromJSON('["navigation","recording-features","captions","gop-benchmark"]'), inputs.ui_stage) }}
         run: python3 -u scripts/live-smoke.py
       - name: Check recorded PLAY remains separate from live transport
         id: live-recorded-regression
