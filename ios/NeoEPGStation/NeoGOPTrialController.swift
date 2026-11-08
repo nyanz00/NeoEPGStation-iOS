@@ -54,9 +54,9 @@ import UniformTypeIdentifiers
     refresh()
   }
   private func failure(_ message: String) -> NSError { NSError(domain:"GOP",code:1,userInfo:[NSLocalizedDescriptionKey:message]) }
-  private func begin() {
+  private func begin(shuffle: Bool = true) {
     guard plan != nil, !files.isEmpty, !running else { return }
-    files.shuffle(); reports = []; fileIndex = 0; running = true; batchStatus = "running"
+    if shuffle { files.shuffle() }; reports = []; fileIndex = 0; running = true; batchStatus = "running"
     batchID = UUID().uuidString; presentationCount = 0; inputLoadCount = 0
     refresh(); playNext()
   }
@@ -108,7 +108,10 @@ import UniformTypeIdentifiers
     loadViewIfNeeded(); onBatchFinished = completion
     documentPicker(UIDocumentPickerViewController(forOpeningContentTypes:[.data],asCopy:true),didPickDocumentsAt:urls)
     guard !files.isEmpty else { completion(["status":"import-failed"]); return }
-    begin()
+    // Reproduce the observed 1080p MP4 -> 1080p MKV -> small MKV handover.
+    let order = ["synthetic-native-2","synthetic-native-1","synthetic-native-3"]
+    files.sort { (order.firstIndex(of:$0.1.label) ?? 99) < (order.firstIndex(of:$1.1.label) ?? 99) }
+    begin(shuffle:false)
   }
 #endif
   private func export() {
@@ -171,11 +174,17 @@ import UniformTypeIdentifiers
         try Task.checkCancellation()
         let s = state()
         if s["failed"] as? Bool == true { try check() }
-        if s["ready"] as? Bool == true && s["seekable"] as? Bool == true && player?.view.window != nil { break }
+        // The first startup picture may precede the audio/display clock being
+        // settled. Confirm moving presentation before the first warmup seek;
+        // startup itself is not part of the seek benchmark.
+        let samples = s["displayedSamples"] as? Int ?? 0, time = s["time"] as? Double ?? 0
+        if s["ready"] as? Bool == true && s["seekable"] as? Bool == true &&
+          s["playing"] as? Bool == true && s["buffering"] as? Bool != true && samples >= 3 && time >= 0.25 && player?.view.window != nil { break }
         try await Task.sleep(nanoseconds:20_000_000)
       }
       try check(); let s = state()
       guard s["ready"] as? Bool == true, s["seekable"] as? Bool == true, s["checkpointEnabled"] as? Bool == false,
+        (s["displayedSamples"] as? Int ?? 0) >= 3, (s["time"] as? Double ?? 0) >= 0.25,
         let duration = s["duration"] as? Double, abs(duration-profile.duration)<1 else { throw error("media-duration-or-route-mismatch") }
       report["initialState"] = s
       if references.isEmpty && s["displayTimestampAvailable"] as? Bool != true {

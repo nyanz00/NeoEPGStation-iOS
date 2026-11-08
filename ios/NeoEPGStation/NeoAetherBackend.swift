@@ -133,7 +133,7 @@ final class NeoAetherBackend: NSObject {
   private var choices: [Int: URL] = [:], chosenSubtitle = -1
   private var nativeSubtitle = false
   private var logCapture = NeoAetherLogCapture()
-  private let decodedFrames = NeoAetherDecodedFrames()
+  private var decodedFrames = NeoAetherDecodedFrames()
   private let pipFrames = NeoAetherPiPFrames()
   private var rate: Float = 1
   // Comment/PiP workers sample these synchronously off-main. Never cross a
@@ -202,7 +202,7 @@ final class NeoAetherBackend: NSObject {
      "checkpointEnabled":checkpoints != nil,"subtitleVisible":caption.image != nil,
      "ready":ready,"seekable":seekable,"failed":failed || recovering,"duration":Double(durationMs)/1000,
      "time":Double(timeMs)/1000,"rate":rate,"pictureEvidence":benchmarkPictureEvidence,
-     "recovering":recovering,"displayTimestampAvailable":lastPictureTimeVerified]
+     "recovering":recovering,"displayTimestampAvailable":lastPictureTimeVerified,"displayedSamples":samples,"buffering":buffering]
   }
   @objc var downloadedRanges: [[NSNumber]] {
     guard let engine, durationMs > 0 else { return [] }
@@ -241,6 +241,10 @@ final class NeoAetherBackend: NSObject {
     durationMs = 0; seekable = false; videoSize = .zero
     loaded = false; ready = false; ended = false; failed = false; buffering = true; recovering = false; primingPausedFrame = false
     wantsPlayback = playing; self.playing = false; timeMs = max(0,startMilliseconds)
+    // Frame generations are scoped to one engine input, not the whole batch.
+    // Old decode callbacks retain the previous collector instead of publishing
+    // their last frame into the new input's readiness/seek evidence.
+    decodedFrames = NeoAetherDecodedFrames(); lastGeneration = nil; pendingGeneration = nil
     lastPTS = -.infinity; lastFrameHost = 0; openedAt = CACurrentMediaTime(); lastCheckpointTick = -.infinity
     outputID += 1; samples = 0; pendingTarget = nil; settleSeek(false)
     do {
