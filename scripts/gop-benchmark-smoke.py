@@ -37,7 +37,7 @@ assert captured,'No running foreground image captured'
 print('PASS: local AV1 normal player, 2 warmup + 6 measured seeks, displayed PTS, independent engine timing, forward/back summaries and JSON export')
 
 # Exercise the actual file-import delegate, schema2, and three consecutive
-# native inputs in ONE foreground player/engine. No reference pixels are sent.
+# timestamped inputs in ONE foreground player/engine. No reference pixels are sent.
 run('xcrun','simctl','terminate',device,bundle)
 for source,destination in [('encoded-seek-1080.mkv','gop-batch-a.mkv'),('encoded-seek-1080.mp4','gop-batch-b.mp4'),('encoded-seek.mkv','gop-batch-c.mkv')]:
  shutil.copyfile(Path('tests/fixtures')/source,docs/destination)
@@ -67,7 +67,7 @@ for result in batch['runs']:
  assert result['targets']==expected[result['label']]['targets'],result
  rows=result['rows'];assert len(rows)==8 and sum(r['sampleKind']=='warmup' for r in rows)==2,result
  measured=[r for r in rows if r['sampleKind']=='measured']
- assert len(measured)==6 and all(r['status']=='verified' and r['verification']=='avplayer-item-display-time-buffer' and abs(r['picturePTS']-r['target'])<=2/24 for r in measured),result
+ assert len(measured)==6 and all(r['status']=='verified' and r['verification'] in ('avplayer-item-display-time-buffer','displayed-surface-source-PTS') and abs(r['picturePTS']-r['target'])<=2/24 for r in measured),result
  assert set(r['group'] for r in measured)=={'near','middle','far'},result
  assert all(result['summaryByGroup'][g]['all']['count']==2 for g in ('near','middle','far')),result
 print('PASS: metadata-only merged plan, actual import, three inputs with different targets, one presentation, zero reference images, per-group summaries')
