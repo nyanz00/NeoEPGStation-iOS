@@ -495,6 +495,9 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
     self.aether.onChange = ^{ [owner aetherChanged]; };
     self.aether.onRecovery = ^(int64_t position) {
       if (!owner || owner.closing || owner.networkReloadWaiting) { return; }
+      // A local benchmark records the exact failure and stops; do not enter
+      // the normal server-reconnection loop and hide a broken batch handover.
+      if (owner.gopBenchmarkConfiguration) { return; }
       dispatch_block_t pendingReload = owner.reloadCompletion;
       owner.reloadCompletion = nil;
       if (owner.reloading) {
@@ -623,7 +626,6 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self showControls];
   if (self.gopBenchmarkConfiguration) {
     self.gopRun = [[NeoGOPPlaybackRun alloc] initWithPlayer:self configuration:self.gopBenchmarkConfiguration];
-    [self.gopRun start];
   }
   if ([self isLive]) { [self startLive]; return; }
   if (!self.aether && ![self.recordingContext[@"videoFileType"] isEqual:@"ts"]) {
@@ -793,6 +795,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   [self alignVideoOutput];
   if (changed) { [self setNeedsStatusBarAppearanceUpdate]; }
 }
+- (void)viewDidAppear:(BOOL)animated { [super viewDidAppear:animated]; [self.gopRun start]; }
 - (void)viewDidLayoutSubviews { [super viewDidLayoutSubviews]; [self applyPlayerLayout:self.view.bounds.size]; }
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
   [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
@@ -3817,7 +3820,8 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 #endif
 - (void)play { [self setPlaybackIntent:YES]; }
 - (void)gopBenchmarkPrepare {
-  self.playbackRate = 1; [self.aether setPlaybackRate:1]; [self setPlaybackIntent:YES]; [self setOrientation:@"landscape"];
+  self.playbackRate = 1; [self.aether setPlaybackRate:1]; [self setPlaybackIntent:YES];
+  if (self.orientationMask != UIInterfaceOrientationMaskLandscapeRight) { [self setOrientation:@"landscape"]; }
 }
 - (NSDictionary<NSString *,id> *)gopBenchmarkState {
   NSMutableDictionary *state = [self.aether.gopBenchmarkSnapshot mutableCopy] ?: [NSMutableDictionary new];
@@ -3829,7 +3833,20 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
 }
 - (void)gopBenchmarkSeek:(int64_t)milliseconds { [self seekBy:milliseconds-[self mediaTime] completion:^{}]; }
 - (NSData *)gopBenchmarkLuma { return [self.aether gopBenchmarkLuma]; }
-- (void)gopBenchmarkFinish { [self closePlayer]; }
+- (void)gopBenchmarkFinish { if (![self.gopBenchmarkConfiguration[@"batchManaged"] boolValue]) { [self closePlayer]; } }
+- (void)gopBenchmarkClose { [self closePlayer]; }
+- (void)gopBenchmarkLoadURL:(NSURL *)url configuration:(NSDictionary<NSString *,id> *)configuration {
+  if (!self.gopBenchmarkConfiguration || self.gopRun.active || self.closing) { return; }
+  self.sourceURL = url; self.playbackURL = url; self.gopBenchmarkConfiguration = configuration;
+  self.lastObservedTime = 0; self.lastObservedLength = 0; self.playbackEnded = NO; self.playbackFailed = NO;
+  self.reloading = NO; self.networkReloadWaiting = NO; self.awaitingEndpoint = NO; self.inputBufferReady = NO;
+  [self.networkRetryTimer invalidate]; self.networkRetryTimer = nil;
+  [self.reloadTimer invalidate]; self.reloadTimer = nil;
+  double fps = [configuration[@"profile"][@"fps"] doubleValue];
+  self.aether.gopBenchmarkTolerance = MAX(0.03, 2.0 / MAX(1, fps));
+  self.gopRun = [[NeoGOPPlaybackRun alloc] initWithPlayer:self configuration:configuration];
+  [self.aether loadURL:url startMilliseconds:0 playing:YES]; [self.gopRun start];
+}
 - (void)pause { [self setPlaybackIntent:NO]; }
 - (void)seekBy:(int64_t)offset completion:(dispatch_block_t)completion {
   if ([self isLive]) { completion(); return; }

@@ -19,6 +19,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)gopBenchmarkPrepare;
 - (void)gopBenchmarkSeek:(int64_t)milliseconds;
 - (void)gopBenchmarkFinish;
+- (void)gopBenchmarkClose;
+- (void)gopBenchmarkLoadURL:(NSURL *)url configuration:(NSDictionary<NSString *,id> *)configuration NS_SWIFT_NAME(gopBenchmarkLoad(_:configuration:));
 - (instancetype)initWithURL:(NSURL *)url title:(NSString *)title
                   username:(NSString *)username password:(NSString *)password
             networkCaching:(NSInteger)networkCaching;

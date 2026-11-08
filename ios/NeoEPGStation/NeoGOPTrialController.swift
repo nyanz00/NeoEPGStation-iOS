@@ -3,10 +3,13 @@ import UniformTypeIdentifiers
 
 @MainActor final class NeoGOPTrialController: UIViewController, UIDocumentPickerDelegate {
   private var plan: NeoGOPBenchmark.Plan?, files: [(URL,NeoGOPBenchmark.Profile)] = []
-  private var reports: [[String:Any]] = [], fileIndex = 0, running = false, latest: [String:Any]?
+  private var reports: [[String:Any]] = [], fileIndex = 0, running = false
   private let status = NeoStyle.label("測定計画JSONと比較する動画を「ファイル」から選択してください。動画はアプリ内へコピーされます。",size:15)
   private let rounds = UIStepper(), roundLabel = NeoStyle.label(), startButton = UIButton(type:.system)
   private let stack = UIStackView()
+  private weak var activePlayer: NeoPlayerController?
+  private var batchStatus = "idle", batchID = "", presentationCount = 0, inputLoadCount = 0
+  private var onBatchFinished: (([String:Any]) -> Void)?
   static var resultURL: URL { FileManager.default.urls(for:.documentDirectory,in:.userDomainMask)[0].appendingPathComponent("gop-seek-benchmark.json") }
   override func viewDidLoad() {
     super.viewDidLoad(); view.backgroundColor = NeoStyle.background; title = "GOP シーク測定"
@@ -25,13 +28,17 @@ import UniformTypeIdentifiers
     if let data = try? Data(contentsOf:Self.resultURL), let object = try? JSONSerialization.jsonObject(with:data) as? [String:Any] { reports = object["runs"] as? [[String:Any]] ?? [] }
     refresh()
   }
-  private func refresh() { roundLabel.text = "各動画 \(Int(rounds.value)*(plan?.targets.count ?? 24)*2)回＋ウォームアップ2回"; startButton.isEnabled = !files.isEmpty && plan != nil && !running }
+  private func refresh() {
+    var total = 0
+    if let plan { for (_,profile) in files { total += plan.targets(for:profile).count*2*Int(rounds.value) } }
+    roundLabel.text = "測定合計 \(total)回＋各動画ウォームアップ2回"
+    startButton.isEnabled = !files.isEmpty && plan != nil && !running
+  }
   func documentPicker(_ controller: UIDocumentPickerViewController,didPickDocumentsAt urls: [URL]) {
     do {
       if let json = urls.first(where: { $0.pathExtension.lowercased() == "json" }) {
         let data = try Data(contentsOf:json); guard data.count < 4*1024*1024 else { throw failure("測定計画が大きすぎます。") }
         let value = try JSONDecoder().decode(NeoGOPBenchmark.Plan.self,from:data); guard value.valid else { throw failure("測定計画が無効です。") }; plan = value
-        guard value.profiles.allSatisfy({ !($0.references ?? []).isEmpty }) else { throw failure("画像照合付きの測定計画JSONを選択してください。") }
       }
       guard let plan else { throw failure("PCで作成した測定計画JSONも一緒に選択してください。") }
       var selected: [(URL,NeoGOPBenchmark.Profile)] = []
@@ -47,33 +54,63 @@ import UniformTypeIdentifiers
     refresh()
   }
   private func failure(_ message: String) -> NSError { NSError(domain:"GOP",code:1,userInfo:[NSLocalizedDescriptionKey:message]) }
-  private func begin() { guard plan != nil, !files.isEmpty else { return }; files.shuffle(); reports = []; fileIndex = 0; running = true; refresh(); playNext() }
+  private func begin() {
+    guard plan != nil, !files.isEmpty, !running else { return }
+    files.shuffle(); reports = []; fileIndex = 0; running = true; batchStatus = "running"
+    batchID = UUID().uuidString; presentationCount = 0; inputLoadCount = 0
+    refresh(); playNext()
+  }
   private func playNext() {
-    guard running, fileIndex < files.count, let plan else { running = false; status.text = "測定終了。結果を共有できます。"; refresh(); return }
+    guard running, let plan else { return }
+    guard fileIndex < files.count else {
+      running = false; batchStatus = "completed"; save()
+      activePlayer?.gopBenchmarkClose(); refresh(); return
+    }
     let (url,profile) = files[fileIndex]
+    let object = (try? JSONSerialization.jsonObject(with:JSONEncoder().encode(profile))) as? [String:Any] ?? [:]
+    let configuration: [String:Any] = ["profile":object,"targets":plan.targets(for:profile),"rounds":Int(rounds.value),"batchManaged":true,"batchID":batchID]
+    inputLoadCount += 1
+    if let owner = activePlayer { owner.gopBenchmarkLoad(url,configuration:configuration); return }
     let owner = NeoPlayerController(url:url,title:"GOP シーク測定 · "+profile.label,username:"",password:"",networkCaching:5000)
     owner.aetherOptions = ["checkpointEnabled":false,"gopBenchmark":true,"gopTolerance":max(0.03,2/profile.fps)]
     owner.recordingContext = ["videoFileType":"encoded","disableHistory":true]
-    let object = (try? JSONSerialization.jsonObject(with:JSONEncoder().encode(profile))) as? [String:Any] ?? [:]
-    owner.gopBenchmarkConfiguration = ["profile":object,"targets":plan.targets,"rounds":Int(rounds.value)]
-    latest = nil
-    owner.onGOPBenchmarkResult = { [weak self] result in self?.latest = result }
-    owner.onClose = { [weak self,weak owner] in
-      guard let self else { return }
-      if let latest = self.latest { self.reports.append(latest); self.save() }
-      let complete = self.latest?["status"] as? String == "completed"
-      self.fileIndex += 1
-      Task { [weak self,weak owner] in
-        for _ in 0..<100 { if owner?.presentingViewController == nil { break }; try? await Task.sleep(nanoseconds:20_000_000) }
-        guard let self else { return }
-        if complete { self.playNext() } else { self.running = false; self.status.text = "測定を中断しました。途中結果を共有できます。"; self.refresh() }
+    owner.gopBenchmarkConfiguration = configuration
+    activePlayer = owner; presentationCount += 1
+    owner.onGOPBenchmarkResult = { [weak self,weak owner] result in
+      guard let self, let owner else { return }
+      self.reports.append(result); self.fileIndex += 1
+      if result["status"] as? String != "completed" { self.running = false; self.batchStatus = "cancelled" }
+      self.save()
+      let token = self.batchID
+      DispatchQueue.main.async { [weak self,weak owner] in
+        guard let self, let owner, self.batchID == token, self.activePlayer === owner else { return }
+        if self.running { self.playNext() } else { owner.gopBenchmarkClose() }
       }
+    }
+    owner.onClose = { [weak self] in
+      guard let self else { return }
+      self.activePlayer = nil
+      if self.running { self.batchStatus = "cancelled" }; self.running = false
+      self.status.text = self.batchStatus == "completed" ? "測定終了。結果を共有できます。" : "測定を中断しました。途中結果を共有できます。"
+      self.save(); self.refresh()
+      let callback = self.onBatchFinished; self.onBatchFinished = nil; callback?(self.batchReport())
     }
     owner.modalPresentationStyle = .fullScreen; present(owner,animated:true)
   }
-  private func save() {
-    if let data = try? JSONSerialization.data(withJSONObject:["schema":1,"runs":reports],options:[.prettyPrinted,.sortedKeys]) { try? data.write(to:Self.resultURL,options:.atomic) }
+  private func batchReport() -> [String:Any] {
+    ["schema":2,"status":batchStatus,"batchID":batchID,"runs":reports,"presentationCount":presentationCount,"inputLoadCount":inputLoadCount]
   }
+  private func save() {
+    if let data = try? JSONSerialization.data(withJSONObject:batchReport(),options:[.prettyPrinted,.sortedKeys]) { try? data.write(to:Self.resultURL,options:.atomic) }
+  }
+#if targetEnvironment(simulator)
+  func runSmokeImport(_ urls: [URL], completion: @escaping ([String:Any]) -> Void) {
+    loadViewIfNeeded(); onBatchFinished = completion
+    documentPicker(UIDocumentPickerViewController(forOpeningContentTypes:[.data],asCopy:true),didPickDocumentsAt:urls)
+    guard !files.isEmpty else { completion(["status":"import-failed"]); return }
+    begin()
+  }
+#endif
   private func export() {
     var urls = [URL](); if FileManager.default.fileExists(atPath:Self.resultURL.path) { urls.append(Self.resultURL) }
     if FileManager.default.fileExists(atPath:NeoGOPPlaybackRun.partialURL.path) { urls.append(NeoGOPPlaybackRun.partialURL) }
@@ -94,7 +131,7 @@ import UniformTypeIdentifiers
   @objc(initWithPlayer:configuration:) init(player: NeoPlayerController,configuration: [String:Any]) { self.player = player; self.configuration = configuration; super.init() }
   @objc func observe(_ event: [String:Any]) { if !done { events.append(event); if events.count > 16 { events.removeFirst(events.count-16) } } }
   @objc func start() {
-    guard task == nil, let player else { return }
+    guard task == nil, !done, let player else { return }
     oldIdle = UIApplication.shared.isIdleTimerDisabled; UIApplication.shared.isIdleTimerDisabled = true
     player.gopBenchmarkPrepare()
     badge.textColor = .white; badge.backgroundColor = UIColor.black.withAlphaComponent(0.65); badge.font = .monospacedDigitSystemFont(ofSize:12,weight:.medium); badge.numberOfLines = 2; badge.isUserInteractionEnabled = false; badge.translatesAutoresizingMaskIntoConstraints = false
@@ -105,7 +142,13 @@ import UniformTypeIdentifiers
   private func state() -> [String:Any] { player?.gopBenchmarkState() ?? [:] }
   private func check() throws {
     try Task.checkCancellation(); let s = state()
-    guard !done, s["closing"] as? Bool != true, s["foreground"] as? Bool == true, s["pip"] as? Bool != true, s["failed"] as? Bool != true, s["playing"] as? Bool == true else { throw error("interrupted-or-not-foreground") }
+    var reason: String?
+    if done || s["closing"] as? Bool == true { reason = "player-closing" }
+    else if s["foreground"] as? Bool != true { reason = "not-foreground" }
+    else if s["pip"] as? Bool == true { reason = "pip-entered" }
+    else if s["failed"] as? Bool == true { reason = "playback-failed-or-recovering" }
+    else if s["playing"] as? Bool != true { reason = "playback-paused" }
+    if let reason { report["failureState"] = s; throw error(reason) }
   }
   private func error(_ message: String) -> NSError { NSError(domain:"GOP",code:1,userInfo:[NSLocalizedDescriptionKey:message]) }
   private func run() async {
@@ -120,10 +163,14 @@ import UniformTypeIdentifiers
         "timing":"normal-controller-seek-entry-to-displayed-target-picture","engineCompletionMeaning":"engine seek return, independent of displayed picture",
         "referenceReadback":"32x18 luma; MAE <= 9/255, correlation >= 0.985; unchanged/flat pictures excluded"]
       report["startedAt"] = ISO8601DateFormatter().string(from:Date())
+      report["batchID"] = configuration["batchID"]
+      report["targets"] = targets
+      report["referenceCount"] = references.count
       badge.text = "GOP測定：再生準備中…"
       for _ in 0..<1500 {
         try Task.checkCancellation()
         let s = state()
+        if s["failed"] as? Bool == true { try check() }
         if s["ready"] as? Bool == true && s["seekable"] as? Bool == true && player?.view.window != nil { break }
         try await Task.sleep(nanoseconds:20_000_000)
       }
@@ -131,6 +178,9 @@ import UniformTypeIdentifiers
       guard s["ready"] as? Bool == true, s["seekable"] as? Bool == true, s["checkpointEnabled"] as? Bool == false,
         let duration = s["duration"] as? Double, abs(duration-profile.duration)<1 else { throw error("media-duration-or-route-mismatch") }
       report["initialState"] = s
+      if references.isEmpty && s["displayTimestampAvailable"] as? Bool != true {
+        throw error("displayed-timestamp-unavailable-on-this-route")
+      }
       let measured = NeoGOPBenchmark.steps(targets,rounds:rounds), warmup = Array(measured.prefix(2)), steps = warmup+measured
       var failures = 0
       for (index,step) in steps.enumerated() {
@@ -148,6 +198,9 @@ import UniformTypeIdentifiers
         row["keySeconds"] = profile.key(before:step.target); row["distanceFromKey"] = profile.key(before:step.target).map { step.target-$0 }
         row["thermalState"] = ProcessInfo.processInfo.thermalState.rawValue
         row["viewportWidth"] = state()["width"]; row["viewportHeight"] = state()["height"]
+        if let point = profile.points?.first(where: { abs($0.target-step.target)<0.0001 }) {
+          row["group"] = point.group; row["section"] = point.section; row["nextKeySeconds"] = point.nextKey
+        }
         rows.append(row); save("running")
         failures = ["verified","ambiguous-image"].contains(row["status"] as? String ?? "") ? 0 : failures+1
         if failures >= 3 { throw error("three-unverified-results") }
@@ -155,6 +208,7 @@ import UniformTypeIdentifiers
       }
       finish("completed",reason:nil); player?.gopBenchmarkFinish()
     } catch {
+      report["failureState"] = state()
       finish("cancelled",reason:error.localizedDescription)
       if player?.view.window != nil { player?.gopBenchmarkFinish() }
     }
@@ -162,7 +216,7 @@ import UniformTypeIdentifiers
   private func seek(_ target: Double) async throws -> [String:Any] {
     try check(); events = []
     let candidates = references.filter { abs($0.target-target)<0.0001 }
-    let previous = player?.gopBenchmarkLuma()
+    let previous = candidates.isEmpty ? nil : player?.gopBenchmarkLuma()
     let flatReferences = !candidates.isEmpty && candidates.allSatisfy { !NeoGOPBenchmark.imageMatches($0.luma,$0.luma) }
     let unchanged = flatReferences || (previous.map { image in candidates.contains { NeoGOPBenchmark.imageMatches(image,$0.luma) } } ?? false)
     let invoked = CACurrentMediaTime(), from = state()["time"] as? Double ?? -1
@@ -217,11 +271,14 @@ import UniformTypeIdentifiers
   private func save(_ status: String) {
     report["status"] = status; report["rows"] = rows
     report["summary"] = NeoGOPBenchmark.summary(rows.filter { $0["sampleKind"] as? String == "measured" })
+    var groups: [String:Any] = [:]
+    for name in ["near","middle","far"] { groups[name] = NeoGOPBenchmark.summary(rows.filter { $0["sampleKind"] as? String == "measured" && $0["group"] as? String == name }) }
+    report["summaryByGroup"] = groups
     if let data = try? JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]) { try? data.write(to:Self.partialURL,options:.atomic) }
   }
   private func finish(_ status: String,reason: String?) {
     guard !done else { return }; done = true; report["reason"] = reason; save(status); badge.removeFromSuperview(); UIApplication.shared.isIdleTimerDisabled = oldIdle
     player?.onGOPBenchmarkResult?(report)
   }
-  @objc func cancel(_ reason: String) { guard !done else { return }; task?.cancel(); finish("cancelled",reason:reason) }
+  @objc func cancel(_ reason: String) { guard !done else { return }; task?.cancel(); report["failureState"] = state(); finish("cancelled",reason:reason) }
 }

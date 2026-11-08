@@ -5,7 +5,7 @@ let profile = NeoGOPBenchmark.Profile(label:"synthetic",bytes:1000,duration:100,
 let plan = NeoGOPBenchmark.Plan(schema:1,targets:[31.125,55.75],profiles:[profile])
 check(plan.valid,"valid plan")
 check(profile.key(before:31.125) == 28 && profile.key(before:32) == 32 && profile.key(before:0) == 0,"actual preceding key selection")
-check(!NeoGOPBenchmark.Plan(schema:2,targets:plan.targets,profiles:[profile]).valid,"unknown schema")
+check(!NeoGOPBenchmark.Plan(schema:3,targets:plan.targets,profiles:[profile]).valid,"unknown schema")
 check(!NeoGOPBenchmark.Plan(schema:1,targets:[90],profiles:[profile]).valid,"staging stays within clip")
 check(!NeoGOPBenchmark.Plan(schema:1,targets:plan.targets,profiles:[profile,profile]).valid,"ambiguous file identity rejected")
 let steps = NeoGOPBenchmark.steps(plan.targets,rounds:2)
@@ -28,4 +28,18 @@ check(!NeoGOPBenchmark.imageMatches(Data(),pattern),"invalid reference rejected"
 check(NeoGOPBenchmark.imageScore(pattern,noisy)==2,"absolute luma distance")
 var invalidReference = profile; invalidReference.references = [.init(target:31,pts:31,luma:Data())]
 check(!NeoGOPBenchmark.Plan(schema:1,targets:plan.targets,profiles:[invalidReference]).valid,"invalid reference plan rejected")
+var first = profile; first.targets = [31.125,55.75]
+var second = NeoGOPBenchmark.Profile(label:"second",bytes:2000,duration:100,fps:24,keys:profile.keys)
+second.targets = [32.125,56.75]
+let batch = NeoGOPBenchmark.Plan(schema:2,targets:[],profiles:[first,second])
+check(batch.valid,"schema2 allows metadata-only profiles and different targets")
+check(batch.targets(for:first) == first.targets && batch.targets(for:second) == second.targets,"each input uses its own positions")
+check(plan.targets(for:first) == plan.targets,"schema1 preserves shared positions")
+check(!NeoGOPBenchmark.Plan(schema:2,targets:plan.targets,profiles:[profile]).valid,"schema2 cannot silently borrow shared targets")
+second.targets = [99]
+check(!NeoGOPBenchmark.Plan(schema:2,targets:[],profiles:[first,second]).valid,"per-file bounds validated")
+first.points = [.init(target:31.125,group:"near",section:1,key:28,nextKey:32),.init(target:55.75,group:"far",section:1,key:52,nextKey:56)]
+check(NeoGOPBenchmark.Plan(schema:2,targets:[],profiles:[first]).valid,"point labels accepted without images")
+first.points = [.init(target:31.125,group:"unknown",section:1,key:28,nextKey:32)]
+check(!NeoGOPBenchmark.Plan(schema:2,targets:[],profiles:[first]).valid,"misaligned or unknown point labels rejected")
 print("GOP benchmark model checks: \(count) passed")

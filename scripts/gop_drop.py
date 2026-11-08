@@ -10,8 +10,7 @@ import shutil
 import statistics
 import subprocess
 import sys
-
-from gop_reference import references
+import time
 
 VIDEO_SUFFIXES = {'.mkv', '.mp4', '.mov', '.m4v'}
 
@@ -97,11 +96,6 @@ def probe(movie, ffprobe):
     if len(rate) != 2 or float(rate[1]) == 0:
         raise ValueError('フレームレートを取得できませんでした。')
     fps = float(rate[0])/float(rate[1])
-    # Reference readback currently covers SDR BT.709/untagged sources.
-    if video.get('color_transfer', 'unknown') not in ('unknown', 'unspecified', 'bt709', 'iec61966-2-1'):
-        raise ValueError('この参照画像生成はSDR用です。この動画の転送特性には未対応です。')
-    if video.get('color_space', 'unknown') not in ('unknown', 'unspecified', 'bt709'):
-        raise ValueError('この参照画像生成はBT.709/色指定なしの動画用です。')
     origin = float(video.get('start_time', 0))
     duration = float(meta['format']['duration'])-origin
     packets = read('-select_streams', 'v:0', '-show_packets', '-show_entries', 'packet=pts_time,flags')['packets']
@@ -118,7 +112,8 @@ def probe(movie, ffprobe):
     return profile, pts
 
 
-def create(movie, ffprobe, ffmpeg, sections=8, check_only=False):
+def build_profile(movie, ffprobe, sections=8):
+    started = time.perf_counter()
     print(f'解析: {movie.name}', flush=True)
     profile, pts = probe(movie, ffprobe)
     intervals, tolerance = choose_intervals(profile['keys'], pts, profile['duration'], profile['fps'], sections)
@@ -132,62 +127,81 @@ def create(movie, ffprobe, ffmpeg, sections=8, check_only=False):
     print(f'  キー間隔中央値: {profile["gapMedian"]:.3f}秒 / {sections}区間×近・中央・遠×送り戻し = {len(targets)*2}回', flush=True)
     for index, interval in enumerate(intervals, 1):
         print(f'  {index}: キー {interval["key"]:.3f}〜{interval["nextKey"]:.3f}秒 / 近 {interval["near"]:.3f}・中央 {interval["middle"]:.3f}・遠 {interval["far"]:.3f}', flush=True)
-    if check_only:
-        return None
-    positions = sorted(set(targets+[t+d for t in targets for d in (-10, 10)]))
-    print('  画像照合データを作成中です。動画の長さによって数分かかります…', flush=True)
-    profile['references'] = references(movie, positions, profile['fps'], ffmpeg, profile['sourceTimeOrigin'])
-    if len(profile['keys']) >= 100000 or len(profile['references']) >= 20000:
+    if len(profile['keys']) >= 100000:
         raise ValueError('現在のアプリの測定計画上限を超えています。')
-    plan = dict(schema=1, targets=targets, profiles=[profile], sampling=dict(method='keyframe-position-v1', sections=sections,
-                targetToleranceSeconds=tolerance, points=points))
+    profile.update(targets=targets, points=points, samplingMethod='keyframe-position-v2', targetToleranceSeconds=tolerance)
+    print(f'  解析完了: {time.perf_counter()-started:.2f}秒（参照画像なし）', flush=True)
+    return profile
+
+
+def write_batch(profiles, requested_output):
+    if not 1 <= len(profiles) <= 12 or len({p['bytes'] for p in profiles}) != len(profiles):
+        raise ValueError('1〜12本で、ファイルサイズが重複しない動画を選択してください。')
+    plan = dict(schema=2, targets=[], profiles=profiles, measurement='displayed-timestamp')
     data = (json.dumps(plan, ensure_ascii=False, separators=(',', ':'))+'\n').encode('utf-8')
     if len(data) >= 4*1024*1024:
         raise ValueError('JSONがアプリ上限の4MiBを超えました。--sectionsを減らしてください。')
-    stem = f'gop-seek-plan-{profile["label"]}'
-    output = movie.with_name(stem+'.json')
+    output = Path(requested_output)
+    stem = output.stem
     suffix = 2
     while output.exists():
-        output = movie.with_name(f'{stem} ({suffix}).json')
+        output = output.with_name(f'{stem} ({suffix}).json')
         suffix += 1
     # Exclusive create also protects a file appearing after the existence check.
     with output.open('xb') as handle:
         handle.write(data)
-    print(f'  完了: {output}\n  動画とこのJSONを同じフォルダーに置いて、アプリで2つを選択してください。', flush=True)
+    print(f'\n完了: {output}\n{len(profiles)}本を1個のJSONへ保存しました。動画とこのJSONを同じフォルダーに置いて選択してください。', flush=True)
+    print('この軽量形式は修正版テスター用です。ビルド355では使用できません。', flush=True)
     return output
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='動画をドロップして、キー区間の近・中央・遠を測るJSONを動画と同じ場所へ作成します。')
+    parser = argparse.ArgumentParser(description='動画をドロップして、参照画像なし・動画別測定位置の統合JSONを1個作成します。')
     parser.add_argument('paths', nargs='*', help='動画またはフォルダー（複数可、フォルダー内のサブフォルダーは対象外）')
     parser.add_argument('--sections', type=int, default=8)
     parser.add_argument('--ffprobe')
-    parser.add_argument('--ffmpeg')
-    parser.add_argument('--check', action='store_true', help='解析・測定位置の確認だけ。参照画像とJSONは作成しません。')
+    parser.add_argument('--output', type=Path, help='出力先。省略時は先頭の動画と同じ場所のgop-seek-plan.json')
+    parser.add_argument('--check', action='store_true', help='解析・測定位置の確認だけ。JSONは作成しません。')
     parser.add_argument('--pause', action='store_true', help='終了後にEnter入力を待ちます（デスクトップの起動用）。')
     args = parser.parse_args(argv)
     try:
         movies = inputs(args.paths)
         ffprobe = executable('ffprobe', args.ffprobe)
-        ffmpeg = executable('ffmpeg', args.ffmpeg)
+        if len(movies) > 12:
+            raise ValueError('一度に選択できるのは12本までです。')
         if not 1 <= args.sections <= 16:
             raise ValueError('測定区間数は1〜16で指定してください。')
     except (ValueError, OSError) as error:
         print(f'エラー: {error}', file=sys.stderr)
         return 1
     errors = 0
+    profiles = []
     for index, movie in enumerate(movies, 1):
         print(f'\n[{index}/{len(movies)}]', flush=True)
         try:
-            create(movie, ffprobe, ffmpeg, args.sections, args.check)
+            profile = build_profile(movie, ffprobe, args.sections)
+            if profile['bytes'] in {p['bytes'] for p in profiles}:
+                raise ValueError('同じサイズの動画があり、アプリで区別できません。別々に生成してください。')
+            if profile['label'] in {p['label'] for p in profiles}:
+                profile['label'] += f'-{index}'
+            profiles.append(profile)
         except (ValueError, OSError, KeyError, StopIteration, subprocess.SubprocessError, AssertionError) as error:
             errors += 1
             if isinstance(error, subprocess.CalledProcessError):
-                print('エラー: FFmpeg/ffprobeの処理に失敗しました。', file=sys.stderr)
+                print('エラー: ffprobeの処理に失敗しました。', file=sys.stderr)
             else:
                 print(f'エラー: {error}', file=sys.stderr)
     print(f'\n終了: 成功 {len(movies)-errors}本 / 失敗 {errors}本', flush=True)
-    return 1 if errors else 0
+    if errors:
+        print('失敗した動画があるため、統合JSONは保存していません。', file=sys.stderr)
+        return 1
+    if not args.check:
+        try:
+            write_batch(profiles, args.output or movies[0].with_name('gop-seek-plan.json'))
+        except (ValueError, OSError) as error:
+            print(f'エラー: {error}', file=sys.stderr)
+            return 1
+    return 0
 
 
 if __name__ == '__main__':

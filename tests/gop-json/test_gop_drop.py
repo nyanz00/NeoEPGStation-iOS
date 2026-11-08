@@ -4,9 +4,10 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
-from gop_drop import choose_intervals, executable, inputs, main
+from gop_drop import choose_intervals, executable, inputs, main, write_batch
 
 
 class GOPDropTests(unittest.TestCase):
@@ -83,6 +84,40 @@ class GOPDropTests(unittest.TestCase):
             self.assertEqual(executable('ffprobe',str(tool)),str(tool.resolve()))
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(main([]),1)
+
+    def test_metadata_batch_has_per_file_targets_and_no_images(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)/'plan.json'
+            profiles = [dict(label='a',bytes=1,targets=[24.125]),dict(label='b',bytes=2,targets=[25.125])]
+            with contextlib.redirect_stdout(io.StringIO()):
+                written = write_batch(profiles,output)
+            import json
+            data = json.loads(written.read_text(encoding='utf-8'))
+            self.assertEqual(data['schema'],2)
+            self.assertEqual(data['targets'],[])
+            self.assertEqual([p['targets'] for p in data['profiles']],[[24.125],[25.125]])
+            self.assertTrue(all('references' not in p for p in data['profiles']))
+            original = output.read_bytes()
+            with contextlib.redirect_stdout(io.StringIO()):
+                another = write_batch(profiles,output)
+            self.assertNotEqual(another,output)
+            self.assertEqual(output.read_bytes(),original)
+
+    def test_ambiguous_file_sizes_do_not_create_a_plan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)/'plan.json'
+            with self.assertRaises(ValueError):
+                write_batch([dict(bytes=1),dict(bytes=1)],output)
+            self.assertFalse(output.exists())
+
+    def test_one_failed_input_prevents_partial_batch_export(self):
+        with tempfile.TemporaryDirectory() as directory:
+            a,b = Path(directory)/'a.mkv',Path(directory)/'b.mkv'
+            a.write_bytes(b'a');b.write_bytes(b'bb')
+            with patch('gop_drop.executable',return_value='ffprobe'), patch('gop_drop.build_profile',side_effect=[dict(label='a',bytes=1),ValueError('bad video')]), patch('gop_drop.write_batch') as write:
+                with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(main([str(a),str(b)]),1)
+                write.assert_not_called()
 
 
 if __name__ == '__main__':

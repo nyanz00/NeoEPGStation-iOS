@@ -7,11 +7,16 @@ enum NeoGOPBenchmark {
   struct Profile: Codable {
     let label: String, bytes: Int64, duration: Double, fps: Double, keys: [Double]
     var references: [Reference]? = nil
+    var targets: [Double]? = nil
+    var points: [Point]? = nil
     func key(before target: Double) -> Double? {
       var low = 0, high = keys.count
       while low < high { let mid = (low+high)/2; if keys[mid] <= target { low = mid+1 } else { high = mid } }
       return low > 0 ? keys[low-1] : nil
     }
+  }
+  struct Point: Codable {
+    let target: Double, group: String, section: Int, key: Double, nextKey: Double
   }
   // Colour conversion/readback can introduce a few quantisation levels. Keep a
   // strict absolute bound and a structural match; flat/duplicate images cannot
@@ -38,13 +43,27 @@ enum NeoGOPBenchmark {
   }
   struct Plan: Codable {
     let schema: Int, targets: [Double], profiles: [Profile]
+    func targets(for profile: Profile) -> [Double] { schema == 2 ? (profile.targets ?? []) : targets }
     var valid: Bool {
-      schema == 1 && (1...100).contains(targets.count) && (1...12).contains(profiles.count) &&
-      targets.allSatisfy { $0.isFinite && $0 >= 20 } && Set(profiles.map(\.bytes)).count == profiles.count &&
-      profiles.allSatisfy { p in p.bytes > 0 && p.duration.isFinite && p.duration > 60 && p.fps.isFinite && p.fps > 0 && p.keys.count >= 2 && p.keys.count < 100000 &&
-        (p.references == nil || (p.references!.count < 20000 && p.references!.allSatisfy { $0.luma.count == 576 && $0.target.isFinite && $0.pts.isFinite && abs($0.target-$0.pts)<=max(0.03,2/p.fps)+0.000001 })) &&
-        p.keys.allSatisfy { $0.isFinite && $0 >= 0 && $0 < p.duration } && zip(p.keys,p.keys.dropFirst()).allSatisfy { $0 < $1 } &&
-        targets.allSatisfy { $0+15 < p.duration } }
+      guard schema == 1 || schema == 2, (1...12).contains(profiles.count), Set(profiles.map(\.bytes)).count == profiles.count else { return false }
+      return profiles.allSatisfy { profile in
+        let positions = self.targets(for:profile)
+        guard (1...100).contains(positions.count), Set(positions).count == positions.count,
+          profile.bytes > 0, profile.duration.isFinite, profile.duration > 60, profile.fps.isFinite, profile.fps > 0,
+          (2..<100000).contains(profile.keys.count) else { return false }
+        guard positions.allSatisfy({ $0.isFinite && $0 >= 20 && $0+15 < profile.duration }),
+          profile.keys.allSatisfy({ $0.isFinite && $0 >= 0 && $0 < profile.duration }),
+          zip(profile.keys,profile.keys.dropFirst()).allSatisfy({ $0 < $1 }) else { return false }
+        if let references = profile.references {
+          guard references.count < 20000, references.allSatisfy({ $0.luma.count == 576 && $0.target.isFinite && $0.pts.isFinite && abs($0.target-$0.pts)<=max(0.03,2/profile.fps)+0.000001 }) else { return false }
+        }
+        if let points = profile.points {
+          guard points.count == positions.count, Set(points.map(\.target)) == Set(positions), points.allSatisfy({
+            ["near","middle","far"].contains($0.group) && $0.section > 0 && $0.key.isFinite && $0.nextKey.isFinite && $0.key < $0.target && $0.target < $0.nextKey
+          }) else { return false }
+        }
+        return true
+      }
     }
   }
   struct Step: Codable, Equatable {

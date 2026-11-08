@@ -20,6 +20,20 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     let window = UIWindow(frame: UIScreen.main.bounds)
     window.rootViewController = NeoShell(); self.window = window; window.makeKeyAndVisible()
 #if targetEnvironment(simulator)
+    if ProcessInfo.processInfo.environment["NEO_EPG_GOP_BATCH"] == "1" {
+      DispatchQueue.main.asyncAfter(deadline:.now()+0.8) {
+        let directory = NeoPiPSmoke.directory
+        let lab = NeoGOPTrialController(); lab.modalPresentationStyle = .fullScreen
+        window.rootViewController?.present(lab,animated:false) {
+          let names = ["gop-batch-plan.json","gop-batch-a.mkv","gop-batch-b.mp4","gop-batch-c.mkv"]
+          lab.runSmokeImport(names.map { directory.appendingPathComponent($0) }) { result in
+            NeoPiPSmoke.save("gop-batch-smoke",result)
+            if let url = NeoPlaybackDiagnostics.exportURL(), let data = try? Data(contentsOf:url) { try? data.write(to:directory.appendingPathComponent("gop-batch-diagnostics.json")) }
+          }
+        }
+      }
+      return true
+    }
     if let name = ProcessInfo.processInfo.environment["NEO_EPG_GOP_BENCHMARK"] {
       DispatchQueue.main.asyncAfter(deadline:.now()+0.8) {
         let directory = NeoPiPSmoke.directory

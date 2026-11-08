@@ -164,6 +164,12 @@ final class NeoAetherBackend: NSObject {
   @objc var onGOPBenchmarkEvent: (([String:Any]) -> Void)?
   private var benchmarkSeekSerial = 0
   private var benchmarkPictureEvidence: [String:Any] = [:]
+  private var lastPictureTimeVerified = false
+  private var benchmarkToleranceOverride: Double?
+  @objc var gopBenchmarkTolerance: Double {
+    get { benchmarkToleranceOverride ?? (options["gopTolerance"] as? Double ?? 0.085) }
+    set { benchmarkToleranceOverride = newValue }
+  }
   private lazy var benchmarkImageContext = CIContext(options:[.cacheIntermediates:false])
   // Opt-in only. Display readback may lose the source timestamp attachments.
   // Match its pixels against PC-decoded references instead of inventing a PTS.
@@ -195,7 +201,8 @@ final class NeoAetherBackend: NSObject {
     ["route":engine?.videoRoute.rawValue ?? "unloaded","codec":engine?.sourceVideoCodecName ?? "unknown",
      "checkpointEnabled":checkpoints != nil,"subtitleVisible":caption.image != nil,
      "ready":ready,"seekable":seekable,"failed":failed || recovering,"duration":Double(durationMs)/1000,
-     "time":Double(timeMs)/1000,"rate":rate,"pictureEvidence":benchmarkPictureEvidence]
+     "time":Double(timeMs)/1000,"rate":rate,"pictureEvidence":benchmarkPictureEvidence,
+     "recovering":recovering,"displayTimestampAvailable":lastPictureTimeVerified]
   }
   @objc var downloadedRanges: [[NSNumber]] {
     guard let engine, durationMs > 0 else { return [] }
@@ -227,7 +234,11 @@ final class NeoAetherBackend: NSObject {
     task?.cancel(); seekTask?.cancel(); aheadTask?.cancel(); subscriptions.removeAll()
     checkpoints?.stop(); checkpoints = nil; NeoAV1PlaybackBridge.install(nil)
     AetherEngine.setForceSoftwarePathForTesting(false)
-    pipFrames.configure(timebase:nil, sink:nil); pipClock = nil; engine?.stop(); detachOutput(); snapshotPixel = nil
+    let reuseBenchmarkEngine = options["gopBenchmark"] as? Bool == true && engine != nil
+    pipFrames.configure(timebase:nil, sink:nil); pipClock = nil
+    if reuseBenchmarkEngine { engine?.prepareForItemReplacement() } else { engine?.stop() }
+    detachOutput(); snapshotPixel = nil; lastPictureTimeVerified = false; benchmarkPictureEvidence = [:]
+    durationMs = 0; seekable = false; videoSize = .zero
     loaded = false; ready = false; ended = false; failed = false; buffering = true; recovering = false; primingPausedFrame = false
     wantsPlayback = playing; self.playing = false; timeMs = max(0,startMilliseconds)
     lastPTS = -.infinity; lastFrameHost = 0; openedAt = CACurrentMediaTime(); lastCheckpointTick = -.infinity
@@ -247,7 +258,9 @@ final class NeoAetherBackend: NSObject {
         NeoPlaybackDiagnostics.record("checkpoint.configuration", fields:["enabled":true,"historySeconds":60,"futureSeconds":20,"budgetBytes":NeoCheckpointPlayback.budget])
       }
       if let decision = options["checkpointSelection"] as? [String:Any] { NeoPlaybackDiagnostics.record("checkpoint.selection",fields:decision) }
-      let next = try AetherEngine(); engine = next
+      let next: AetherEngine
+      if reuseBenchmarkEngine, let existing = engine { next = existing } else { next = try AetherEngine() }
+      engine = next
       next.backgroundPlaybackEnabled = true; next.pictureInPictureActive = pipActive
       next.volume = muted ? 0 : 1; next.bind(view:surface)
       next.setSoftwareVideoFrameTimeObserver { [frames = decodedFrames] in frames.accept($0) }
@@ -347,7 +360,7 @@ final class NeoAetherBackend: NSObject {
     let target = min(max(0,Double(milliseconds)/1000),max(0,engine.duration-0.01))
     pendingTarget = target; pendingGeneration = lastGeneration; pendingBegan = CACurrentMediaTime()
     if options["gopBenchmark"] as? Bool == true {
-      decodedFrames.armBenchmarkTarget(target,tolerance:options["gopTolerance"] as? Double ?? 0.085,previous:pendingGeneration)
+      decodedFrames.armBenchmarkTarget(target,tolerance:gopBenchmarkTolerance,previous:pendingGeneration)
     }
     benchmarkSeekSerial += 1; let benchmarkSerial = benchmarkSeekSerial
     onGOPBenchmarkEvent?(["event":"started","serial":benchmarkSerial,"host":pendingBegan,"target":target,"from":Double(timeMs)/1000])
@@ -446,7 +459,7 @@ final class NeoAetherBackend: NSObject {
     }
     let frame = picture()
     if let (pixel,pts,generation,displayTimeVerified) = frame, pts != lastPTS || generation != lastGeneration {
-      lastPTS = pts; lastGeneration = generation; snapshotPixel = pixel
+      lastPTS = pts; lastGeneration = generation; snapshotPixel = pixel; lastPictureTimeVerified = displayTimeVerified
       lastFrameHost = pipActive ? (pipFrames.latest?.host ?? now) : now
       samples += 1
       if primingPausedFrame {
@@ -459,7 +472,7 @@ final class NeoAetherBackend: NSObject {
         timeMs = Int64(max(0,pts)*1000)
       }
       if !ready { ready = true; buffering = false; onChange?() }
-      let tolerance = options["gopBenchmark"] as? Bool == true ? (options["gopTolerance"] as? Double ?? 0.085) : 0.5
+      let tolerance = options["gopBenchmark"] as? Bool == true ? gopBenchmarkTolerance : 0.5
       if let target = pendingTarget, abs(pts-target) <= tolerance,
         generation == nil || generation != pendingGeneration {
         onGOPBenchmarkEvent?(["event":"picture","serial":benchmarkSeekSerial,"host":now,"target":target,"pts":pts,"verified":displayTimeVerified,
