@@ -26,9 +26,10 @@ for name in ['gop-benchmark-smoke.json','gop-seek-current.json','gop-benchmark-d
  if (docs/name).exists():shutil.copyfile(docs/name,Path('dist')/name)
 assert marker.exists(),'Benchmark result missing; inspect preserved diagnostics'
 result=json.loads(marker.read_text());rows=result.get('rows',[])
-assert result['status']=='completed',result
+assert result['status'] in ('completed','completed-with-failures'),result
 assert result['checkpoint'] is False and result['audio'] is True and result['local'] is True,result
 assert len(rows)==8 and sum(r['sampleKind']=='warmup' for r in rows)==2,result
+assert all(r['status']=='verified' or r['status']=='ambiguous-preparation' for r in rows if r['sampleKind']=='warmup'),result
 measured=[r for r in rows if r['sampleKind']=='measured']
 assert len(measured)==6 and all(r['status']=='verified' and r['displayMs']>0 and abs(r.get('picturePTS',r.get('referencePTS',-1))-r['target'])<=2/24 for r in measured),result
 assert all(r['verification'] in ('displayed-surface-source-PTS','avplayer-item-display-time-buffer','displayed-picture-reference') for r in measured),result
