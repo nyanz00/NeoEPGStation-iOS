@@ -18,6 +18,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable NSData *)gopBenchmarkLuma;
 - (void)gopBenchmarkPrepare;
 - (void)gopBenchmarkSeek:(int64_t)milliseconds;
+- (void)gopBenchmarkEndAttempt;
 - (void)gopBenchmarkFinish;
 - (void)gopBenchmarkClose;
 - (void)gopBenchmarkLoadURL:(NSURL *)url configuration:(NSDictionary<NSString *,id> *)configuration NS_SWIFT_NAME(gopBenchmarkLoad(_:configuration:));

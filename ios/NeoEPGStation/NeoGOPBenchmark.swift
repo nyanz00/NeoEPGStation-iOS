@@ -76,12 +76,48 @@ enum NeoGOPBenchmark {
       return directions.map { Step(target:target,forward:$0,round:round+1) }
     } }
   }
+  static func shouldReadNativePicture(fresh: Bool, ready: Bool, seeking: Bool) -> Bool { fresh || !ready || seeking }
+  static func canContinue(after status: String) -> Bool { ["completed","completed-with-failures","failed"].contains(status) }
+  static func completionStatus(_ rows: [[String:Any]]) -> String {
+    rows.allSatisfy { $0["status"] as? String == "verified" } ? "completed" : "completed-with-failures"
+  }
+  // Bounded metadata only. Preserve the first polls, latest polls and closest
+  // verified display timestamp even when a landing is skipped or times out.
+  struct SeekTrace {
+    let serial: Int, target: Double, began: Double
+    private(set) var polls = 0, copied = 0, copiedWithoutNew = 0, maximumGapMs = 0.0
+    private var lastHost: Double?, first: [[String:Any]] = [], tail: [[String:Any]] = [], closest: [String:Any]?
+    private var closestDistance = Double.infinity
+    init(serial: Int, target: Double, began: Double) { self.serial = serial; self.target = target; self.began = began }
+    mutating func record(host: Double, pts: Double?, itemTime: Double? = nil, fresh: Bool? = nil, verified: Bool = true) {
+      guard host.isFinite, host >= began else { return }
+      if let lastHost { maximumGapMs = max(maximumGapMs,(host-lastHost)*1000) }; lastHost = host
+      polls += 1
+      var sample: [String:Any] = ["afterMs":(host-began)*1000,"copied":pts != nil,"verifiedTime":verified]
+      if let fresh { sample["hasNew"] = fresh }
+      if let itemTime, itemTime.isFinite { sample["itemTime"] = itemTime }
+      if let pts, pts.isFinite {
+        copied += 1; if fresh == false { copiedWithoutNew += 1 }; sample["pts"] = pts
+        let distance = abs(pts-target)
+        if verified, distance < closestDistance { closestDistance = distance; closest = sample }
+      }
+      if first.count < 8 { first.append(sample) }
+      tail.append(sample); if tail.count > 24 { tail.removeFirst(tail.count-24) }
+    }
+    var dictionary: [String:Any] {
+      var result: [String:Any] = ["serial":serial,"target":target,"polls":polls,"copied":copied,
+        "copiedWithoutNew":copiedWithoutNew,"maximumGapMs":maximumGapMs,"first":first,"latest":tail]
+      result["closest"] = closest
+      if closestDistance.isFinite { result["closestDistanceSeconds"] = closestDistance }
+      return result
+    }
+  }
   static func summary(_ rows: [[String:Any]]) -> [String:Any] {
     func stats(_ rows: [[String:Any]]) -> [String:Any] {
       let values = rows.filter { $0["status"] as? String == "verified" }.compactMap { $0["displayMs"] as? Double }.sorted()
-      guard !values.isEmpty else { return ["count":0,"attempts":rows.count] }
+      guard !values.isEmpty else { return ["count":0,"attempts":rows.count,"failedCount":rows.count] }
       let count = values.count
-      return ["count":count,"attempts":rows.count,"medianMs":count%2 == 0 ? (values[count/2-1]+values[count/2])/2 : values[count/2],
+      return ["count":count,"attempts":rows.count,"failedCount":rows.count-count,"medianMs":count%2 == 0 ? (values[count/2-1]+values[count/2])/2 : values[count/2],
         "p90Ms":values[max(0,Int(ceil(Double(count)*0.9))-1)],"worstMs":values.last!,"meanMs":values.reduce(0,+)/Double(count)]
     }
     return ["all":stats(rows),"forward":stats(rows.filter { $0["forward"] as? Bool == true }),"backward":stats(rows.filter { $0["forward"] as? Bool == false })]

@@ -42,4 +42,21 @@ first.points = [.init(target:31.125,group:"near",section:1,key:28,nextKey:32),.i
 check(NeoGOPBenchmark.Plan(schema:2,targets:[],profiles:[first]).valid,"point labels accepted without images")
 first.points = [.init(target:31.125,group:"unknown",section:1,key:28,nextKey:32)]
 check(!NeoGOPBenchmark.Plan(schema:2,targets:[],profiles:[first]).valid,"misaligned or unknown point labels rejected")
+check(NeoGOPBenchmark.shouldReadNativePicture(fresh:false,ready:true,seeking:true) && !NeoGOPBenchmark.shouldReadNativePicture(fresh:false,ready:true,seeking:false),"native picture is read while seeking, but skipped for a ready unchanged frame")
+check(["completed","completed-with-failures","failed"].allSatisfy { NeoGOPBenchmark.canContinue(after:$0) } && !NeoGOPBenchmark.canContinue(after:"cancelled") && !NeoGOPBenchmark.canContinue(after:"unknown"),"only terminal completion and failure states permit continuation")
+check(NeoGOPBenchmark.completionStatus([["status":"verified"],["status":"failed"]]) == "completed-with-failures" && NeoGOPBenchmark.completionStatus([["status":"verified"]]) == "completed","completion status reflects whether any row failed verification")
+check(all["failedCount"] as? Int == 2,"summary counts failed or unverified attempts")
+var trace = NeoGOPBenchmark.SeekTrace(serial:42,target:10,began:100)
+for index in 0..<40 {
+  let pts: Double? = index == 4 ? nil : (index == 0 ? 10 : (index == 1 ? 10.5 : (index == 18 ? 10.25 : 20)))
+  let fresh: Bool? = index == 1 ? false : (index == 4 ? nil : true)
+  let host = 100+Double(index)*0.25+(index >= 20 ? 1.25 : 0)
+  trace.record(host:host,pts:pts,itemTime:Double(index),fresh:fresh,verified:index != 0)
+}
+let traceResult = trace.dictionary
+let traceFirst = traceResult["first"] as! [[String:Any]], traceLatest = traceResult["latest"] as! [[String:Any]]
+check(traceResult["polls"] as? Int == 40 && traceResult["copied"] as? Int == 39 && traceResult["copiedWithoutNew"] as? Int == 1 && traceResult["maximumGapMs"] as? Double == 1500,"seek trace counts nil and unchanged polls and preserves the largest poll gap")
+check(traceFirst.count == 8 && traceLatest.count == 24 && traceFirst.first?["afterMs"] as? Double == 0 && traceLatest.first?["afterMs"] as? Double == 4000 && traceLatest.last?["afterMs"] as? Double == 11000,"seek trace retains only the first eight and latest 24 poll records")
+let closest = traceResult["closest"] as? [String:Any]
+check(closest?["pts"] as? Double == 10.25 && closest?["verifiedTime"] as? Bool == true && closest?["itemTime"] as? Double == 18,"unverified near-target PTS cannot replace the closest verified timestamp")
 print("GOP benchmark model checks: \(count) passed")

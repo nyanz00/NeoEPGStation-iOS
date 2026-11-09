@@ -163,7 +163,9 @@ final class NeoAetherBackend: NSObject {
   @objc var subtitleTracks: [[String: Any]] = []
   @objc var onGOPBenchmarkEvent: (([String:Any]) -> Void)?
   private var benchmarkSeekSerial = 0
+  private var completedSeekSerial = -1
   private var benchmarkPictureEvidence: [String:Any] = [:]
+  private var benchmarkTrace: NeoGOPBenchmark.SeekTrace?
   private var lastPictureTimeVerified = false
   private var benchmarkToleranceOverride: Double?
   @objc var gopBenchmarkTolerance: Double {
@@ -202,7 +204,8 @@ final class NeoAetherBackend: NSObject {
      "checkpointEnabled":checkpoints != nil,"subtitleVisible":caption.image != nil,
      "ready":ready,"seekable":seekable,"failed":failed || recovering,"duration":Double(durationMs)/1000,
      "time":Double(timeMs)/1000,"rate":rate,"pictureEvidence":benchmarkPictureEvidence,
-     "recovering":recovering,"displayTimestampAvailable":lastPictureTimeVerified,"displayedSamples":samples,"buffering":buffering]
+     "recovering":recovering,"displayTimestampAvailable":lastPictureTimeVerified,"displayedSamples":samples,"buffering":buffering,
+     "seekObservation":benchmarkTrace?.dictionary ?? [:]]
   }
   @objc var downloadedRanges: [[NSNumber]] {
     guard let engine, durationMs > 0 else { return [] }
@@ -237,7 +240,7 @@ final class NeoAetherBackend: NSObject {
     let reuseBenchmarkEngine = options["gopBenchmark"] as? Bool == true && engine != nil
     pipFrames.configure(timebase:nil, sink:nil); pipClock = nil
     if reuseBenchmarkEngine { engine?.prepareForItemReplacement() } else { engine?.stop() }
-    detachOutput(); snapshotPixel = nil; lastPictureTimeVerified = false; benchmarkPictureEvidence = [:]
+    detachOutput(); snapshotPixel = nil; lastPictureTimeVerified = false; benchmarkPictureEvidence = [:]; benchmarkTrace = nil
     durationMs = 0; seekable = false; videoSize = .zero
     loaded = false; ready = false; ended = false; failed = false; buffering = true; recovering = false; primingPausedFrame = false
     wantsPlayback = playing; self.playing = false; timeMs = max(0,startMilliseconds)
@@ -367,14 +370,18 @@ final class NeoAetherBackend: NSObject {
       decodedFrames.armBenchmarkTarget(target,tolerance:gopBenchmarkTolerance,previous:pendingGeneration)
     }
     benchmarkSeekSerial += 1; let benchmarkSerial = benchmarkSeekSerial
+    if options["gopBenchmark"] as? Bool == true { benchmarkTrace = .init(serial:benchmarkSerial,target:target,began:pendingBegan) }
     onGOPBenchmarkEvent?(["event":"started","serial":benchmarkSerial,"host":pendingBegan,"target":target,"from":Double(timeMs)/1000])
     pipFrames.discontinuity()
     seekCompletion = completion; stalledSince = 0; ended = false
     let token = epoch
     seekTask = Task { [weak self, engine] in
       await engine.seek(to:target)
-      guard let self, !self.closed, self.epoch == token else { return }
+      guard let self, !Task.isCancelled, !self.closed, self.epoch == token, self.benchmarkSeekSerial == benchmarkSerial else { return }
       self.onGOPBenchmarkEvent?(["event":"engineCompletion","serial":benchmarkSerial,"host":CACurrentMediaTime(),"target":target])
+      self.completedSeekSerial = benchmarkSerial
+      // Sample at completion too, before a short landing window can pass.
+      self.tick()
       if self.pipActive, engine.videoRoute != .software { self.configurePiPFrames() }
       self.applyIntent()
     }
@@ -382,6 +389,11 @@ final class NeoAetherBackend: NSObject {
   private func settleSeek(_ ok: Bool) {
     let done = seekCompletion; seekCompletion = nil; pendingTarget = nil
     done?(ok)
+  }
+  @objc func finishGOPBenchmarkAttempt() {
+    guard options["gopBenchmark"] as? Bool == true else { return }
+    seekTask?.cancel(); seekTask = nil; benchmarkSeekSerial += 1
+    settleSeek(false) // Clear the trial before the normal recovery watchdog fires.
   }
   private func requestRecovery(target: Int64? = nil, reason: String = "engineFailure") {
     guard !closed, !recovering, !ended else { return }
@@ -431,22 +443,33 @@ final class NeoAetherBackend: NSObject {
         let candidate = options["gopBenchmark"] as? Bool == true && pendingTarget != nil ? decodedFrames.benchmarkTarget() : nil
         let position = pts ?? candidate?.time ?? decoded?.time
         guard let position, position.isFinite else { continue }
+        if pendingTarget != nil { benchmarkTrace?.record(host:CACurrentMediaTime(),pts:position,verified:pts != nil) }
         return (pixel,position,generation ?? candidate?.generation ?? decoded?.generation,pts != nil)
       }
     } else if let item = outputItem, let output {
       let current = item.currentTime(); var shown = CMTime.invalid
-      // A paused HLS replacement can already have a decoded picture while
-      // hasNew remains false. During initial readiness, ask for that picture
-      // directly; normal playback retains the new-frame optimisation.
+      // hasNew means "not previously acquired", not "nothing to display".
+      // Re-read the current display time during seeks as well as startup.
+#if targetEnvironment(simulator)
+      if pendingTarget != nil, options["gopConsumeNativePicture"] as? Bool == true {
+        // Real API consumption by a second observer; never fabricate a PTS.
+        _ = output.copyPixelBuffer(forItemTime:current,itemTimeForDisplay:nil)
+      }
+#endif
       let fresh = output.hasNewPixelBuffer(forItemTime:current)
-      if (fresh || !ready), let pixel = output.copyPixelBuffer(forItemTime:current,itemTimeForDisplay:&shown), shown.isNumeric {
-        let pts = engine.presentationAxisMap.sourceSeconds(forItemSeconds:shown.seconds) ?? shown.seconds
+      let pixel = NeoGOPBenchmark.shouldReadNativePicture(fresh:fresh,ready:ready,seeking:pendingTarget != nil)
+        ? output.copyPixelBuffer(forItemTime:current,itemTimeForDisplay:&shown) : nil
+      let pts: Double? = shown.isNumeric ? engine.presentationAxisMap.sourceSeconds(forItemSeconds:shown.seconds) ?? shown.seconds : nil
+      if pendingTarget != nil { benchmarkTrace?.record(host:CACurrentMediaTime(),pts:pixel != nil ? pts : nil,itemTime:current.isNumeric ? current.seconds : nil,fresh:fresh) }
+      if let pixel, let pts {
         if !fresh && !ready {
           NeoPlaybackDiagnostics.record("aether.initialPicturePolled",fields:["mediaMs":pts*1000,"paused":!wantsPlayback])
         }
         return (pixel,pts,nil,true)
       }
+      return nil
     }
+    if pendingTarget != nil { benchmarkTrace?.record(host:CACurrentMediaTime(),pts:nil,verified:false) }
     return nil
   }
   private func tick() {
@@ -462,22 +485,26 @@ final class NeoAetherBackend: NSObject {
       videoSize = CGSize(width:Double(engine.sourceVideoWidth)*engine.sourceVideoPixelAspectRatio,height:Double(engine.sourceVideoHeight))
     }
     let frame = picture()
-    if let (pixel,pts,generation,displayTimeVerified) = frame, pts != lastPTS || generation != lastGeneration {
-      lastPTS = pts; lastGeneration = generation; snapshotPixel = pixel; lastPictureTimeVerified = displayTimeVerified
-      lastFrameHost = pipActive ? (pipFrames.latest?.host ?? now) : now
-      samples += 1
-      if primingPausedFrame {
-        engine.pause()
-        NeoPlaybackDiagnostics.record("aether.pausedPictureReady",fields:["mediaMs":pts*1000,"volume":engine.volume,"intent":wantsPlayback])
-        primingPausedFrame = false; engine.volume = muted ? 0 : 1
+    if let (pixel,pts,generation,displayTimeVerified) = frame {
+      let changed = pts != lastPTS || generation != lastGeneration
+      if changed {
+        lastPTS = pts; lastGeneration = generation; snapshotPixel = pixel; lastPictureTimeVerified = displayTimeVerified
+        lastFrameHost = pipActive ? (pipFrames.latest?.host ?? now) : now
+        samples += 1
+        if primingPausedFrame {
+          engine.pause()
+          NeoPlaybackDiagnostics.record("aether.pausedPictureReady",fields:["mediaMs":pts*1000,"volume":engine.volume,"intent":wantsPlayback])
+          primingPausedFrame = false; engine.volume = muted ? 0 : 1
+        }
+        if videoSize == .zero { videoSize = CGSize(width:CVPixelBufferGetWidth(pixel),height:CVPixelBufferGetHeight(pixel)) }
+        if pendingTarget == nil || abs(pts-(pendingTarget ?? pts)) <= 0.5 {
+          timeMs = Int64(max(0,pts)*1000)
+        }
+        if !ready { ready = true; buffering = false; onChange?() }
       }
-      if videoSize == .zero { videoSize = CGSize(width:CVPixelBufferGetWidth(pixel),height:CVPixelBufferGetHeight(pixel)) }
-      if pendingTarget == nil || abs(pts-(pendingTarget ?? pts)) <= 0.5 {
-        timeMs = Int64(max(0,pts)*1000)
-      }
-      if !ready { ready = true; buffering = false; onChange?() }
       let tolerance = options["gopBenchmark"] as? Bool == true ? gopBenchmarkTolerance : 0.5
       if let target = pendingTarget, abs(pts-target) <= tolerance,
+        changed || completedSeekSerial == benchmarkSeekSerial,
         generation == nil || generation != pendingGeneration {
         onGOPBenchmarkEvent?(["event":"picture","serial":benchmarkSeekSerial,"host":now,"target":target,"pts":pts,"verified":displayTimeVerified,
           "verification":engine.videoRoute == .software ? "displayed-surface-source-PTS" : "avplayer-item-display-time-buffer"])
@@ -488,14 +515,14 @@ final class NeoAetherBackend: NSObject {
         }
         settleSeek(true)
       }
-      if !pipActive, let sample = makeSample(pixel,pts:pts) { frameSink?.receiveVideoSampleBuffer(sample) }
+      if changed, !pipActive, let sample = makeSample(pixel,pts:pts) { frameSink?.receiveVideoSampleBuffer(sample) }
     }
     playing = wantsPlayback && loaded && !ended && !recovering && engine.state == .playing
     // Confirm an actual presentation hold here, once, for every consumer.
     // Transient engine buffering while pictures still arrive is not a stop.
     buffering = !ended && !failed && (!ready || recovering ||
       (engine.isBuffering && lastFrameHost > 0 && now-lastFrameHost > 0.35))
-    if let target = pendingTarget, now-pendingBegan > 12 { requestRecovery(target:Int64(target*1000),reason:"seekVideoTimeout") }
+    if options["gopBenchmark"] as? Bool != true, let target = pendingTarget, now-pendingBegan > 12 { requestRecovery(target:Int64(target*1000),reason:"seekVideoTimeout") }
     // Confirmed frame timestamps, not image differences: static scenes remain valid.
     // Keep the last displayed position while output is stale, including audio-only progress.
     if loaded, wantsPlayback, (!inBackground || pipActive), !ended, !recovering, pendingTarget == nil, now-openedAt > 5 {

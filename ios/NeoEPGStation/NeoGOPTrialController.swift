@@ -63,12 +63,18 @@ import UniformTypeIdentifiers
   private func playNext() {
     guard running, let plan else { return }
     guard fileIndex < files.count else {
-      running = false; batchStatus = "completed"; save()
+      running = false; batchStatus = reports.allSatisfy { $0["status"] as? String == "completed" } ? "completed" : "completed-with-failures"; save()
       activePlayer?.gopBenchmarkClose(); refresh(); return
     }
     let (url,profile) = files[fileIndex]
     let object = (try? JSONSerialization.jsonObject(with:JSONEncoder().encode(profile))) as? [String:Any] ?? [:]
-    let configuration: [String:Any] = ["profile":object,"targets":plan.targets(for:profile),"rounds":Int(rounds.value),"batchManaged":true,"batchID":batchID]
+    var configuration: [String:Any] = ["profile":object,"targets":plan.targets(for:profile),"rounds":Int(rounds.value),"batchManaged":true,"batchID":batchID]
+#if targetEnvironment(simulator)
+    if ProcessInfo.processInfo.environment["NEO_EPG_GOP_FAULTS"] == "1" {
+      if profile.label == "synthetic-native-2" { configuration["testOmitRole"] = "preparation" }
+      if profile.label == "synthetic-native-1" { configuration["testOmitRole"] = "measurement" }
+    }
+#endif
     inputLoadCount += 1
     if let owner = activePlayer { owner.gopBenchmarkLoad(url,configuration:configuration); return }
     let owner = NeoPlayerController(url:url,title:"GOP シーク測定 · "+profile.label,username:"",password:"",networkCaching:5000)
@@ -79,7 +85,7 @@ import UniformTypeIdentifiers
     owner.onGOPBenchmarkResult = { [weak self,weak owner] result in
       guard let self, let owner else { return }
       self.reports.append(result); self.fileIndex += 1
-      if result["status"] as? String != "completed" { self.running = false; self.batchStatus = "cancelled" }
+      if !NeoGOPBenchmark.canContinue(after:result["status"] as? String ?? "") { self.running = false; self.batchStatus = "cancelled" }
       self.save()
       let token = self.batchID
       DispatchQueue.main.async { [weak self,weak owner] in
@@ -91,14 +97,15 @@ import UniformTypeIdentifiers
       guard let self else { return }
       self.activePlayer = nil
       if self.running { self.batchStatus = "cancelled" }; self.running = false
-      self.status.text = self.batchStatus == "completed" ? "測定終了。結果を共有できます。" : "測定を中断しました。途中結果を共有できます。"
+      self.status.text = self.batchStatus == "completed" ? "測定終了。結果を共有できます。" : self.batchStatus == "completed-with-failures" ? "測定終了（一部失敗あり）。結果を共有できます。" : "測定を中断しました。途中結果を共有できます。"
       self.save(); self.refresh()
       let callback = self.onBatchFinished; self.onBatchFinished = nil; callback?(self.batchReport())
     }
     owner.modalPresentationStyle = .fullScreen; present(owner,animated:true)
   }
   private func batchReport() -> [String:Any] {
-    ["schema":2,"status":batchStatus,"batchID":batchID,"runs":reports,"presentationCount":presentationCount,"inputLoadCount":inputLoadCount]
+    ["schema":2,"status":batchStatus,"batchID":batchID,"runs":reports,"presentationCount":presentationCount,"inputLoadCount":inputLoadCount,
+     "failedRunCount":reports.filter { $0["status"] as? String != "completed" }.count]
   }
   private func save() {
     if let data = try? JSONSerialization.data(withJSONObject:batchReport(),options:[.prettyPrinted,.sortedKeys]) { try? data.write(to:Self.resultURL,options:.atomic) }
@@ -168,6 +175,7 @@ import UniformTypeIdentifiers
       report["startedAt"] = ISO8601DateFormatter().string(from:Date())
       report["batchID"] = configuration["batchID"]
       report["targets"] = targets
+      report["plannedMeasuredCount"] = targets.count*2*rounds
       report["referenceCount"] = references.count
       badge.text = "GOP測定：再生準備中…"
       for _ in 0..<1500 {
@@ -191,18 +199,24 @@ import UniformTypeIdentifiers
         throw error("displayed-timestamp-unavailable-on-this-route")
       }
       let measured = NeoGOPBenchmark.steps(targets,rounds:rounds), warmup = Array(measured.prefix(2)), steps = warmup+measured
-      var failures = 0
+      var consecutiveFailures = 0
       for (index,step) in steps.enumerated() {
         try check(); badge.text = index < warmup.count ? "GOP測定：ウォームアップ" : "GOP測定 \(index-warmup.count+1)/\(measured.count) · \(step.forward ? "送り" : "戻し")"
-        let staging = try await seek(step.stage)
+        var omitRole: String?
+#if targetEnvironment(simulator)
+        if index == warmup.count { omitRole = configuration["testOmitRole"] as? String }
+#endif
+        let staging = try await seek(step.stage,omitPicture:omitRole == "preparation")
+        var row: [String:Any]
         if staging["status"] as? String == "ambiguous-image" {
-          var skipped = staging; skipped["status"] = "ambiguous-preparation"; skipped["forward"] = step.forward
-          skipped["round"] = step.round; skipped["sampleKind"] = index < warmup.count ? "warmup" : "measured"
-          rows.append(skipped); save("running"); continue
+          row = ["status":"ambiguous-preparation","target":step.target,"preparation":staging]
+        } else if staging["status"] as? String != "verified" {
+          row = ["status":"preparation-failed","target":step.target,"preparation":staging]
+        } else {
+          try await Task.sleep(nanoseconds:300_000_000); try check()
+          row = try await seek(step.target,omitPicture:omitRole == "measurement")
+          row["preparation"] = staging
         }
-        guard staging["status"] as? String == "verified" else { report["preparationFailure"] = staging; report["failureState"] = state(); throw error("preparation-picture-not-verified") }
-        try await Task.sleep(nanoseconds:300_000_000); try check()
-        var row = try await seek(step.target)
         row["forward"] = step.forward; row["round"] = step.round; row["sampleKind"] = index < warmup.count ? "warmup" : "measured"
         row["keySeconds"] = profile.key(before:step.target); row["distanceFromKey"] = profile.key(before:step.target).map { step.target-$0 }
         row["thermalState"] = ProcessInfo.processInfo.thermalState.rawValue
@@ -211,18 +225,21 @@ import UniformTypeIdentifiers
           row["group"] = point.group; row["section"] = point.section; row["nextKeySeconds"] = point.nextKey
         }
         rows.append(row); save("running")
-        failures = ["verified","ambiguous-image"].contains(row["status"] as? String ?? "") ? 0 : failures+1
-        if failures >= 3 { throw error("three-unverified-results") }
+        consecutiveFailures = row["status"] as? String == "verified" ? 0 : consecutiveFailures+1
+        if consecutiveFailures >= 3 {
+          finish("failed",reason:"three-consecutive-unverified-results"); player?.gopBenchmarkFinish(); return
+        }
         try await Task.sleep(nanoseconds:300_000_000)
       }
-      finish("completed",reason:nil); player?.gopBenchmarkFinish()
+      finish(NeoGOPBenchmark.completionStatus(rows),reason:nil); player?.gopBenchmarkFinish()
     } catch {
       report["failureState"] = state()
-      finish("cancelled",reason:error.localizedDescription)
+      let cancelled = error is CancellationError || ["player-closing","not-foreground","pip-entered","playback-paused"].contains(error.localizedDescription)
+      finish(cancelled ? "cancelled" : "failed",reason:error.localizedDescription)
       if player?.view.window != nil { player?.gopBenchmarkFinish() }
     }
   }
-  private func seek(_ target: Double) async throws -> [String:Any] {
+  private func seek(_ target: Double, omitPicture: Bool = false) async throws -> [String:Any] {
     try check(); events = []
     let candidates = references.filter { abs($0.target-target)<0.0001 }
     let previous = candidates.isEmpty ? nil : player?.gopBenchmarkLuma()
@@ -235,9 +252,11 @@ import UniformTypeIdentifiers
     var picture: [String:Any]?, engine: [String:Any]?
     var matched: NeoGOPBenchmark.Reference?, matchedHost = 0.0, bestScore = Double.infinity, readbackMs = 0.0
     var bestImage: Data?
-    for _ in 0..<800 {
+    let deadline = invoked+(omitPicture ? 0.8 : 8.0)
+    while CACurrentMediaTime() < deadline {
       try check()
       picture = events.first { $0["serial"] as? Int == serial && $0["event"] as? String == "picture" }
+      if omitPicture { picture = nil }
       engine = events.first { $0["serial"] as? Int == serial && $0["event"] as? String == "engineCompletion" }
       if let picture {
         if picture["verified"] as? Bool != true, !candidates.isEmpty, !unchanged {
@@ -275,11 +294,17 @@ import UniformTypeIdentifiers
       else { row["referenceDebugLuma"] = bestImage?.base64EncodedString() }
     }
     if let host = engine?["host"] as? Double { row["engineCompletionMs"] = (host-invoked)*1000 }
+    row["observation"] = state()["seekObservation"]
+    if omitPicture { row["testFault"] = "omitted-picture-event" }
+    if row["status"] as? String != "verified" {
+      row["failureState"] = state(); player?.gopBenchmarkEndAttempt()
+    }
     return row
   }
   private func save(_ status: String) {
     report["status"] = status; report["rows"] = rows
     report["summary"] = NeoGOPBenchmark.summary(rows.filter { $0["sampleKind"] as? String == "measured" })
+    report["unattemptedMeasuredCount"] = max(0,(report["plannedMeasuredCount"] as? Int ?? 0)-rows.filter { $0["sampleKind"] as? String == "measured" }.count)
     var groups: [String:Any] = [:]
     for name in ["near","middle","far"] { groups[name] = NeoGOPBenchmark.summary(rows.filter { $0["sampleKind"] as? String == "measured" && $0["group"] as? String == name }) }
     report["summaryByGroup"] = groups

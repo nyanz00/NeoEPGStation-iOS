@@ -39,8 +39,10 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         let directory = NeoPiPSmoke.directory
         guard let data = try? Data(contentsOf:directory.appendingPathComponent("gop-fixture.json")),
           let configuration = try? JSONSerialization.jsonObject(with:data) as? [String:Any] else { return }
-        let controller = NeoPlayerController(url:directory.appendingPathComponent(name),title:"Synthetic GOP benchmark",username:"",password:"",networkCaching:5000)
+        let native = ProcessInfo.processInfo.environment["NEO_EPG_GOP_NATIVE"].flatMap(URL.init(string:))
+        let controller = NeoPlayerController(url:native ?? directory.appendingPathComponent(name),title:"Synthetic GOP benchmark",username:"",password:"",networkCaching:5000)
         controller.aetherOptions = ["checkpointEnabled":false,"gopBenchmark":true,"gopTolerance":2.0/24]
+        if native != nil { controller.aetherOptions?["streaming"] = true; controller.aetherOptions?["gopConsumeNativePicture"] = true }
         controller.recordingContext = ["videoFileType":"encoded","disableHistory":true]
         controller.gopBenchmarkConfiguration = configuration
         controller.onGOPBenchmarkResult = { result in

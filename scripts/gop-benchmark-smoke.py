@@ -1,5 +1,5 @@
 """Exercise the shipping foreground player and benchmark with a local AV1 clip."""
-import json,os,shutil,subprocess,time
+import functools,http.server,json,os,shutil,subprocess,threading,time
 from pathlib import Path
 
 def run(*args,timeout=180):return subprocess.check_output(args,text=True,timeout=timeout).strip()
@@ -71,3 +71,61 @@ for result in batch['runs']:
  assert set(r['group'] for r in measured)=={'near','middle','far'},result
  assert all(result['summaryByGroup'][g]['all']['count']==2 for g in ('near','middle','far')),result
 print('PASS: metadata-only merged plan, actual import, three inputs with different targets, one presentation, zero reference images, per-group summaries')
+
+# Drop exactly one preparation observation and one measured observation. The
+# current video AND subsequent videos must complete; neither failure is timed
+# as a successful seek. The real playback continues during these observer faults.
+run('xcrun','simctl','terminate',device,bundle)
+marker=docs/'gop-batch-smoke.json';marker.unlink(missing_ok=True)
+os.environ['SIMCTL_CHILD_NEO_EPG_GOP_FAULTS']='1'
+run('xcrun','simctl','launch',f'--stdout={docs}/gop-fault-stdout.txt',f'--stderr={docs}/gop-fault-stderr.txt',device,bundle)
+for _ in range(180):
+ if marker.exists():break
+ time.sleep(1)
+for source,destination in [('gop-batch-smoke.json','gop-fault-smoke.json'),('gop-seek-current.json','gop-fault-current.json'),('gop-batch-diagnostics.json','gop-fault-diagnostics.json')]:
+ if (docs/source).exists():shutil.copyfile(docs/source,Path('dist')/destination)
+assert marker.exists(),'Fault batch did not finish'
+fault=json.loads(marker.read_text());assert fault['status']=='completed-with-failures' and fault['failedRunCount']==2
+assert fault['presentationCount']==1 and fault['inputLoadCount']==3 and len(fault['runs'])==3
+for trial in fault['runs']:
+ measured=[r for r in trial['rows'] if r['sampleKind']=='measured'];assert len(measured)==6
+ invalid=[r for r in measured if r['status']!='verified']
+ expected_failure=trial['label']!='synthetic-native-3'
+ assert len(invalid)==int(expected_failure)
+ assert trial['summary']['all']['count']==6-int(expected_failure) and trial['summary']['all']['failedCount']==int(expected_failure)
+ assert all('displayMs' not in r for r in invalid)
+ if invalid:
+  row=invalid[0];detail=row['preparation'] if row['status']=='preparation-failed' else row
+  assert detail['testFault']=='omitted-picture-event' and detail['observation']['polls']>0
+  assert row['status']==('preparation-failed' if trial['label']=='synthetic-native-2' else 'timeout')
+ else:assert trial['status']=='completed'
+print('PASS: preparation and measured observer failures saved/excluded; remaining trials and three inputs completed')
+
+# Native AVPlayer output, including the real hasNew=false case after a second
+# observer acquires a buffer. Reuse the existing public HLS fixture.
+run('xcrun','simctl','terminate',device,bundle)
+native=Path('tests/fixtures/aether-connected-hls')
+class QuietHandler(http.server.SimpleHTTPRequestHandler):
+ def log_message(self,*args):pass
+server=http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(QuietHandler,directory=str(native.resolve())))
+threading.Thread(target=server.serve_forever,daemon=True).start()
+profile=expected['synthetic-native-2']
+(docs/'gop-fixture.json').write_text(json.dumps(dict(profile=profile,targets=profile['targets'],rounds=1)))
+marker=docs/'gop-benchmark-smoke.json';marker.unlink(missing_ok=True)
+for name in ['SIMCTL_CHILD_NEO_EPG_GOP_BATCH','SIMCTL_CHILD_NEO_EPG_GOP_FAULTS']:os.environ.pop(name,None)
+os.environ['SIMCTL_CHILD_NEO_EPG_GOP_BENCHMARK']='native'
+os.environ['SIMCTL_CHILD_NEO_EPG_GOP_NATIVE']=f'http://127.0.0.1:{server.server_port}/playlist.m3u8'
+run('xcrun','simctl','launch',f'--stdout={docs}/gop-native-stdout.txt',f'--stderr={docs}/gop-native-stderr.txt',device,bundle)
+try:
+ for _ in range(180):
+  if marker.exists():break
+  time.sleep(1)
+ for source,destination in [('gop-benchmark-smoke.json','gop-native-smoke.json'),('gop-benchmark-diagnostics.json','gop-native-diagnostics.json'),('gop-native-stdout.txt','gop-native-stdout.txt'),('gop-native-stderr.txt','gop-native-stderr.txt')]:
+  if (docs/source).exists():shutil.copyfile(docs/source,Path('dist')/destination)
+ assert marker.exists(),'Native display observation did not finish'
+ result=json.loads(marker.read_text());assert result['status']=='completed',result.get('reason')
+ rows=result['rows'];assert len(rows)==8 and result['referenceCount']==0
+ assert all(r['status']=='verified' and r['verification']=='avplayer-item-display-time-buffer' and abs(r['picturePTS']-r['target'])<=2/24 for r in rows)
+ assert all(r['observation']['copiedWithoutNew']>0 for r in rows)
+ print('PASS: real native output, hasNew=false with acquired buffer, same strict target PTS, engine/display timing independent')
+finally:server.shutdown();server.server_close()

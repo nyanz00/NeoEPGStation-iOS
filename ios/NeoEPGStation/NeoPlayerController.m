@@ -3832,6 +3832,7 @@ extern int libvlc_media_player_time_point_interpolate(const NeoNativeTimePoint *
   return state;
 }
 - (void)gopBenchmarkSeek:(int64_t)milliseconds { [self seekBy:milliseconds-[self mediaTime] completion:^{}]; }
+- (void)gopBenchmarkEndAttempt { [self.aether finishGOPBenchmarkAttempt]; [self completeSeek:self.seekGeneration failed:YES]; }
 - (NSData *)gopBenchmarkLuma { return [self.aether gopBenchmarkLuma]; }
 - (void)gopBenchmarkFinish { if (![self.gopBenchmarkConfiguration[@"batchManaged"] boolValue]) { [self closePlayer]; } }
 - (void)gopBenchmarkClose { [self closePlayer]; }
