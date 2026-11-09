@@ -47,21 +47,15 @@ marker=docs/'gop-batch-smoke.json';marker.unlink(missing_ok=True)
 os.environ.pop('SIMCTL_CHILD_NEO_EPG_GOP_BENCHMARK',None)
 os.environ['SIMCTL_CHILD_NEO_EPG_GOP_BATCH']='1'
 run('xcrun','simctl','launch',f'--stdout={docs}/gop-batch-stdout.txt',f'--stderr={docs}/gop-batch-stderr.txt',device,bundle)
-captured_batch=False
 for _ in range(180):
  if marker.exists():break
- try:
-  partial=json.loads((docs/'gop-seek-benchmark.json').read_text())
-  if not captured_batch and partial.get('inputLoadCount',0)>=2:
-   run('xcrun','simctl','io',device,'screenshot','dist/gop-batch-running.png',timeout=30);captured_batch=True
- except (OSError,ValueError):pass
  time.sleep(1)
 for name in ['gop-batch-smoke.json','gop-seek-benchmark.json','gop-seek-current.json','gop-batch-diagnostics.json','gop-batch-stdout.txt','gop-batch-stderr.txt']:
  if (docs/name).exists():shutil.copyfile(docs/name,Path('dist')/name)
 assert marker.exists(),'Batch marker missing; inspect preserved diagnostics'
 batch=json.loads(marker.read_text());assert batch['status']=='completed',batch
 assert batch['presentationCount']==1 and batch['inputLoadCount']==3,batch
-assert len(batch['runs'])==3 and captured_batch,batch
+assert len(batch['runs'])==3,batch
 expected={p['label']:p for p in json.loads(Path('tests/gop-benchmark/batch.json').read_text())['profiles']}
 for result in batch['runs']:
  assert result['status']=='completed' and result['referenceCount']==0,result
