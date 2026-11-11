@@ -310,6 +310,9 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
 #if targetEnvironment(simulator)
   func smokeWaveScrollChecks() async -> [String:Bool] {
     view.layoutIfNeeded(); list.layoutIfNeeded()
+    // The test has just attached this route. A real tap occurs after it has
+    // painted; snapshotView can return nil before that first committed frame.
+    await NeoContentFrame.next(); await NeoContentFrame.next()
     var checks = [String:Bool]()
     for (name,index) in [("forward",1),("backward",0)] {
       guard buttons.indices.contains(index) else { checks["waveFixturesExist"] = false; return checks }
