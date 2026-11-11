@@ -1288,6 +1288,13 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let original = recorded.collection
     showRoute("settings"); showRoute("recorded")
     let retained = original === recorded.collection
+    if smokeStage == "recorded-fixes" {
+      Task { [self] in
+        let checks = await runRecordedFixesSmoke(recorded)
+        writeIPadSmoke(recorded,checks:checks,retained:retained)
+      }
+      return
+    }
     if smokeStage == "captions" {
       writeIPadSmoke(recorded,checks:NeoCaptionStyleSmoke.run(),retained:retained)
       return
@@ -1434,7 +1441,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       var dropText = ""
       if self.smokeStage == "record-actions" {
         recorded.smokeOpenFirstMenu()
-        popupCorrect = self.popup?.titles == ["rule", "search", "user", "encode", "Info", "protect", "subtitle", "delete"]
+        popupCorrect = self.popup?.titles == ["rule", "search", "user", "encode", "Info", "protect", "delete"]
       }
       if self.smokeStage == "list-actions" {
         recorded.smokeOpenListMenu()
@@ -1469,6 +1476,70 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         "detailButtons": (self.active?.topViewController as? NeoDetailPage)?.smokeButtonTitles ?? [],
         "dropDialogVisible": (self.active?.topViewController as? NeoDetailPage)?.smokeDropDialogVisible ?? false])
     }
+  }
+  private func runRecordedFixesSmoke(_ recorded: NeoRecordedPage) async -> [String:Bool] {
+    var checks = [String:Bool]()
+    func waitFor(_ condition: () -> Bool) async -> Bool {
+      for _ in 0..<100 {
+        if condition() { return true }
+        try? await Task.sleep(nanoseconds:20_000_000)
+      }
+      return condition()
+    }
+    func screenshot(_ name:String) {
+      let image = UIGraphicsImageRenderer(bounds:view.bounds).image { _ in view.drawHierarchy(in:view.bounds,afterScreenUpdates:true) }
+      try? image.pngData()?.write(to:NeoPiPSmoke.directory.appendingPathComponent("recording-fixes-\(name).png"))
+    }
+    recorded.smokeOpenFirstMenu()
+    checks["developerListHasNoSubtitle"] = popup?.titles.contains("subtitle") == false
+    dismissPopup()
+    recorded.smokeOpenSearch()
+    let opened = await waitFor { (recorded.presentedViewController as? UINavigationController)?.topViewController?.viewIfLoaded?.window != nil && recorded.presentedViewController?.isBeingPresented == false }
+    if opened, let search = (recorded.presentedViewController as? UINavigationController)?.topViewController as? NeoRecordedSearch {
+      // The sheet's appearance callback installs its initial first responder.
+      try? await Task.sleep(nanoseconds:150_000_000)
+      checks.merge(search.smokeInputChecks(),uniquingKeysWith:{ _,new in new })
+      screenshot("search")
+    } else { checks["searchPresented"] = false }
+    recorded.dismiss(animated:false)
+    _ = await waitFor { recorded.presentedViewController == nil }
+
+    showRoute("onair")
+    if let onair = active?.topViewController as? NeoOnAirPage {
+      onair.view.layoutIfNeeded()
+      checks.merge(await onair.smokeWaveScrollChecks(),uniquingKeysWith:{ _,new in new })
+      screenshot("waves")
+    } else { checks["onairPresented"] = false }
+    showRoute("recorded")
+
+    let old = storage.hideRecordedThumbnailButton
+    defer { storage.hideRecordedThumbnailButton = old }
+    storage.hideRecordedThumbnailButton = true
+    openDetail(NeoRecordedPage.fixtures.records[0])
+    let built = await waitFor { (self.active?.topViewController as? NeoDetailPage)?.openingContentFinished == true && self.active?.transitionCoordinator == nil }
+    guard built, let detail = active?.topViewController as? NeoDetailPage else { checks["detailBuilt"] = false; return checks }
+    detail.smokeOpenMenu()
+    checks["developerDetailKeepsSubtitle"] = popup?.titles.contains("subtitle") == true
+    checks["hiddenThumbUsesMenu"] = popup?.titles.contains("thumbnail") == true && !detail.smokeButtonTitles.contains("THUMB")
+    dismissPopup()
+
+    showRoute("settings")
+    let settings = NeoSettingsCategoryPage(category:.display,shell:self)
+    active?.pushViewController(settings,animated:false)
+    _ = await waitFor { settings.openingContentFinished }
+    func descendants(_ root:UIView) -> [UIView] { [root]+root.subviews.flatMap { descendants($0) } }
+    guard let toggle = descendants(settings.view).compactMap({ $0 as? UISwitch }).first(where:{ $0.accessibilityLabel == "THUMBボタンを表示しない" }) else {
+      checks["thumbSettingExists"] = false; showRoute("recorded"); return checks
+    }
+    toggle.isOn = false; toggle.sendActions(for:.valueChanged)
+    showRoute("recorded")
+    checks["thumbSettingUpdatesRetainedDetail"] = active?.topViewController === detail && detail.smokeButtonTitles.contains("THUMB")
+    detail.smokeOpenMenu()
+    checks["visibleThumbNotDuplicatedInMenu"] = popup?.titles.contains("thumbnail") == false
+    dismissPopup(); screenshot("thumb-visible")
+    showRoute("settings"); toggle.isOn = true; toggle.sendActions(for:.valueChanged); showRoute("recorded")
+    checks["thumbCanBeHiddenAgainWithoutReopening"] = active?.topViewController === detail && !detail.smokeButtonTitles.contains("THUMB")
+    return checks
   }
   private func writeIPadSmoke(_ recorded: NeoRecordedPage, checks: [String: Bool], retained: Bool) {
     NeoNative.writeSmoke("ui-\(smokeStage)-smoke", ["success": checks.values.allSatisfy { $0 }, "checks": checks,

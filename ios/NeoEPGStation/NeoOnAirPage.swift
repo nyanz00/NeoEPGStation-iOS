@@ -114,6 +114,9 @@ private final class NeoOnAirCell: UICollectionViewCell {
 
 final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
   private var waveSnapshot: UIView?
+  // Animate an unscrolled surface. UICollectionView.bounds.origin contains
+  // contentOffset, so its frame must not also serve as the slide's geometry.
+  private let listViewport = UIView(), listSurface = UIView()
   private let tabs = UIScrollView(), tabLine = UIView(), indicator = UIView()
   private let list = UICollectionView(frame:.zero,collectionViewLayout:UICollectionViewFlowLayout())
   private let message = NeoStyle.label(size:14,muted:true), spinner = UIActivityIndicatorView(style:.medium)
@@ -129,7 +132,9 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
   required init?(coder: NSCoder) { fatalError() }
   override func viewDidLoad() {
     super.viewDidLoad(); pins = Set(UserDefaults.standard.array(forKey:pinKey) as? [Int] ?? [])
-    body.addSubview(tabs); body.addSubview(list); body.addSubview(message); body.addSubview(spinner)
+    body.addSubview(tabs); body.addSubview(listViewport); listViewport.addSubview(listSurface); listSurface.addSubview(list)
+    listViewport.clipsToBounds = true
+    body.addSubview(message); body.addSubview(spinner)
     tabs.showsHorizontalScrollIndicator = false; tabs.backgroundColor = NeoStyle.paper
     tabLine.backgroundColor = NeoStyle.border; tabs.addSubview(tabLine); indicator.backgroundColor = NeoStyle.accent; tabs.addSubview(indicator)
     list.backgroundColor = .clear; list.dataSource = self; list.delegate = self; list.alwaysBounceVertical = true
@@ -153,6 +158,15 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     super.viewDidDisappear(animated); active = false; timer?.invalidate(); timer = nil; progressTimer?.invalidate(); progressTimer = nil
   }
   func reload() {
+#if targetEnvironment(simulator)
+    if shell?.smokeStage == "recorded-fixes" {
+      schedules = (0..<60).map { index in
+        NeoLiveSchedule(channel:NeoLiveChannel(id:index+1,name:"Fixture channel \(index+1)",channelType:index < 30 ? "GR" : "BS"),
+          programs:[NeoLiveProgram(id:index+1,name:"Fixture program",startAt:0,endAt:3600000)])
+      }
+      rebuild(); return
+    }
+#endif
     guard task == nil, let api = shell?.api else { return }
     if schedules.isEmpty { spinner.startAnimating() }
     let halfWidth = api.isHalfWidthDisplayed
@@ -193,17 +207,19 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
   }
   private func selectWave(_ id: String) {
     guard waves.contains(id), id != wave else { return }
-    waveSnapshot?.removeFromSuperview(); waveSnapshot = nil; list.layer.removeAllAnimations(); list.transform = .identity
+    waveSnapshot?.removeFromSuperview(); waveSnapshot = nil; listSurface.layer.removeAllAnimations(); listSurface.transform = .identity
     let direction: CGFloat = (waves.firstIndex(of:id) ?? 0) > (waves.firstIndex(of:wave) ?? 0) ? 1 : -1
-    let old = !UIAccessibility.isReduceMotionEnabled ? list.snapshotView(afterScreenUpdates:false) : nil
-    if let old { old.frame = list.frame; body.addSubview(old); waveSnapshot = old }
-    wave = id; filter(); list.layoutIfNeeded()
-    list.setContentOffset(CGPoint(x:0,y:-list.adjustedContentInset.top),animated:false)
+    let old = !UIAccessibility.isReduceMotionEnabled ? listSurface.snapshotView(afterScreenUpdates:false) : nil
+    if let old { old.frame = listViewport.bounds; listViewport.addSubview(old); waveSnapshot = old }
+    UIView.performWithoutAnimation {
+      wave = id; filter(); view.layoutIfNeeded(); list.layoutIfNeeded()
+      list.setContentOffset(CGPoint(x:0,y:-list.adjustedContentInset.top),animated:false)
+      list.layoutIfNeeded()
+    }
     if let old {
-      list.transform = CGAffineTransform(translationX:direction*list.bounds.width,y:0)
+      listSurface.transform = CGAffineTransform(translationX:direction*listViewport.bounds.width,y:0)
       UIView.animate(withDuration:0.22,delay:0,options:[.beginFromCurrentState,.allowUserInteraction,.curveEaseOut]) {
-        self.list.transform = .identity; old.transform = CGAffineTransform(translationX:-direction*self.list.bounds.width,y:0)
-        self.view.layoutIfNeeded()
+        self.listSurface.transform = .identity; old.transform = CGAffineTransform(translationX:-direction*self.listViewport.bounds.width,y:0)
       } completion: { [weak self,weak old] _ in old?.removeFromSuperview(); if self?.waveSnapshot === old { self?.waveSnapshot = nil } }
     }
     if let index = waves.firstIndex(of:id), buttons.indices.contains(index) { tabs.scrollRectToVisible(buttons[index].frame,animated:true) }
@@ -236,7 +252,11 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     for button in buttons { let width = max(90,(button.titleLabel?.intrinsicContentSize.width ?? 0)+32); button.frame = CGRect(x:x,y:0,width:width,height:48); x += width }
     tabs.contentSize = CGSize(width:x,height:48); tabLine.frame = CGRect(x:0,y:47,width:max(x,tabs.bounds.width),height:1)
     if let index = waves.firstIndex(of:wave), buttons.indices.contains(index) { let frame = buttons[index].frame; indicator.frame = CGRect(x:frame.minX,y:46,width:frame.width,height:2) }
-    list.frame = CGRect(x:0,y:tabHeight,width:body.bounds.width,height:body.bounds.height-tabHeight)
+    listViewport.frame = CGRect(x:0,y:tabHeight,width:body.bounds.width,height:body.bounds.height-tabHeight)
+    // Assign bounds and center, not frame, while the surface is transformed.
+    listSurface.bounds = listViewport.bounds
+    listSurface.center = CGPoint(x:listViewport.bounds.midX,y:listViewport.bounds.midY)
+    list.frame = listSurface.bounds
     message.frame = CGRect(x:16,y:tabHeight+30,width:max(0,body.bounds.width-32),height:180)
     spinner.center = CGPoint(x:body.bounds.midX,y:tabHeight+130)
     list.collectionViewLayout.invalidateLayout()
@@ -288,6 +308,43 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     present(dialog,animated:true)
   }
 #if targetEnvironment(simulator)
+  func smokeWaveScrollChecks() async -> [String:Bool] {
+    view.layoutIfNeeded(); list.layoutIfNeeded()
+    var checks = [String:Bool]()
+    for (name,index) in [("forward",1),("backward",0)] {
+      guard buttons.indices.contains(index) else { checks["waveFixturesExist"] = false; return checks }
+      list.setContentOffset(CGPoint(x:0,y:400),animated:false); list.layoutIfNeeded()
+      checks[name+"StartsScrolled"] = list.contentOffset.y > 300
+      buttons[index].sendActions(for:.touchUpInside)
+      checks[name+"ResetsBeforeSlide"] = abs(list.contentOffset.y+list.adjustedContentInset.top)<1
+      let animations = (listSurface.layer.animationKeys() ?? []).compactMap { listSurface.layer.animation(forKey:$0) }
+      checks[name+"Keeps022Duration"] = UIAccessibility.isReduceMotionEnabled || animations.contains { abs($0.duration-0.22)<0.001 }
+      var yStable = true, observedMotion = UIAccessibility.isReduceMotionEnabled
+      for sample in 0..<10 {
+        try? await Task.sleep(nanoseconds:16_000_000)
+        // Exercise the normal parent layout while the slide is in flight.
+        if sample == 2 { view.setNeedsLayout(); view.layoutIfNeeded() }
+        if let surface = listSurface.layer.presentation() {
+          yStable = yStable && abs(surface.frame.minY)<0.5 && abs(surface.frame.height-listViewport.bounds.height)<0.5
+          observedMotion = observedMotion || abs(surface.frame.minX)>1
+        }
+        yStable = yStable && abs(list.contentOffset.y+list.adjustedContentInset.top)<1
+      }
+      checks[name+"HasHorizontalMotion"] = observedMotion
+      checks[name+"HasNoVerticalMotion"] = yStable
+      try? await Task.sleep(nanoseconds:90_000_000)
+      checks[name+"FinishesAtViewport"] = waveSnapshot == nil && listSurface.transform == .identity
+    }
+    // Reverse before completion, including a second scrolled starting point.
+    selectWave(waves[1]); try? await Task.sleep(nanoseconds:35_000_000)
+    list.setContentOffset(CGPoint(x:0,y:400),animated:false); selectWave(waves[0])
+    try? await Task.sleep(nanoseconds:70_000_000)
+    let surface = listSurface.layer.presentation()?.frame ?? listSurface.frame
+    checks["rapidSwitchHasNoVerticalMotion"] = abs(surface.minY)<0.5 && abs(list.contentOffset.y+list.adjustedContentInset.top)<1
+    try? await Task.sleep(nanoseconds:200_000_000)
+    checks["rapidSwitchReleasesSnapshot"] = waveSnapshot == nil && wave == waves[0]
+    return checks
+  }
   func runLiveUIProbe(_ completion: @escaping ([String:Bool]) -> Void) {
     var checks = ["liveRoute":!visible.isEmpty,"waveTabs":waves.contains("GR") && waves.contains("BS"),
       "forceFetched":forces.values.contains(220),"streamModes":shell?.serverConfig.map { NeoLiveOption.available($0).count >= 3 } ?? false]
@@ -297,7 +354,7 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     checks["firstWaveRightSwipeUsesDrawer"] = shell?.smokeSwipeWave(horizontal:100) == false
     if waves.count > 1 {
       checks["leftSwipeChangesWave"] = shell?.smokeSwipeWave(horizontal:-100) == true && wave == waves[1]
-      checks["waveSlideAnimated"] = UIAccessibility.isReduceMotionEnabled || (waveSnapshot != nil && !(list.layer.animationKeys()?.isEmpty ?? true))
+      checks["waveSlideAnimated"] = UIAccessibility.isReduceMotionEnabled || (waveSnapshot != nil && !(listSurface.layer.animationKeys()?.isEmpty ?? true))
       list.setContentOffset(CGPoint(x:0,y:200),animated:false); filter(); list.layoutIfNeeded()
       checks["refreshPreservesScroll"] = list.contentOffset.y > 150
       checks["rightSwipeChangesWave"] = shell?.smokeSwipeWave(horizontal:100) == true && wave == waves[0]

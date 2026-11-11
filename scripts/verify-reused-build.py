@@ -53,6 +53,8 @@ if full_recheck or network_probe or focused:
     foundation = 'Check player feedback models' if os.environ.get('CHECK_SCOPE') == 'player-feedback' else 'Native ASS parser and playback clock tests'
     if os.environ.get('CHECK_SCOPE') == 'player-feedback' and os.environ.get('UI_STAGE') == 'gop-benchmark':
         foundation = 'Check GOP benchmark models'
+    if os.environ.get('CHECK_SCOPE') == 'player-feedback' and os.environ.get('UI_STAGE') == 'recorded-fixes':
+        foundation = 'Check recorded search dates and action visibility'
     if os.environ.get('UI_STAGE') == 'recording-features' and steps.get('Check recording Info and Annict models') != 'success':
         raise RuntimeError('Cannot retest failed recording feature models')
     for name in [foundation, 'Native UI type checks',

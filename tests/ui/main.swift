@@ -53,7 +53,7 @@ expect(developer.encode == ["Sample"] && developer.developerMode == true && deve
 let noModes = try JSONDecoder().decode(NeoServerConfig.self, from: Data(#"{"developerMode":true,"encode":null}"#.utf8))
 expect(noModes.encode.isEmpty && noModes.developerMode == true, "Missing encode modes do not discard developer mode")
 expect(NeoRecordingMenu.commands(item: menuRecording, detail: true, config: developer) == [.download, .rule, .search, .user, .encode, .thumbnail, .subtitle, .info, .unprotect, .delete], "Detail developer subtitle follows thumbnail")
-expect(NeoRecordingMenu.commands(item: menuRecording, detail: false, config: developer) == [.rule, .search, .user, .encode, .info, .unprotect, .subtitle, .delete], "List developer subtitle follows protection")
+expect(NeoRecordingMenu.commands(item: menuRecording, detail: false, config: developer) == [.rule, .search, .user, .encode, .info, .unprotect, .delete], "Developer subtitle is absent from list")
 expect(!NeoRecordingMenu.commands(item: menuRecording, detail: true, config: developer, hideThumbnailButton: false).contains(.thumbnail), "Visible THUMB is not duplicated in menu")
 expect(NeoProgramText.dropSummary(menuRecording) == "drop: 2, error: 0, scrambling: 1 2.00 GB", "Drop counters and total file size decoded")
 expect(menuRecording.dropLogFile?.hasErrors == true && decoded.records[0].dropLogFile == nil, "Drop presence and error state")

@@ -5,14 +5,39 @@ final class NeoRecordedSearch: UIViewController {
   private let api: NeoAPI, channels: [Int: String], userID: Int?
   private var draft: NeoRecordedFilters
   private let scroll = UIScrollView(), stack = UIStackView()
+  private var fields: [String:UITextField] = [:], dateTexts: [String:String] = [:]
+  private var didFocusKeyword = false
   private var options: NeoRecordedOptions?, ruleName = "", task: Task<Void, Never>?
   var onApply: ((NeoRecordedFilters) -> Void)?
 #if targetEnvironment(simulator)
   var smokeFixtures = false
   var smokeValid: Bool { stack.arrangedSubviews.filter { $0 is UITextField }.count == 3 && options?.encode.count == 2 }
+  func smokeInputChecks() -> [String:Bool] {
+    guard let keyword = fields["キーワード"], let start = fields["開始日"], let end = fields["終了日"] else { return ["searchFieldsExist":false] }
+    var checks = ["keywordFocusedOnOpen":keyword.isFirstResponder]
+    keyword.text = "入力を維持"; keyword.sendActions(for:.editingChanged)
+    keyword.selectedTextRange = keyword.textRange(from:keyword.beginningOfDocument,to:keyword.beginningOfDocument)
+    loadOptions() // The actual successful candidate-load path calls render().
+    checks["candidateRefreshKeepsKeyboardAndText"] = fields["キーワード"] === keyword && keyword.isFirstResponder && keyword.text == "入力を維持"
+    checks["candidateRefreshKeepsCaret"] = keyword.selectedTextRange.map { keyword.offset(from:keyword.beginningOfDocument,to:$0.start) == 0 } ?? false
+    start.text = "２０２６１１１２"; start.sendActions(for:.editingChanged)
+    checks["datePasteFormattedAndCanonical"] = start.text == "2026/11/12" && draft.startDate == "2026-11-12"
+    end.text = "20261113"; end.sendActions(for:.editingChanged)
+    let range = try? draft.dateRange()
+    checks["dateRangeKeepsJSTInclusiveEnd"] = range?.0 == 1794409200000 && range?.1 == 1794581999999
+    start.becomeFirstResponder(); start.text = "2026/11/1"; start.sendActions(for:.editingChanged)
+    render()
+    checks["deletionAndRefreshKeepPartialDate"] = fields["開始日"] === start && start.isFirstResponder && start.text == "2026/11/1" && !dateInputsValid
+    start.text = "2026/02/30"; start.sendActions(for:.editingChanged)
+    checks["impossibleDateStaysVisibleAndInvalid"] = start.text == "2026/02/30" && !dateInputsValid
+    start.text = ""; start.sendActions(for:.editingChanged)
+    checks["emptyDateRemovesFilter"] = draft.startDate.isEmpty && dateInputsValid
+    return checks
+  }
 #endif
   init(api: NeoAPI, channels: [Int: String], userID: Int?, filters: NeoRecordedFilters) {
     self.api = api; self.channels = channels; self.userID = userID; draft = filters
+    dateTexts = ["開始日":NeoDateInput.display(filters.startDate), "終了日":NeoDateInput.display(filters.endDate)]
     super.init(nibName: nil, bundle: nil)
   }
   required init?(coder: NSCoder) { fatalError() }
@@ -33,6 +58,11 @@ final class NeoRecordedSearch: UIViewController {
     render(); loadOptions()
   }
   override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); scroll.frame = view.bounds.inset(by: view.safeAreaInsets) }
+  override func viewDidAppear(_ animated: Bool) {
+    super.viewDidAppear(animated)
+    guard !didFocusKeyword else { return }
+    didFocusKeyword = true; fields["キーワード"]?.becomeFirstResponder()
+  }
   private func loadOptions() {
     task?.cancel()
 #if targetEnvironment(simulator)
@@ -56,7 +86,10 @@ final class NeoRecordedSearch: UIViewController {
   }
   private func render() {
     let offset = scroll.contentOffset
-    stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+    // Keep reusable fields in their superview during a candidate refresh.
+    // Removing the first responder would dismiss the keyboard or discard IME input.
+    let previous = stack.arrangedSubviews
+    previous.forEach { stack.removeArrangedSubview($0) }
     field("キーワード", value: draft.keyword) { [weak self] in self?.draft.keyword = $0 }
     choice("ルール", value: draft.manualOnly ? "手動録画のみ" : draft.ruleID.map { ruleName.isEmpty ? "ルール \($0)" : ruleName } ?? "すべて", enabled: !draft.manualOnly && options != nil) { [weak self] in self?.selectRule() }
     choice("チャンネル", value: draft.channelID.flatMap { channels[$0] } ?? "すべて", enabled: options != nil) { [weak self] in
@@ -81,21 +114,41 @@ final class NeoRecordedSearch: UIViewController {
       field("月", value: draft.month, numeric: true) { [weak self] in self?.draft.month = $0 }
       field("日", value: draft.day, numeric: true) { [weak self] in self?.draft.day = $0 }
     } else {
-      field("開始日", value: draft.startDate, placeholder: "YYYY-MM-DD") { [weak self] in self?.draft.startDate = $0 }
-      field("終了日", value: draft.endDate, placeholder: "YYYY-MM-DD") { [weak self] in self?.draft.endDate = $0 }
+      field("開始日", value: dateTexts["開始日"] ?? "", placeholder: "YYYY/MM/DD", isDate:true) { [weak self] in self?.draft.startDate = NeoDateInput.parse($0) ?? "" }
+      field("終了日", value: dateTexts["終了日"] ?? "", placeholder: "YYYY/MM/DD", isDate:true) { [weak self] in self?.draft.endDate = NeoDateInput.parse($0) ?? "" }
     }
-    stack.addArrangedSubview(NeoStyle.button("クリア") { [weak self] in self?.draft = NeoRecordedFilters(); self?.render() })
+    stack.addArrangedSubview(NeoStyle.button("クリア") { [weak self] in self?.draft = NeoRecordedFilters(); self?.dateTexts = [:]; self?.render() })
     stack.addArrangedSubview(NeoStyle.button("検索", filled: true) { [weak self] in self?.apply() })
+    let retained = Set(stack.arrangedSubviews.map(ObjectIdentifier.init))
+    previous.filter { !retained.contains(ObjectIdentifier($0)) }.forEach { $0.removeFromSuperview() }
     view.layoutIfNeeded(); scroll.setContentOffset(offset, animated: false)
   }
-  private func field(_ title: String, value: String, placeholder: String = "", numeric: Bool = false, change: @escaping (String) -> Void) {
+  private func field(_ title: String, value: String, placeholder: String = "", numeric: Bool = false, isDate: Bool = false, change: @escaping (String) -> Void) {
     let label = NeoStyle.label(title); stack.addArrangedSubview(label)
-    let field = UITextField(); field.text = value; field.placeholder = placeholder; field.textColor = .white
+    let field: UITextField
+    if let existing = fields[title] { field = existing }
+    else {
+      field = UITextField(); fields[title] = field
+      field.heightAnchor.constraint(equalToConstant:44).isActive = true
+    }
+    if field.text != value { field.text = value }
+    field.placeholder = placeholder; field.textColor = .white
     field.autocorrectionType = .no; field.autocapitalizationType = .none; field.clearButtonMode = .whileEditing
-    field.keyboardType = numeric ? .numberPad : .default; field.borderStyle = .roundedRect
-    field.backgroundColor = NeoStyle.background; field.heightAnchor.constraint(equalToConstant: 44).isActive = true
+    field.keyboardType = isDate ? .asciiCapableNumberPad : numeric ? .numberPad : .default; field.borderStyle = .roundedRect
+    field.backgroundColor = NeoStyle.background
     field.accessibilityIdentifier = "recorded-search-\(title)"; field.accessibilityLabel = title
-    field.addAction(UIAction { [weak field] _ in change(field?.text ?? "") }, for: .editingChanged); stack.addArrangedSubview(field)
+    let actionID = UIAction.Identifier("recorded-search-input")
+    field.removeAction(identifiedBy:actionID,for:.editingChanged)
+    field.addAction(UIAction(identifier:actionID) { [weak self,weak field] _ in
+      guard let self,let field else { return }
+      var text = field.text ?? ""
+      if isDate {
+        text = NeoDateInput.editing(text,previous:self.dateTexts[title] ?? "")
+        self.dateTexts[title] = text
+        if field.text != text { field.text = text }
+      }
+      change(text)
+    }, for: .editingChanged); stack.addArrangedSubview(field)
   }
   private func choice(_ title: String, value: String, enabled: Bool = true, action: @escaping () -> Void) {
     stack.addArrangedSubview(NeoStyle.label(title))
@@ -150,8 +203,14 @@ final class NeoRecordedSearch: UIViewController {
     navigationController?.pushViewController(page, animated: true); page.onSearch?("")
   }
   private func apply() {
-    do { _ = try draft.queryItems(); view.endEditing(true); let value = draft, action = onApply; dismiss(animated: true) { action?(value) } }
+    do {
+      if !dateInputsValid { throw NeoError("録画日の指定が不正です") }
+      _ = try draft.queryItems(); view.endEditing(true); let value = draft, action = onApply; dismiss(animated: true) { action?(value) }
+    }
     catch { let alert = UIAlertController(title: nil, message: error.localizedDescription, preferredStyle: .alert); alert.addAction(UIAlertAction(title: "閉じる", style: .cancel)); present(alert, animated: true) }
+  }
+  private var dateInputsValid: Bool {
+    draft.specificDate || !dateTexts.values.contains(where:{ !$0.isEmpty && NeoDateInput.parse($0) == nil })
   }
   @objc private func keyboard(_ note: Notification) {
     guard let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }

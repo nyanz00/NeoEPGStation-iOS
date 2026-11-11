@@ -129,6 +129,8 @@ final class NeoDetailPage: NeoPage {
   override func viewWillAppear(_ animated: Bool) {
     super.viewWillAppear(animated)
     guard openingContentFinished else { return }
+    // This controller is retained while Settings is shown in another tab.
+    refreshCapabilities()
     if let value = shell?.api?.cachedRecording(item.id) { applyMetadata(value) }
     annict?.load()
     refreshMetadata()

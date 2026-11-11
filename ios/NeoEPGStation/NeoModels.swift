@@ -186,7 +186,6 @@ enum NeoRecordingMenu {
     if detail && config?.developerMode == true { result.append(.subtitle) }
     if !item.isRecording && !(item.videoFiles ?? []).isEmpty { result.append(.info) }
     result.append(item.isProtected == true ? .unprotect : .protect)
-    if !detail && config?.developerMode == true { result.append(.subtitle) }
     result.append(.delete)
     return result
   }
