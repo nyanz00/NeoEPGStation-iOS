@@ -116,7 +116,18 @@ private final class NeoRecordingActionsProtocol: URLProtocol {
         result = fixture.value
       } else { status = 404; result = ["message": "fixture recording not found"] }
     } else if parts.count == 4, parts[0] == "api", parts[1] == "recorded", let id = Int(parts[2]), parts[3] == "user", method == "PUT" {
-      let body = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+      // URLSession can expose upload bytes as httpBodyStream inside a custom
+      // URLProtocol. A missing httpBody does not mean an empty HTTP request.
+      var bytes = request.httpBody ?? Data()
+      if bytes.isEmpty, let stream = request.httpBodyStream {
+        stream.open(); defer { stream.close() }
+        var buffer = [UInt8](repeating:0,count:4096)
+        while true {
+          let count = stream.read(&buffer,maxLength:buffer.count)
+          if count <= 0 { break }; bytes.append(contentsOf:buffer.prefix(count))
+        }
+      }
+      let body = (try? JSONSerialization.jsonObject(with:bytes)) as? [String:Any] ?? [:]
       if let userID = body["userId"] as? Int {
         assignedUsers[id] = userID
         if var fixture = fixtures[id] { fixture.value["userId"] = userID; fixtures[id] = fixture }
@@ -221,6 +232,14 @@ private final class NeoRecordingActionsEventFlag {
       }
       return host.presentedViewController as? NeoRecordingActionDialog
     }
+    func finishAction(_ host: NeoPage) async {
+      if await waitFor({ host.presentedViewController == nil && host.recordingActions == nil }) { return }
+      // Keep evidence for the failed assertion, then isolate the next action.
+      // Otherwise one retained error dialog blocks every subsequent test.
+      host.recordingActions?.cancel()
+      if let presented = host.presentedViewController { await dismiss(presented) }
+      _ = await waitFor({ host.presentedViewController == nil && host.recordingActions == nil })
+    }
 
     guard let navigation = shell.children.compactMap({ $0 as? UINavigationController }).first(where: { $0.viewControllers.first is NeoRecordedPage }) else {
       checks["recordedPageAttached"] = false
@@ -277,7 +296,7 @@ private final class NeoRecordingActionsEventFlag {
       checks["userAssignmentFromDialogButton"] = assigned
       let assignmentReloaded = await waitFor({ host.records.first(where: { $0.id == 6102 })?.userId == 9 })
       checks["userAssignmentReloadsRecordedList"] = assignmentReloaded
-      _ = await waitFor({ host.presentedViewController == nil && host.recordingActions == nil })
+      await finishAction(host)
     } else { checks["userDialogPresentedAndLoaded"] = false }
 
     let thumbnailNotifications = NeoRecordingActionsEventFlag()
@@ -304,7 +323,7 @@ private final class NeoRecordingActionsEventFlag {
       checks["thumbnailChangeObservedAndRefreshed"] = false
     }
     NotificationCenter.default.removeObserver(thumbnailObserver)
-    _ = await waitFor({ host.presentedViewController == nil && host.recordingActions == nil })
+    await finishAction(host)
 
     host.performRecordingAction(.delete, item: item(values[3]))
     if let dialog = await actionDialog(host) {
@@ -321,7 +340,7 @@ private final class NeoRecordingActionsEventFlag {
       checks["subsetDeleteUsesVideoEndpoint"] = selectedOnlyOne && deletedOne
       checks["subsetDeleteKeepsRecord"] = !NeoRecordingActionsProtocol.deletedRecords().contains(6104)
       checks["subsetDeleteReloadShowsRemainingFiles"] = refreshedRecord && host.records.first(where: { $0.id == 6104 })?.videoFiles?.count == 2
-      _ = await waitFor({ host.presentedViewController == nil && host.recordingActions == nil })
+      await finishAction(host)
     } else {
       checks["subsetDeleteUsesVideoEndpoint"] = false
       checks["subsetDeleteKeepsRecord"] = false
@@ -340,7 +359,7 @@ private final class NeoRecordingActionsEventFlag {
       })
       checks["allFilesDeleteWholeRecording"] = allSelected && deletedAll
       checks["allDeletionReloadRemovesRecording"] = deletedAll
-      _ = await waitFor({ host.presentedViewController == nil && host.recordingActions == nil })
+      await finishAction(host)
     } else { checks["allFilesDeleteWholeRecording"] = false; checks["allDeletionReloadRemovesRecording"] = false }
 
     NeoRecordingActionsProtocol.setListIDs([6101, 6102, 6103, 6104])
@@ -354,7 +373,7 @@ private final class NeoRecordingActionsEventFlag {
       checks["partialFailureOnlyDeletesEarlierFile"] = NeoRecordingActionsProtocol.deletedVideos().contains(61061)
         && !NeoRecordingActionsProtocol.deletedVideos().contains(61062)
       dialog.smokeTapCancel()
-      _ = await waitFor({ host.presentedViewController == nil && host.recordingActions == nil })
+      await finishAction(host)
     } else {
       checks["partialFailureKeepsDialogAndExplainsSucceededSubset"] = false
       checks["partialFailureOnlyDeletesEarlierFile"] = false
