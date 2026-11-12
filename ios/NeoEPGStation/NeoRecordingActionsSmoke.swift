@@ -390,7 +390,7 @@ private final class NeoRecordingActionsEventFlag {
   private static func record(_ id: Int, files: [(Int, String, Int)], thumbnails: [Int] = [1], protected: Bool = false) -> [String: Any] {
     ["id": id, "name": "Fixture recording \(id)", "startAt": 1_700_000_000_000, "endAt": 1_700_001_800_000,
       "isRecording": false, "description": "Fixture description", "extended": "", "channelId": NSNull(), "channelName": NSNull(),
-      "thumbnails": thumbnails, "videoFiles": files.map { ["id": $0.0, "name": $0.1, "type": "TS", "size": $0.2] },
+      "thumbnails": thumbnails, "videoFiles": files.map { file -> [String: Any] in ["id": file.0, "name": file.1, "type": "TS", "size": file.2] },
       "isProtected": protected, "userId": 7]
   }
 
