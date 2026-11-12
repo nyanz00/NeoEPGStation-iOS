@@ -31,6 +31,7 @@ struct NeoRecording: Decodable {
   var ruleId: Int? = nil
   var isProtected: Bool? = nil
   var isEncoding: Bool? = nil
+  var userId: Int? = nil
   var dropLogFile: NeoDropLog? = nil
   var genre1: Int? = nil; var subGenre1: Int? = nil
   var genre2: Int? = nil; var subGenre2: Int? = nil
@@ -442,6 +443,10 @@ struct NeoAnnictEpisode: Decodable {
   var label: String { episodeNumberText ?? episodeNumber.map { "第\(String(format:"%g",$0))話" } ?? "エピソード" }
 }
 enum NeoAnnictPreferences {
+  static var onDownload: Bool {
+    get { UserDefaults.standard.bool(forKey:"annict.autoWatchOnDownload") }
+    set { UserDefaults.standard.set(newValue,forKey:"annict.autoWatchOnDownload") }
+  }
   static var mode: String {
     get { let value = UserDefaults.standard.string(forKey:"annict.autoWatchMode") ?? "disabled"; return ["disabled","start","progress"].contains(value) ? value : "disabled" }
     set { UserDefaults.standard.set(newValue,forKey:"annict.autoWatchMode") }
@@ -471,6 +476,7 @@ extension Notification.Name {
   static let neoRecordingPreferencesChanged = Notification.Name("NeoRecordingPreferencesChanged")
   static let neoAnnictChanged = Notification.Name("NeoAnnictChanged")
   static let neoTextPreferencesChanged = Notification.Name("NeoTextPreferencesChanged")
+  static let neoRecordedChanged = Notification.Name("NeoRecordedChanged")
 }
 private final class NeoAPIRedirectPolicy: NSObject, URLSessionTaskDelegate {
   func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -480,6 +486,9 @@ final class NeoAPI {
   let base: URL; let session: URLSession
   @MainActor private var checkpointRequests: [String: Task<NeoCheckpointVideoInfo, Error>] = [:]
   @MainActor private var detailCache: [String:(value:NeoRecording,stored:Date)] = [:]
+  @MainActor private var detailGenerations: [Int:Int] = [:]
+  @MainActor private var thumbnailRefreshes: [Int:Task<Void,Never>] = [:]
+  @MainActor private var thumbnailRefreshTokens: [Int:UUID] = [:]
   @MainActor private var episodeCache: [String:(value:NeoAnnictEpisode,stored:Date)] = [:]
   @MainActor private var detailRequests: [String:Task<NeoRecording,Error>] = [:]
   @MainActor private var episodeRequests: [String:Task<NeoAnnictEpisode,Error>] = [:]
@@ -538,6 +547,10 @@ final class NeoAPI {
     set { UserDefaults.standard.set(min(1000, max(1, newValue)), forKey: "recorded.length." + base.absoluteString)
       NotificationCenter.default.post(name: .neoRecordingPreferencesChanged, object: self) }
   }
+  var deleteRecordedDefaultValue: Bool {
+    get { UserDefaults.standard.bool(forKey:"recorded.deleteDefault."+base.absoluteString) }
+    set { UserDefaults.standard.set(newValue,forKey:"recorded.deleteDefault."+base.absoluteString) }
+  }
   var topRecordedPagination: Bool {
     get { UserDefaults.standard.bool(forKey:"recorded.pagination.top."+base.absoluteString) }
     set { UserDefaults.standard.set(newValue,forKey:"recorded.pagination.top."+base.absoluteString); NotificationCenter.default.post(name:.neoRecordingPreferencesChanged,object:self) }
@@ -580,23 +593,81 @@ final class NeoAPI {
     guard result.total >= 0, result.records.allSatisfy({ $0.id > 0 }) else { throw NeoError("録画一覧の応答形式が一致しません。") }
     return NeoRecords(records:result.records.map { $0.displayed(halfWidth:halfWidth) },total:result.total)
   }
-  @MainActor private func detailKey(_ id: Int) -> String { "\(identityRevision):\(isHalfWidthDisplayed):\(id)" }
+  @MainActor private func detailKey(_ id: Int) -> String { "\(identityRevision):\(detailGenerations[id,default:0]):\(isHalfWidthDisplayed):\(id)" }
+  @MainActor func invalidateRecording(_ id: Int) {
+    detailGenerations[id,default:0] += 1
+    for key in Array(detailCache.keys) where key.hasSuffix(":\(id)") { detailCache.removeValue(forKey:key) }
+    for key in Array(detailRequests.keys) where key.hasSuffix(":\(id)") { detailRequests.removeValue(forKey:key)?.cancel() }
+    let episode = episodeKey(id)
+    episodeCache.removeValue(forKey:episode); episodeRevisions[episode,default:0] += 1
+    episodeRequests.removeValue(forKey:episode)?.cancel()
+  }
+  @MainActor func recordingChanged(_ id: Int, deleted: Bool = false, thumbnail: Bool = false) {
+    invalidateRecording(id)
+    NotificationCenter.default.post(name:.neoRecordedChanged,object:self,userInfo:["recordingID":id,"deleted":deleted,"thumbnail":thumbnail])
+  }
+  @MainActor func watchRecordingThumbnail(_ id: Int, previous: [Int], interval: UInt64 = 2_000_000_000, attempts: Int = 72) {
+    thumbnailRefreshes[id]?.cancel()
+    let token = UUID(), revision = identityRevision
+    thumbnailRefreshTokens[id] = token
+    thumbnailRefreshes[id] = Task { [weak self] in
+      guard let self else { return }
+      defer { if thumbnailRefreshTokens[id] == token { thumbnailRefreshes.removeValue(forKey:id); thumbnailRefreshTokens.removeValue(forKey:id) } }
+      for attempt in 0..<max(0,attempts) {
+        do {
+          // Queue acceptance is not completion. Watch cheaply for up to ten
+          // minutes, backing off after the first thirty seconds.
+          try await Task.sleep(nanoseconds:attempt < 15 ? interval : max(interval,10_000_000_000)); try Task.checkCancellation()
+          guard identityRevision == revision else { return }
+          let updated = try await recording(id,refresh:true)
+          guard !Task.isCancelled, identityRevision == revision else { return }
+          if let first = updated.thumbnails?.first, first != previous.first {
+            recordingChanged(id,thumbnail:true); return
+          }
+        } catch {
+          if Task.isCancelled || identityRevision != revision { return }
+          if (error as? NeoError)?.statusCode == 404 { recordingChanged(id,deleted:true); return }
+        }
+      }
+      if !Task.isCancelled, identityRevision == revision { recordingChanged(id) }
+    }
+  }
+  @MainActor func stopRecordingUpdates() {
+    thumbnailRefreshes.values.forEach { $0.cancel() }; thumbnailRefreshes.removeAll(); thumbnailRefreshTokens.removeAll()
+  }
+  func protectRecording(_ id: Int, protected: Bool, user: String, headers: [String:String]) async throws {
+    _ = try await response(url("/recorded/\(id)/\(protected ? "protect" : "unprotect")"),method:"PUT",user:user,headers:headers)
+  }
+  func assignRecordingUser(_ id: Int, userID: Int, user: String, headers: [String:String]) async throws {
+    guard userID > 0 else { throw NeoError("通常ユーザーを選択してください。") }
+    _ = try await response(url("/recorded/\(id)/user"),method:"PUT",body:["userId":userID],user:user,headers:headers)
+  }
+  func deleteRecording(_ id: Int, user: String, headers: [String:String]) async throws {
+    _ = try await response(url("/recorded/\(id)"),method:"DELETE",user:user,headers:headers)
+  }
+  func deleteRecordingVideo(_ id: Int, user: String, headers: [String:String]) async throws {
+    _ = try await response(url("/videos/\(id)"),method:"DELETE",user:user,headers:headers)
+  }
+  func replaceRecordingThumbnail(_ id: Int, user: String, headers: [String:String]) async throws {
+    _ = try await response(url("/thumbnails/videos/\(id)/replace"),method:"POST",user:user,timeout:120,headers:headers)
+  }
   @MainActor func cachedRecording(_ id: Int) -> NeoRecording? {
     guard let entry = detailCache[detailKey(id)], Date().timeIntervalSince(entry.stored) < 60 else { return nil }; return entry.value
   }
   @MainActor func recording(_ id: Int, refresh: Bool = false) async throws -> NeoRecording {
     if !refresh, let cached = cachedRecording(id) { return cached }
-    let key = detailKey(id), revision = identityRevision, halfWidth = isHalfWidthDisplayed
+    let key = detailKey(id), revision = identityRevision, halfWidth = isHalfWidthDisplayed, generation = detailGenerations[id,default:0]
     if let active = detailRequests[key] { return try await active.value }
     let user = viewer, headers = profileHeaders
     let active = Task<NeoRecording,Error> {
       let value: NeoRecording = try await self.request(self.url("/recorded/\(id)?isHalfWidth=\(halfWidth)"),user:user,headers:headers)
       guard value.id == id else { throw NeoError("録画情報の応答形式が一致しません。") }
-      guard self.identityRevision == revision, self.isHalfWidthDisplayed == halfWidth else { throw CancellationError() }
+      guard self.identityRevision == revision, self.isHalfWidthDisplayed == halfWidth, self.detailGenerations[id,default:0] == generation else { throw CancellationError() }
       return value.displayed(halfWidth:halfWidth)
     }
     detailRequests[key] = active; defer { detailRequests.removeValue(forKey:key) }
     let value = try await active.value
+    guard identityRevision == revision, isHalfWidthDisplayed == halfWidth, detailGenerations[id,default:0] == generation else { throw CancellationError() }
     detailCache[key] = (value,Date())
     if detailCache.count > 64, let oldest = detailCache.min(by:{ $0.value.stored < $1.value.stored })?.key { detailCache.removeValue(forKey:oldest) }
     return value

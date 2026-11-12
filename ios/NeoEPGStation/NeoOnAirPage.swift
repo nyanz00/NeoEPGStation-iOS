@@ -411,10 +411,13 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
 class NeoLiveDialog: UIViewController {
   var bottomAvoidance: CGFloat = 0
   var maximumWidth: CGFloat { 444 }
+  var showsCloseButton: Bool { false }
   var titleInset: CGFloat? { nil }
+  var titleVerticalInset: CGFloat? { nil }
   var contentBackground: UIColor { UIColor.white.withAlphaComponent(0.08) }
   private let card = UIView(), scroll = UIScrollView(), stack = UIStackView(), actions = UIStackView()
   private let headingLabel = NeoStyle.label(size:20,bold:true), contentFill = UIView(), topLine = UIView(), bottomLine = UIView()
+  private lazy var closeButton = NeoStyle.iconButton("Close",label:"閉じる") { [weak self] in self?.cancel() }
   private let heading: String
   init(title: String) { heading = title; super.init(nibName:nil,bundle:nil); modalPresentationStyle = .overFullScreen; modalTransitionStyle = .crossDissolve }
   required init?(coder: NSCoder) { fatalError() }
@@ -441,6 +444,7 @@ class NeoLiveDialog: UIViewController {
     NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:scroll.contentLayoutGuide.leadingAnchor),stack.trailingAnchor.constraint(equalTo:scroll.contentLayoutGuide.trailingAnchor),
       stack.topAnchor.constraint(equalTo:scroll.contentLayoutGuide.topAnchor),stack.bottomAnchor.constraint(equalTo:scroll.contentLayoutGuide.bottomAnchor),stack.widthAnchor.constraint(equalTo:scroll.frameLayoutGuide.widthAnchor)])
     headingLabel.attributedText = NeoStyle.dialogTitle(heading).attributedText; headingLabel.numberOfLines = 0
+    if showsCloseButton { card.addSubview(closeButton) }
     let tap = UITapGestureRecognizer(target:self,action:#selector(tappedBackground(_:))); tap.cancelsTouchesInView = false; view.addGestureRecognizer(tap)
   }
   func cancel() {
@@ -452,6 +456,7 @@ class NeoLiveDialog: UIViewController {
 #endif
     }
   }
+  func setCloseEnabled(_ enabled: Bool) { closeButton.isEnabled = enabled }
   private func cancelIfOutside(_ point: CGPoint) { if !card.frame.contains(point) { cancel() } }
   @objc private func tappedBackground(_ gesture: UITapGestureRecognizer) { cancelIfOutside(gesture.location(in:view)) }
   func addText(_ text: String, bold: Bool = false) {
@@ -475,11 +480,14 @@ class NeoLiveDialog: UIViewController {
     super.viewDidLayoutSubviews(); let width = min(maximumWidth,max(0,view.bounds.width-24))
     let content = stack.systemLayoutSizeFitting(CGSize(width:width-48,height:UIView.layoutFittingCompressedSize.height),withHorizontalFittingPriority:.required,verticalFittingPriority:.fittingSizeLevel).height
     let inset = titleInset ?? NeoStyle.dialogTitleInset(viewportWidth:view.bounds.width)
-    let header = headingLabel.sizeThatFits(CGSize(width:width-2*inset,height:CGFloat.greatestFiniteMagnitude)).height+2*inset
+    let verticalInset = titleVerticalInset ?? inset
+    let titleWidth = width-2*inset-(showsCloseButton ? 40 : 0)
+    let header = headingLabel.sizeThatFits(CGSize(width:titleWidth,height:CGFloat.greatestFiniteMagnitude)).height+2*verticalInset
     let availableHeight = view.bounds.height-bottomAvoidance
     let height = min(max(200,header+content+92),max(200,availableHeight-view.safeAreaInsets.top-view.safeAreaInsets.bottom-32))
     card.frame = CGRect(x:(view.bounds.width-width)/2,y:(availableHeight-height)/2,width:width,height:height)
-    headingLabel.frame = CGRect(x:inset,y:inset,width:width-2*inset,height:header-2*inset)
+    headingLabel.frame = CGRect(x:inset,y:verticalInset,width:titleWidth,height:header-2*verticalInset)
+    if showsCloseButton { closeButton.frame = CGRect(x:width-(view.bounds.width >= 600 ? 16 : 12)-36,y:view.bounds.width >= 600 ? 16 : 12,width:36,height:36) }
     contentFill.frame = CGRect(x:0,y:header,width:width,height:height-header-60)
     topLine.frame = CGRect(x:0,y:header,width:width,height:1); bottomLine.frame = CGRect(x:0,y:height-60,width:width,height:1)
     scroll.frame = CGRect(x:24,y:header+16,width:width-48,height:max(0,height-header-92)); actions.frame = CGRect(x:12,y:height-54,width:width-24,height:48)

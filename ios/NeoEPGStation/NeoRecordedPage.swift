@@ -191,6 +191,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   private let spinner = UIActivityIndicatorView(style: .medium)
   private let message = NeoStyle.label(size: 14, muted: true)
   private let refresh = UIRefreshControl()
+  private var mutationReloadNeeded = false
   // Card xs/sm changes at 600; pagination uses a separate 500px query in Web.
   var mobile: Bool { collection.bounds.width < 600 }
   var cardHeight: CGFloat { mobile ? 108 : floor(itemWidth * 9 / 16) + 106 }
@@ -244,6 +245,13 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
       guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
       self.task?.cancel(); self.clearCache(); self.records = []; self.collection.reloadData(); self.reload(targetPage:self.page)
     })
+    observers.append(NotificationCenter.default.addObserver(forName:.neoRecordedChanged,object:nil,queue:.main) { [weak self] note in
+      guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
+      self.clearCache(); self.mutationReloadNeeded = true
+      if self.viewIfLoaded?.window != nil, self.navigationController?.topViewController === self {
+        self.mutationReloadNeeded = false; self.reload(targetPage:self.page,preserveOffset:true)
+      } else { self.task?.cancel() }
+    })
     actions = [NeoStyle.iconButton("SearchOutlined", label: "録画検索") { [weak self] in self?.search() },
       NeoStyle.iconButton("MoreVert", label: "録画一覧メニュー") { [weak self] in self?.showOptions() }]
     reload()
@@ -277,6 +285,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   override func viewWillAppear(_ animated: Bool) {
     super.viewWillAppear(animated)
     if identityReloadNeeded { identityReloadNeeded = false; reload(targetPage:page) }
+    else if mutationReloadNeeded { mutationReloadNeeded = false; reload(targetPage:page,preserveOffset:true) }
   }
   func rememberDetail(_ id: Int) { returnRecordingID = id; returnOffset = collection.contentOffset; clearHighlight() }
   private func showHighlight(_ id: Int) {
@@ -331,11 +340,12 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     else { collection.setContentOffset(CGPoint(x: 0, y: -collection.adjustedContentInset.top), animated: false) }
   }
   @objc private func refreshList() { cache.removeAll(); cacheOrder.removeAll(); reload() }
-  private func reload(targetPage: Int? = nil) {
+  private func reload(targetPage: Int? = nil, preserveOffset: Bool = false) {
     task?.cancel(); loadGeneration += 1; let attempt = loadGeneration
     spinner.startAnimating(); message.text = nil
     clearHighlight()
     let requestedPage = targetPage ?? page, query = keyword, oldest = reverse
+    let savedOffset = preserveOffset ? collection.contentOffset : .zero
     self.requestedPage = requestedPage
     let userID = locatedUserID
     let search = filters, limit = pageLength
@@ -354,7 +364,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         if let cached { result = cached }
         else {
 #if targetEnvironment(simulator)
-        if self.shell?.smokeStage.isEmpty == false, api?.base.host != "recording-features.invalid" { result = Self.fixtures }
+        if self.shell?.smokeStage.isEmpty == false, !["recording-features.invalid","recording-actions.invalid"].contains(api?.base.host ?? "") { result = Self.fixtures }
         else { guard let requestAPI = api else { return }; result = try await requestAPI.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search) }
 #else
         guard let requestAPI = api else { return }; result = try await requestAPI.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search)
@@ -366,7 +376,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         }
         try Task.checkCancellation()
         let lastPage = max(1, Int(ceil(Double(result.total) / Double(limit))))
-        if requestedPage > lastPage { self.reload(targetPage: lastPage); return }
+        if requestedPage > lastPage { self.reload(targetPage: lastPage,preserveOffset:preserveOffset); return }
         let urls = result.records.compactMap { $0.thumbnails?.first.flatMap { api?.url("/thumbnails/\($0)") } }
         // Show the list immediately. Cells share asynchronous thumbnail loads;
         // preparing every image first held the entire list for up to 400ms.
@@ -375,15 +385,17 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         self.page = requestedPage; self.records = result.records; self.total = result.total
         self.lateThumbnails = late
         self.message.text = result.records.isEmpty ? "録画がありません" : nil
-        self.collection.reloadData(); self.collection.setContentOffset(.zero, animated: false)
+        self.collection.reloadData()
         self.collection.layoutIfNeeded()
+        let maximumOffset = max(-self.collection.adjustedContentInset.top,self.collection.contentSize.height-self.collection.bounds.height+self.collection.adjustedContentInset.bottom)
+        self.collection.setContentOffset(CGPoint(x:0,y:min(maximumOffset,max(-self.collection.adjustedContentInset.top,savedOffset.y))),animated:false)
         self.prepareVisibleDetails()
         if let id = self.focusedRecordingID, let index = result.records.firstIndex(where: { $0.id == id }) {
           self.collection.scrollToItem(at: IndexPath(item: index, section: 0), at: .centeredVertically, animated: false)
           self.showHighlight(id)
           self.focusedRecordingID = nil
         }
-        self.lastFadeDuration = UIAccessibility.isReduceMotionEnabled ? 0 : cached == nil ? 0.5 : 0.32
+        self.lastFadeDuration = preserveOffset || UIAccessibility.isReduceMotionEnabled ? 0 : cached == nil ? 0.5 : 0.32
         // CSS `ease` in RecordedPage.tsx, applied once to the entire list/footer.
         let fade = CABasicAnimation(keyPath: "opacity"); fade.fromValue = 0; fade.toValue = 1
         fade.duration = self.lastFadeDuration; fade.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)

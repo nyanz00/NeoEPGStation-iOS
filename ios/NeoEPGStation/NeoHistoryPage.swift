@@ -71,7 +71,7 @@ final class NeoHistoryPage: NeoPage, UITableViewDataSource, UITableViewDelegate 
     [saveTitle, save, hint, message].forEach(banner.addSubview); save.onTintColor = NeoStyle.accent
     save.accessibilityLabel = "視聴履歴を保存"; save.addTarget(self, action: #selector(saveChanged), for: .valueChanged)
     actions = [NeoStyle.iconButton("Refresh", label: "視聴履歴を更新") { [weak self] in self?.reload() }]
-    for name in [Notification.Name.neoAccountChanged, .neoHistoryChanged, .neoTextPreferencesChanged] {
+    for name in [Notification.Name.neoAccountChanged, .neoHistoryChanged, .neoTextPreferencesChanged, .neoRecordedChanged] {
       observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
         guard let self else { return }
         if let api = note.object as? NeoAPI, self.shell?.api !== api { return }

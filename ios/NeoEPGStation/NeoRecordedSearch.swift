@@ -58,11 +58,23 @@ final class NeoRecordedSearch: UIViewController {
     render(); loadOptions()
   }
   override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); scroll.frame = view.bounds.inset(by: view.safeAreaInsets) }
-  override func viewDidAppear(_ animated: Bool) {
-    super.viewDidAppear(animated)
-    guard !didFocusKeyword else { return }
-    didFocusKeyword = true; fields["キーワード"]?.becomeFirstResponder()
+  override func viewWillAppear(_ animated: Bool) {
+    super.viewWillAppear(animated); focusKeywordForPresentation()
   }
+  override func viewIsAppearing(_ animated: Bool) {
+    super.viewIsAppearing(animated); focusKeywordForPresentation()
+  }
+  private func focusKeywordForPresentation() {
+    guard !didFocusKeyword else { return }
+    didFocusKeyword = fields["キーワード"]?.becomeFirstResponder() == true
+  }
+#if targetEnvironment(simulator)
+  private(set) var smokeFocusedBeforeAppearanceCompleted = false
+  override func viewDidAppear(_ animated: Bool) {
+    smokeFocusedBeforeAppearanceCompleted = fields["キーワード"]?.isFirstResponder == true
+    super.viewDidAppear(animated)
+  }
+#endif
   private func loadOptions() {
     task?.cancel()
 #if targetEnvironment(simulator)

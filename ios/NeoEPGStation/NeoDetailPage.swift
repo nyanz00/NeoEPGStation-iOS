@@ -16,13 +16,16 @@ final class NeoDetailPage: NeoPage {
   private var thumbnailSize: [NSLayoutConstraint] = []
   private var task: Task<Void, Never>?
   private var analysisTask: Task<Void, Never>?
+  private var recordingObserver: NSObjectProtocol?
   private var annict: NeoAnnictHeader?
   private var metadataTitle: UILabel?, metadataTexts: [UILabel] = []
   private let dropStatus = NeoStyle.label(size: 14, muted: true)
   private lazy var playButton = NeoStyle.recordingButton("PLAY", icon: "PlayArrowOutlined") { [weak self] in self?.selectFile() }
   private lazy var streamingButton = NeoStyle.recordingButton("STREAMING", icon: "PlayCircleOutlineOutlined") { [weak self] in self?.selectStreamingFile() }
   private lazy var encodeButton = NeoStyle.recordingButton("ENCODE", icon: "ControlPoint", success: true) { [weak self] in self?.alert("ENCODE の操作は準備中です。") }
-  private lazy var thumbButton = NeoStyle.recordingButton("THUMB", icon: "ImageOutlined", success: true) { [weak self] in self?.alert("thumbnail の操作は準備中です。") }
+  private lazy var thumbButton = NeoStyle.recordingButton("THUMB", icon: "ImageOutlined", success: true) { [weak self] in
+    guard let self else { return }; self.performRecordingAction(.thumbnail,item:self.item)
+  }
   private let buttonRow = NeoRecordingButtonRow()
   private lazy var beginningButton: UIButton = {
     let button = NeoStyle.button("最初から再生") { [weak self] in self?.selectFile(fromBeginning: true) }
@@ -52,6 +55,14 @@ final class NeoDetailPage: NeoPage {
       stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -24),
       stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -24)])
     wide = (navigationController?.view.bounds.width ?? view.bounds.width) >= 900
+    recordingObserver = NotificationCenter.default.addObserver(forName:.neoRecordedChanged,object:nil,queue:.main) { [weak self] note in
+      guard let self, let api = note.object as? NeoAPI, self.shell?.api === api, note.userInfo?["recordingID"] as? Int == self.item.id else { return }
+      if note.userInfo?["deleted"] as? Bool == true {
+        guard let nav = self.navigationController else { return }
+        if nav.topViewController === self { nav.popViewController(animated:self.viewIfLoaded?.window != nil) }
+        else { nav.setViewControllers(nav.viewControllers.filter { $0 !== self },animated:false) }
+      } else if self.openingContentFinished { self.refreshMetadata() }
+    }
   }
   override func buildOpeningContent() async {
     if !fixturePresentation, let api = shell?.api {
@@ -265,7 +276,7 @@ final class NeoDetailPage: NeoPage {
   func smokeOpenDropLog() { showDropLog() }
   var smokeDropDialogVisible: Bool { (presentedViewController as? NeoDropLogDialog)?.smokeReady == true }
 #endif
-  deinit { task?.cancel(); analysisTask?.cancel() }
+  deinit { task?.cancel(); analysisTask?.cancel(); if let recordingObserver { NotificationCenter.default.removeObserver(recordingObserver) } }
 }
 
 // Web RecordedDetailPage action row: spacing=8, height=36. The requested

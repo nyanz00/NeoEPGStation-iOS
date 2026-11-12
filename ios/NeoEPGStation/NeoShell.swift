@@ -174,6 +174,7 @@ final class NeoPlayerTransition: NSObject, UIViewControllerTransitioningDelegate
 }
 
 class NeoPage: UIViewController {
+  var recordingActions: NeoRecordingActions?
   var defersOpeningContent: Bool { false }
   private(set) var openingContentFinished = false
   private var openingLink: CADisplayLink?, openingTask: Task<Void,Never>?
@@ -520,6 +521,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
 #endif
   }
   func connect(_ url: URL) {
+    cancelRecordingActions()
     dismissPopup(); historyReturnSnapshot = nil; historyReturnRevision = nil; api = NeoAPI(base: url); channels = [:]; serverConfig = nil
     for controller in controllers.values { controller.willMove(toParent: nil); controller.view.removeFromSuperview(); controller.removeFromParent() }
     controllers.removeAll(); active = nil
@@ -554,12 +556,17 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     if player == nil { account?.restore() }
   }
   func showConnection(message: String? = nil) {
+    cancelRecordingActions()
     dismissPopup()
     api = nil; account = nil; menuOpen = false; route = "connection"
     let page = NeoConnectionPage(shell: self)
     page.initialMessage = message
     let nav = UINavigationController(rootViewController: page); nav.setNavigationBarHidden(true, animated: false)
     attach(nav); view.setNeedsLayout()
+  }
+  private func cancelRecordingActions() {
+    api?.stopRecordingUpdates()
+    for nav in controllers.values { for case let page as NeoPage in nav.viewControllers { page.recordingActions?.cancel() } }
   }
   func showRoute(_ id: String) {
     guard api != nil, popInteraction == nil, !routeBackRunning else { return }
@@ -1288,6 +1295,13 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let original = recorded.collection
     showRoute("settings"); showRoute("recorded")
     let retained = original === recorded.collection
+    if smokeStage == "recording-actions" {
+      Task { [self] in
+        let checks = await NeoRecordingActionsSmoke.run(shell:self)
+        writeIPadSmoke(recorded,checks:checks,retained:retained)
+      }
+      return
+    }
     if smokeStage == "recorded-fixes" {
       Task { [self] in
         let checks = await runRecordedFixesSmoke(recorded)

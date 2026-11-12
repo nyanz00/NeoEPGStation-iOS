@@ -392,6 +392,7 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
       toggle("録画済みの上部にページ切り替えを表示", on:api.topRecordedPagination) { api.topRecordedPagination = $0 }
       toggle("拡張ページ切り替え", explanation:"現在のページ番号から移動先を入力できます。幅に余裕がある場合は先頭・末尾ボタンも表示します。", on:api.extendedPagination) { api.extendedPagination = $0 }
       toggle("THUMBボタンを表示しない", on: shell.storage.hideRecordedThumbnailButton) { [weak shell] in shell?.storage.hideRecordedThumbnailButton = $0 }
+      toggle("削除時に録画ファイルを初期選択", explanation:"録画情報の削除ダイアログを開いた時、録画ファイルを最初から選択する", on:api.deleteRecordedDefaultValue) { api.deleteRecordedDefaultValue = $0 }
       toggle("録画済みへ戻った番組を強調表示", explanation: "録画詳細や視聴履歴から一覧へ移動した際、対象の録画を約1秒間ハイライトします。", on: api.highlightRecorded) { api.highlightRecorded = $0 }
       let length = UITextField(); length.text = String(api.recordedLength); length.keyboardType = .numberPad; length.textColor = .white
       length.borderStyle = .roundedRect; length.backgroundColor = NeoStyle.paper
@@ -467,6 +468,7 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
     }
     if api.profileHeaders["X-Viewer-Profile-Id"] == nil { info("書き込み連携には、アカウント設定で通常ユーザーを選択してください。") }
     choice("自動視聴記録",values:[("disabled","自動記録しない"),("start","PLAY／STREAMING開始時"),("progress","指定割合まで視聴した時")],selected:NeoAnnictPreferences.mode) { NeoAnnictPreferences.mode = $0 }
+    toggle("ダウンロード時の視聴記録",explanation:"録画ファイルまたはプレイリストのdownloadを開始した時に、この話を見たと記録します。",on:NeoAnnictPreferences.onDownload) { NeoAnnictPreferences.onDownload = $0 }
     if NeoAnnictPreferences.mode == "progress" {
       let amount = UIStepper(); amount.minimumValue = 1; amount.maximumValue = 100; amount.value = Double(NeoAnnictPreferences.threshold)
       amount.accessibilityIdentifier = "annict-threshold"
