@@ -13,7 +13,8 @@ final class NeoMediaToolsPage: NeoPage {
     let side: Int, source: Int, target: Int, track: NeoManagedTrack
     var title: String
   }
-  private let api: NeoAPI?, revision: Int, user: String, headers: [String:String]
+  private let api: NeoAPI?, user: String
+  private var revision: Int, headers: [String:String]
   private let original: NeoRecording
   private let scroll = UIScrollView(), stack = UIStackView(), cards = UIStackView()
   private let notice = NeoStyle.label(size:14,muted:true), status = NeoStyle.label(size:14)
@@ -28,6 +29,9 @@ final class NeoMediaToolsPage: NeoPage {
   private var start: Task<Void,Never>?, bootstrap: Task<Void,Never>?
   private var affected: Set<Int> = [], lastNoticeJob: String?
   private var configured = false
+  private var initialized = false, awaitingAuthentication = false
+  private var authenticationNotice: String?
+  private var recovery: Task<Void,Never>?
   private var selectionRevision = 0
   private var noticeBox: UIView?, statusBox: UIView?
   private var gateError = false, statusError = false
@@ -79,10 +83,9 @@ final class NeoMediaToolsPage: NeoPage {
     execute.setImage(NeoIcon.image("SubtitlesOutlined"),for:.normal); execute.titleEdgeInsets = UIEdgeInsets(top:0,left:8,bottom:0,right:0)
     execute.heightAnchor.constraint(equalToConstant:42).isActive = true; execute.widthAnchor.constraint(greaterThanOrEqualToConstant:112).isActive = true
     footer.addArrangedSubview(execute); stack.addArrangedSubview(footer)
-    observer = NotificationCenter.default.addObserver(forName:.neoAccountChanged,object:nil,queue:.main) { [weak self] _ in
-      guard let self, !self.current else { return }; self.stopped = true; self.cancelReads(); self.start?.cancel()
-      self.notice.text = "アクティブユーザーが変更されました。録画詳細から開き直してください。"; self.enabled = false
-      self.status.text = nil; self.retry.isHidden = true; self.pending = nil; self.render()
+    observer = NotificationCenter.default.addObserver(forName:.neoAccountChanged,object:nil,queue:.main) { [weak self] note in
+      guard let self, let changed = note.object as? NeoAPI, changed === self.api else { return }
+      self.accountChanged()
     }
     keyboardObserver = NotificationCenter.default.addObserver(forName:UIResponder.keyboardWillChangeFrameNotification,object:nil,queue:.main) { [weak self] note in self?.keyboardChanged(note) }
     render()
@@ -90,21 +93,66 @@ final class NeoMediaToolsPage: NeoPage {
   override func buildOpeningContent() async {
     if !configured { configureContent(); configured = true }
     await NeoContentFrame.next()
+    guard current else { accountChanged(); return }
+    await initializeContent()
+  }
+  private func initializeContent() async {
     guard let api, current, !Task.isCancelled else { return }
+    let requestRevision = revision
     do {
-      let config = try await api.configuration(); guard current, !Task.isCancelled else { return }
+      let config = try await api.configuration(); guard current, revision == requestRevision, !Task.isCancelled else { return }
       guard config.developerMode == true else { gateError = true; notice.text = "この機能はdeveloperModeでのみ利用できます。"; render(); return }
       enabled = true; notice.text = "映像・音声を再エンコードせず、選択した字幕トラックを別のMKVへコピーしたり、既存の字幕名や順序を変更したりできます。処理中は対象ファイルを再生・変更しないでください。"
-      let record = try await api.recording(original.id,refresh:true); guard current, !Task.isCancelled else { return }
+      let record = try await api.recording(original.id,refresh:true); guard current, revision == requestRevision, !Task.isCancelled else { return }
       select(0,recording:record)
-      bootstrap = Task { [weak self] in
-        if let channels = try? await api.channels(), let self, self.current, !Task.isCancelled {
-          self.channels = channels
-          for side in self.panes.indices where !self.panes[side].keyword.isEmpty { self.search(side,keyword:self.panes[side].keyword,more:false) }
-        }
-      }
-    } catch { if current { gateError = true; notice.text = error.localizedDescription } }
+      initialized = true
+      loadChannels()
+    } catch { if current, revision == requestRevision, !Task.isCancelled { gateError = true; notice.text = error.localizedDescription } }
     render()
+  }
+  private func loadChannels() {
+    guard let api, current else { return }
+    bootstrap = Task { [weak self] in
+      if let channels = try? await api.channels(), let self, self.current, !Task.isCancelled {
+        self.channels = channels
+        for side in self.panes.indices where !self.panes[side].keyword.isEmpty { self.search(side,keyword:self.panes[side].keyword,more:false) }
+      }
+    }
+  }
+  private func accountChanged() {
+    guard !stopped, let api else { return }
+    // Revalidation temporarily clears the authentication headers. It is not
+    // a user switch; keep the selection/editor until the result is known.
+    guard shell?.api === api, api.viewer == user,
+      !api.accountReady || api.profileHeaders["X-Viewer-Profile-Id"] == headers["X-Viewer-Profile-Id"] else {
+      stopped = true; cancelReads(); recovery?.cancel(); start?.cancel()
+      notice.text = "アクティブユーザーが変更されました。録画詳細から開き直してください。"; enabled = false
+      status.text = nil; retry.isHidden = true; pending = nil; render(); return
+    }
+    guard !api.accountReady || awaitingAuthentication || api.identityRevision != revision else { return }
+    cancelReads(); recovery?.cancel(); start?.cancel()
+    if !api.accountReady {
+      if !awaitingAuthentication { authenticationNotice = notice.text }
+      awaitingAuthentication = true
+      notice.text = "認証を確認しています…"; render(); return
+    }
+    revision = api.identityRevision; headers = api.profileHeaders
+    if awaitingAuthentication { notice.text = authenticationNotice; authenticationNotice = nil }
+    awaitingAuthentication = false
+    render()
+    if initialized {
+      for side in panes.indices {
+        loadTracks(side)
+        if !panes[side].keyword.isEmpty { search(side,keyword:panes[side].keyword,more:false) }
+      }
+      if channels.isEmpty { loadChannels() }
+      if job?.status == "running" { resumeWatch() }
+    } else {
+      recovery = Task { [weak self] in
+        guard let self else { return }
+        await self.initializeContent()
+      }
+    }
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews(); scroll.frame = body.bounds
@@ -122,6 +170,7 @@ final class NeoMediaToolsPage: NeoPage {
   private func cancelReads() { bootstrap?.cancel(); for pane in panes { pane.read?.cancel(); pane.search?.cancel(); pane.generation += 1; pane.searchGeneration += 1; pane.loading = false } }
   private func render() {
     cards.isHidden = !enabled; execute.isHidden = !enabled
+    cards.isUserInteractionEnabled = current
     styleBanner(noticeBox,label:notice,error:gateError)
     styleBanner(statusBox,label:status,error:statusError)
     if processing && !statusError { statusSpinner.startAnimating() } else { statusSpinner.stopAnimating() }
@@ -232,8 +281,9 @@ final class NeoMediaToolsPage: NeoPage {
   }
   private func resumeWatch() {
     guard current, let api, let job else { return }; retry.isHidden = true
+    let watchRevision = revision
     api.watchMediaJob(job,recordings:affected,revision:revision,user:user,headers:headers) { [weak self] job,error in
-      guard let self, self.current else { return }; self.job = job
+      guard let self, self.current, self.revision == watchRevision else { return }; self.job = job
       self.statusError = error != nil || job.status == "failed"
       if let error { self.status.text = "処理状況を取得できません: "+error+"\nサーバー側の処理は継続します。"; self.retry.isHidden = false }
       else if job.status == "running" { self.status.text = self.kind.progress+"するためMKVを再多重化しています。ファイルサイズによっては時間がかかります。この画面を閉じてもサーバー側の処理は継続します。" }
@@ -270,6 +320,9 @@ final class NeoMediaToolsPage: NeoPage {
   }
 #if targetEnvironment(simulator)
   var smokeEnabled: Bool { enabled }
+  var smokeCurrent: Bool { current }
+  var smokeNotice: String { notice.text ?? "" }
+  func smokeSelectedFile(_ side: Int) -> Int? { panes[side].file }
   var smokeBusy: Bool { processing }
   var smokeStatus: String { status.text ?? "" }
   var smokePanes: [NeoTrackPane] { views }
@@ -277,5 +330,5 @@ final class NeoMediaToolsPage: NeoPage {
   func smokeExecute() { execute.sendActions(for:.touchUpInside) }
   var smokeCanExecute: Bool { execute.isEnabled }
 #endif
-  deinit { if let observer { NotificationCenter.default.removeObserver(observer) }; if let keyboardObserver { NotificationCenter.default.removeObserver(keyboardObserver) }; bootstrap?.cancel(); start?.cancel(); for pane in panes { pane.read?.cancel(); pane.search?.cancel() } }
+  deinit { if let observer { NotificationCenter.default.removeObserver(observer) }; if let keyboardObserver { NotificationCenter.default.removeObserver(keyboardObserver) }; bootstrap?.cancel(); recovery?.cancel(); start?.cancel(); for pane in panes { pane.read?.cancel(); pane.search?.cancel() } }
 }

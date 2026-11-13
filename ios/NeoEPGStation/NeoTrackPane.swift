@@ -257,6 +257,7 @@ final class NeoTrackPane: UIStackView, UITextFieldDelegate, UIScrollViewDelegate
     searchResultsList.spacing = 0
     searchResultsList.translatesAutoresizingMaskIntoConstraints = false
     searchResultsScroll.translatesAutoresizingMaskIntoConstraints = false
+    searchResultsScroll.delaysContentTouches = false
     searchResultsScroll.delegate = self
     searchResultsScroll.addSubview(searchResultsList)
     NSLayoutConstraint.activate([
@@ -682,6 +683,9 @@ final class NeoTrackPane: UIStackView, UITextFieldDelegate, UIScrollViewDelegate
     let details = NeoStyle.label("\(channel) ・ \(Self.recordingDate(item.startAt))", size: 12, muted: true)
     details.numberOfLines = 1
     let labels = UIStackView(arrangedSubviews: [title, details])
+    // This stack only draws the button's title/details. The entire row,
+    // including both labels, must hit the enclosing selection button.
+    labels.isUserInteractionEnabled = false
     labels.axis = .vertical
     labels.alignment = .fill
     labels.spacing = 3

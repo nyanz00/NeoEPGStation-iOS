@@ -43,6 +43,7 @@ private final class NeoMediaToolsProtocol: URLProtocol {
   private static var jobErrors: [String: [String]] = [:]
   private static var histories: [String: [String]] = [:]
   private static var delays: [String: TimeInterval] = [:]
+  private static var completedDelayedReplies = 0
   private static var nextJobID = 0
   private var cancelled = false
   private let cancellationLock = NSLock()
@@ -61,6 +62,7 @@ private final class NeoMediaToolsProtocol: URLProtocol {
     let response = HTTPURLResponse(url: request.url!, statusCode: reply.status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
     DispatchQueue.global().asyncAfter(deadline: .now() + reply.delay) { [self] in
       cancellationLock.lock(); let stopped = cancelled; cancellationLock.unlock()
+      if reply.delay > 0 { Self.lock.lock(); Self.completedDelayedReplies += 1; Self.lock.unlock() }
       guard !stopped else { return }
       client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
       client?.urlProtocol(self, didLoad: data)
@@ -77,7 +79,7 @@ private final class NeoMediaToolsProtocol: URLProtocol {
     recordIDs = Array(records.keys.sorted().prefix(4))
     subtitles = tracks
     configDeveloperMode = developerMode
-    requests = []; counts = [:]; jobs = [:]; jobOrder = []; jobPlans = [:]; jobErrors = [:]; histories = [:]; delays = [:]; nextJobID = 0
+    requests = []; counts = [:]; jobs = [:]; jobOrder = []; jobPlans = [:]; jobErrors = [:]; histories = [:]; delays = [:]; completedDelayedReplies = 0; nextJobID = 0
   }
 
   static func setDeveloperMode(_ value: Bool) {
@@ -94,13 +96,26 @@ private final class NeoMediaToolsProtocol: URLProtocol {
     lock.lock(); delays[method + " " + path] = seconds; lock.unlock()
   }
 
+  static func setSubtitles(_ tracks: [[String: Any]], for fileID: Int) {
+    lock.lock(); subtitles[fileID] = tracks; lock.unlock()
+  }
+
   static func count(_ method: String, _ path: String) -> Int {
     lock.lock(); defer { lock.unlock() }; return counts[method + " " + path, default: 0]
+  }
+
+  static var delayedRepliesCompleted: Int {
+    lock.lock(); defer { lock.unlock() }; return completedDelayedReplies
   }
 
   static func captured(method: String, path: String) -> [[String: Any]] {
     lock.lock(); defer { lock.unlock() }
     return requests.filter { $0.method == method && $0.path == path }.map(\.body)
+  }
+
+  static func hasRequest(method: String, path: String, profileID: String, session: String) -> Bool {
+    lock.lock(); defer { lock.unlock() }
+    return requests.contains { $0.method == method && $0.path == path && $0.profileID == profileID && $0.session == session }
   }
 
   static func capturedJobIDs(kind: String) -> [String] {
@@ -141,7 +156,7 @@ private final class NeoMediaToolsProtocol: URLProtocol {
     requests.append(CapturedRequest(method: method, path: path, body: body,
       profileID: request.value(forHTTPHeaderField: "X-Viewer-Profile-Id"),
       session: request.value(forHTTPHeaderField: "X-Viewer-Session")))
-    let delay = delays[key, default: 0]
+    let delay = delays.removeValue(forKey: key) ?? 0
 
     if path == "/api/config" && method == "GET" {
       return Reply(status: 200, value: ["developerMode": configDeveloperMode, "encode": []], delay: delay)
@@ -265,6 +280,9 @@ private final class NeoMediaToolsProtocol: URLProtocol {
     shell.showRoute("recorded")
     shell.view.layoutIfNeeded()
     var checks: [String: Bool] = [:]
+    checks["recordingOptionTextAndPaddingHitButton"] = false
+    checks["recordingOptionScrollDoesNotDelayTouches"] = false
+    checks["sameIdentityAuthenticationResumePreservesSelectionAndPending"] = false
 
     func waitFor(_ condition: () -> Bool, attempts: Int = 180) async -> Bool {
       for _ in 0..<attempts {
@@ -303,6 +321,9 @@ private final class NeoMediaToolsProtocol: URLProtocol {
     }
     func waitForJob(_ page: NeoMediaToolsPage, status: String, attempts: Int = 240) async -> Bool {
       await waitFor({ !page.smokeBusy && page.smokeStatus.contains(status) }, attempts: attempts)
+    }
+    func descendants(_ root: UIView) -> [UIView] {
+      [root] + root.subviews.flatMap(descendants)
     }
 
     defer {
@@ -345,6 +366,9 @@ private final class NeoMediaToolsProtocol: URLProtocol {
       checks["failedTaskIsPolledAndShown"] = false
       checks["queueExecuteUsesSourceTargetSubtitleAndTrimmedTitle"] = false
       checks["selectionChangeDoesNotRetargetOrForgetAcceptedJob"] = false
+      checks["recordingOptionTextAndPaddingHitButton"] = false
+      checks["recordingOptionScrollDoesNotDelayTouches"] = false
+      checks["sameIdentityAuthenticationResumePreservesSelectionAndPending"] = false
       checks["requestsUseCapturedProfileHeaders"] = false
       checks["identityChangeRejectsLateTrackUpdate"] = false
       await settle(page, nav: pageNav)
@@ -366,6 +390,9 @@ private final class NeoMediaToolsProtocol: URLProtocol {
       checks["failedTaskIsPolledAndShown"] = false
       checks["queueExecuteUsesSourceTargetSubtitleAndTrimmedTitle"] = false
       checks["selectionChangeDoesNotRetargetOrForgetAcceptedJob"] = false
+      checks["recordingOptionTextAndPaddingHitButton"] = false
+      checks["recordingOptionScrollDoesNotDelayTouches"] = false
+      checks["sameIdentityAuthenticationResumePreservesSelectionAndPending"] = false
       checks["requestsUseCapturedProfileHeaders"] = false
       checks["identityChangeRejectsLateTrackUpdate"] = false
       await settle(page, nav: pageNav)
@@ -373,12 +400,55 @@ private final class NeoMediaToolsProtocol: URLProtocol {
       return checks
     }
 
-    // Select the second pane through its UI callback and verify both metadata lists.
-    page.smokePanes[1].onSelectRecording?(targetItem)
+    // Search for a recording and verify text and padding hit the actual option button.
+    let targetPane = page.smokePanes[1]
+    var parentView = targetPane.superview
+    while let current = parentView, !(current is UIScrollView) { parentView = current.superview }
+    let pageScroll = parentView as? UIScrollView
+    if let pageScroll {
+      pageScroll.scrollRectToVisible(targetPane.convert(targetPane.bounds, to: pageScroll), animated: false)
+      page.view.layoutIfNeeded()
+    }
+    let targetSearch = descendants(targetPane).compactMap { $0 as? UITextField }
+      .first(where: { $0.accessibilityLabel == "録画を検索" })
+    targetSearch?.text = "Media tools target"
+    targetSearch?.sendActions(for: .editingChanged)
+    let targetOptionReady = await waitFor {
+      descendants(targetPane).compactMap { $0 as? UIButton }
+        .contains(where: { $0.accessibilityLabel?.hasPrefix("Media tools target,") == true })
+    }
+    page.view.layoutIfNeeded()
+    let targetOption = descendants(targetPane).compactMap { $0 as? UIButton }
+      .first(where: { $0.accessibilityLabel?.hasPrefix("Media tools target,") == true })
+    if let pageScroll, let targetOption {
+      pageScroll.scrollRectToVisible(targetOption.convert(targetOption.bounds, to: pageScroll), animated: false)
+      page.view.layoutIfNeeded()
+    }
+    var hitTargetPositions = false
+    var searchScrollDoesNotDelayTouches = false
+    if targetOptionReady, let targetOption, let window = page.view.window,
+       let titleLabel = descendants(targetOption).compactMap({ $0 as? UILabel }).first(where: { $0.text == "Media tools target" }),
+       let detailsLabel = descendants(targetOption).compactMap({ $0 as? UILabel }).first(where: { $0.text?.contains("Fixture Channel") == true }) {
+      targetPane.layoutIfNeeded()
+      let positions = [
+        titleLabel.convert(CGPoint(x: titleLabel.bounds.midX, y: titleLabel.bounds.midY), to: window),
+        detailsLabel.convert(CGPoint(x: detailsLabel.bounds.midX, y: detailsLabel.bounds.midY), to: window),
+        targetOption.convert(CGPoint(x: 4, y: targetOption.bounds.midY), to: window)
+      ]
+      let hitButtons = positions.compactMap { window.hitTest($0, with: nil) as? UIButton }
+      hitTargetPositions = hitButtons.count == positions.count && hitButtons.allSatisfy { $0 === targetOption }
+      var ancestor: UIView? = targetOption
+      while let current = ancestor, !(current is UIScrollView) { ancestor = current.superview }
+      searchScrollDoesNotDelayTouches = (ancestor as? UIScrollView)?.delaysContentTouches == false
+      if let hitButton = hitButtons.first { hitButton.sendActions(for: .touchUpInside) }
+    }
+    checks["recordingOptionTextAndPaddingHitButton"] = targetOptionReady && hitTargetPositions
+    checks["recordingOptionScrollDoesNotDelayTouches"] = targetOptionReady && searchScrollDoesNotDelayTouches
+    let pickedTarget = await waitFor({ page.smokeSelectedFile(1) == targetFile })
     let bothLoaded = await waitFor({ page.smokeTracks(0).count == 3 && page.smokeTracks(1).count == 2 })
     let sourceTrack = page.smokeTracks(0).first
     let targetTrack = page.smokeTracks(1).first
-    checks["bothPanesLoadSubtitleMetadata"] = bothLoaded
+    checks["bothPanesLoadSubtitleMetadata"] = pickedTarget && bothLoaded
       && sourceTrack?.subtitleIndex == 0 && sourceTrack?.streamIndex == 12 && sourceTrack?.codecName == "ass"
       && sourceTrack?.language == "jpn" && sourceTrack?.title == "Source A" && sourceTrack?.isDefault == true
       && targetTrack?.subtitleIndex == 0 && targetTrack?.streamIndex == 31 && targetTrack?.title == "Target A"
@@ -465,9 +535,58 @@ private final class NeoMediaToolsProtocol: URLProtocol {
     let beforeIdentity = NeoMediaToolsProtocol.profileHeadersAreValid(profileID: "21", session: "fixture-session")
     checks["requestsUseCapturedProfileHeaders"] = beforeIdentity
 
+    // A token refresh for the same user/profile temporarily suspends the page.
+    // Keep the queued editor and both file selections, reload, and ignore the
+    // delayed response captured under the old session.
+    if let selectedTrack = page.smokeTracks(0).first {
+      page.smokePanes[0].onQueue?(selectedTrack)
+      page.smokePanes[1].onPendingTitle?("Resume smoke transfer")
+      let oldFiles = [page.smokeSelectedFile(0), page.smokeSelectedFile(1)]
+      let jobsBeforeResume = ["transfer", "rename", "reorder"].map { NeoMediaToolsProtocol.capturedJobIDs(kind: $0).count }
+      let oldSession = "fixture-session"
+      let refreshedSession = "fixture-refreshed-session"
+      let delayedPath = "/api/videos/\(sourceFile)/subtitles"
+      let targetPath = "/api/videos/\(alternateTargetFile)/subtitles"
+      let readsBeforeDelayed = NeoMediaToolsProtocol.count("GET", delayedPath)
+      let targetReadsBeforeDelayed = NeoMediaToolsProtocol.count("GET", targetPath)
+      let completedBeforeDelayed = NeoMediaToolsProtocol.delayedRepliesCompleted
+      NeoMediaToolsProtocol.setDelay(method: "GET", path: delayedPath, seconds: 0.4)
+      page.smokePanes[0].onRetry?()
+      let staleReadStarted = await waitFor({ NeoMediaToolsProtocol.count("GET", delayedPath) > readsBeforeDelayed })
+      api.suspendAuthentication()
+      let suspended = await waitFor({ !page.smokeCurrent })
+      let suspendedStatePreserved = oldFiles == [page.smokeSelectedFile(0), page.smokeSelectedFile(1)]
+        && !page.smokeCanExecute && page.smokeNotice.contains("認証")
+      NeoMediaToolsProtocol.setSubtitles([
+        track(0, stream: 12, title: "Resumed Source A", display: "Japanese", codec: "ass", language: "jpn", isDefault: true, isForced: false),
+        track(1, stream: 15, title: "Resumed Source B", display: "English", codec: "subrip", language: "eng", isDefault: false, isForced: true),
+        track(2, stream: 18, title: "Resumed Source C", display: "Commentary", codec: "ass", language: "jpn", isDefault: false, isForced: false)
+      ], for: sourceFile)
+      api.activate(user: "7", headers: ["X-Viewer-Profile-Id": "21", "X-Viewer-Session": refreshedSession])
+      let resumed = await waitFor {
+        page.smokeCurrent && page.smokeTracks(0).first?.title == "Resumed Source A" && page.smokeCanExecute
+      }
+      let delayedReplyFinished = await waitFor({ NeoMediaToolsProtocol.delayedRepliesCompleted > completedBeforeDelayed })
+      let lateResponseDidNotReplaceResumedData = page.smokeTracks(0).first?.title == "Resumed Source A"
+      let resumedRequestUsedRefreshedSession = NeoMediaToolsProtocol.hasRequest(method: "GET", path: delayedPath, profileID: "21", session: refreshedSession)
+      let bothPanesReloadedWithRefreshedSession = NeoMediaToolsProtocol.count("GET", targetPath) > targetReadsBeforeDelayed
+        && NeoMediaToolsProtocol.hasRequest(method: "GET", path: targetPath, profileID: "21", session: refreshedSession)
+      NeoMediaToolsProtocol.setSubtitles(sourceTracks, for: sourceFile)
+      api.activate(user: "7", headers: ["X-Viewer-Profile-Id": "21", "X-Viewer-Session": oldSession])
+      let activationWithoutSuspensionRemainsUsable = await waitFor {
+        page.smokeCurrent && page.smokeTracks(0).count == 3 && page.smokeCanExecute
+      }
+      checks["sameIdentityAuthenticationResumePreservesSelectionAndPending"] = staleReadStarted && suspended
+        && suspendedStatePreserved && resumed && delayedReplyFinished && lateResponseDidNotReplaceResumedData
+        && resumedRequestUsedRefreshedSession && bothPanesReloadedWithRefreshedSession && activationWithoutSuspensionRemainsUsable
+        && oldFiles == [page.smokeSelectedFile(0), page.smokeSelectedFile(1)]
+        && jobsBeforeResume == ["transfer", "rename", "reorder"].map { NeoMediaToolsProtocol.capturedJobIDs(kind: $0).count }
+    } else { checks["sameIdentityAuthenticationResumePreservesSelectionAndPending"] = false }
+
     // Make one subtitle read late, switch identity while it is in flight, and
     // ensure its response cannot repopulate the old page.
     await settle(page, nav: pageNav)
+    let identityDelayedRepliesBefore = NeoMediaToolsProtocol.delayedRepliesCompleted
     NeoMediaToolsProtocol.setDelay(method: "GET", path: "/api/videos/\(sourceFile)/subtitles", seconds: 0.45)
     let readsBeforeIdentityPage = NeoMediaToolsProtocol.count("GET", "/api/videos/\(sourceFile)/subtitles")
     guard let identityPageResult = await open(sourceItem) else {
@@ -481,8 +600,8 @@ private final class NeoMediaToolsProtocol: URLProtocol {
     let lateReadStarted = await waitFor({ NeoMediaToolsProtocol.count("GET", "/api/videos/\(sourceFile)/subtitles") > readsBeforeIdentityPage })
     api.activate(user: "9", headers: ["X-Viewer-Profile-Id": "22", "X-Viewer-Session": "alternate-fixture"])
     _ = await waitFor({ !identityPage.smokeEnabled })
-    try? await Task.sleep(nanoseconds: 600_000_000)
-    checks["identityChangeRejectsLateTrackUpdate"] = lateReadStarted && !identityPage.smokeEnabled && identityPage.smokeTracks(0).isEmpty
+    let lateReplyFinished = await waitFor({ NeoMediaToolsProtocol.delayedRepliesCompleted > identityDelayedRepliesBefore })
+    checks["identityChangeRejectsLateTrackUpdate"] = lateReadStarted && lateReplyFinished && !identityPage.smokeEnabled && identityPage.smokeTracks(0).isEmpty
     await settle(identityPage, nav: identityNav)
 
     api.activate(user: "7", headers: ["X-Viewer-Profile-Id": "21", "X-Viewer-Session": "fixture-session"])
