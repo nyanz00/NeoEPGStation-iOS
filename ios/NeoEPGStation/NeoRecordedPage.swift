@@ -36,7 +36,7 @@ final class NeoRecordedCard: UICollectionViewCell {
   let descriptionLabel = NeoStyle.label(size: 12)
   var mobile = true { didSet { if oldValue != mobile { setNeedsLayout() } } }
   private let editCheck = UIImageView()
-  private var editing = false, editSelected = false, focused = false
+  private var editing = false, editSelected = false, returnHighlight = false
   func setEditing(_ value: Bool, selected: Bool) {
     editing = value; editSelected = selected; more.isHidden = value; editCheck.isHidden = !value
     editCheck.image = NeoIcon.image(selected ? "CheckBox" : "CheckBoxOutlineBlank")
@@ -44,14 +44,14 @@ final class NeoRecordedCard: UICollectionViewCell {
     updateAppearance(); setNeedsLayout()
   }
   func setFocused(_ focused: Bool) {
-    self.focused = focused; updateAppearance()
+    returnHighlight = focused; updateAppearance()
   }
   private func updateAppearance() {
     // MUI dark warning.main orange[400], action.hover white at 0.08.
-    contentView.layer.borderWidth = focused || editSelected ? 2 : 0
-    contentView.layer.borderColor = (focused ? UIColor(red: 255/255, green: 167/255, blue: 38/255, alpha: 1) : NeoStyle.accent).cgColor
-    contentView.backgroundColor = editSelected ? UIColor.white.withAlphaComponent(0.16) : focused ? UIColor.white.withAlphaComponent(0.08) : NeoStyle.paper
-    if focused || editSelected { accessibilityTraits.insert(.selected) } else { accessibilityTraits.remove(.selected) }
+    contentView.layer.borderWidth = returnHighlight || editSelected ? 2 : 0
+    contentView.layer.borderColor = (returnHighlight ? UIColor(red: 255/255, green: 167/255, blue: 38/255, alpha: 1) : NeoStyle.accent).cgColor
+    contentView.backgroundColor = editSelected ? UIColor.white.withAlphaComponent(0.16) : returnHighlight ? UIColor.white.withAlphaComponent(0.08) : NeoStyle.paper
+    if returnHighlight || editSelected { accessibilityTraits.insert(.selected) } else { accessibilityTraits.remove(.selected) }
   }
   var onMore: ((UIView) -> Void)?
   private lazy var more: UIButton = NeoStyle.iconButton("MoreVert", label: "録画メニュー") { [weak self] in
