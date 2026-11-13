@@ -21,10 +21,21 @@ def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
     marker.unlink(missing_ok=True)
     os.environ['SIMCTL_CHILD_NEO_EPG_UI_SMOKE'] = stage
     launched_at = time.time()
-    launched = run('xcrun', 'simctl', 'launch',
-                  f'--stdout={ui_container}/Documents/ui-{stage}-stdout.txt',
-                  f'--stderr={ui_container}/Documents/ui-{stage}-stderr.txt',
-                  udid, 'io.github.nyanz00.NeoEPGStation')
+    launch_arguments = ('xcrun', 'simctl', 'launch',
+                        f'--stdout={ui_container}/Documents/ui-{stage}-stdout.txt',
+                        f'--stderr={ui_container}/Documents/ui-{stage}-stderr.txt',
+                        udid, 'io.github.nyanz00.NeoEPGStation')
+    try:
+        launched = run(*launch_arguments)
+    except subprocess.TimeoutExpired:
+        # A freshly booted simulator can stall in SpringBoard before launch.
+        # Restart only the synthetic UI scenario, never a production mutation.
+        Path(f'dist/{prefix}-{stage}-launch-retry.txt').write_text('simctl launch timed out after 120s; retrying once\n')
+        run('xcrun', 'simctl', 'bootstatus', udid, '-b', timeout=180)
+        subprocess.run(['xcrun', 'simctl', 'terminate', udid, 'io.github.nyanz00.NeoEPGStation'],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+        marker.unlink(missing_ok=True)
+        launched = run(*launch_arguments, timeout=180)
     for _ in range(90):
         if marker.exists():
             break

@@ -125,6 +125,7 @@ jobs:
       - name: Check recorded bulk models and API
         if: ${{ inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'recorded-bulk' }}
         run: |
+          set -o pipefail
           mkdir -p build/native-tests dist
           swiftc -parse-as-library ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift ios/NeoEPGStation/NeoRecordedBulk.swift tests/recorded-bulk/main.swift -o build/native-tests/recorded-bulk
           build/native-tests/recorded-bulk | tee dist/recorded-bulk-models.txt
@@ -558,6 +559,13 @@ jobs:
           python3 scripts/verify-reused-build.py
           ditto -x -k reused/artifact/dist/simulator-app.zip build/simulator/Build/Products/Release-iphonesimulator
           codesign --verify --deep --strict build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app
+      - name: Check recorded bulk models and API
+        if: ${{ inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'recorded-bulk' }}
+        run: |
+          set -o pipefail
+          mkdir -p build/native-tests dist
+          swiftc -parse-as-library ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift ios/NeoEPGStation/NeoRecordedBulk.swift tests/recorded-bulk/main.swift -o build/native-tests/recorded-bulk
+          build/native-tests/recorded-bulk | tee dist/recorded-bulk-models.txt
       - name: Check reused application UI
         id: reused-checks
         run: |

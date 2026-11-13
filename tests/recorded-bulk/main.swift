@@ -17,7 +17,18 @@ private final class NeoRecordedBulkProtocol: URLProtocol {
   }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
   override func startLoading() {
-    let body = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    var data = request.httpBody
+    if data == nil, let stream = request.httpBodyStream {
+      stream.open(); defer { stream.close() }
+      var collected = Data(), buffer = [UInt8](repeating: 0, count: 4096)
+      while stream.hasBytesAvailable {
+        let count = stream.read(&buffer, maxLength: buffer.count)
+        guard count > 0 else { break }
+        collected.append(buffer, count: count)
+      }
+      data = collected
+    }
+    let body = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
     let headers = (request.allHTTPHeaderFields ?? [:]).reduce(into: [String: String]()) { result, pair in
       result[pair.key.lowercased()] = pair.value
     }
