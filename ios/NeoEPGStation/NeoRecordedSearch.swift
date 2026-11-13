@@ -14,12 +14,19 @@ final class NeoRecordedSearch: UIViewController {
   var smokeValid: Bool { stack.arrangedSubviews.filter { $0 is UITextField }.count == 3 && options?.encode.count == 2 }
   func smokeInputChecks() -> [String:Bool] {
     guard let keyword = fields["キーワード"], let start = fields["開始日"], let end = fields["終了日"] else { return ["searchFieldsExist":false] }
+    let originalDraft = draft, originalApply = onApply
+    defer { draft = originalDraft; onApply = originalApply }
     var checks = ["keywordFocusedOnOpen":keyword.isFirstResponder]
+    let originalKeyword = keyword.text, originalDraftKeyword = draft.keyword
+    keyword.text = "最新の検索語"
+    checks["returnSubmitsLatestKeyword"] = syncKeywordForSubmission(keyword) && draft.keyword == "最新の検索語"
+    keyword.text = originalKeyword; draft.keyword = originalDraftKeyword
     keyword.text = "入力を維持"; keyword.sendActions(for:.editingChanged)
     keyword.selectedTextRange = keyword.textRange(from:keyword.beginningOfDocument,to:keyword.beginningOfDocument)
     loadOptions() // The actual successful candidate-load path calls render().
     checks["candidateRefreshKeepsKeyboardAndText"] = fields["キーワード"] === keyword && keyword.isFirstResponder && keyword.text == "入力を維持"
     checks["candidateRefreshKeepsCaret"] = keyword.selectedTextRange.map { keyword.offset(from:keyword.beginningOfDocument,to:$0.start) == 0 } ?? false
+    checks["keywordUsesSearchReturnKey"] = keyword.returnKeyType == .search
     start.text = "２０２６１１１２"; start.sendActions(for:.editingChanged)
     checks["datePasteFormattedAndCanonical"] = start.text == "2026/11/12" && draft.startDate == "2026-11-12"
     end.text = "20261113"; end.sendActions(for:.editingChanged)
@@ -145,6 +152,15 @@ final class NeoRecordedSearch: UIViewController {
     }
     if field.text != value { field.text = value }
     field.placeholder = placeholder; field.textColor = .white
+    if title == "キーワード" {
+      field.returnKeyType = .search
+      let returnID = UIAction.Identifier("recorded-search-keyword-return")
+      field.removeAction(identifiedBy: returnID, for: .editingDidEndOnExit)
+      field.addAction(UIAction(identifier: returnID) { [weak self, weak field] _ in
+        guard let self, let field, self.syncKeywordForSubmission(field) else { return }
+        self.apply()
+      }, for: .editingDidEndOnExit)
+    }
     field.autocorrectionType = .no; field.autocapitalizationType = .none; field.clearButtonMode = .whileEditing
     field.keyboardType = isDate ? .asciiCapableNumberPad : numeric ? .numberPad : .default; field.borderStyle = .roundedRect
     field.backgroundColor = NeoStyle.background
@@ -161,6 +177,11 @@ final class NeoRecordedSearch: UIViewController {
       }
       change(text)
     }, for: .editingChanged); stack.addArrangedSubview(field)
+  }
+  private func syncKeywordForSubmission(_ field: UITextField) -> Bool {
+    guard field.markedTextRange == nil else { return false }
+    draft.keyword = field.text ?? ""
+    return true
   }
   private func choice(_ title: String, value: String, enabled: Bool = true, action: @escaping () -> Void) {
     stack.addArrangedSubview(NeoStyle.label(title))

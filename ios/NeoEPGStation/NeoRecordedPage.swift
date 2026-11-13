@@ -35,12 +35,23 @@ final class NeoRecordedCard: UICollectionViewCell {
   let channel = NeoStyle.label(size: 12, muted: true), time = NeoStyle.label(size: 12, muted: true)
   let descriptionLabel = NeoStyle.label(size: 12)
   var mobile = true { didSet { if oldValue != mobile { setNeedsLayout() } } }
+  private let editCheck = UIImageView()
+  private var editing = false, editSelected = false, focused = false
+  func setEditing(_ value: Bool, selected: Bool) {
+    editing = value; editSelected = selected; more.isHidden = value; editCheck.isHidden = !value
+    editCheck.image = NeoIcon.image(selected ? "CheckBox" : "CheckBoxOutlineBlank")
+    editCheck.tintColor = selected ? NeoStyle.accent : .white.withAlphaComponent(0.7)
+    updateAppearance(); setNeedsLayout()
+  }
   func setFocused(_ focused: Bool) {
+    self.focused = focused; updateAppearance()
+  }
+  private func updateAppearance() {
     // MUI dark warning.main orange[400], action.hover white at 0.08.
-    contentView.layer.borderWidth = focused ? 2 : 0
-    contentView.layer.borderColor = UIColor(red: 255/255, green: 167/255, blue: 38/255, alpha: 1).cgColor
-    contentView.backgroundColor = focused ? UIColor.white.withAlphaComponent(0.08) : NeoStyle.paper
-    if focused { accessibilityTraits.insert(.selected) } else { accessibilityTraits.remove(.selected) }
+    contentView.layer.borderWidth = focused || editSelected ? 2 : 0
+    contentView.layer.borderColor = (focused ? UIColor(red: 255/255, green: 167/255, blue: 38/255, alpha: 1) : NeoStyle.accent).cgColor
+    contentView.backgroundColor = editSelected ? UIColor.white.withAlphaComponent(0.16) : focused ? UIColor.white.withAlphaComponent(0.08) : NeoStyle.paper
+    if focused || editSelected { accessibilityTraits.insert(.selected) } else { accessibilityTraits.remove(.selected) }
   }
   var onMore: ((UIView) -> Void)?
   private lazy var more: UIButton = NeoStyle.iconButton("MoreVert", label: "録画メニュー") { [weak self] in
@@ -50,6 +61,9 @@ final class NeoRecordedCard: UICollectionViewCell {
     super.init(frame: frame); contentView.backgroundColor = NeoStyle.paper; contentView.layer.cornerRadius = 6
     contentView.clipsToBounds = true
     [thumbnail, title, channel, time, descriptionLabel, more].forEach(contentView.addSubview)
+    editCheck.isUserInteractionEnabled = false; editCheck.isHidden = true
+    editCheck.backgroundColor = .black.withAlphaComponent(0.45); editCheck.layer.cornerRadius = 21
+    editCheck.contentMode = .center; contentView.addSubview(editCheck)
     more.imageView?.transform = CGAffineTransform(scaleX: 20/24, y: 20/24)
     accessibilityIdentifier = "recorded-card"
   }
@@ -61,13 +75,14 @@ final class NeoRecordedCard: UICollectionViewCell {
     thumbnail.frame = CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight)
     let x = mobile ? imageWidth + 8 : 8, y = mobile ? (contentView.bounds.height - 90) / 2 : imageHeight + 8
     let bodyWidth = width - x - 8
-    title.frame = CGRect(x: x, y: y + 5, width: max(0, bodyWidth - 32), height: 20)
+    title.frame = CGRect(x: x, y: y + 5, width: max(0, bodyWidth - (editing ? 0 : 32)), height: 20)
+    editCheck.frame = CGRect(x:2,y:2,width:42,height:42)
     more.frame = CGRect(x: width - 38, y: y, width: 30, height: 30)
     channel.frame = CGRect(x: x, y: y + 30, width: bodyWidth, height: 20)
     time.frame = CGRect(x: x, y: y + 50, width: bodyWidth, height: 20)
     descriptionLabel.frame = CGRect(x: x, y: y + 70, width: bodyWidth, height: 20)
   }
-  override func prepareForReuse() { super.prepareForReuse(); thumbnail.load(nil); onMore = nil; setFocused(false) }
+  override func prepareForReuse() { super.prepareForReuse(); thumbnail.load(nil); onMore = nil; setEditing(false,selected:false); setFocused(false) }
   func configure(_ item: NeoRecording, channelName: String, api: NeoAPI?, mobile: Bool, fadeThumbnail: Bool) {
     self.mobile = mobile; title.text = item.name; channel.text = channelName
     time.text = NeoProgramText.interval(start: item.startAt, end: item.endAt)
@@ -192,6 +207,11 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   private let message = NeoStyle.label(size: 14, muted: true)
   private let refresh = UIRefreshControl()
   private var mutationReloadNeeded = false
+  private var editMode = false, selectedIDs: Set<Int> = []
+  private var editViewer: String?, editProfile: String?
+  private var bulkActions: NeoRecordedBulkActions?
+  private var bulkMobile = true
+  private var selectedRecords: [NeoRecording] { records.filter { selectedIDs.contains($0.id) } }
   // Card xs/sm changes at 600; pagination uses a separate 500px query in Web.
   var mobile: Bool { collection.bounds.width < 600 }
   var cardHeight: CGFloat { mobile ? 108 : floor(itemWidth * 9 / 16) + 106 }
@@ -224,6 +244,11 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     loadUsers()
     observers.append(NotificationCenter.default.addObserver(forName: .neoAccountChanged, object: nil, queue: .main) { [weak self] note in
       guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
+      if self.editMode {
+        if self.editViewer != api.viewer || (api.accountReady && self.editProfile != api.profileHeaders["X-Viewer-Profile-Id"]) {
+          self.setEditMode(false)
+        } else { self.updateEditHeader() }
+      }
       if !self.userFilterExplicit {
         let id = Int(api.viewer).flatMap { $0 > 0 ? $0 : nil }
         self.locatedUserID = id
@@ -248,18 +273,20 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     observers.append(NotificationCenter.default.addObserver(forName:.neoRecordedChanged,object:nil,queue:.main) { [weak self] note in
       guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
       self.clearCache(); self.mutationReloadNeeded = true
+      if self.bulkActions != nil { return }
       if self.viewIfLoaded?.window != nil, self.navigationController?.topViewController === self {
         self.mutationReloadNeeded = false; self.reload(targetPage:self.page,preserveOffset:true)
       } else { self.task?.cancel() }
     })
-    actions = [NeoStyle.iconButton("SearchOutlined", label: "録画検索") { [weak self] in self?.search() },
-      NeoStyle.iconButton("MoreVert", label: "録画一覧メニュー") { [weak self] in self?.showOptions() }]
+    updateEditHeader()
     reload()
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
     let frame = body.bounds
     let changed = collection.bounds.size != frame.size; collection.frame = frame
+    let narrow = (view.window?.bounds.width ?? view.bounds.width) < 600
+    if narrow != bulkMobile { bulkMobile = narrow; updateEditHeader() }
     if changed {
       // Layout invalidation resizes cells; it does not call configure again.
       // Update the content mode of retained cells as well as their outer frames.
@@ -364,7 +391,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         if let cached { result = cached }
         else {
 #if targetEnvironment(simulator)
-        if self.shell?.smokeStage.isEmpty == false, !["recording-features.invalid","recording-actions.invalid"].contains(api?.base.host ?? "") { result = Self.fixtures }
+        if self.shell?.smokeStage.isEmpty == false, !["recording-features.invalid","recording-actions.invalid","recorded-bulk.invalid"].contains(api?.base.host ?? "") { result = Self.fixtures }
         else { guard let requestAPI = api else { return }; result = try await requestAPI.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search) }
 #else
         guard let requestAPI = api else { return }; result = try await requestAPI.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search)
@@ -383,6 +410,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         let late = Set(urls)
         guard self.shell?.api === api, api?.identityRevision == revision, api?.isHalfWidthDisplayed == halfWidth else { return }
         self.page = requestedPage; self.records = result.records; self.total = result.total
+        self.selectedIDs.formIntersection(Set(result.records.map(\.id))); self.updateEditHeader()
         self.lateThumbnails = late
         self.message.text = result.records.isEmpty ? "録画がありません" : nil
         self.collection.reloadData()
@@ -432,7 +460,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { interacting = false; prepareVisibleDetails() }
   override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); preparationTask?.cancel(); shell?.api?.pauseDetailPreparation() }
   private func selectPage(_ value: Int) {
-    guard value != page, (1...max(1, Int(ceil(Double(total) / Double(pageLength))))).contains(value) else { return }
+    guard !editMode, value != page, (1...max(1, Int(ceil(Double(total) / Double(pageLength))))).contains(value) else { return }
     reload(targetPage: value)
   }
   private func jumpToPage() {
@@ -546,9 +574,98 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     guard let anchor = actions.last else { return }
     let items = [("編集", "EditOutlined"), ("クリーンアップ", "DeleteSweepOutlined"), ("アップロード", "UploadOutlined")]
     shell?.showPopup(anchor: anchor, entries: items.map { title, icon in
-      NeoMenuEntry(title: title, icon: icon) { [weak self] in self?.alert("\(title) の操作は準備中です。") }
+      NeoMenuEntry(title: title, icon: icon) { [weak self] in
+        if title == "編集" { self?.setEditMode(true) }
+        else { self?.alert("\(title) の操作は準備中です。") }
+      }
     }, appearance: .pageActions)
   }
+  private func setEditMode(_ editing: Bool) {
+    editMode = editing
+    if editing { editViewer = shell?.api?.viewer; editProfile = shell?.api?.profileHeaders["X-Viewer-Profile-Id"] }
+    else { selectedIDs.removeAll(); editViewer = nil; editProfile = nil }
+    clearHighlight(); updateEditHeader(); updateEditCards()
+    collection.collectionViewLayout.invalidateLayout()
+  }
+  private func updateEditCards() {
+    for case let card as NeoRecordedCard in collection.visibleCells {
+      guard let index = collection.indexPath(for:card), records.indices.contains(index.item) else { continue }
+      card.setEditing(editMode,selected:selectedIDs.contains(records[index.item].id))
+    }
+  }
+  private func updateEditHeader() {
+    guard isViewLoaded else { return }
+    if !editMode {
+      titleLabel.text = "録画済み"; headerAccessory = userButton
+      actions = [NeoStyle.iconButton("SearchOutlined",label:"録画検索") { [weak self] in self?.search() },
+        NeoStyle.iconButton("MoreVert",label:"録画一覧メニュー") { [weak self] in self?.showOptions() }]
+      return
+    }
+    headerAccessory = nil
+    let selected = selectedRecords, all = !records.isEmpty && records.allSatisfy { selectedIDs.contains($0.id) }
+    let size = selected.reduce(0.0) { total,item in total + (item.videoFiles ?? []).reduce(0) { $0+$1.size } }
+    titleLabel.text = "\(selected.count) 件選択 (\(NeoRecordedBulk.formattedSize(size)))"
+    let authenticated = shell?.api?.accountReady == true
+    let enabled = !selected.isEmpty && bulkActions == nil && authenticated
+    func button(_ icon: String, _ label: String, enabled: Bool = true, action: @escaping () -> Void) -> UIButton {
+      let button = NeoStyle.iconButton(icon,label:label,action:action); button.isEnabled = enabled; return button
+    }
+    var buttons = [button("SelectAllOutlined",all ? "すべて解除" : "すべて選択",enabled:bulkActions == nil && authenticated) { [weak self] in
+      guard let self else { return }; self.selectedIDs = all ? [] : Set(self.records.map(\.id))
+      self.updateEditHeader(); self.updateEditCards()
+    }]
+    if bulkMobile {
+      buttons.append(button("Multicast", "一括操作",enabled:enabled) { [weak self] in self?.showBulkChoices() })
+    } else {
+      buttons.append(button("ControlPoint", "エンコードを一括追加",enabled:enabled) { [weak self] in self?.startBulk(.encode) })
+      buttons.append(button("AccountCircleOutlined", "ユーザーを一括変更",enabled:enabled) { [weak self] in self?.startBulk(.user) })
+      buttons.append(button("DriveFileMoveOutlined", "サブディレクトリへ一括移動",enabled:enabled) { [weak self] in self?.startBulk(.move) })
+    }
+    buttons.append(button("DeleteOutlineOutlined","削除",enabled:enabled) { [weak self] in self?.startBulk(.delete) })
+    buttons.append(button("Close","編集を終了",enabled:bulkActions == nil) { [weak self] in self?.setEditMode(false) })
+    actions = buttons
+  }
+  private func showBulkChoices() {
+    guard editMode, !selectedRecords.isEmpty, bulkActions == nil, presentedViewController == nil else { return }
+    present(NeoBulkActionsDialog { [weak self] command in self?.startBulk(command) },animated:true)
+  }
+  private func startBulk(_ command: NeoBulkRecordingCommand) {
+    guard editMode, !selectedRecords.isEmpty, bulkActions == nil, presentedViewController == nil,
+      let shell, let api = shell.api, api.accountReady else { return }
+    let revision = api.identityRevision
+    let operation = NeoRecordedBulkActions(host:self,shell:shell,api:api,records:selectedRecords)
+    bulkActions = operation; updateEditHeader()
+    operation.onFinish = { [weak self,weak api] remaining in
+      guard let self else { return }; self.bulkActions = nil
+      guard let api, self.shell?.api === api, api.identityRevision == revision else { return }
+      if let remaining {
+        self.selectedIDs = remaining.intersection(Set(self.records.map(\.id))); self.editMode = !self.selectedIDs.isEmpty
+      }
+      self.updateEditHeader(); self.updateEditCards(); self.collection.collectionViewLayout.invalidateLayout()
+      if remaining != nil || self.mutationReloadNeeded {
+        self.mutationReloadNeeded = false; self.clearCache(); self.reload(targetPage:self.page,preserveOffset:true)
+      }
+    }
+    operation.start(command)
+  }
+#if targetEnvironment(simulator)
+  var smokeEditing: Bool { editMode }
+  var smokeSelectedIDs: Set<Int> { selectedIDs }
+  var smokeBulkDialog: NeoBulkRecordingDialog? { bulkActions?.smokeDialog }
+  func smokeEnterEditing() { setEditMode(true) }
+  func smokeEndEditing() { setEditMode(false) }
+  func smokeToggleRecording(_ id: Int) {
+    guard let index = records.firstIndex(where:{$0.id == id}) else { return }
+    collectionView(collection,didSelectItemAt:IndexPath(item:index,section:0))
+  }
+  func smokeOpenBulk(_ command: NeoBulkRecordingCommand) { startBulk(command) }
+  var smokeEditActionNames: [String] { actions.compactMap(\.accessibilityLabel) }
+  var smokePaginationHidden: Bool {
+    collectionView(collection,layout:collection.collectionViewLayout,referenceSizeForFooterInSection:0).height == 0
+      && collectionView(collection,layout:collection.collectionViewLayout,referenceSizeForHeaderInSection:0).height == 0
+  }
+  func smokeFixtureRefresh() { clearCache(); reload(targetPage:page,preserveOffset:true) }
+#endif
   func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int { records.count }
   func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
     let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "card", for: indexPath) as! NeoRecordedCard
@@ -557,12 +674,20 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     cell.configure(item, channelName: item.channelName ?? item.channelId.flatMap { shell?.channels[$0] } ?? "", api: shell?.api,
       mobile: mobile, fadeThumbnail: thumbnailURL.map { lateThumbnails.contains($0) } ?? false)
     cell.setFocused(item.id == highlightID)
+    cell.setEditing(editMode,selected:selectedIDs.contains(item.id))
 #if targetEnvironment(simulator)
     if shell?.smokeStage.isEmpty == false { cell.thumbnail.showFixture(item.id) }
 #endif
     cell.onMore = { [weak self] anchor in self?.showRecordingMenu(item, anchor: anchor, detail: false) }; return cell
   }
-  func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) { shell?.openDetail(records[indexPath.item]) }
+  func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+    guard records.indices.contains(indexPath.item) else { return }
+    if editMode {
+      let id = records[indexPath.item].id
+      if selectedIDs.contains(id) { selectedIDs.remove(id) } else { selectedIDs.insert(id) }
+      updateEditHeader(); updateEditCards()
+    } else { shell?.openDetail(records[indexPath.item]) }
+  }
   func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
     prepareVisibleDetails()
     (cell as? NeoRecordedCard)?.mobile = mobile
@@ -576,10 +701,10 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, minimumLineSpacingForSectionAt section: Int) -> CGFloat { mobile ? 4 : 8 }
   func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, minimumInteritemSpacingForSectionAt section: Int) -> CGFloat { mobile ? 4 : 8 }
   func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, referenceSizeForFooterInSection section: Int) -> CGSize {
-    CGSize(width: collectionView.bounds.width, height: total > pageLength ? 72 : 0)
+    CGSize(width: collectionView.bounds.width, height: !editMode && total > pageLength ? 72 : 0)
   }
   func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, referenceSizeForHeaderInSection section: Int) -> CGSize {
-    CGSize(width:collectionView.bounds.width,height:shell?.api?.topRecordedPagination == true && total > pageLength ? 72 : 0)
+    CGSize(width:collectionView.bounds.width,height:!editMode && shell?.api?.topRecordedPagination == true && total > pageLength ? 72 : 0)
   }
   func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
     let footer = collectionView.dequeueReusableSupplementaryView(ofKind: kind, withReuseIdentifier: "pages", for: indexPath) as! NeoPaginationFooter

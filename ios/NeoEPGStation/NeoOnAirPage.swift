@@ -415,6 +415,8 @@ class NeoLiveDialog: UIViewController {
   var titleInset: CGFloat? { nil }
   var titleVerticalInset: CGFloat? { nil }
   var contentBackground: UIColor { UIColor.white.withAlphaComponent(0.08) }
+  var contentHorizontalInset: CGFloat { 24 }
+  var screenHorizontalInset: CGFloat { 12 }
   private let card = UIView(), scroll = UIScrollView(), stack = UIStackView(), actions = UIStackView()
   private let headingLabel = NeoStyle.label(size:20,bold:true), contentFill = UIView(), topLine = UIView(), bottomLine = UIView()
   private lazy var closeButton = NeoStyle.iconButton("Close",label:"閉じる") { [weak self] in self?.cancel() }
@@ -477,8 +479,8 @@ class NeoLiveDialog: UIViewController {
     return button
   }
   override func viewDidLayoutSubviews() {
-    super.viewDidLayoutSubviews(); let width = min(maximumWidth,max(0,view.bounds.width-24))
-    let content = stack.systemLayoutSizeFitting(CGSize(width:width-48,height:UIView.layoutFittingCompressedSize.height),withHorizontalFittingPriority:.required,verticalFittingPriority:.fittingSizeLevel).height
+    super.viewDidLayoutSubviews(); let width = min(maximumWidth,max(0,view.bounds.width-2*screenHorizontalInset))
+    let content = stack.systemLayoutSizeFitting(CGSize(width:width-2*contentHorizontalInset,height:UIView.layoutFittingCompressedSize.height),withHorizontalFittingPriority:.required,verticalFittingPriority:.fittingSizeLevel).height
     let inset = titleInset ?? NeoStyle.dialogTitleInset(viewportWidth:view.bounds.width)
     let verticalInset = titleVerticalInset ?? inset
     let titleWidth = width-2*inset-(showsCloseButton ? 40 : 0)
@@ -490,7 +492,7 @@ class NeoLiveDialog: UIViewController {
     if showsCloseButton { closeButton.frame = CGRect(x:width-(view.bounds.width >= 600 ? 16 : 12)-36,y:view.bounds.width >= 600 ? 16 : 12,width:36,height:36) }
     contentFill.frame = CGRect(x:0,y:header,width:width,height:height-header-60)
     topLine.frame = CGRect(x:0,y:header,width:width,height:1); bottomLine.frame = CGRect(x:0,y:height-60,width:width,height:1)
-    scroll.frame = CGRect(x:24,y:header+16,width:width-48,height:max(0,height-header-92)); actions.frame = CGRect(x:12,y:height-54,width:width-24,height:48)
+    scroll.frame = CGRect(x:contentHorizontalInset,y:header+16,width:width-2*contentHorizontalInset,height:max(0,height-header-92)); actions.frame = CGRect(x:12,y:height-54,width:width-24,height:48)
   }
 }
 
