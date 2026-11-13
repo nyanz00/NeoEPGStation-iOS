@@ -113,6 +113,7 @@ final class NeoMediaToolsPage: NeoPage {
   private func loadChannels() {
     guard let api, current else { return }
     bootstrap = Task { [weak self] in
+      guard !Task.isCancelled else { return }
       if let channels = try? await api.channels(), let self, self.current, !Task.isCancelled {
         self.channels = channels
         for side in self.panes.indices where !self.panes[side].keyword.isEmpty { self.search(side,keyword:self.panes[side].keyword,more:false) }
@@ -140,6 +141,12 @@ final class NeoMediaToolsPage: NeoPage {
     if awaitingAuthentication { notice.text = authenticationNotice; authenticationNotice = nil }
     awaitingAuthentication = false
     render()
+    resumeContent()
+  }
+  private func resumeContent(appearing: Bool = false) {
+    // A retained page in another tab must not start background reads. It will
+    // refresh when it becomes visible again, using the renewed credentials.
+    guard current, appearing || viewIfLoaded?.window != nil else { return }
     if initialized {
       for side in panes.indices {
         loadTracks(side)
@@ -164,7 +171,7 @@ final class NeoMediaToolsPage: NeoPage {
   override func viewWillAppear(_ animated: Bool) {
     super.viewWillAppear(animated)
     scroll.contentInset = .zero; scroll.verticalScrollIndicatorInsets = .zero
-    if openingContentFinished, current, enabled { for side in panes.indices { loadTracks(side) } }
+    if openingContentFinished, current { resumeContent(appearing:true) }
   }
   override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); cancelReads() }
   private func cancelReads() { bootstrap?.cancel(); for pane in panes { pane.read?.cancel(); pane.search?.cancel(); pane.generation += 1; pane.searchGeneration += 1; pane.loading = false } }
@@ -206,6 +213,7 @@ final class NeoMediaToolsPage: NeoPage {
     let user = self.user, headers = self.headers
     pane.read = Task { [weak self] in
       do {
+        try Task.checkCancellation()
         let tracks = try await api.managedTracks(file,user:user,headers:headers)
         guard let self, self.current, !Task.isCancelled, pane.generation == generation, pane.file == file else { return }
         pane.tracks = tracks; pane.loading = false; self.render()
@@ -265,6 +273,7 @@ final class NeoMediaToolsPage: NeoPage {
     start = Task { [self] in
       defer { starting = false; start = nil; if current { render() } }
       do {
+        try Task.checkCancellation()
         let fresh = try await api.managedTracks(checkedFile,user:user,headers:headers)
         guard current, !Task.isCancelled else { return }
         guard selectionRevision == selectionAtStart else { throw NeoError("選択が変更されたため、処理を開始しませんでした。") }

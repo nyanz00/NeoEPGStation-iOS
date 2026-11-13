@@ -574,7 +574,7 @@ private final class NeoMediaToolsProtocol: URLProtocol {
       NeoMediaToolsProtocol.setSubtitles(sourceTracks, for: sourceFile)
       api.activate(user: "7", headers: ["X-Viewer-Profile-Id": "21", "X-Viewer-Session": oldSession])
       let activationWithoutSuspensionRemainsUsable = await waitFor {
-        page.smokeCurrent && page.smokeTracks(0).count == 3 && page.smokeCanExecute
+        page.smokeCurrent && page.smokeTracks(0).first?.title == "Source A" && page.smokeCanExecute
       }
       checks["sameIdentityAuthenticationResumePreservesSelectionAndPending"] = staleReadStarted && suspended
         && suspendedStatePreserved && resumed && delayedReplyFinished && lateResponseDidNotReplaceResumedData
@@ -586,9 +586,6 @@ private final class NeoMediaToolsProtocol: URLProtocol {
     // Make one subtitle read late, switch identity while it is in flight, and
     // ensure its response cannot repopulate the old page.
     await settle(page, nav: pageNav)
-    let identityDelayedRepliesBefore = NeoMediaToolsProtocol.delayedRepliesCompleted
-    NeoMediaToolsProtocol.setDelay(method: "GET", path: "/api/videos/\(sourceFile)/subtitles", seconds: 0.45)
-    let readsBeforeIdentityPage = NeoMediaToolsProtocol.count("GET", "/api/videos/\(sourceFile)/subtitles")
     guard let identityPageResult = await open(sourceItem) else {
       checks["identityChangeRejectsLateTrackUpdate"] = false
       await settle(nil, nav: navigation())
@@ -597,11 +594,24 @@ private final class NeoMediaToolsProtocol: URLProtocol {
       return checks
     }
     let identityPage = identityPageResult.0, identityNav = identityPageResult.1
+    let identityTracksReady = await waitFor({ identityPage.smokeTracks(0).count == 3 })
+    let identityTracksBeforeSwitch = identityPage.smokeTracks(0)
+    let identityDelayedRepliesBefore = NeoMediaToolsProtocol.delayedRepliesCompleted
+    let readsBeforeIdentityPage = NeoMediaToolsProtocol.count("GET", "/api/videos/\(sourceFile)/subtitles")
+    // Start a controlled late read after navigation has settled. Its payload
+    // differs from the displayed snapshot, so an unintended update is visible.
+    NeoMediaToolsProtocol.setSubtitles([
+      track(0, stream: 12, title: "Stale identity response", display: "Japanese", codec: "ass", language: "jpn", isDefault: true, isForced: false)
+    ], for: sourceFile)
+    NeoMediaToolsProtocol.setDelay(method: "GET", path: "/api/videos/\(sourceFile)/subtitles", seconds: 0.45)
+    identityPage.smokePanes[0].onRetry?()
     let lateReadStarted = await waitFor({ NeoMediaToolsProtocol.count("GET", "/api/videos/\(sourceFile)/subtitles") > readsBeforeIdentityPage })
+    NeoMediaToolsProtocol.setSubtitles(sourceTracks, for: sourceFile)
     api.activate(user: "9", headers: ["X-Viewer-Profile-Id": "22", "X-Viewer-Session": "alternate-fixture"])
     _ = await waitFor({ !identityPage.smokeEnabled })
     let lateReplyFinished = await waitFor({ NeoMediaToolsProtocol.delayedRepliesCompleted > identityDelayedRepliesBefore })
-    checks["identityChangeRejectsLateTrackUpdate"] = lateReadStarted && lateReplyFinished && !identityPage.smokeEnabled && identityPage.smokeTracks(0).isEmpty
+    checks["identityChangeRejectsLateTrackUpdate"] = identityTracksReady && lateReadStarted && lateReplyFinished
+      && !identityPage.smokeEnabled && !identityPage.smokeCurrent && identityPage.smokeTracks(0) == identityTracksBeforeSwitch
     await settle(identityPage, nav: identityNav)
 
     api.activate(user: "7", headers: ["X-Viewer-Profile-Id": "21", "X-Viewer-Session": "fixture-session"])
