@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+    BCAC0000000000000000000A = {isa = PBXBuildFile; fileRef = ACAC0000000000000000000A; };
+    BCAC0000000000000000000B = {isa = PBXBuildFile; fileRef = ACAC0000000000000000000B; };
+    BCAC0000000000000000000C = {isa = PBXBuildFile; fileRef = ACAC0000000000000000000C; };
+    BCAC0000000000000000000D = {isa = PBXBuildFile; fileRef = ACAC0000000000000000000D; };
     BCAC00000000000000000006 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000006; };
     BCAC00000000000000000007 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000007; };
     BCAC00000000000000000008 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000008; };
@@ -81,6 +85,10 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+    ACAC0000000000000000000A = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoMediaTools.swift; sourceTree = "<group>"; };
+    ACAC0000000000000000000B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoMediaToolsPage.swift; sourceTree = "<group>"; };
+    ACAC0000000000000000000C = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoTrackPane.swift; sourceTree = "<group>"; };
+    ACAC0000000000000000000D = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoMediaToolsSmoke.swift; sourceTree = "<group>"; };
     ACAC00000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoRecordingActions.swift; sourceTree = "<group>"; };
     ACAC00000000000000000007 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoRecordingActionDialog.swift; sourceTree = "<group>"; };
     ACAC00000000000000000008 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoRecordingDownload.swift; sourceTree = "<group>"; };
@@ -184,6 +192,10 @@
         ACAC00000000000000000007,
         ACAC00000000000000000008,
         ACAC00000000000000000009,
+        ACAC0000000000000000000A,
+        ACAC0000000000000000000B,
+        ACAC0000000000000000000C,
+        ACAC0000000000000000000D,
         ACAC00000000000000000003,
         ACAC00000000000000000004,
         ACAC00000000000000000002,
@@ -442,6 +454,10 @@
         BCAC00000000000000000007,
         BCAC00000000000000000008,
         BCAC00000000000000000009,
+        BCAC0000000000000000000A,
+        BCAC0000000000000000000B,
+        BCAC0000000000000000000C,
+        BCAC0000000000000000000D,
         BCAC00000000000000000003,
         BCAC00000000000000000004,
         BCAC00000000000000000001,

@@ -169,6 +169,10 @@ extension NeoPage {
         if command == .info, let self, let api = self.shell?.api {
           self.present(NeoRecordedInfoDialog(item:item,api:api),animated:true); return
         }
+        if command == .subtitle, let self, let shell = self.shell {
+          guard shell.serverConfig?.developerMode == true else { return }
+          shell.pushPage { NeoMediaToolsPage(recording:item,shell:shell) }; return
+        }
         if [.download,.user,.thumbnail,.protect,.unprotect,.delete].contains(command) {
           self?.performRecordingAction(command,item:item); return
         }

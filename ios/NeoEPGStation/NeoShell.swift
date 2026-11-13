@@ -1295,6 +1295,13 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let original = recorded.collection
     showRoute("settings"); showRoute("recorded")
     let retained = original === recorded.collection
+    if smokeStage == "detail-tools" {
+      Task { [self] in
+        let checks = await NeoMediaToolsSmoke.run(shell:self)
+        writeIPadSmoke(recorded,checks:checks,retained:retained)
+      }
+      return
+    }
     if smokeStage == "recording-actions" {
       Task { [self] in
         let checks = await NeoRecordingActionsSmoke.run(shell:self)

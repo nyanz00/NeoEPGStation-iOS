@@ -489,6 +489,8 @@ final class NeoAPI {
   @MainActor private var detailGenerations: [Int:Int] = [:]
   @MainActor private var thumbnailRefreshes: [Int:Task<Void,Never>] = [:]
   @MainActor private var thumbnailRefreshTokens: [Int:UUID] = [:]
+  @MainActor var mediaJobWatches: [String:Task<Void,Never>] = [:]
+  @MainActor var mediaJobTokens: [String:UUID] = [:]
   @MainActor private var episodeCache: [String:(value:NeoAnnictEpisode,stored:Date)] = [:]
   @MainActor private var detailRequests: [String:Task<NeoRecording,Error>] = [:]
   @MainActor private var episodeRequests: [String:Task<NeoAnnictEpisode,Error>] = [:]
@@ -634,6 +636,7 @@ final class NeoAPI {
   }
   @MainActor func stopRecordingUpdates() {
     thumbnailRefreshes.values.forEach { $0.cancel() }; thumbnailRefreshes.removeAll(); thumbnailRefreshTokens.removeAll()
+    mediaJobWatches.values.forEach { $0.cancel() }; mediaJobWatches.removeAll(); mediaJobTokens.removeAll()
   }
   func protectRecording(_ id: Int, protected: Bool, user: String, headers: [String:String]) async throws {
     _ = try await response(url("/recorded/\(id)/\(protected ? "protect" : "unprotect")"),method:"PUT",user:user,headers:headers)
@@ -817,7 +820,7 @@ final class NeoAPI {
     }
     return text
   }
-  private func request<T: Decodable>(_ url: URL, method: String = "GET", body: [String: Any]? = nil,
+  func request<T: Decodable>(_ url: URL, method: String = "GET", body: [String: Any]? = nil,
     user: String? = nil, timeout: Double = 20, headers: [String: String]? = nil) async throws -> T {
     let data = try await response(url, method: method, body: body, user: user, timeout: timeout, headers: headers)
     do { return try JSONDecoder().decode(T.self, from: data) }
@@ -826,7 +829,7 @@ final class NeoAPI {
   private func response(_ url: URL, method: String = "GET", body: [String: Any]? = nil,
     user: String? = nil, timeout: Double = 20, headers: [String: String]? = nil) async throws -> Data {
     var request = URLRequest(url: url); request.timeoutInterval = timeout; request.httpMethod = method
-    if url.path.contains("/annict") || url.path.hasSuffix("/info") { request.cachePolicy = .reloadIgnoringLocalCacheData }
+    if url.path.contains("/annict") || url.path.contains("/subtitles") || url.path.hasSuffix("/info") { request.cachePolicy = .reloadIgnoringLocalCacheData }
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     let identity = identitySnapshot()
     request.setValue(user ?? identity.0, forHTTPHeaderField: "X-EPGStation-User-Id")

@@ -50,7 +50,24 @@ enum NeoIcon {
       path.addLine(to: CGPoint(x: 21, y: 6))
       path.addLine(to: CGPoint(x: 3, y: 6))
       path.close()
-    case "ArrowBack":
+    case "ArrowForwardOutlined":
+      for (index, point) in [CGPoint(x:12,y:4),CGPoint(x:10.59,y:5.41),CGPoint(x:16.17,y:11),CGPoint(x:4,y:11),CGPoint(x:4,y:13),CGPoint(x:16.17,y:13),CGPoint(x:10.59,y:18.59),CGPoint(x:12,y:20),CGPoint(x:20,y:12)].enumerated() {
+        if index == 0 { path.move(to:point) } else { path.addLine(to:point) }
+      }; path.close()
+    case "KeyboardArrowUpOutlined", "KeyboardArrowDownOutlined":
+      let points = name == "KeyboardArrowUpOutlined" ? [CGPoint(x:7.41,y:15.41),CGPoint(x:12,y:10.83),CGPoint(x:16.59,y:15.41),CGPoint(x:18,y:14),CGPoint(x:12,y:8),CGPoint(x:6,y:14)] : [CGPoint(x:7.41,y:8.59),CGPoint(x:12,y:13.17),CGPoint(x:16.59,y:8.59),CGPoint(x:18,y:10),CGPoint(x:12,y:16),CGPoint(x:6,y:10)]
+      for (index, point) in points.enumerated() { if index == 0 { path.move(to:point) } else { path.addLine(to:point) } }; path.close()
+    case "ReorderOutlined":
+      for y in [CGFloat(5),9,13,17] { path.append(UIBezierPath(rect:CGRect(x:3,y:y,width:18,height:2))) }
+    case "SaveOutlined":
+      path.usesEvenOddFillRule = true
+      path.move(to:CGPoint(x:17,y:3)); path.addLine(to:CGPoint(x:5,y:3))
+      path.addCurve(to:CGPoint(x:3,y:5),controlPoint1:CGPoint(x:3.89,y:3),controlPoint2:CGPoint(x:3,y:3.9)); path.addLine(to:CGPoint(x:3,y:19))
+      path.addCurve(to:CGPoint(x:5,y:21),controlPoint1:CGPoint(x:3,y:20.1),controlPoint2:CGPoint(x:3.89,y:21)); path.addLine(to:CGPoint(x:19,y:21))
+      path.addCurve(to:CGPoint(x:21,y:19),controlPoint1:CGPoint(x:20.1,y:21),controlPoint2:CGPoint(x:21,y:20.1)); path.addLine(to:CGPoint(x:21,y:7)); path.close()
+      let inset = UIBezierPath(); inset.move(to:CGPoint(x:19,y:19)); inset.addLine(to:CGPoint(x:5,y:19)); inset.addLine(to:CGPoint(x:5,y:5)); inset.addLine(to:CGPoint(x:16.17,y:5)); inset.addLine(to:CGPoint(x:19,y:7.83)); inset.close(); path.append(inset)
+      path.append(UIBezierPath(ovalIn:CGRect(x:9,y:12,width:6,height:6))); path.append(UIBezierPath(rect:CGRect(x:6,y:6,width:9,height:4)))
+    case "ArrowBack", "ArrowBackOutlined":
       path.move(to: CGPoint(x: 20, y: 11))
       path.addLine(to: CGPoint(x: 7.83, y: 11))
       path.addLine(to: CGPoint(x: 13.42, y: 5.41))
