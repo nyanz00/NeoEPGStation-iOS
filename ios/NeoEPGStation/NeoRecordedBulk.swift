@@ -57,7 +57,7 @@ enum NeoRecordedBulk {
       func enqueue(_ position: Int) {
         let target = targets[position]
         group.addTask { @MainActor in
-          func check() throws { try Task.checkCancellation(); if !isCurrent() { throw CancellationError() } }
+          @MainActor func check() throws { try Task.checkCancellation(); if !isCurrent() { throw CancellationError() } }
           try check()
           if target.deleteRecording {
             do {
