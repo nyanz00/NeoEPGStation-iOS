@@ -11,7 +11,7 @@ final class NeoEncodeCard: UITableViewCell {
   private let log = NeoStyle.label(size: 12, muted: true), cancel = UIButton(type: .system)
   private let up = UIButton(type: .system), down = UIButton(type: .system), check = UIImageView()
   private let indeterminate = UIActivityIndicatorView(style: .medium)
-  private var mobile = true, waiting = false, editing = false, reordering = false, selectedCard = false
+  private var mobile = true, waiting = false, selectionMode = false, reordering = false, selectedCard = false
   private var canMoveUp = false, canMoveDown = false, disabled = false
   private var touch = UITapGestureRecognizer()
 
@@ -53,7 +53,7 @@ final class NeoEncodeCard: UITableViewCell {
 
   func configure(_ item: NeoEncodeItem, shell: NeoShell, mobile: Bool, waiting: Bool, editing: Bool,
                  reordering: Bool, selected: Bool, canMoveUp: Bool, canMoveDown: Bool, disabled: Bool) {
-    self.mobile = mobile; self.waiting = waiting; self.editing = editing; self.reordering = reordering
+    self.mobile = mobile; self.waiting = waiting; self.selectionMode = editing; self.reordering = reordering
     selectedCard = selected; self.canMoveUp = canMoveUp; self.canMoveDown = canMoveDown; self.disabled = disabled
     let scheduled = item.scheduledAt != nil
     let mode = scheduled ? (item.scheduledAtLabel ?? "開始予約") : item.mode
@@ -93,10 +93,10 @@ final class NeoEncodeCard: UITableViewCell {
     card.frame = contentView.bounds.insetBy(dx: 12, dy: 6)
     let w = card.bounds.width, pad: CGFloat = 12
     let controlsX = w - 44, thumbW: CGFloat = wide ? 200 : 120, thumbH = thumbW * 9 / 16
-    check.frame = editing ? CGRect(x: 8, y: 12, width: 28, height: 28) : .zero
+    check.frame = selectionMode ? CGRect(x: 8, y: 12, width: 28, height: 28) : .zero
     dragHandle.frame = CGRect(x: 4, y: 20, width: 36, height: 40)
     if wide {
-      let left = pad + (editing ? 38 : 0) + (dragHandle.isHidden ? 0 : 38)
+      let left = pad + (selectionMode ? 38 : 0) + (dragHandle.isHidden ? 0 : 38)
       thumbnail.frame = CGRect(x: left, y: 12, width: thumbW, height: thumbH)
       let infoX = left + thumbW + 10, chipWidth = min(130, max(90, w-left-thumbW-90))
       chip.frame = CGRect(x: max(infoX, w-chipWidth-58), y: 14, width: chipWidth, height: 26)
@@ -107,7 +107,7 @@ final class NeoEncodeCard: UITableViewCell {
       else { cancel.frame = CGRect(x: controlsX-15, y: 48, width: 50, height: 40) }
       progressFrame(y: 132, x: pad, width: w-pad*2)
     } else {
-      let top = CGFloat(12), left = pad + (editing ? 36 : 0)
+      let top = CGFloat(12), left = pad + (selectionMode ? 36 : 0)
       chip.frame = CGRect(x: left, y: top, width: min(thumbW, w-left-pad), height: 24)
       thumbnail.frame = CGRect(x: left, y: top+32, width: thumbW, height: thumbH)
       let tx = left + thumbW + 10, textW = max(0, w-tx-pad)
@@ -125,7 +125,7 @@ final class NeoEncodeCard: UITableViewCell {
     indeterminate.frame = CGRect(x: x, y: y+22, width: width, height: 8)
     log.frame = CGRect(x: x, y: y+33, width: width, height: 18)
   }
-  @objc private func selectCard() { if editing { onSelect?() } }
+  @objc private func selectCard() { if selectionMode { onSelect?() } }
   override func prepareForReuse() {
     super.prepareForReuse(); thumbnail.load(nil); onSelect = nil; onCancel = nil; onMoveUp = nil; onMoveDown = nil
   }
