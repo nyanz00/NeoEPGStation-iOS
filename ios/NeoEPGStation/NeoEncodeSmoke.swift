@@ -155,6 +155,7 @@ private final class NeoEncodeUIProtocol: URLProtocol {
     shell.showRoute("encode"); let page = shell.children.compactMap{$0 as? UINavigationController}.first(where:{$0.topViewController is NeoEncodePage})?.topViewController as? NeoEncodePage
     let queueLoaded = await wait { page?.smokeInfo.runningItems.map(\.id) == [8101] && page?.smokeInfo.waitItems.map(\.id) == [8102,8103] && page?.smokeInfo.scheduledItems.map(\.id) == [8104] && page?.smokeInfo.recoveryItems.map(\.id) == [8105,8106] }
     checks["queueDisplaysFourEncodeGroups"] = queueLoaded
+    page?.view.layoutIfNeeded(); checks["queueHeaderLabelsFit"] = page?.smokeHeaderLabelsFit == true
     shell.view.layoutIfNeeded(); screenshot(shell,"queue")
     if let page { page.smokeBeginOrder(); page.smokeMove(8103,to:0); page.smokeSaveOrder() }
     checks["queueReorderUsesExpectedPermutation"] = await wait { NeoEncodeUIProtocol.count("PUT /api/encode/order") == 1 && NeoEncodeUIProtocol.orderedIDs() == [8103,8102] }

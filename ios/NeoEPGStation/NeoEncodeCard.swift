@@ -7,7 +7,7 @@ final class NeoEncodeCard: UITableViewCell {
   let dragHandle = UIView()
   private let card = UIView(), thumbnail = NeoThumbnail(), chip = UILabel(), title = NeoStyle.label(size: 16, bold: true)
   private let channel = NeoStyle.label(size: 14, muted: true), date = NeoStyle.label(size: 12, muted: true)
-  private let percentLabel = NeoStyle.label(size: 14), progress = UIProgressView(progressViewStyle: .default)
+  private let percentLabel = NeoStyle.label(size: 14), percentValue = NeoStyle.label(size:14), progress = UIProgressView(progressViewStyle: .default)
   private let log = NeoStyle.label(size: 12, muted: true), cancel = UIButton(type: .system)
   private let up = UIButton(type: .system), down = UIButton(type: .system), check = UIImageView()
   private let indeterminate = UIActivityIndicatorView(style: .medium)
@@ -37,7 +37,7 @@ final class NeoEncodeCard: UITableViewCell {
     dragHandle.backgroundColor = .clear
     let grip = UIImageView(image: NeoIcon.image("DragIndicatorOutlined")); grip.tintColor = NeoStyle.muted; grip.frame = CGRect(x: 6, y: 8, width: 24, height: 24); dragHandle.addSubview(grip)
     check.contentMode = .scaleAspectFit; indeterminate.color = NeoStyle.accent
-    [thumbnail, chip, title, channel, date, percentLabel, progress, log, indeterminate, cancel, up, down, dragHandle, check].forEach(card.addSubview)
+    [thumbnail, chip, title, channel, date, percentLabel, percentValue, progress, log, indeterminate, cancel, up, down, dragHandle, check].forEach(card.addSubview)
     cancel.addAction(UIAction { [weak self] _ in self?.onCancel?() }, for: .touchUpInside)
     up.addAction(UIAction { [weak self] _ in self?.onMoveUp?() }, for: .touchUpInside)
     down.addAction(UIAction { [weak self] _ in self?.onMoveDown?() }, for: .touchUpInside)
@@ -48,7 +48,7 @@ final class NeoEncodeCard: UITableViewCell {
   static func height(width: CGFloat, mobile: Bool, waiting: Bool, editing: Bool) -> CGFloat {
     let wide = !mobile && width >= 600
     if wide { return waiting ? (editing ? 164 : 148) : (editing ? 232 : 216) }
-    return waiting ? (editing ? 194 : 178) : (editing ? 310 : 294)
+    return waiting ? (editing ? 194 : 178) : 244
   }
 
   func configure(_ item: NeoEncodeItem, shell: NeoShell, mobile: Bool, waiting: Bool, editing: Bool,
@@ -75,8 +75,8 @@ final class NeoEncodeCard: UITableViewCell {
     check.tintColor = selected ? NeoStyle.accent : NeoStyle.muted
     progress.isHidden = waiting || item.percent == nil; indeterminate.isHidden = waiting || item.percent != nil
     if item.percent == nil && !waiting { indeterminate.startAnimating() } else { indeterminate.stopAnimating() }
-    percentLabel.isHidden = waiting; log.isHidden = waiting || item.log == nil
-    let p = min(1, max(0, item.percent ?? 0)); percentLabel.text = "\(item.mode)     \(Int(floor(p * 100)))%"
+    percentLabel.isHidden = waiting; percentValue.isHidden = waiting; log.isHidden = waiting || item.log == nil
+    let p = min(1, max(0, item.percent ?? 0)); percentLabel.text = item.mode; percentValue.text = "\(Int(floor(p * 100)))%"
     if let value = item.percent { progress.setProgress(Float(min(1, max(0, value))), animated: false); progress.isHidden = waiting }
     else { progress.setProgress(0, animated: false); progress.isHidden = true; progress.accessibilityLabel = "エンコード中" }
     log.text = item.log; alpha = disabled ? 0.55 : 1
@@ -120,7 +120,8 @@ final class NeoEncodeCard: UITableViewCell {
     }
   }
   private func progressFrame(y: CGFloat, x: CGFloat, width: CGFloat) {
-    percentLabel.frame = CGRect(x: x, y: y, width: width, height: 20)
+    percentLabel.frame = CGRect(x: x, y: y, width: max(0,width-60), height: 20)
+    percentValue.frame = CGRect(x:x+max(0,width-60),y:y,width:60,height:20); percentValue.textAlignment = .right
     progress.frame = CGRect(x: x, y: y+22, width: width, height: 8)
     indeterminate.frame = CGRect(x: x, y: y+22, width: width, height: 8)
     log.frame = CGRect(x: x, y: y+33, width: width, height: 18)

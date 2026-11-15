@@ -38,6 +38,7 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
     table.frame = CGRect(x:(body.bounds.width-width)/2,y:0,width:width,height:body.bounds.height)
     message.frame = CGRect(x:16,y:40,width:max(0,body.bounds.width-32),height:140); spinner.center = CGPoint(x:body.bounds.midX,y:80)
     if headerMobile != mobile { updateHeader() }
+    layoutEncodeActions()
     if layoutWidth != width { layoutWidth = width; table.reloadData() }
   }
   override func viewDidAppear(_ animated: Bool) {
@@ -111,7 +112,11 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
     func action(_ name:String,_ label:String,_ enabled:Bool = true,_ action:@escaping ()->Void) -> UIButton {
       if mobile { return icon(name,label,enabled,action) }
       let value = NeoStyle.button(label,action:action); value.setImage(NeoIcon.image(name),for:.normal)
-      value.isEnabled = enabled && !busy; value.widthAnchor.constraint(greaterThanOrEqualToConstant:90).isActive = true; return value
+      value.accessibilityIdentifier = "encode-wide-action"; value.accessibilityLabel = label
+      var configuration = UIButton.Configuration.plain(); configuration.title = label; configuration.image = NeoIcon.image(name)
+      configuration.imagePadding = 8; configuration.contentInsets = NSDirectionalEdgeInsets(top:6,leading:8,bottom:6,trailing:8)
+      configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { original in var result = original; result.font = .systemFont(ofSize:14,weight:.medium); return result }
+      value.configuration = configuration; value.isEnabled = enabled && !busy; return value
     }
     var values: [UIView] = []
     if reordering {
@@ -130,6 +135,15 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
     actions = values; table.dragInteractionEnabled = reordering && !mobile && !busy
   }
   private func toggle(_ id:Int) { if selected.contains(id) { selected.remove(id) } else { selected.insert(id) }; render() }
+  private func layoutEncodeActions() {
+    guard !mobile else { return }
+    var right = view.bounds.width-4
+    for action in actions.reversed() {
+      let desired = action.accessibilityIdentifier == "encode-wide-action" ? max(90,action.sizeThatFits(CGSize(width:220,height:44)).width) : 44
+      let width = min(220,desired); right -= width; action.frame = CGRect(x:right,y:6,width:width,height:44)
+    }
+    titleLabel.frame.size.width = max(0,right-titleLabel.frame.minX-4)
+  }
   private func move(_ id:Int,to index:Int) {
     guard reordering, !queueChanged, mutation == nil, orderedIDs.indices.contains(index), let old = orderedIDs.firstIndex(of:id) else { return }
     orderedIDs.remove(at:old); orderedIDs.insert(id,at:index); render()
@@ -204,9 +218,13 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
   }
   func numberOfSections(in tableView:UITableView)->Int { groups.count }
   func tableView(_ tableView:UITableView,numberOfRowsInSection section:Int)->Int { groups[section] == .recovery ? info.recoveryItems.count : items(groups[section]).count }
-  func tableView(_ tableView:UITableView,titleForHeaderInSection section:Int)->String? { groups[section].title }
-  func tableView(_ tableView:UITableView,willDisplayHeaderView view:UIView,forSection section:Int) {
-    if let header = view as? UITableViewHeaderFooterView { header.textLabel?.textColor = .white; header.textLabel?.font = .systemFont(ofSize:20,weight:.medium); header.contentView.backgroundColor = NeoStyle.background }
+  func tableView(_ tableView:UITableView,heightForHeaderInSection section:Int)->CGFloat { 48 }
+  func tableView(_ tableView:UITableView,viewForHeaderInSection section:Int)->UIView? {
+    let header = UIView(); header.backgroundColor = NeoStyle.background
+    let label = NeoStyle.label(groups[section].title,size:20); label.font = .systemFont(ofSize:20,weight:.medium)
+    label.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(label)
+    NSLayoutConstraint.activate([label.leadingAnchor.constraint(equalTo:header.leadingAnchor,constant:12),label.trailingAnchor.constraint(equalTo:header.trailingAnchor,constant:-12),label.topAnchor.constraint(equalTo:header.topAnchor,constant:8),label.bottomAnchor.constraint(equalTo:header.bottomAnchor,constant:-8)])
+    return header
   }
   func tableView(_ tableView:UITableView,heightForRowAt indexPath:IndexPath)->CGFloat {
     if groups[indexPath.section] == .recovery { return UITableView.automaticDimension }
@@ -241,6 +259,7 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
   var smokeOrder: [Int] { orderedIDs }
   var smokeConflict: Bool { queueChanged }
   var smokeBusy: Bool { mutation != nil }
+  var smokeHeaderLabelsFit: Bool { actions.filter { $0.accessibilityIdentifier == "encode-wide-action" }.allSatisfy { $0.bounds.width+1 >= $0.sizeThatFits(CGSize(width:220,height:44)).width } }
   var smokeConfirm: NeoEncodeConfirm? { confirm }
   func smokeSelect(_ id:Int) { editingSelection = true; toggle(id) }
   func smokeBeginOrder() { expectedIDs = info.waitItems.map(\.id); orderedIDs = expectedIDs; reordering = true; render() }
@@ -285,6 +304,7 @@ final class NeoEncodeConfirm: NeoLiveDialog {
 
 private final class NeoEncodeRecoveryCell:UITableViewCell {
   private let stack = UIStackView(), title = NeoStyle.label(size:16,bold:true), mode = NeoStyle.label(size:14,muted:true), reason = NeoStyle.label(size:14)
+  private let reasonSurface = UIStackView(), reasonIcon = UIImageView()
   private let retry = UIButton(type:.system), remove = UIButton(type:.system)
   var onRetry:(()->Void)?, onDelete:(()->Void)?
   override init(style:UITableViewCell.CellStyle,reuseIdentifier:String?) {
@@ -292,7 +312,12 @@ private final class NeoEncodeRecoveryCell:UITableViewCell {
     let card = UIView(); card.backgroundColor = NeoStyle.paper; card.layer.cornerRadius = 4; card.layer.borderWidth = 1; card.layer.borderColor = NeoStyle.border.cgColor
     contentView.addSubview(card); card.translatesAutoresizingMaskIntoConstraints = false; stack.translatesAutoresizingMaskIntoConstraints = false; card.addSubview(stack)
     NSLayoutConstraint.activate([card.leadingAnchor.constraint(equalTo:contentView.leadingAnchor,constant:12),card.trailingAnchor.constraint(equalTo:contentView.trailingAnchor,constant:-12),card.topAnchor.constraint(equalTo:contentView.topAnchor,constant:5),card.bottomAnchor.constraint(equalTo:contentView.bottomAnchor,constant:-5),stack.leadingAnchor.constraint(equalTo:card.leadingAnchor,constant:12),stack.trailingAnchor.constraint(equalTo:card.trailingAnchor,constant:-12),stack.topAnchor.constraint(equalTo:card.topAnchor,constant:12),stack.bottomAnchor.constraint(equalTo:card.bottomAnchor,constant:-12)])
-    stack.axis = .vertical; stack.spacing = 8; [title,mode,reason].forEach { $0.numberOfLines = 0; stack.addArrangedSubview($0) }
+    stack.axis = .vertical; stack.spacing = 8; [title,mode].forEach { $0.numberOfLines = 0; stack.addArrangedSubview($0) }
+    reason.numberOfLines = 0; reasonSurface.axis = .horizontal; reasonSurface.spacing = 12; reasonSurface.alignment = .center
+    reasonSurface.isLayoutMarginsRelativeArrangement = true; reasonSurface.layoutMargins = UIEdgeInsets(top:6,left:16,bottom:6,right:16)
+    reasonSurface.layer.cornerRadius = 4; reasonSurface.addArrangedSubview(reasonIcon); reasonSurface.addArrangedSubview(reason)
+    reasonIcon.widthAnchor.constraint(equalToConstant:22).isActive = true; reasonIcon.heightAnchor.constraint(equalToConstant:22).isActive = true
+    reasonSurface.heightAnchor.constraint(greaterThanOrEqualToConstant:48).isActive = true; stack.addArrangedSubview(reasonSurface)
     retry.setTitle("再開",for:.normal); retry.setImage(NeoIcon.image("ReplayOutlined"),for:.normal); retry.tintColor = NeoStyle.accent
     remove.setTitle("削除",for:.normal); remove.setImage(NeoIcon.image("DeleteOutlineOutlined"),for:.normal); remove.tintColor = NeoStyle.error
     retry.addAction(UIAction { [weak self] _ in self?.onRetry?() },for:.touchUpInside); remove.addAction(UIAction { [weak self] _ in self?.onDelete?() },for:.touchUpInside)
@@ -302,8 +327,9 @@ private final class NeoEncodeRecoveryCell:UITableViewCell {
   func configure(_ item:NeoEncodeRecovery,disabled:Bool) {
     title.text = item.recorded?.name ?? "番組情報が見つかりません"
     mode.text = "\(item.mode ?? "エンコード設定を特定できません") ・ \(item.status == "paused" ? "一時停止中" : "要確認")"
-    reason.text = item.reason; reason.backgroundColor = item.canRetry ? UIColor(red:7/255,green:19/255,blue:24/255,alpha:1) : UIColor(red:25/255,green:18/255,blue:7/255,alpha:1)
+    reason.text = item.reason; reasonSurface.backgroundColor = item.canRetry ? UIColor(red:7/255,green:19/255,blue:24/255,alpha:1) : UIColor(red:25/255,green:18/255,blue:7/255,alpha:1)
     reason.textColor = item.canRetry ? UIColor(red:184/255,green:231/255,blue:251/255,alpha:1) : NeoStyle.warning
+    reasonIcon.image = NeoIcon.image(item.canRetry ? "InfoOutlined" : "ReportProblemOutlined"); reasonIcon.tintColor = reason.textColor
     retry.isHidden = !item.canRetry; retry.isEnabled = !disabled; remove.isEnabled = !disabled
   }
   override func prepareForReuse() { super.prepareForReuse(); onRetry = nil; onDelete = nil }
