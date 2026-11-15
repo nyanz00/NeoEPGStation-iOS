@@ -27,3 +27,7 @@ Web参照: `RecordedPage.tsx`、`recordedBulkDelete.ts`、`queries.ts`、`Multic
 再検証ではモデル/API試験21項目、iPhone・iPadの画面試験各23項目がすべて成功。編集ヘッダー、選択表示、ユーザー変更、空のエンコードダイアログの画像も確認した。対象外の再生試験は実行していない。実機・実サーバーでの変更操作は未確認。
 
 `NeoEPGStation-build371.ipa`のSHA-256: `30b6f232007ae85da3970d29897f146acdbf9f2775f74e8bfd6af2cd1e6af154`。成果物のコミット・ビルド番号・IPA内部のバージョン・配布ハッシュを照合済み。
+
+`search`接続後はActions `43714270611`、アプリソース`16af3bdade3eea1a48aff03a022da6bebbc4ee20`、ビルド373で検証した。モデル/API26項目とiPhone・iPad各26項目が成功。追加した画面試験で、カードメニューの閉鎖とキーワード検索、同じ結果画面からのルール検索への切り替え、ユーザー維持・先頭ページ・元一覧への復帰を確認した。両SDKのビルド・型検査・参照検査も成功。実サーバーでの検索結果は未確認。
+
+`NeoEPGStation-build373.ipa`のSHA-256: `a40bf1a8be2f8dcab15b500b407d0a3f46f37ccb871cda37eb021188e5636ca2`。成果物と検証元ソース・ビルド番号・IPA内部バージョン・配布ハッシュを照合済み。
