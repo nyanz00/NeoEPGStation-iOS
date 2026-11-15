@@ -61,7 +61,7 @@ on:
         required: false
         default: all
         type: choice
-        options: [all, recorded, pagination, detail, record-actions, detail-actions, play-popup, list-actions, drop-dialog, menu, settings, gestures, navigation, recording-features, captions, gop-benchmark, recorded-fixes, recording-actions, detail-tools, recorded-bulk]
+        options: [all, recorded, pagination, detail, record-actions, detail-actions, play-popup, list-actions, drop-dialog, menu, settings, gestures, navigation, recording-features, captions, gop-benchmark, recorded-fixes, recording-actions, detail-tools, recorded-bulk, encode]
 
 permissions:
   contents: read
@@ -122,6 +122,13 @@ jobs:
           swiftc ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift ios/NeoEPGStation/NeoMediaTools.swift tests/detail-tools/main.swift -o build/native-tests/detail-tools
           build/native-tests/detail-tools | tee dist/detail-tools-models.txt
           swiftc -frontend -parse ios/NeoEPGStation/NeoMediaToolsPage.swift ios/NeoEPGStation/NeoTrackPane.swift ios/NeoEPGStation/NeoMediaToolsSmoke.swift
+      - name: Check encode models and API
+        if: ${{ inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'encode' }}
+        run: |
+          set -o pipefail
+          mkdir -p build/native-tests dist
+          swiftc -parse-as-library ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift ios/NeoEPGStation/NeoEncodeModels.swift tests/encode/main.swift -o build/native-tests/encode
+          build/native-tests/encode | tee dist/encode-models.txt
       - name: Check recorded bulk models and API
         if: ${{ inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'recorded-bulk' }}
         run: |
@@ -181,14 +188,14 @@ jobs:
           exit "$task_checks_failed"
       - name: Check live models, API selection and TS clocks
         id: live-model-checks
-        if: ${{ contains(fromJSON('["live","player-feedback"]'), inputs.check_scope) && !contains(fromJSON('["recorded-fixes","recording-actions","detail-tools","recorded-bulk"]'), inputs.ui_stage) }}
+        if: ${{ contains(fromJSON('["live","player-feedback"]'), inputs.check_scope) && !contains(fromJSON('["recorded-fixes","recording-actions","detail-tools","recorded-bulk","encode"]'), inputs.ui_stage) }}
         run: |
           mkdir -p build/native-tests dist
           swiftc ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift tests/live/main.swift -o build/native-tests/live
           build/native-tests/live | tee dist/live-model-checks.txt
       - name: Check player feedback models
         id: player-feedback-models
-        if: ${{ inputs.check_scope == 'player-feedback' && !contains(fromJSON('["captions","gop-benchmark","recorded-fixes","recording-actions","detail-tools","recorded-bulk"]'), inputs.ui_stage) }}
+        if: ${{ inputs.check_scope == 'player-feedback' && !contains(fromJSON('["captions","gop-benchmark","recorded-fixes","recording-actions","detail-tools","recorded-bulk","encode"]'), inputs.ui_stage) }}
         run: |
           mkdir -p build/native-tests dist
           swiftc ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift ios/NeoEPGStation/NeoASSComments.swift ios/NeoEPGStation/NeoCommentLoader.swift tests/player-feedback/main.swift -o build/native-tests/player-feedback
@@ -348,7 +355,7 @@ jobs:
           exit "$comparison_failed"
       - name: Check player feedback interactions
         id: player-feedback-checks
-        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && !contains(fromJSON('["navigation","recording-features","captions","gop-benchmark","recorded-fixes","recording-actions","detail-tools","recorded-bulk"]'), inputs.ui_stage) }}
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && !contains(fromJSON('["navigation","recording-features","captions","gop-benchmark","recorded-fixes","recording-actions","detail-tools","recorded-bulk","encode"]'), inputs.ui_stage) }}
         run: python3 -u scripts/player-feedback-smoke.py
       - name: Check immediate navigation swipes on iPhone and iPad
         id: navigation-checks
@@ -370,6 +377,9 @@ jobs:
       - name: Check recording actions on iPhone and iPad
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'recording-actions' }}
         run: python3 -u scripts/simulator-smoke.py --recording-actions-only
+      - name: Check encode UI on iPhone and iPad
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'encode' }}
+        run: python3 -u scripts/simulator-smoke.py --encode-only
       - name: Check recorded bulk actions on iPhone and iPad
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'recorded-bulk' }}
         run: python3 -u scripts/simulator-smoke.py --recorded-bulk-only
@@ -378,7 +388,7 @@ jobs:
         run: python3 -u scripts/simulator-smoke.py --detail-tools-only
       - name: Check live station UI, raw/transcoded TS, comments, switching and reconnect
         id: live-checks
-        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && contains(fromJSON('["live","player-feedback"]'), inputs.check_scope) && !contains(fromJSON('["navigation","recording-features","captions","gop-benchmark","recorded-fixes","recording-actions","detail-tools","recorded-bulk"]'), inputs.ui_stage) }}
+        if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && contains(fromJSON('["live","player-feedback"]'), inputs.check_scope) && !contains(fromJSON('["navigation","recording-features","captions","gop-benchmark","recorded-fixes","recording-actions","detail-tools","recorded-bulk","encode"]'), inputs.ui_stage) }}
         run: python3 -u scripts/live-smoke.py
       - name: Check recorded PLAY remains separate from live transport
         id: live-recorded-regression
@@ -559,6 +569,13 @@ jobs:
           python3 scripts/verify-reused-build.py
           ditto -x -k reused/artifact/dist/simulator-app.zip build/simulator/Build/Products/Release-iphonesimulator
           codesign --verify --deep --strict build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation.app
+      - name: Check encode models and API
+        if: ${{ inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'encode' }}
+        run: |
+          set -o pipefail
+          mkdir -p build/native-tests dist
+          swiftc -parse-as-library ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift ios/NeoEPGStation/NeoEncodeModels.swift tests/encode/main.swift -o build/native-tests/encode
+          build/native-tests/encode | tee dist/encode-models.txt
       - name: Check recorded bulk models and API
         if: ${{ inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'recorded-bulk' }}
         run: |
@@ -587,6 +604,8 @@ jobs:
                 python3 -u scripts/simulator-smoke.py --recorded-fixes-only --only-ipad
               elif [ "$UI_STAGE" = "recording-actions" ]; then
                 python3 -u scripts/simulator-smoke.py --recording-actions-only --only-ipad
+              elif [ "$UI_STAGE" = "encode" ]; then
+                python3 -u scripts/simulator-smoke.py --encode-only --only-ipad
               elif [ "$UI_STAGE" = "recorded-bulk" ]; then
                 python3 -u scripts/simulator-smoke.py --recorded-bulk-only --only-ipad
               elif [ "$UI_STAGE" = "detail-tools" ]; then
@@ -607,6 +626,8 @@ jobs:
               python3 -u scripts/simulator-smoke.py --recorded-fixes-only
               elif [ "$UI_STAGE" = "recording-actions" ]; then
               python3 -u scripts/simulator-smoke.py --recording-actions-only
+              elif [ "$UI_STAGE" = "encode" ]; then
+              python3 -u scripts/simulator-smoke.py --encode-only
               elif [ "$UI_STAGE" = "recorded-bulk" ]; then
               python3 -u scripts/simulator-smoke.py --recorded-bulk-only
               elif [ "$UI_STAGE" = "detail-tools" ]; then

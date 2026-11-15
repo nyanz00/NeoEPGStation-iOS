@@ -175,6 +175,7 @@ final class NeoPlayerTransition: NSObject, UIViewControllerTransitioningDelegate
 
 class NeoPage: UIViewController {
   var recordingActions: NeoRecordingActions?
+  var encodeActions: NeoEncodeActions?
   var defersOpeningContent: Bool { false }
   private(set) var openingContentFinished = false
   private var openingLink: CADisplayLink?, openingTask: Task<Void,Never>?
@@ -417,6 +418,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private var tabletReveal: CGFloat = 1
 #if targetEnvironment(simulator)
   func smokeUseAPI(_ value: NeoAPI?) { api = value; account = value.map { NeoAccountCoordinator(api: $0, shell: self) } }
+  func smokeUseServerConfig(config: NeoServerConfig?) { serverConfig = config }
   private var startupDrawerWasStill = false
 #endif
   private var contentPan: UIPanGestureRecognizer!, closingPan: UIPanGestureRecognizer!, backdropPan: UIPanGestureRecognizer!, sidebarBackPan: UIPanGestureRecognizer!
@@ -566,7 +568,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
   private func cancelRecordingActions() {
     api?.stopRecordingUpdates()
-    for nav in controllers.values { for case let page as NeoPage in nav.viewControllers { page.recordingActions?.cancel() } }
+    for nav in controllers.values { for case let page as NeoPage in nav.viewControllers { page.recordingActions?.cancel(); page.encodeActions?.cancel() } }
   }
   func showRoute(_ id: String) {
     guard api != nil, popInteraction == nil, !routeBackRunning else { return }
@@ -579,6 +581,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       let page: NeoPage
       if id == "recorded" { page = NeoRecordedPage(shell: self) }
       else if id == "onair" { page = NeoOnAirPage(shell: self) }
+      else if id == "encode" { page = NeoEncodePage(shell: self) }
       else if id == "settings" { page = NeoSettingsPage(shell: self) }
       else if id == "history" { page = NeoHistoryPage(shell: self) }
       else { page = NeoPlaceholderPage(id: id, shell: self) }
@@ -1298,6 +1301,13 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     if smokeStage == "recorded-bulk" {
       Task { [self] in
         let checks = await NeoRecordedBulkSmoke.run(shell:self)
+        writeIPadSmoke(recorded,checks:checks,retained:retained)
+      }
+      return
+    }
+    if smokeStage == "encode" {
+      Task { [self] in
+        let checks = await NeoEncodeSmoke.run(shell:self)
         writeIPadSmoke(recorded,checks:checks,retained:retained)
       }
       return

@@ -57,6 +57,8 @@ if full_recheck or network_probe or focused:
         foundation = 'Check recorded search dates and action visibility'
     if os.environ.get('CHECK_SCOPE') == 'player-feedback' and os.environ.get('UI_STAGE') == 'recorded-bulk':
         foundation = 'Check recorded bulk models and API'
+    if os.environ.get('CHECK_SCOPE') == 'player-feedback' and os.environ.get('UI_STAGE') == 'encode':
+        foundation = 'Check encode models and API'
     if os.environ.get('UI_STAGE') == 'recording-features' and steps.get('Check recording Info and Annict models') != 'success':
         raise RuntimeError('Cannot retest failed recording feature models')
     for name in [foundation, 'Native UI type checks',

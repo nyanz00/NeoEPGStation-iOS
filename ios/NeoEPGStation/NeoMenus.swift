@@ -166,6 +166,7 @@ extension NeoPage {
       hideThumbnailButton: shell.storage.hideRecordedThumbnailButton)
     shell.showPopup(anchor: anchor, entries: commands.map { command in
       NeoMenuEntry(title: command.rawValue, icon: command.icon) { [weak self] in
+        if command == .encode { self?.openEncode([item]); return }
         if command == .search, let self, let shell = self.shell {
           if let page = self as? NeoRecordedPage { page.searchRelated(to: item) }
           else { shell.pushPage { NeoRecordedPage(shell: shell, filters: NeoRelatedSearch.filters(for: item)) } }

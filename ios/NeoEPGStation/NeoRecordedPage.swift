@@ -275,7 +275,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     observers.append(NotificationCenter.default.addObserver(forName:.neoRecordedChanged,object:nil,queue:.main) { [weak self] note in
       guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
       self.clearCache(); self.mutationReloadNeeded = true
-      if self.bulkActions != nil { return }
+      if self.bulkActions != nil || self.encodeActions != nil { return }
       if self.viewIfLoaded?.window != nil, self.navigationController?.topViewController === self {
         self.mutationReloadNeeded = false; self.reload(targetPage:self.page,preserveOffset:true)
       } else { self.task?.cancel() }
@@ -393,7 +393,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         if let cached { result = cached }
         else {
 #if targetEnvironment(simulator)
-        if self.shell?.smokeStage.isEmpty == false, !["recording-features.invalid","recording-actions.invalid","recorded-bulk.invalid"].contains(api?.base.host ?? "") { result = Self.fixtures }
+        if self.shell?.smokeStage.isEmpty == false, !["recording-features.invalid","recording-actions.invalid","recorded-bulk.invalid","encode-ui.invalid"].contains(api?.base.host ?? "") { result = Self.fixtures }
         else { guard let requestAPI = api else { return }; result = try await requestAPI.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search) }
 #else
         guard let requestAPI = api else { return }; result = try await requestAPI.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search)
@@ -640,6 +640,21 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     guard editMode, !selectedRecords.isEmpty, bulkActions == nil, presentedViewController == nil,
       let shell, let api = shell.api, api.accountReady else { return }
     let revision = api.identityRevision
+    if command == .encode {
+      guard encodeActions == nil else { return }
+      let operation = NeoEncodeActions(host:self,shell:shell,api:api,records:selectedRecords,bulk:true)
+      encodeActions = operation
+      operation.onCompleted = { [weak self,weak api] failed in
+        guard let self, let api, self.shell?.api === api, api.identityRevision == revision else { return }
+        self.selectedIDs = failed; self.editMode = !failed.isEmpty
+      }
+      operation.onFinished = { [weak self,weak api] in
+        guard let self, let api, self.shell?.api === api, api.identityRevision == revision else { return }
+        self.updateEditHeader(); self.updateEditCards(); self.collection.collectionViewLayout.invalidateLayout()
+        if self.mutationReloadNeeded { self.mutationReloadNeeded = false; self.clearCache(); self.reload(targetPage:self.page,preserveOffset:true) }
+      }
+      operation.start(); return
+    }
     let operation = NeoRecordedBulkActions(host:self,shell:shell,api:api,records:selectedRecords)
     bulkActions = operation; updateEditHeader()
     operation.onFinish = { [weak self,weak api] remaining in

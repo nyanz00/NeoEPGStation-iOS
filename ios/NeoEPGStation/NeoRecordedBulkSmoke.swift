@@ -207,7 +207,7 @@ private final class NeoRecordedBulkProtocol: URLProtocol {
       let menuReady = await waitFor({ host.presentedViewController is NeoBulkActionsDialog })
       guard menuReady, let menu = host.presentedViewController else { return false }
       tap(button(in: menu.view, label: command))
-      return await waitFor({ host.presentedViewController is NeoBulkRecordingDialog })
+      return await waitFor({ host.presentedViewController is NeoBulkRecordingDialog || host.presentedViewController is NeoEncodeDialog })
     }
     guard let nav = shell.children.compactMap({ $0 as? UINavigationController }).first(where: { $0.viewControllers.first is NeoRecordedPage }),
       let host = nav.viewControllers.first as? NeoRecordedPage,
@@ -257,13 +257,12 @@ private final class NeoRecordedBulkProtocol: URLProtocol {
     if isMobile {
       checks["mobileBulkMenuOpens"] = await tapMenuCommand("エンコードを一括追加", host: host)
     } else { host.smokeOpenBulk(.encode); checks["mobileBulkMenuOpens"] = true }
-    if let encode = await readyDialog(host) {
-      checks["encodeEntryIsBlankAndReadOnly"] = encode.command == .encode && encode.records.map(\.id) == [6801] && !encode.smokeSubmitEnabled
+    if await waitFor({ host.presentedViewController is NeoEncodeDialog }), let encode = host.presentedViewController as? NeoEncodeDialog {
+      checks["encodeEntryOpensForm"] = encode.bulk && encode.records.map(\.id) == [6801]
       capture("recorded-bulk-encode.png")
-      // The encode form is intentionally informational only. Close it without enqueuing.
-      button(in: encode.view, label: "閉じる")?.sendActions(for: .touchUpInside)
+      encode.smokeTapCancel()
       checks["encodeCancelKeepsSelection"] = await waitFor({ host.presentedViewController == nil && host.smokeSelectedIDs == [6801] })
-    } else { checks["encodeEntryIsBlankAndReadOnly"] = false; checks["encodeCancelKeepsSelection"] = false }
+    } else { checks["encodeEntryOpensForm"] = false; checks["encodeCancelKeepsSelection"] = false }
 
     // User assignment waits for its options, prefers the active regular user,
     // and never changes the signed-in account.

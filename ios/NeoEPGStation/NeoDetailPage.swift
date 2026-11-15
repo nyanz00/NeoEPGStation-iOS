@@ -22,7 +22,9 @@ final class NeoDetailPage: NeoPage {
   private let dropStatus = NeoStyle.label(size: 14, muted: true)
   private lazy var playButton = NeoStyle.recordingButton("PLAY", icon: "PlayArrowOutlined") { [weak self] in self?.selectFile() }
   private lazy var streamingButton = NeoStyle.recordingButton("STREAMING", icon: "PlayCircleOutlineOutlined") { [weak self] in self?.selectStreamingFile() }
-  private lazy var encodeButton = NeoStyle.recordingButton("ENCODE", icon: "ControlPoint", success: true) { [weak self] in self?.alert("ENCODE の操作は準備中です。") }
+  private lazy var encodeButton = NeoStyle.recordingButton("ENCODE", icon: "ControlPoint", success: true) { [weak self] in
+    guard let self else { return }; self.openEncode([self.item])
+  }
   private lazy var thumbButton = NeoStyle.recordingButton("THUMB", icon: "ImageOutlined", success: true) { [weak self] in
     guard let self else { return }; self.performRecordingAction(.thumbnail,item:self.item)
   }
