@@ -85,7 +85,8 @@ private final class NeoEncodeUIProtocol: URLProtocol {
     views(root).compactMap{$0 as? UIButton}.first { $0.configuration?.title == "ENCODE" || $0.title(for:.normal) == "ENCODE" }
   }
   private static func screenshot(_ shell:NeoShell,_ name:String) {
-    guard let data = shell.view.asImage().pngData() else { return }
+    let surface: UIView = shell.view.window ?? shell.view
+    guard let data = surface.asImage().pngData() else { return }
     try? data.write(to:NeoPiPSmoke.directory.appendingPathComponent("encode-\(name).png"))
   }
   static func run(shell:NeoShell) async -> [String:Bool] {
@@ -166,14 +167,21 @@ private final class NeoEncodeUIProtocol: URLProtocol {
     let canceled = await wait { NeoEncodeUIProtocol.count("DELETE /api/encode/8104") == 1 && NeoEncodeUIProtocol.count("DELETE /api/encode/8102") == 1 && NeoEncodeUIProtocol.count("DELETE /api/encode/8101") == 1 }
     let order = NeoEncodeUIProtocol.mutationOrder().filter{$0.hasPrefix("DELETE ")}
     checks["bulkCancelRequestsWaitingAndScheduledBeforeRunning"] = canceled && order == ["DELETE /api/encode/8104","DELETE /api/encode/8102","DELETE /api/encode/8101"]
-    checks["cancelPartialFailureKeepsFailedSelection"] = await wait { page?.smokeSelected == [8102] && page?.smokeConfirm == nil && page?.smokeBusy == false }
+    checks["cancelPartialFailureKeepsFailedSelection"] = await wait { page?.smokeSelected == [8102] && page?.smokeConfirm == nil && page?.smokeBusy == false && page?.presentedViewController == nil && page?.viewIfLoaded?.window != nil }
     page?.smokeRetry(8105)
     page?.smokeRetry(8106)
     checks["recoveryRetryUsesEligibleTaskOnly"] = await wait { NeoEncodeUIProtocol.count("POST /api/encode/8105/retry") == 1 && NeoEncodeUIProtocol.count("POST /api/encode/8106/retry") == 0 }
-    _ = await wait { page?.smokeBusy == false }
+    let recoveryReady = await wait { page?.smokeBusy == false && page?.presentedViewController == nil && page?.viewIfLoaded?.window != nil }
     page?.smokeAskRecoveryDelete(8106); let deleteConfirm = page?.smokeConfirm
-    _ = await wait { deleteConfirm?.viewIfLoaded?.window != nil && deleteConfirm?.isBeingPresented == false }; deleteConfirm?.smokeSubmit()
-    checks["recoveryDeleteRequiresConfirmation"] = await wait { NeoEncodeUIProtocol.count("DELETE /api/encode/8106") == 1 && page?.smokeBusy == false && page?.smokeConfirm == nil }
+    let confirmationReady = await wait { deleteConfirm?.viewIfLoaded?.window != nil && deleteConfirm?.isBeingPresented == false }
+    let notDeletedBeforeConfirm = NeoEncodeUIProtocol.count("DELETE /api/encode/8106") == 0
+    if confirmationReady { deleteConfirm?.smokeSubmit() }
+    let removed = await wait { NeoEncodeUIProtocol.count("DELETE /api/encode/8106") == 1 && page?.smokeBusy == false && page?.smokeConfirm == nil && page?.presentedViewController == nil }
+    checks["recoveryDeleteRequiresConfirmation"] = recoveryReady && confirmationReady && notDeletedBeforeConfirm && removed
+    let recoveryState: [String: Bool] = ["readyForDelete":recoveryReady,"confirmationShown":confirmationReady,"notDeletedBeforeConfirm":notDeletedBeforeConfirm,"removedAfterConfirm":removed]
+    if let data = try? JSONSerialization.data(withJSONObject:recoveryState,options:.sortedKeys) {
+      try? data.write(to:NeoPiPSmoke.directory.appendingPathComponent("ui-encode-recovery-state.txt"))
+    }
 
     // An account change while the first bulk POST is pending must suppress the next record.
     shell.showRoute("recorded"); let rootNav = shell.children.compactMap{$0 as? UINavigationController}.first(where:{$0.topViewController is NeoRecordedPage})
@@ -194,6 +202,6 @@ private final class NeoEncodeUIProtocol: URLProtocol {
 }
 
 private extension UIView {
-  func asImage() -> UIImage { let renderer = UIGraphicsImageRenderer(bounds:bounds); return renderer.image { context in layer.render(in:context.cgContext) } }
+  func asImage() -> UIImage { let renderer = UIGraphicsImageRenderer(bounds:bounds); return renderer.image { _ in _ = drawHierarchy(in:bounds,afterScreenUpdates:true) } }
 }
 #endif
