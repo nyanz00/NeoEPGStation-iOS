@@ -80,6 +80,26 @@ private final class NeoRecordedBulkProtocol: URLProtocol {
 
   static func run() async throws {
     var count = 0
+    var related = recording(90)
+    related.name = "[新]【全12話】番組 (字) #01「初回」"
+    let keywordSearch = NeoRelatedSearch.filters(for: related)
+    let keywordItems = try keywordSearch.queryItems().map { "\($0.name)=\($0.value ?? "")" }
+    check("card search uses the Web cleaned title and clears unrelated filters",
+      keywordItems == ["keyword=番組"], count: &count)
+    related.ruleId = 42
+    let ruleSearch = NeoRelatedSearch.filters(for: related)
+    let ruleItems = try ruleSearch.queryItems().map { "\($0.name)=\($0.value ?? "")" }
+    check("card search prefers rule ID over the title keyword",
+      ruleItems == ["ruleId=42"], count: &count)
+    related.ruleId = 0
+    let manualSearch = NeoRelatedSearch.filters(for: related)
+    let manualItems = try manualSearch.queryItems().map { "\($0.name)=\($0.value ?? "")" }
+    check("card search retains the Web rule ID zero case",
+      manualItems == ["ruleId=0"], count: &count)
+    check("card search preserves multi-character parentheses and cleans quoted episode titles",
+      NeoRelatedSearch.keyword("番組(特別版)「初回」") == "番組(特別版)", count: &count)
+    check("card search title fallback follows Web for an empty prefix",
+      NeoRelatedSearch.keyword("「初回」") == "「初回」" && NeoRelatedSearch.keyword("[字] #01") == "#01", count: &count)
     let records = [
       recording(1, files: [(11, "same.ts", "ts"), (12, "encoded.mp4", "encoded"), (13, "same.ts", "ts")]),
       recording(2, files: [(21, "encoded.mp4", "encoded"), (22, "other.ts", "ts")]),

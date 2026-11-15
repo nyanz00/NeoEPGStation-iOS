@@ -221,9 +221,11 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     let columns = max(1, Int((width + 8) / 288))
     return min(300, floor((width - CGFloat(columns - 1) * 8) / CGFloat(columns)))
   }
-  init(shell: NeoShell, keyword: String = "", reverse: Bool = false) {
+  init(shell: NeoShell, keyword: String = "", reverse: Bool = false, filters: NeoRecordedFilters? = nil) {
     let layout = UICollectionViewFlowLayout(); collection = UICollectionView(frame: .zero, collectionViewLayout: layout)
-    self.filters.keyword = keyword; self.reverse = reverse
+    self.filters = filters ?? NeoRecordedFilters()
+    if filters == nil { self.filters.keyword = keyword }
+    self.reverse = reverse
     self.locatedUserID = shell.api.flatMap { Int($0.viewer) }.flatMap { $0 > 0 ? $0 : nil }
     pageLength = shell.api?.recordedLength ?? 24
     super.init(title: "録画済み", shell: shell)
@@ -557,8 +559,13 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     nav.modalPresentationStyle = .pageSheet; nav.sheetPresentationController?.detents = [.large()]
     present(nav, animated: true)
   }
+  func searchRelated(to item: NeoRecording) { applySearch(NeoRelatedSearch.filters(for: item)) }
   private func applySearch(_ value: NeoRecordedFilters) {
-    guard let shell, value != filters else { return }
+    guard let shell else { return }
+    if value == filters {
+      if requestedPage != 1 { reload(targetPage: 1) }
+      return
+    }
     let root = navigationController?.viewControllers.first as? NeoRecordedPage
     if value.isEmpty, let root {
       navigationController?.popToRootViewController(animated: true)

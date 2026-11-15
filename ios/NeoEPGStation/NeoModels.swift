@@ -200,6 +200,12 @@ struct NeoRule: Decodable {
 
 enum NeoRelatedSearch {
   // core/media/recorded.ts createRecordedRelatedSearchOption.
+  static func filters(for item: NeoRecording) -> NeoRecordedFilters {
+    var filters = NeoRecordedFilters()
+    if let ruleID = item.ruleId { filters.ruleID = ruleID }
+    else { filters.keyword = keyword(item.name) }
+    return filters
+  }
   static func keyword(_ name: String) -> String {
     var title = name
     for pattern in [#"\[.+?\]"#, #"【.+?】"#, #"\(.\)"#, #" +"#] {

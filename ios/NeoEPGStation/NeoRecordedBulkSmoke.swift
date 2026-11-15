@@ -13,6 +13,7 @@ private final class NeoRecordedBulkProtocol: URLProtocol {
   private static var counts: [String: Int] = [:]
   private static var bodies: [String: [[String: Any]]] = [:]
   private static var headers: [String: [[String: String]]] = [:]
+  private static var recordedQuery: [String: String] = [:]
   private static var deletedVideoIDs = Set<Int>()
   private static var failedVideoIDs = Set<Int>()
   private static var usersDelay: TimeInterval = 0
@@ -67,7 +68,7 @@ private final class NeoRecordedBulkProtocol: URLProtocol {
       return (id, Fixture(value: value))
     })
     listIDs = values.compactMap { $0["id"] as? Int }
-    counts = [:]; bodies = [:]; headers = [:]; deletedVideoIDs = []; self.failedVideoIDs = failVideoIDs; self.usersDelay = usersDelay
+    counts = [:]; bodies = [:]; headers = [:]; recordedQuery = [:]; deletedVideoIDs = []; self.failedVideoIDs = failVideoIDs; self.usersDelay = usersDelay
     pendingUserResponses = 0
     usersDelayDeadline = .distantPast
   }
@@ -82,6 +83,7 @@ private final class NeoRecordedBulkProtocol: URLProtocol {
   static func setListIDs(_ ids: [Int]) { lock.lock(); listIDs = ids; lock.unlock() }
   static func delayedUsersSettled() -> Bool { lock.lock(); defer { lock.unlock() }; return pendingUserResponses == 0 && Date() >= usersDelayDeadline }
   static func count(_ key: String) -> Int { lock.lock(); defer { lock.unlock() }; return counts[key, default: 0] }
+  static func lastRecordedQuery() -> [String: String] { lock.lock(); defer { lock.unlock() }; return recordedQuery }
   static func body(_ key: String) -> [String: Any]? { lock.lock(); defer { lock.unlock() }; return bodies[key]?.last }
   static func requestHeaders(_ key: String) -> [String: String]? { lock.lock(); defer { lock.unlock() }; return headers[key]?.last }
   static func fileIDsDeleted() -> Set<Int> { lock.lock(); defer { lock.unlock() }; return deletedVideoIDs }
@@ -112,12 +114,17 @@ private final class NeoRecordedBulkProtocol: URLProtocol {
         usersDelayDeadline = max(usersDelayDeadline, Date().addingTimeInterval(delay))
       }
     } else if path == "/api/recorded" && method == "GET" {
+      recordedQuery = Dictionary(uniqueKeysWithValues: query.compactMap { item in item.value.map { (item.name, $0) } })
       let selectedUser = query.first(where: { $0.name == "userId" })?.value.flatMap(Int.init)
+      let ruleID = query.first(where: { $0.name == "ruleId" })?.value.flatMap(Int.init)
+      let keyword = query.first(where: { $0.name == "keyword" })?.value
       let offset = max(0, Int(query.first(where: { $0.name == "offset" })?.value ?? "0") ?? 0)
       let limit = max(1, Int(query.first(where: { $0.name == "limit" })?.value ?? "24") ?? 24)
       let matching = listIDs.compactMap { id -> [String: Any]? in
         guard let fixture = fixtures[id], !fixture.deleted, (fixture.value["isHidden"] as? Bool) != true else { return nil }
         if let selectedUser, (fixture.value["userId"] as? Int) != selectedUser { return nil }
+        if let ruleID, (fixture.value["ruleId"] as? Int) != ruleID { return nil }
+        if let keyword, !(fixture.value["name"] as? String ?? "").contains(keyword) { return nil }
         return fixture.value
       }
       result = ["records": Array(matching.dropFirst(offset).prefix(limit)), "total": matching.count]
@@ -151,13 +158,14 @@ private final class NeoRecordedBulkProtocol: URLProtocol {
 
 @MainActor enum NeoRecordedBulkSmoke {
   static func run(shell: NeoShell) async -> [String: Bool] {
-    let values = [
+    var values = [
       record(6801, "Bulk one", userID: 7, files: [(68011, "Original one.ts", "ts"), (68012, "Encode one.mkv", "encoded")]),
       record(6802, "Bulk two", userID: 7, files: [(68021, "Original two.ts", "ts")]),
       record(6803, "Encoding bulk", userID: 7, isEncoding: true, files: [(68031, "Encoding.ts", "ts")]),
       record(6804, "Partial bulk", userID: 7, files: [(68041, "Keep.ts", "ts"), (68042, "Fail.ts", "encoded"), (68043, "Remove.ts", "encoded")]),
       record(6805, "Delete bulk", userID: 7, files: [(68051, "Delete.ts", "ts")])
     ]
+    values[1]["ruleId"] = 42
     NeoRecordedBulkProtocol.reset(values, failVideoIDs: [68042])
     let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [NeoRecordedBulkProtocol.self]
     let session = URLSession(configuration: config)
@@ -207,6 +215,28 @@ private final class NeoRecordedBulkProtocol: URLProtocol {
       checks["recordedBulkPageReady"] = false; return checks
     }
     checks["recordedBulkPageReady"] = true
+
+    host.smokeOpenFirstMenu()
+    let cardMenu = shell.view.subviews.compactMap { $0 as? NeoAnchoredMenu }.first
+    if let menu = cardMenu, let index = menu.titles.firstIndex(of: "search") { menu.select(index) }
+    let resultReady = await waitFor({
+      guard let result = nav.topViewController as? NeoRecordedPage, result !== host else { return false }
+      return result.smokeLoadSettled && result.records.map(\.id) == [6801]
+    })
+    let keywordQuery = NeoRecordedBulkProtocol.lastRecordedQuery()
+    checks["cardSearchOpensFilteredRecordingsAndClosesMenu"] = resultReady && cardMenu?.superview == nil
+      && keywordQuery["keyword"] == "Bulk one" && keywordQuery["ruleId"] == nil
+      && keywordQuery["offset"] == "0" && keywordQuery["userId"] == "7"
+    if resultReady, let result = nav.topViewController as? NeoRecordedPage, let ruleItem = host.records.last {
+      result.searchRelated(to: ruleItem)
+      let ruleReady = await waitFor({ result.smokeLoadSettled && result.records.map(\.id) == [6802] })
+      let ruleQuery = NeoRecordedBulkProtocol.lastRecordedQuery()
+      checks["cardSearchUsesRuleIDAndClearsPreviousKeyword"] = ruleReady && ruleQuery["ruleId"] == "42"
+        && ruleQuery["keyword"] == nil && ruleQuery["offset"] == "0" && ruleQuery["userId"] == "7"
+    } else { checks["cardSearchUsesRuleIDAndClearsPreviousKeyword"] = false }
+    nav.popToViewController(host, animated: false)
+    checks["cardSearchBackRestoresOriginalList"] = await waitFor({ nav.topViewController === host
+      && host.records.map(\.id) == [6801,6802] && host.viewIfLoaded?.window != nil })
 
     host.smokeEnterEditing(); shell.view.layoutIfNeeded()
     let mobileNames = ["すべて選択", "一括操作", "削除", "編集を終了"]
