@@ -31,7 +31,8 @@ private final class NeoEncodeUIProtocol: URLProtocol {
     if method != "GET" { Self.mutations.append(key) }
     if !requestBody.isEmpty { Self.bodies[key,default:[]].append(requestBody) }
     var status = 200, value: Any = [:]
-    if path == "/socket.io/" {
+    // URL.path can omit a trailing slash even though absoluteString retains it.
+    if path == "/socket.io" || path == "/socket.io/" {
       let sid = URLComponents(url:request.url!,resolvingAgainstBaseURL:false)?.queryItems?.first { $0.name == "sid" }?.value
       let text: String
       if method == "POST" { text = "ok" }

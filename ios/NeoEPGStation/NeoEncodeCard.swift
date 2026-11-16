@@ -131,7 +131,7 @@ final class NeoEncodeCard: UITableViewCell {
   }
   var smokeLayoutFits: Bool {
     let infoMid = (title.frame.minY+date.frame.maxY)/2
-    return abs(thumbnail.frame.midY-infoMid) < 0.5 && chip.frame.minX == thumbnail.frame.minX
+    return abs(thumbnail.frame.midY-infoMid) < 0.5 && abs(chip.frame.minX-thumbnail.frame.minX) < 0.01
       && chip.frame.width <= chip.intrinsicContentSize.width+17
       && title.frame.width > 0 && date.frame.width > 0
       && (waiting || (abs(cancel.frame.maxY-percentValue.frame.minY)<0.5 && log.frame.maxY <= card.bounds.height))
