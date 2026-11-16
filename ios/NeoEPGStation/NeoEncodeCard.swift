@@ -119,7 +119,7 @@ final class NeoEncodeCard: UITableViewCell {
     date.frame = CGRect(x:tx,y:infoY+41,width:textW,height:18)
     let percentY = max(mediaY+thumbH+4,infoY+infoHeight+32)
     let percentCenter = w-pad-ceil(percentValue.intrinsicContentSize.width)/2
-    cancel.frame = CGRect(x:percentCenter-16,y:percentY-28,width:32,height:28)
+    cancel.frame = CGRect(x:percentCenter-16,y:percentY-34,width:32,height:28)
     if reordering && waiting {
       up.frame = CGRect(x:w-90,y:percentY-32,width:38,height:32)
       down.frame = CGRect(x:w-48,y:percentY-32,width:38,height:32)
@@ -149,14 +149,14 @@ final class NeoEncodeCard: UITableViewCell {
   var smokeGeometry: [String:Any] {
     ["thumbnail":String(describing:thumbnail.frame),"title":String(describing:title.frame),"date":String(describing:date.frame),
       "badge":String(describing:chip.frame),"badgeText":chip.text ?? "","badgeTextFits":smokeBadgeTextFits,"badgeContent":String(describing:chip.contentRect(in:chip.bounds)),"badgeIntrinsicWidth":chip.intrinsicContentSize.width,"cancel":String(describing:cancel.frame),
-      "percent":String(describing:percentValue.frame),"log":String(describing:log.frame),"card":String(describing:card.bounds),"waiting":waiting,"fits":smokeLayoutFits]
+      "percent":String(describing:percentValue.frame),"progress":String(describing:progress.frame),"log":String(describing:log.frame),"card":String(describing:card.bounds),"waiting":waiting,"fits":smokeLayoutFits]
   }
   var smokeLayoutFits: Bool {
     let infoMid = (title.frame.minY+date.frame.maxY)/2
     return abs(thumbnail.frame.midY-infoMid) < 0.5 && abs(chip.frame.minX-thumbnail.frame.minX) < 0.01
       && chip.frame.width <= chip.intrinsicContentSize.width+0.5
       && title.frame.width > 0 && date.frame.width > 0
-      && (waiting || (abs(cancel.frame.maxY-percentValue.frame.minY)<0.5 && log.frame.maxY <= card.bounds.height))
+      && (waiting || (abs(cancel.frame.maxY+6-percentValue.frame.minY)<0.5 && log.frame.maxY <= card.bounds.height))
   }
 #endif
   @objc private func selectCard() { if selectionMode { onSelect?() } }
