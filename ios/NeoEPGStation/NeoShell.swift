@@ -549,6 +549,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       for case let detail as NeoDetailPage in nav.viewControllers where detail.isViewLoaded { detail.refreshCapabilities() }
     }
   }
+  func cacheChannels(_ values: [NeoChannel]) {
+    channels = Dictionary(values.map { ($0.id,$0.name) },uniquingKeysWith:{ _,new in new })
+  }
   func revalidateAccount() {
 #if targetEnvironment(simulator)
     // Smoke scenarios install their own API/session and explicitly exercise

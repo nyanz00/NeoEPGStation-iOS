@@ -75,7 +75,7 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
       do {
         let channels = try await api.channels(); try Task.checkCancellation()
         guard shell?.api === api else { return }
-        shell?.channels = Dictionary(channels.map { ($0.id,$0.name) },uniquingKeysWith:{ _,new in new })
+        shell?.cacheChannels(channels)
         channelError = false; render(inPlace:true)
       } catch {
         guard !Task.isCancelled, shell?.api === api else { return }; channelError = true; render(inPlace:true)
