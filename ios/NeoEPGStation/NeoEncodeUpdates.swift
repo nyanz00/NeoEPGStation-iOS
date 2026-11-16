@@ -34,15 +34,16 @@ enum NeoEncodeSocketProtocol {
 
 @MainActor final class NeoEncodeUpdates {
   private var task: Task<Void,Never>?
-  func start(api: NeoAPI, port: Int?, updated: @escaping () -> Void) {
+  func start(api: NeoAPI, port: Int?, connectionChanged: ((Bool) -> Void)? = nil, updated: @escaping () -> Void) {
     guard task == nil else { return }
     let endpoints = NeoEncodeSocketProtocol.endpoints(base:api.base,port:port)
     task = Task {
       var endpointIndex = 0, failures = 0
       while !Task.isCancelled, !endpoints.isEmpty {
         do {
-          try await Self.connect(session:api.session,endpoint:endpoints[endpointIndex],updated:updated)
+          try await Self.connect(session:api.session,endpoint:endpoints[endpointIndex],connectionChanged:connectionChanged,updated:updated)
         } catch {
+          connectionChanged?(false)
           if Task.isCancelled { break }
           // Like SocketBridge: try the API origin if the configured port fails.
           endpointIndex = min(endpointIndex+1,endpoints.count-1)
@@ -64,7 +65,7 @@ enum NeoEncodeSocketProtocol {
       let text = String(data:data,encoding:.utf8) else { throw URLError(.badServerResponse) }
     return text
   }
-  private static func connect(session: URLSession, endpoint: URL, updated: @escaping () -> Void) async throws {
+  private static func connect(session: URLSession, endpoint: URL, connectionChanged: ((Bool) -> Void)?, updated: @escaping () -> Void) async throws {
     let opened = try await request(session:session,url:NeoEncodeSocketProtocol.url(endpoint),timeout:3)
     guard let first = NeoEncodeSocketProtocol.packets(opened).first, first.first == "0",
       let json = String(first.dropFirst()).data(using:.utf8),
@@ -84,7 +85,8 @@ enum NeoEncodeSocketProtocol {
         if packet == "1" || packet == "41" || packet.hasPrefix("44") { throw URLError(.networkConnectionLost) }
         if packet.hasPrefix("2") {
           _ = try await request(session:session,url:NeoEncodeSocketProtocol.url(endpoint,sid:sid),body:"3"+String(packet.dropFirst()),timeout:3)
-        } else if packet.hasPrefix("40") || NeoEncodeSocketProtocol.isUpdate(packet) { changed = true }
+        } else if packet.hasPrefix("40") { connectionChanged?(true); changed = true }
+        else if NeoEncodeSocketProtocol.isUpdate(packet) { changed = true }
       }
       if changed { updated() }
     }

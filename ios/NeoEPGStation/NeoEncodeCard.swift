@@ -124,6 +124,11 @@ final class NeoEncodeCard: UITableViewCell {
 #if targetEnvironment(simulator)
   var smokeChannel: String? { channel.text }
   var smokeTitle: NeoMarqueeTitle { title }
+  var smokeGeometry: [String:Any] {
+    ["thumbnail":NSStringFromCGRect(thumbnail.frame),"title":NSStringFromCGRect(title.frame),"date":NSStringFromCGRect(date.frame),
+      "badge":NSStringFromCGRect(chip.frame),"badgeIntrinsicWidth":chip.intrinsicContentSize.width,"cancel":NSStringFromCGRect(cancel.frame),
+      "percent":NSStringFromCGRect(percentValue.frame),"log":NSStringFromCGRect(log.frame),"card":NSStringFromCGRect(card.bounds),"waiting":waiting,"fits":smokeLayoutFits]
+  }
   var smokeLayoutFits: Bool {
     let infoMid = (title.frame.minY+date.frame.maxY)/2
     return abs(thumbnail.frame.midY-infoMid) < 0.5 && chip.frame.minX == thumbnail.frame.minX

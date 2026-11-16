@@ -83,6 +83,7 @@ private final class NeoEncodeUIProtocol: URLProtocol {
   static func mutationOrder()->[String] { lock.lock(); defer { lock.unlock() }; return mutations }
   static func makeNextOrderConflict() { lock.lock(); failOrder=true; lock.unlock() }
   static func delayNextPost(_ value:TimeInterval) { lock.lock(); postDelay=value; lock.unlock() }
+  static func requestCounts() -> [String:Int] { lock.lock(); defer { lock.unlock() }; return calls }
   static func progress(_ percent: Double) {
     lock.lock(); defer { lock.unlock() }
     if !running.isEmpty { running[0]["percent"] = percent }
@@ -182,14 +183,26 @@ private final class NeoEncodeUIProtocol: URLProtocol {
     let queueLoaded = await wait { page?.smokeInfo.runningItems.map(\.id) == [8101] && page?.smokeInfo.waitItems.map(\.id) == [8102,8103] && page?.smokeInfo.scheduledItems.map(\.id) == [8104] && page?.smokeInfo.recoveryItems.map(\.id) == [8105,8106] }
     checks["queueDisplaysFourEncodeGroups"] = queueLoaded
     _ = await wait { page?.smokeCards.isEmpty == false && page?.smokeCards.first?.smokeChannel == "Fixture Station" }
-    page?.view.layoutIfNeeded(); page?.smokeCards.forEach { $0.layoutIfNeeded(); $0.smokeTitle.layoutIfNeeded() }
+    let connected = await wait { page?.smokeSocketConnected == true && page?.smokeReadIdle == true }
+    checks["queueConnectsSocketDefaultNamespace"] = connected
+    let settledLayout = await wait {
+      page?.smokeLayoutCards()
+      return page?.smokeCards.isEmpty == false && page?.smokeCards.allSatisfy { $0.smokeLayoutFits } == true
+    }
     checks["channelIDResolvesThroughStationList"] = page?.smokeCards.first?.smokeChannel == "Fixture Station"
-    checks["compactCardsAlignBadgeThumbnailTextAndProgress"] = page?.smokeCards.isEmpty == false && page?.smokeCards.allSatisfy { $0.smokeLayoutFits } == true
+    checks["compactCardsAlignBadgeThumbnailTextAndProgress"] = settledLayout
     let moving = page?.smokeCards.first, generation = moving?.smokeTitle.animationGeneration
     checks["encodeTitleUsesOneWayMarquee"] = UIAccessibility.isReduceMotionEnabled || moving?.smokeTitle.smokeOneWay == true
     NeoEncodeUIProtocol.progress(0.73)
     let refreshed = await wait { page?.smokeInfo.runningItems.first?.percent == 0.73 }
     checks["socketNotificationRefreshesProgressWithoutReplacingCard"] = refreshed && page?.smokeCards.first === moving && moving?.smokeTitle.animationGeneration == generation
+    let feedbackState:[String:Any] = ["connected":connected,"socketConnected":page?.smokeSocketConnected ?? false,
+      "applicationState":UIApplication.shared.applicationState.rawValue,"refreshed":refreshed,"percent":page?.smokeInfo.runningItems.first?.percent ?? -1,
+      "sameCell":page?.smokeCards.first === moving,"generationBefore":generation ?? -1,"generationAfter":moving?.smokeTitle.animationGeneration ?? -1,
+      "calls":NeoEncodeUIProtocol.requestCounts(),"cards":page?.smokeCards.map(\.smokeGeometry) ?? []]
+    if let data = try? JSONSerialization.data(withJSONObject:feedbackState,options:.sortedKeys) {
+      try? data.write(to:NeoPiPSmoke.directory.appendingPathComponent("ui-encode-feedback-state.txt"))
+    }
     moving?.smokeTitle.smokeInterrupt()
     checks["foregroundTestActuallyInterruptsMarquee"] = moving?.smokeTitle.scrolling == false
     NotificationCenter.default.post(name:UIApplication.didBecomeActiveNotification,object:nil)

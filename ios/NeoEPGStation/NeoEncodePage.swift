@@ -13,6 +13,7 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
   private var updatesTask: Task<Void,Never>?, channelTask: Task<Void,Never>?
   private var needsReload = false, renderedRows: [[Int]] = [], channelError = false
   private var channelAttempt = UUID()
+  private var socketConnected = false
   private var revision: Int?, requestID = UUID(), visible = false
   private var mutationID = UUID(), headerMobile: Bool?, layoutWidth: CGFloat = 0
   private var confirm: NeoEncodeConfirm?
@@ -57,16 +58,16 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
     channelAttempt = UUID(); channelTask?.cancel(); channelTask = nil
   }
   private func startUpdates() {
-    guard visible, UIApplication.shared.applicationState == .active, updatesTask == nil, let api = shell?.api else { return }
+    guard visible, UIApplication.shared.applicationState != .background, updatesTask == nil, let api = shell?.api else { return }
     updatesTask = Task { [weak self] in
       guard let self else { return }
       var config = shell?.serverConfig
       if config == nil { config = try? await api.configuration() }
       guard !Task.isCancelled, visible, shell?.api === api else { return }
-      updates.start(api:api,port:config?.socketIOPort) { [weak self] in self?.reload() }
+      updates.start(api:api,port:config?.socketIOPort,connectionChanged:{ [weak self] in self?.socketConnected = $0 }) { [weak self] in self?.reload() }
     }
   }
-  private func stopUpdates() { updatesTask?.cancel(); updatesTask = nil; updates.stop() }
+  private func stopUpdates() { updatesTask?.cancel(); updatesTask = nil; updates.stop(); socketConnected = false }
   private func loadChannels() {
     guard channelTask == nil, let api = shell?.api else { return }
     let attempt = UUID(); channelAttempt = attempt
@@ -306,6 +307,9 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
 #if targetEnvironment(simulator)
   var smokeInfo: NeoEncodeInfo { info }
   var smokeCards: [NeoEncodeCard] { table.visibleCells.compactMap { $0 as? NeoEncodeCard } }
+  var smokeSocketConnected: Bool { socketConnected }
+  var smokeReadIdle: Bool { task == nil && !needsReload }
+  func smokeLayoutCards() { view.layoutIfNeeded(); table.layoutIfNeeded(); smokeCards.forEach { $0.layoutIfNeeded(); $0.smokeTitle.layoutIfNeeded() } }
   var smokeSelected: Set<Int> { selected }
   var smokeOrder: [Int] { orderedIDs }
   var smokeConflict: Bool { queueChanged }
