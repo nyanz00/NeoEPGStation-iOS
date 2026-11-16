@@ -21,14 +21,19 @@ extension NeoPage {
     self.host = host; self.shell = shell; self.api = api; self.records = records; self.bulk = bulk
     revision = api.identityRevision; user = api.viewer; headers = api.profileHeaders
     observer = NotificationCenter.default.addObserver(forName: .neoAccountChanged, object: nil, queue: .main) { [weak self] _ in
-      guard let self, !self.current else { return }; self.cancel()
+      self?.authenticationChanged()
     }
   }
-  private var current: Bool { !finished && host != nil && shell?.api === api && api.accountReady
+  private var current: Bool { !finished && host != nil && shell?.api === api
     && api.identityRevision == revision && api.viewer == user && api.profileHeaders == headers }
+  private func authenticationChanged() {
+    guard current else { cancel(); return }
+    dialog?.authenticationReady = api.accountReady
+    if api.accountReady, shell?.serverConfig == nil, mutation == nil { loadConfig() }
+  }
   private func check() throws { try Task.checkCancellation(); if !current { throw CancellationError() } }
   func start() {
-    guard current else { cancel(); return }
+    guard current, api.accountReady else { cancel(); return }
     let modal = NeoEncodeDialog(records: records, bulk: bulk, settings: .load()); dialog = modal
     modal.onClose = { [weak self] in self?.finish(dismiss: false) }
     modal.onSubmit = { [weak self] dialog in self?.submit(dialog) }
@@ -38,7 +43,7 @@ extension NeoPage {
     else { loadConfig() }
   }
   private func loadConfig() {
-    guard current, mutation == nil, let dialog else { return }
+    guard current, api.accountReady, mutation == nil, let dialog else { return }
     read?.cancel(); dialog.setMessage("読み込み中…")
     read = Task { [self] in
       do {
@@ -50,7 +55,7 @@ extension NeoPage {
     }
   }
   private func submit(_ dialog: NeoEncodeDialog) {
-    guard current, mutation == nil else { return }
+    guard current, api.accountReady, mutation == nil else { return }
     let jobs: [NeoEncodeJob]
     do { jobs = try failures?.map(\.job) ?? NeoEncodePlan.jobs(records, sourceName: bulk ? dialog.sourceName : nil,
       sourceID: dialog.sourceVideoFileID, settings: dialog.settings, directory: dialog.directory) }
@@ -62,6 +67,12 @@ extension NeoPage {
       do {
         let result = try await NeoEncodePlan.submit(jobs, isCurrent: { [weak self] in self?.current == true },
           enqueue: { [self] job in
+            // A pending request is never resent. Before the next bulk item,
+            // wait for validation of the same identity to finish.
+            while current && api.accountRevalidating && !api.accountReady {
+              try await Task.sleep(nanoseconds: 50_000_000); try check()
+            }
+            try check(); guard api.accountReady else { throw CancellationError() }
             _ = try await api.addEncode(job, user: user, headers: headers)
             api.recordingChanged(job.recordedID)
             NotificationCenter.default.post(name: .neoEncodeChanged, object: api)

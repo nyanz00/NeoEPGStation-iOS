@@ -127,7 +127,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p build/native-tests dist
-          swiftc -parse-as-library ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift ios/NeoEPGStation/NeoEncodeModels.swift tests/encode/main.swift -o build/native-tests/encode
+          swiftc -parse-as-library ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift ios/NeoEPGStation/NeoEncodeModels.swift ios/NeoEPGStation/NeoEncodeUpdates.swift tests/encode/main.swift -o build/native-tests/encode
           build/native-tests/encode | tee dist/encode-models.txt
       - name: Check recorded bulk models and API
         if: ${{ inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'recorded-bulk' }}
@@ -574,7 +574,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p build/native-tests dist
-          swiftc -parse-as-library ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift ios/NeoEPGStation/NeoEncodeModels.swift tests/encode/main.swift -o build/native-tests/encode
+          swiftc -parse-as-library ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift ios/NeoEPGStation/NeoEncodeModels.swift ios/NeoEPGStation/NeoEncodeUpdates.swift tests/encode/main.swift -o build/native-tests/encode
           build/native-tests/encode | tee dist/encode-models.txt
       - name: Check recorded bulk models and API
         if: ${{ inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'recorded-bulk' }}

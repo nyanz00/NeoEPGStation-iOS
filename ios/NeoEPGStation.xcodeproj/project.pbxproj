@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+    BEEC00000000000000000007 = {isa = PBXBuildFile; fileRef = AEEC00000000000000000007; };
     BEEC00000000000000000006 = {isa = PBXBuildFile; fileRef = AEEC00000000000000000006; };
     BEEC00000000000000000005 = {isa = PBXBuildFile; fileRef = AEEC00000000000000000005; };
     BEEC00000000000000000004 = {isa = PBXBuildFile; fileRef = AEEC00000000000000000004; };
@@ -95,6 +96,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+    AEEC00000000000000000007 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoEncodeUpdates.swift; sourceTree = "<group>"; };
     AEEC00000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoEncodeSmoke.swift; sourceTree = "<group>"; };
     AEEC00000000000000000005 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoEncodePage.swift; sourceTree = "<group>"; };
     AEEC00000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoEncodeCard.swift; sourceTree = "<group>"; };
@@ -224,6 +226,7 @@
         AEEC00000000000000000004,
         AEEC00000000000000000005,
         AEEC00000000000000000006,
+        AEEC00000000000000000007,
         ACAC00000000000000000013,
         ACAC0000000000000000000D,
         ACAC00000000000000000003,
@@ -496,6 +499,7 @@
         BEEC00000000000000000004,
         BEEC00000000000000000005,
         BEEC00000000000000000006,
+        BEEC00000000000000000007,
         BCAC00000000000000000013,
         BCAC0000000000000000000D,
         BCAC00000000000000000003,

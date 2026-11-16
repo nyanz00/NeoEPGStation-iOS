@@ -74,6 +74,7 @@ struct NeoServerConfig: Decodable {
   }
   let encode: [String]; let developerMode: Bool?
   var recorded: [String] = []
+  var socketIOPort: Int? = nil
   var isEnableTSRecordedStream: Bool? = nil
   var isEnableEncodedRecordedStream: Bool? = nil
   var isEnableTSLiveStream: Bool? = nil
@@ -83,7 +84,7 @@ struct NeoServerConfig: Decodable {
     self.encode = encode; self.developerMode = developerMode
     self.isEnableTSRecordedStream = isEnableTSRecordedStream; self.isEnableEncodedRecordedStream = isEnableEncodedRecordedStream
   }
-  private enum CodingKeys: String, CodingKey { case encode, recorded, developerMode, isEnableTSRecordedStream, isEnableEncodedRecordedStream, streamConfig, isEnableTSLiveStream, broadcast, urlscheme, watchConfig }
+  private enum CodingKeys: String, CodingKey { case encode, recorded, socketIOPort, developerMode, isEnableTSRecordedStream, isEnableEncodedRecordedStream, streamConfig, isEnableTSLiveStream, broadcast, urlscheme, watchConfig }
   init(from decoder: Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
     // queries.ts normalizes missing/non-string encode modes independently of capabilities.
@@ -98,6 +99,7 @@ struct NeoServerConfig: Decodable {
     watchConfig = try values.decodeIfPresent(WatchConfig.self,forKey:.watchConfig)
     encode = modes
     recorded = try values.decodeIfPresent([String].self, forKey: .recorded) ?? []
+    socketIOPort = try values.decodeIfPresent(Int.self, forKey: .socketIOPort)
     developerMode = try values.decodeIfPresent(Bool.self, forKey: .developerMode)
     isEnableTSRecordedStream = try values.decodeIfPresent(Bool.self, forKey: .isEnableTSRecordedStream)
     isEnableEncodedRecordedStream = try values.decodeIfPresent(Bool.self, forKey: .isEnableEncodedRecordedStream)
@@ -512,6 +514,7 @@ final class NeoAPI {
     set { headersLock.lock(); authenticationHeaders = newValue; headersLock.unlock() }
   }
   var accountReady = false
+  private(set) var accountRevalidating = false
   var identityRevision = 0
   var onLocked: ((Int) -> Void)?
   var viewer: String {
@@ -525,15 +528,18 @@ final class NeoAPI {
     }
   }
   func activate(user: String, headers: [String: String]) {
+    let unchanged = accountRevalidating && viewer == user && profileHeaders == headers
     headersLock.lock()
     authenticationHeaders = headers
     UserDefaults.standard.set(user, forKey: "viewer." + base.absoluteString)
     headersLock.unlock()
-    accountReady = true; identityRevision += 1
+    accountReady = true; accountRevalidating = false
+    if !unchanged { identityRevision += 1 }
     NotificationCenter.default.post(name: .neoAccountChanged, object: self)
   }
-  func suspendAuthentication() {
-    accountReady = false; profileHeaders = [:]; identityRevision += 1
+  func suspendAuthentication(preservingIdentity: Bool = false) {
+    accountReady = false; accountRevalidating = preservingIdentity
+    if !preservingIdentity { profileHeaders = [:]; identityRevision += 1 }
     NotificationCenter.default.post(name:.neoAccountChanged,object:self)
   }
   private func identitySnapshot() -> (String, [String: String]) {

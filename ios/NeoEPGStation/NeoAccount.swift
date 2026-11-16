@@ -49,7 +49,7 @@ final class NeoProfileSecrets {
   }
   func restore() {
     guard current, !busy, let user = Int(api.viewer), user > 0 else { return }
-    api.suspendAuthentication()
+    api.suspendAuthentication(preservingIdentity: true)
     resolve(String(user), restoring: true)
   }
   // Deferred native menu stays anchored to the shared outlined selector.

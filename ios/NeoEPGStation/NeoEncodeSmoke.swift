@@ -9,6 +9,7 @@ private final class NeoEncodeUIProtocol: URLProtocol {
   private static var calls: [String:Int] = [:], bodies: [String:[[String:Any]]] = [:], mutations: [String] = []
   private static var failRecordedIDs = Set<Int>(), failCancelIDs = Set<Int>(), failOrder = false
   private static var postDelay: TimeInterval = 0
+  private static var socketEvents: [String] = []
   private var cancelled = false
   private let cancellationLock = NSLock()
 
@@ -30,7 +31,22 @@ private final class NeoEncodeUIProtocol: URLProtocol {
     if method != "GET" { Self.mutations.append(key) }
     if !requestBody.isEmpty { Self.bodies[key,default:[]].append(requestBody) }
     var status = 200, value: Any = [:]
+    if path == "/socket.io/" {
+      let sid = URLComponents(url:request.url!,resolvingAgainstBaseURL:false)?.queryItems?.first { $0.name == "sid" }?.value
+      let text: String
+      if method == "POST" { text = "ok" }
+      else if sid == nil { text = "0{\"sid\":\"fixture\",\"pingInterval\":25000,\"pingTimeout\":20000}"; Self.socketEvents = ["40{\"sid\":\"fixture\"}"] }
+      else { text = Self.socketEvents.isEmpty ? "6" : Self.socketEvents.removeFirst() }
+      Self.lock.unlock()
+      let response = HTTPURLResponse(url:request.url!,statusCode:200,httpVersion:"HTTP/1.1",headerFields:["Content-Type":"text/plain"])!
+      DispatchQueue.global().asyncAfter(deadline:.now()+0.1) { [self] in
+        cancellationLock.lock(); let stopped=cancelled; cancellationLock.unlock(); guard !stopped else { return }
+        client?.urlProtocol(self,didReceive:response,cacheStoragePolicy:.notAllowed); client?.urlProtocol(self,didLoad:Data(text.utf8)); client?.urlProtocolDidFinishLoading(self)
+      }
+      return
+    }
     if path == "/api/config" { value = ["encode":["h264","hevc"],"recorded":["D:\\Encode"]] }
+    else if path == "/api/channels" { value = [["id":1,"name":"Fixture Station"]] }
     else if path == "/api/users" { value = ["users":[["id":7,"name":"Fixture user"],["id":8,"name":"Other user"]]] }
     else if path == "/api/recorded" { value = ["records":Self.records,"total":Self.records.count] }
     else if path == "/api/encode", method == "GET" { value = ["runningItems":Self.running,"waitItems":Self.waiting,"scheduledItems":Self.scheduled,"recoveryItems":Self.recovery] }
@@ -67,11 +83,16 @@ private final class NeoEncodeUIProtocol: URLProtocol {
   static func mutationOrder()->[String] { lock.lock(); defer { lock.unlock() }; return mutations }
   static func makeNextOrderConflict() { lock.lock(); failOrder=true; lock.unlock() }
   static func delayNextPost(_ value:TimeInterval) { lock.lock(); postDelay=value; lock.unlock() }
+  static func progress(_ percent: Double) {
+    lock.lock(); defer { lock.unlock() }
+    if !running.isEmpty { running[0]["percent"] = percent }
+    socketEvents.append("42[\"updateEncode\"]")
+  }
 }
 
 @MainActor enum NeoEncodeSmoke {
   private static func record(_ id:Int) -> [String:Any] {
-    ["id":id,"name":"Encode fixture \(id)","startAt":1791021600000,"endAt":1791023400000,"isRecording":false,"description":"Fixture","channelId":1,"channelName":"Smoke","thumbnails":[],"videoFiles":[["id":id*10,"name":"shared.ts","type":"ts","size":100,"filename":"shared.ts"],["id":id*10+1,"name":"alternate.ts","type":"ts","size":100,"filename":"alternate.ts"]],"userId":7]
+    ["id":id,"name":"Encode fixture \(id) — Long program title for the single direction scrolling and foreground recovery test","startAt":1791021600000,"endAt":1791023400000,"isRecording":false,"description":"Fixture","channelId":1,"thumbnails":[],"videoFiles":[["id":id*10,"name":"shared.ts","type":"ts","size":100,"filename":"shared.ts"],["id":id*10+1,"name":"alternate.ts","type":"ts","size":100,"filename":"alternate.ts"]],"userId":7]
   }
   private static func queueItem(_ id:Int,_ recorded:Int,_ mode:String = "h264",percent:Double? = nil) -> [String:Any] {
     var value:[String:Any] = ["id":id,"mode":mode,"recorded":record(recorded)]
@@ -116,6 +137,11 @@ private final class NeoEncodeUIProtocol: URLProtocol {
     let directReady = await wait { dialog = detail?.presentedViewController as? NeoEncodeDialog; return dialog?.smokeConfigModeCount == 2 && dialog?.smokeSubmitEnabled == true && dialog?.isBeingPresented == false }
     checks["recordDetailEncodeOpensReadyForm"] = directReady && dialog?.records.map(\.id) == [7101] && dialog?.bulk == false
     dialog?.smokeSetSource(71010); dialog?.smokeSetMode("hevc"); dialog?.smokeSetOptions(sameDirectory:false,removeOriginal:true,updateThumbnail:false); dialog?.smokeSetRoot("D:\\Encode"); dialog?.smokeSetDirectory("  Drama  ")
+    api.suspendAuthentication(preservingIdentity:true)
+    dialog?.smokeTapSubmit()
+    checks["authenticationRefreshPreservesDialogAndBlocksSubmit"] = detail?.presentedViewController === dialog && dialog?.smokeSubmitEnabled == false && NeoEncodeUIProtocol.count("POST /api/encode") == 0
+    api.activate(user:"7",headers:["X-Viewer-Profile-Id":"21","X-Viewer-Session":"encode-ui-fixture"])
+    checks["sameIdentityRestoresFormWithoutLosingInputs"] = detail?.presentedViewController === dialog && dialog?.smokeSubmitEnabled == true && dialog?.settings.mode == "hevc" && dialog?.directory == "  Drama  "
     shell.view.layoutIfNeeded(); screenshot(shell,"add")
     let enabled = dialog?.smokeSubmitEnabled == true; dialog?.smokeTapSubmit(); dialog?.smokeTapSubmit()
     let posted = await wait { NeoEncodeUIProtocol.count("POST /api/encode") == 1 && detail?.presentedViewController == nil }
@@ -155,6 +181,20 @@ private final class NeoEncodeUIProtocol: URLProtocol {
     shell.showRoute("encode"); let page = shell.children.compactMap{$0 as? UINavigationController}.first(where:{$0.topViewController is NeoEncodePage})?.topViewController as? NeoEncodePage
     let queueLoaded = await wait { page?.smokeInfo.runningItems.map(\.id) == [8101] && page?.smokeInfo.waitItems.map(\.id) == [8102,8103] && page?.smokeInfo.scheduledItems.map(\.id) == [8104] && page?.smokeInfo.recoveryItems.map(\.id) == [8105,8106] }
     checks["queueDisplaysFourEncodeGroups"] = queueLoaded
+    _ = await wait { page?.smokeCards.isEmpty == false && page?.smokeCards.first?.smokeChannel == "Fixture Station" }
+    page?.view.layoutIfNeeded(); page?.smokeCards.forEach { $0.layoutIfNeeded(); $0.smokeTitle.layoutIfNeeded() }
+    checks["channelIDResolvesThroughStationList"] = page?.smokeCards.first?.smokeChannel == "Fixture Station"
+    checks["compactCardsAlignBadgeThumbnailTextAndProgress"] = page?.smokeCards.isEmpty == false && page?.smokeCards.allSatisfy { $0.smokeLayoutFits } == true
+    let moving = page?.smokeCards.first, generation = moving?.smokeTitle.animationGeneration
+    checks["encodeTitleUsesOneWayMarquee"] = UIAccessibility.isReduceMotionEnabled || moving?.smokeTitle.smokeOneWay == true
+    NeoEncodeUIProtocol.progress(0.73)
+    let refreshed = await wait { page?.smokeInfo.runningItems.first?.percent == 0.73 }
+    checks["socketNotificationRefreshesProgressWithoutReplacingCard"] = refreshed && page?.smokeCards.first === moving && moving?.smokeTitle.animationGeneration == generation
+    moving?.smokeTitle.smokeInterrupt()
+    checks["foregroundTestActuallyInterruptsMarquee"] = moving?.smokeTitle.scrolling == false
+    NotificationCenter.default.post(name:UIApplication.didBecomeActiveNotification,object:nil)
+    _ = await wait { moving?.smokeTitle.layoutIfNeeded(); return moving?.smokeTitle.scrolling == true }
+    checks["foregroundRestartsSharedMarquee"] = UIAccessibility.isReduceMotionEnabled || moving?.smokeTitle.scrolling == true
     page?.view.layoutIfNeeded(); checks["queueHeaderLabelsFit"] = page?.smokeHeaderLabelsFit == true
     shell.view.layoutIfNeeded(); screenshot(shell,"queue")
     if let page { page.smokeBeginOrder(); page.smokeMove(8103,to:0); page.smokeSaveOrder() }

@@ -7,6 +7,7 @@ final class NeoEncodeDialog: NeoLiveDialog {
   private var configModes: [String] = []
   private var configDirectories: [String] = []
   private var busy = false
+  var authenticationReady = true { didSet { refreshControls() } }
   private var locked = false
   private var completed = 0
   private var total = 0
@@ -224,7 +225,7 @@ final class NeoEncodeDialog: NeoLiveDialog {
     guard let source = commonSources.first else { return }; sourceVideoFileID = source.id; sourceName = source.name
   }
   private var canSubmit: Bool {
-    guard !busy, !records.isEmpty else { return false }
+    guard authenticationReady, !busy, !records.isEmpty else { return false }
     if locked { return !failures.isEmpty }
     guard configModes.contains(settings.mode) else { return false }
     if bulk {

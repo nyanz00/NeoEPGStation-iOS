@@ -26,6 +26,40 @@ private final class NeoEncodeProtocol: URLProtocol {
   static func captured() -> [Captured] { lock.lock(); defer { lock.unlock() }; return requests }
 }
 
+/// Engine.IO polling fixture whose later poll remains open until cancellation.
+private final class NeoEncodeSocketFixture: URLProtocol {
+  private static let lock = NSLock()
+  private static var requests: [(String,String?,[String:String])] = []
+  private static var socketPolls = 0
+  private var held = false
+  override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "socket-tests.invalid" }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    var bodyData = request.httpBody
+    if bodyData == nil, let stream = request.httpBodyStream {
+      stream.open(); defer { stream.close() }; var data = Data(), buffer = [UInt8](repeating:0,count:1024)
+      while true { let n = stream.read(&buffer,maxLength:buffer.count); if n <= 0 { break }; data.append(buffer,count:n) }
+      bodyData = data
+    }
+    let body = bodyData.flatMap { String(data:$0,encoding:.utf8) }
+    let sid = URLComponents(url:request.url!,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{$0.name == "sid"})?.value
+    let headers = (request.allHTTPHeaderFields ?? [:]).reduce(into:[String:String]()) { $0[$1.key.lowercased()] = $1.value }
+    Self.lock.lock(); Self.requests.append((request.httpMethod ?? "GET",body,headers)); if sid != nil && body == nil { Self.socketPolls += 1 }; let poll = Self.socketPolls; Self.lock.unlock()
+    if body == nil {
+      if sid == nil { respond(#"0{"sid":"fixture-sid","pingInterval":10000,"pingTimeout":10000}"#) }
+      else if poll == 1 { respond("2fixture-ping\u{1e}42[\"updateEncode\"]\u{1e}42[\"updateStatus\"]") }
+      else { held = true; Self.lock.lock(); Self.requests.append(("HOLD",nil,[:])); Self.lock.unlock() }
+    } else { respond("ok") }
+  }
+  private func respond(_ text:String) {
+    let response = HTTPURLResponse(url:request.url!,statusCode:200,httpVersion:"HTTP/1.1",headerFields:["Content-Type":"text/plain"])!
+    client?.urlProtocol(self,didReceive:response,cacheStoragePolicy:.notAllowed); client?.urlProtocol(self,didLoad:Data(text.utf8)); client?.urlProtocolDidFinishLoading(self)
+  }
+  override func stopLoading() { if held { Self.lock.lock(); Self.requests.append(("CANCEL",nil,[:])); Self.lock.unlock() } }
+  static func reset() { lock.lock(); requests = []; socketPolls = 0; lock.unlock() }
+  static func captured() -> [(String,String?,[String:String])] { lock.lock(); defer { lock.unlock() }; return requests }
+}
+
 @MainActor private enum NeoEncodeTests {
   static func check(_ name: String, _ condition: @autoclosure () -> Bool, count: inout Int) { count += 1; guard condition() else { fatalError("FAIL: \(name)") }; print("PASS: \(name)") }
   static func file(_ id: Int, _ name: String) -> NeoVideoFile { NeoVideoFile(id:id,name:name,type:"ts",size:1,filename:nil) }
@@ -53,6 +87,39 @@ private final class NeoEncodeProtocol: URLProtocol {
     let suite = "encode-tests-\(UUID().uuidString)"; let defaults = UserDefaults(suiteName:suite)!; defer { defaults.removePersistentDomain(forName:suite) }
     check("settings load defaults when suite is empty", NeoAddEncodeSettings.load(defaults) == NeoAddEncodeSettings(),count:&count)
     settings.save(defaults); check("settings save and load round trip", NeoAddEncodeSettings.load(defaults) == settings,count:&count)
+
+    let socketBase = URL(string:"https://example.invalid:8443/epgstation/")!
+    let socketEndpoints = NeoEncodeSocketProtocol.endpoints(base:socketBase,port:9000)
+    check("socket endpoints preserve subpath and include configured-port fallback", socketEndpoints.map(\.absoluteString) == ["https://example.invalid:9000/epgstation/socket.io/","https://example.invalid:8443/epgstation/socket.io/"],count:&count)
+    let socketQuery = URLComponents(url:NeoEncodeSocketProtocol.url(socketEndpoints[0],sid:"a b"),resolvingAgainstBaseURL:false)?.queryItems ?? []
+    check("Engine.IO URL carries v4 polling transport and session ID", socketQuery.first(where:{$0.name == "EIO"})?.value == "4" && socketQuery.first(where:{$0.name == "transport"})?.value == "polling" && socketQuery.first(where:{$0.name == "sid"})?.value == "a b",count:&count)
+    check("Socket.IO parser recognizes only encode update events and separates packets", NeoEncodeSocketProtocol.isUpdate(#"42["updateEncode",{}]"#) && NeoEncodeSocketProtocol.isUpdate(#"42["updateStatus"]"#) && !NeoEncodeSocketProtocol.isUpdate(#"42["other"]"#) && !NeoEncodeSocketProtocol.isUpdate("42broken") && NeoEncodeSocketProtocol.packets("2ping\u{1e}42event") == ["2ping","42event"],count:&count)
+
+    let auth = api(), originalRevision = auth.identityRevision, originalHeaders = auth.profileHeaders
+    auth.suspendAuthentication(preservingIdentity:true)
+    check("preserving suspension gates requests and keeps identity credentials", !auth.accountReady && auth.accountRevalidating && auth.identityRevision == originalRevision && auth.viewer == "17" && auth.profileHeaders == originalHeaders,count:&count)
+    auth.activate(user:"17",headers:originalHeaders)
+    check("same identity revalidation restores readiness without revision change", auth.accountReady && !auth.accountRevalidating && auth.identityRevision == originalRevision && auth.profileHeaders == originalHeaders,count:&count)
+    auth.suspendAuthentication(preservingIdentity:true); auth.activate(user:"18",headers:originalHeaders)
+    check("account change during revalidation advances identity revision", auth.identityRevision == originalRevision + 1 && auth.viewer == "18",count:&count)
+    let accountRevision = auth.identityRevision
+    auth.suspendAuthentication(preservingIdentity:true); auth.activate(user:"18",headers:["X-Viewer-Session":"rotated"])
+    check("credential change during revalidation advances identity revision", auth.identityRevision == accountRevision + 1,count:&count)
+
+    NeoEncodeSocketFixture.reset()
+    let socketConfig = URLSessionConfiguration.ephemeral; socketConfig.protocolClasses = [NeoEncodeSocketFixture.self]
+    let socketAPI = NeoAPI(base:URL(string:"https://socket-tests.invalid/epgstation")!,session:URLSession(configuration:socketConfig))
+    socketAPI.activate(user:"private-user",headers:["Authorization":"private-token"])
+    let updates = NeoEncodeUpdates(); var updateCount = 0
+    updates.start(api:socketAPI,port:nil) { updateCount += 1 }
+    let deadline = Date().addingTimeInterval(2)
+    while updateCount == 0 && Date() < deadline { try await Task.sleep(nanoseconds:10_000_000) }
+    while !NeoEncodeSocketFixture.captured().contains(where:{$0.0 == "HOLD"}) && Date() < deadline { try await Task.sleep(nanoseconds:10_000_000) }
+    updates.stop(); try await Task.sleep(nanoseconds:100_000_000)
+    let socketRequests = NeoEncodeSocketFixture.captured()
+    check("polling fixture completes handshake, namespace, ping pong and update callback", updateCount == 1 && socketRequests.contains(where:{$0.1 == "40"}) && socketRequests.contains(where:{$0.1 == "3fixture-ping"}),count:&count)
+    check("polling requests do not copy user or authorization headers", socketRequests.allSatisfy({$0.2["authorization"] == nil && $0.2["x-epgstation-user-id"] == nil}),count:&count)
+    check("stop cancels the deliberately held polling request", socketRequests.contains(where:{$0.0 == "CANCEL"}),count:&count)
 
     var submitted:[Int]=[], progress:[Int]=[]
     let result = try await NeoEncodePlan.submit(jobs,isCurrent:{true},enqueue:{ job in submitted.append(job.recordedID); if job.recordedID == 1 { throw NeoError("temporary") } },progress:{progress.append($0)})
