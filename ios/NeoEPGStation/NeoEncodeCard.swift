@@ -1,11 +1,23 @@
 import UIKit
 
+/// Keep visual padding out of the displayed string and size the pill once.
+private final class NeoEncodeBadge: UILabel {
+  static let horizontalInset: CGFloat = 6
+  override var intrinsicContentSize: CGSize {
+    let textSize = super.intrinsicContentSize
+    return CGSize(width:ceil(max(0,textSize.width))+Self.horizontalInset*2,height:24)
+  }
+  func contentRect(in rect: CGRect) -> CGRect { rect.insetBy(dx:Self.horizontalInset,dy:0) }
+  override func drawText(in rect: CGRect) { super.drawText(in:contentRect(in:rect)) }
+}
+
 /// Queue row presentation for the Web EncodeCard. Queue mutations and drag
 /// state remain owned by the containing page.
 final class NeoEncodeCard: UITableViewCell {
   var onSelect: (() -> Void)?, onCancel: (() -> Void)?, onMoveUp: (() -> Void)?, onMoveDown: (() -> Void)?
   let dragHandle = UIView()
-  private let card = UIView(), thumbnail = NeoThumbnail(), chip = UILabel(), title = NeoMarqueeTitle()
+  private let card = UIView(), thumbnail = NeoThumbnail(), chip = NeoEncodeBadge(), title = NeoMarqueeTitle()
+  private var badgeText = ""
   private let channel = NeoStyle.label(size: 14, muted: true), date = NeoStyle.label(size: 12, muted: true)
   private let percentLabel = NeoStyle.label(size: 14), percentValue = NeoStyle.label(size:14), progress = UIProgressView(progressViewStyle: .default)
   private let log = NeoStyle.label(size: 12, muted: true), cancel = UIButton(type: .system)
@@ -21,7 +33,7 @@ final class NeoEncodeCard: UITableViewCell {
     card.backgroundColor = NeoStyle.paper; card.layer.cornerRadius = 4; card.layer.borderWidth = 1
     card.layer.borderColor = NeoStyle.border.cgColor; contentView.addSubview(card)
     thumbnail.contentMode = .scaleAspectFill; thumbnail.clipsToBounds = true; thumbnail.layer.cornerRadius = 4
-    chip.font = .systemFont(ofSize: 12); chip.textAlignment = .center; chip.numberOfLines = 1
+    chip.font = .systemFont(ofSize: 12); chip.textAlignment = .left; chip.numberOfLines = 1
     chip.layer.cornerRadius = 12; chip.clipsToBounds = true
     channel.numberOfLines = 1; date.numberOfLines = 1
     progress.progressTintColor = NeoStyle.accent; progress.trackTintColor = NeoStyle.accent.withAlphaComponent(0.25)
@@ -63,7 +75,8 @@ final class NeoEncodeCard: UITableViewCell {
     f.dateFormat = "HH:mm"
     date.text = "\(f.string(from: start)) - \(f.string(from: end))（\(mins)分）"
     channel.text = item.recorded.channelName ?? item.recorded.channelId.flatMap { shell.channels[$0] } ?? item.recorded.channelId.map(String.init) ?? ""
-    chip.text = "  \(mode)  "; chip.backgroundColor = waiting ? UIColor.white.withAlphaComponent(0.12) : NeoStyle.accent
+    badgeText = mode; chip.text = mode
+    chip.backgroundColor = waiting ? UIColor.white.withAlphaComponent(0.12) : NeoStyle.accent
     chip.textColor = waiting ? .white : NeoStyle.successText
     thumbnail.load(item.recorded.thumbnails?.first.flatMap { shell.api?.url("/thumbnails/\($0)") })
     cancel.isHidden = editing || reordering; cancel.isEnabled = !disabled
@@ -95,7 +108,7 @@ final class NeoEncodeCard: UITableViewCell {
     check.frame = selectionMode ? CGRect(x:8,y:10,width:28,height:28) : .zero
     dragHandle.frame = CGRect(x:4,y:40,width:36,height:40)
     let left = pad + (selectionMode ? 36 : 0) + (dragHandle.isHidden ? 0 : 38)
-    let badgeWidth = min(chip.intrinsicContentSize.width+16,max(0,w-left-pad))
+    let badgeWidth = min(chip.intrinsicContentSize.width,max(0,w-left-pad))
     chip.frame = CGRect(x:left,y:10,width:badgeWidth,height:24)
     let mediaY: CGFloat = 40, infoHeight: CGFloat = 59
     let tx = left+thumbW+10, textW = max(0,w-tx-pad)
@@ -124,15 +137,24 @@ final class NeoEncodeCard: UITableViewCell {
 #if targetEnvironment(simulator)
   var smokeChannel: String? { channel.text }
   var smokeTitle: NeoMarqueeTitle { title }
+  var smokeBadgeTextFits: Bool {
+    guard let font = chip.font else { return false }
+    let textWidth = ceil((badgeText as NSString).size(withAttributes:[.font:font]).width)
+    let content = chip.contentRect(in:chip.bounds)
+    return chip.text == badgeText && chip.textAlignment == .left
+      && abs(chip.bounds.width-textWidth-12) < 0.5
+      && abs(content.minX-6) < 0.01 && abs(chip.bounds.maxX-content.maxX-6) < 0.01
+      && abs(chip.frame.minX-thumbnail.frame.minX) < 0.01
+  }
   var smokeGeometry: [String:Any] {
     ["thumbnail":String(describing:thumbnail.frame),"title":String(describing:title.frame),"date":String(describing:date.frame),
-      "badge":String(describing:chip.frame),"badgeIntrinsicWidth":chip.intrinsicContentSize.width,"cancel":String(describing:cancel.frame),
+      "badge":String(describing:chip.frame),"badgeText":chip.text ?? "","badgeTextFits":smokeBadgeTextFits,"badgeContent":String(describing:chip.contentRect(in:chip.bounds)),"badgeIntrinsicWidth":chip.intrinsicContentSize.width,"cancel":String(describing:cancel.frame),
       "percent":String(describing:percentValue.frame),"log":String(describing:log.frame),"card":String(describing:card.bounds),"waiting":waiting,"fits":smokeLayoutFits]
   }
   var smokeLayoutFits: Bool {
     let infoMid = (title.frame.minY+date.frame.maxY)/2
     return abs(thumbnail.frame.midY-infoMid) < 0.5 && abs(chip.frame.minX-thumbnail.frame.minX) < 0.01
-      && chip.frame.width <= chip.intrinsicContentSize.width+17
+      && chip.frame.width <= chip.intrinsicContentSize.width+0.5
       && title.frame.width > 0 && date.frame.width > 0
       && (waiting || (abs(cancel.frame.maxY-percentValue.frame.minY)<0.5 && log.frame.maxY <= card.bounds.height))
   }

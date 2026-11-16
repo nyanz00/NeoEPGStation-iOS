@@ -98,6 +98,7 @@ private final class NeoEncodeUIProtocol: URLProtocol {
   }
   private static func queueItem(_ id:Int,_ recorded:Int,_ mode:String = "h264",percent:Double? = nil) -> [String:Any] {
     var value:[String:Any] = ["id":id,"mode":mode,"recorded":record(recorded)]
+    if mode == "later" { value["scheduledAt"] = 1791025200000.0; value["scheduledAtLabel"] = "開始予約: 12:00" }
     if let percent { value["percent"] = percent }; return value
   }
   private static func wait(_ condition:() -> Bool, attempts:Int = 100) async -> Bool {
@@ -116,7 +117,7 @@ private final class NeoEncodeUIProtocol: URLProtocol {
     var checks:[String:Bool] = [:]
     let base = URL(string:"https://encode-ui.invalid")!
     let records = (7101...7104).map(record)
-    NeoEncodeUIProtocol.reset(records:records,running:[queueItem(8101,7101,"h264",percent:0.4)],waiting:[queueItem(8102,7102),queueItem(8103,7103)],scheduled:[queueItem(8104,7104,"later")],recovery:[["id":8105,"status":"failed","mode":"h264","recorded":record(7101),"reason":"fixture retry","canRetry":true],["id":8106,"status":"failed","mode":"h264","recorded":record(7102),"reason":"not retryable","canRetry":false]],failRecordedIDs:[7102],failCancelIDs:[8102])
+    NeoEncodeUIProtocol.reset(records:records,running:[queueItem(8101,7101,"AV1-TEST-24",percent:0.4)],waiting:[queueItem(8102,7102),queueItem(8103,7103)],scheduled:[queueItem(8104,7104,"later")],recovery:[["id":8105,"status":"failed","mode":"h264","recorded":record(7101),"reason":"fixture retry","canRetry":true],["id":8106,"status":"failed","mode":"h264","recorded":record(7102),"reason":"not retryable","canRetry":false]],failRecordedIDs:[7102],failCancelIDs:[8102])
     let config = URLSessionConfiguration.ephemeral; config.protocolClasses=[NeoEncodeUIProtocol.self]
     let api = NeoAPI(base:base,session:URLSession(configuration:config)); api.activate(user:"7",headers:["X-Viewer-Profile-Id":"21","X-Viewer-Session":"encode-ui-fixture"])
     let fixtureConfig = try? JSONDecoder().decode(NeoServerConfig.self,from:JSONSerialization.data(withJSONObject:["encode":["h264","hevc"],"recorded":["D:\\Encode"]]))
@@ -179,7 +180,7 @@ private final class NeoEncodeUIProtocol: URLProtocol {
       && NeoEncodeUIProtocol.allBodies("POST /api/encode").compactMap{$0["recordedId"] as? Int} == [7101,7101,7102,7102]
 
 
-    NeoEncodeUIProtocol.resetQueue(running:[queueItem(8101,7101,"h264",percent:0.4)],waiting:[queueItem(8102,7102),queueItem(8103,7103)],scheduled:[queueItem(8104,7104,"later")],recovery:[["id":8105,"status":"failed","mode":"h264","recorded":record(7101),"reason":"fixture retry","canRetry":true],["id":8106,"status":"failed","mode":"h264","recorded":record(7102),"reason":"not retryable","canRetry":false]])
+    NeoEncodeUIProtocol.resetQueue(running:[queueItem(8101,7101,"AV1-TEST-24",percent:0.4)],waiting:[queueItem(8102,7102),queueItem(8103,7103)],scheduled:[queueItem(8104,7104,"later")],recovery:[["id":8105,"status":"failed","mode":"h264","recorded":record(7101),"reason":"fixture retry","canRetry":true],["id":8106,"status":"failed","mode":"h264","recorded":record(7102),"reason":"not retryable","canRetry":false]])
     shell.showRoute("encode"); let page = shell.children.compactMap{$0 as? UINavigationController}.first(where:{$0.topViewController is NeoEncodePage})?.topViewController as? NeoEncodePage
     let queueLoaded = await wait { page?.smokeInfo.runningItems.map(\.id) == [8101] && page?.smokeInfo.waitItems.map(\.id) == [8102,8103] && page?.smokeInfo.scheduledItems.map(\.id) == [8104] && page?.smokeInfo.recoveryItems.map(\.id) == [8105,8106] }
     checks["queueDisplaysFourEncodeGroups"] = queueLoaded
@@ -192,6 +193,7 @@ private final class NeoEncodeUIProtocol: URLProtocol {
     }
     checks["channelIDResolvesThroughStationList"] = page?.smokeCards.first?.smokeChannel == "Fixture Station"
     checks["compactCardsAlignBadgeThumbnailTextAndProgress"] = settledLayout
+    checks["badgeUsesRawTextWithSinglePaddingAndLeftAlignment"] = page?.smokeCards.isEmpty == false && page?.smokeCards.allSatisfy { $0.smokeBadgeTextFits } == true
     let moving = page?.smokeCards.first, generation = moving?.smokeTitle.animationGeneration
     checks["encodeTitleUsesOneWayMarquee"] = UIAccessibility.isReduceMotionEnabled || moving?.smokeTitle.smokeOneWay == true
     NeoEncodeUIProtocol.progress(0.73)
