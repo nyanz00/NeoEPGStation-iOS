@@ -9,6 +9,12 @@ on:
     paths-ignore: ['docs/**', 'AGENTS.md', 'README.md']
   workflow_dispatch:
     inputs:
+      runner_image:
+        description: 'Manual fallback when the default macOS runner pool is unavailable'
+        required: false
+        default: macos-26
+        type: choice
+        options: [macos-26, macos-15]
       check_scope:
         description: 'Simulator verification scope (build and type checks always run for new builds)'
         required: false
@@ -108,10 +114,11 @@ jobs:
   build:
     needs: [preflight, native-library]
     if: ${{ needs.preflight.outputs.proceed == 'true' && !inputs.reuse_run }}
-    runs-on: macos-26
+    runs-on: ${{ inputs.runner_image || 'macos-26' }}
     timeout-minutes: 60
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      XCODE_VERSION: ${{ inputs.runner_image == 'macos-15' && '26.3' || '26.6' }}
+      DEVELOPER_DIR: ${{ inputs.runner_image == 'macos-15' && '/Applications/Xcode_26.3.app/Contents/Developer' || '/Applications/Xcode_26.6.app/Contents/Developer' }}
       NETWORK_CODEC: ${{ inputs.network_codec || 'h264' }}
     steps:
       - uses: actions/checkout@v4
@@ -294,7 +301,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: build/SourcePackages
-          key: aether-spm-xcode26.6-${{ hashFiles('ios/NeoEPGStation.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          key: aether-spm-xcode${{ env.XCODE_VERSION }}-${{ hashFiles('ios/NeoEPGStation.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
       - name: Resolve pinned comparison engine
         id: aether-dependencies
         run: |
@@ -314,7 +321,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/checkpoint
-          key: checkpoint-xcode26.6-v1-${{ hashFiles('scripts/build-checkpoint.py', 'scripts/checkpoint_compression_sources.py', 'vendor/checkpoint/**', 'vendor/rcomp-metal/**', 'vendor/lscomp/**', 'experiments/dav1d-checkpoint/*.c', 'experiments/dav1d-checkpoint/*.h') }}
+          key: checkpoint-xcode${{ env.XCODE_VERSION }}-v1-${{ hashFiles('scripts/build-checkpoint.py', 'scripts/checkpoint_compression_sources.py', 'vendor/checkpoint/**', 'vendor/rcomp-metal/**', 'vendor/lscomp/**', 'experiments/dav1d-checkpoint/*.c', 'experiments/dav1d-checkpoint/*.h') }}
       - name: Build private checkpoint decoder for device and simulator
         run: |
           command -v meson >/dev/null && command -v ninja >/dev/null || brew install meson ninja
@@ -547,13 +554,14 @@ jobs:
     name: Reused simulator UI checks
     needs: preflight
     if: ${{ needs.preflight.outputs.proceed == 'true' && inputs.reuse_run != '' }}
-    runs-on: macos-26
+    runs-on: ${{ inputs.runner_image || 'macos-26' }}
     timeout-minutes: 25
     permissions:
       contents: read
       actions: read
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      XCODE_VERSION: ${{ inputs.runner_image == 'macos-15' && '26.3' || '26.6' }}
+      DEVELOPER_DIR: ${{ inputs.runner_image == 'macos-15' && '/Applications/Xcode_26.3.app/Contents/Developer' || '/Applications/Xcode_26.6.app/Contents/Developer' }}
       REUSE_RUN: ${{ inputs.reuse_run }}
       NATIVE_PIXEL_PROBE: ${{ inputs.native_pixel_probe }}
       UI_STAGE: ${{ inputs.ui_stage }}

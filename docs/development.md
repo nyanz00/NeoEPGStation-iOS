@@ -150,3 +150,7 @@ HTTPSの証明書検証は無効化しない。App Store提出時にはこの設
 VLCKitとlibVLCのライセンス表示・ソース提供等の配布条件を維持する。
 独自改修の配布前には対応するソースとパッチを公開し、App Store配布時の構成を確認する。
 公式ビルドの情報: https://github.com/videolan/vlckit/tree/2e0868f5ed40fe59cd92f377645fdcc260c6e759
+
+### 実行機不足時の手動フォールバック
+
+macOS実行機が未取得のまま容量制約で終了した場合、`workflow_dispatch`の`runner_image`で`macos-15`を選べる。通常は`macos-26` / Xcode 26.6、フォールバックは`macos-15` / Xcode 26.3。アプリ・モデル・iPhone/iPad検証の範囲は同じで、SPMとチェックポイントのコンパイル済みキャッシュはXcode版ごとに分離する。再利用するシミュレーターアプリは作成元に対応する実行環境を選ぶ。検証結果には実際の環境を記録する。
