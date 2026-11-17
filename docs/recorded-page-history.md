@@ -13,3 +13,11 @@ Web参照は`RecordedPage.tsx`のページ変更・エンコード追加、`Reco
 | 進捗 | 同じジョブの既知値の更新だけUIKitで補間する。初回・別ジョブ・未確定から確定への切替・再利用時は正しい位置を即時表示する。同じ値の再表示では進行中のアニメーションを作り直さない。位置・バッジは変更しない。 |
 
 モデル検証は`tests/page-history/main.swift`、通知とAPIは`tests/encode/main.swift`、実画面の操作は`runRecordedHistorySmoke`と`NeoEncodeSmoke`。`player-feedback` / `encode`の同じiPhone/iPad実行にまとめる。API失敗の注入、キャンセル、復元、分岐、ユーザー・フィルター変更、実際のPLAY候補を表示した状態の戻り、単体/一括の実通知、進捗の更新/初回/再利用を対象とする。プレイヤー内部のジェスチャーや再生処理は変更しない。
+
+## 検証済みビルド
+
+- [Actions 44127800746](https://github.com/nyanz00/NeoEPGStation-iOS/actions/runs/44127800746)、ソース `1e5ae5fb12f91dfd1d21d9075ecfbfcfc0af60d7`、build 387。
+- macOS 15 / Xcode 26.3の手動フォールバックでdevice・simulatorビルド、FFmpeg import分離、IPA作成まで成功。通常のmacOS 26実行は容量制約で実行機を取得できず、ビルド前に終了したため、本変更のmacOS 26での成功を示す結果ではない。
+- ページ履歴・ジェスチャー30 assertions、通知・エンコードモデル/API 31 checks、iPhone・iPad各51画面チェック成功。手元のCI補助テスト27件も成功。
+- 画面チェックは合成データ・ローカルのAPI fixtureを使用。PLAY候補を開いた状態の全面戻り、指への追従、ページとスクロールの往復、取り消し・API失敗時のロールバック、履歴分岐・ユーザー/フィルター変更、単体/一括の成功通知、進捗初回/更新/同値/カード再利用を確認。実機・実サーバーでの操作感は未確認。
+- `NeoEPGStation-build387.ipa` SHA-256: `5a7f460405c689eb4657f543484ca9c462f3fbb70ac559ec2ee080fc4ad8ed83`。Actions artifact digest、build-infoのソース、IPA内のビルド番号とハッシュを照合済み。
