@@ -66,7 +66,7 @@ struct PageHistoryTests {
     func gesture(_ y: Double, _ horizontal: Double, _ vertical: Double, back: Bool, tablet: Bool = false,
       fullScreen: Bool = false, forward: Bool = false) -> NeoSwipeAction? {
       NeoNavigationGesture.action(startY: y, height: 100, canGoBack: back, tablet: tablet,
-        horizontal: horizontal, vertical: vertical, fullScreenBack: fullScreen, canGoForward: forward)
+        horizontal: horizontal, vertical: vertical, persistentMenu: tablet, fullScreenBack: fullScreen, canGoForward: forward)
     }
     actionIs(.back, gesture(0, 10, 0, back: true, fullScreen: true), "full-screen back works from top")
     actionIs(.back, gesture(100, 10, 0, back: true, fullScreen: true), "full-screen back works from bottom")
