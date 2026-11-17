@@ -73,6 +73,8 @@ private final class NeoEncodeSocketFixture: URLProtocol {
   }
   static func run() async throws {
     var count = 0
+    check("single encode message matches Web without a count", NeoEncodePlan.successMessage(bulk:false,count:1) == "エンコードキューに追加しました。",count:&count)
+    check("bulk encode message includes the total successful count", NeoEncodePlan.successMessage(bulk:true,count:3) == "3 件をエンコードキューに追加しました。",count:&count)
     var settings = NeoAddEncodeSettings(mode:"h264",parentDir:"D:\\encoded",sameDirectory:false,removeOriginal:true,updateThumbnail:false)
     let records = [recording(1,[file(10,"shared.ts"),file(11,"shared.ts"),file(12,"other.ts")]),recording(2,[file(20,"other.ts"),file(21,"shared.ts")])]
     let jobs = try NeoEncodePlan.jobs([records[0],records[0],records[1]],sourceName:"shared.ts",settings:settings,directory:"  Drama  ")

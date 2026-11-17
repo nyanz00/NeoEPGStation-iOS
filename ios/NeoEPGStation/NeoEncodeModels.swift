@@ -46,6 +46,9 @@ struct NeoEncodeJob {
 struct NeoEncodeFailure { let job: NeoEncodeJob, error: String }
 struct NeoEncodeBatchResult { var succeeded: [NeoEncodeJob] = [], failed: [NeoEncodeFailure] = [] }
 enum NeoEncodePlan {
+  static func successMessage(bulk: Bool, count: Int) -> String {
+    bulk ? "\(count) 件をエンコードキューに追加しました。" : "エンコードキューに追加しました。"
+  }
   static func commonSourceNames(_ items: [NeoRecording]) -> [String] {
     guard let first = items.first else { return [] }
     var seen = Set<String>()

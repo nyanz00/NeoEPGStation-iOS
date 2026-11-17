@@ -152,6 +152,7 @@ private final class NeoEncodeUIProtocol: URLProtocol {
     checks["singleEncodeSubmitsExactOptionsOnce"] = enabled && posted && body?["recordedId"] as? Int == 7101 && body?["sourceVideoFileId"] as? Int == 71010 && body?["mode"] as? String == "hevc" && body?["parentDir"] as? String == "D:\\Encode" && body?["directory"] as? String == "Drama" && body?["removeOriginal"] as? Bool == true && body?["updateThumbnail"] as? Bool == false
     let dismissed = await wait { nav?.topViewController === detail && detail?.presentedViewController == nil }
     checks["singleEncodeCompletionDismisses"] = dismissed
+    checks["singleEncodeNoticeMatchesWeb"] = (shell.view.viewWithTag(80921) as? UILabel)?.text?.trimmingCharacters(in:.whitespaces) == "エンコードキューに追加しました。"
 
     // Exercise the same dialog entry through the recorded-list context menu API.
     // The list's real menu is a UIKit menu; selecting its encode action presents the same action owner.
@@ -178,6 +179,7 @@ private final class NeoEncodeUIProtocol: URLProtocol {
     let postBodies = NeoEncodeUIProtocol.body("POST /api/encode")
     checks["bulkRetryPostsOnlyFailedJob"] = retried && postBodies?["recordedId"] as? Int == 7102
       && NeoEncodeUIProtocol.allBodies("POST /api/encode").compactMap{$0["recordedId"] as? Int} == [7101,7101,7102,7102]
+    checks["bulkEncodeNoticeKeepsCount"] = (shell.view.viewWithTag(80921) as? UILabel)?.text?.trimmingCharacters(in:.whitespaces) == "2 件をエンコードキューに追加しました。"
 
 
     NeoEncodeUIProtocol.resetQueue(running:[queueItem(8101,7101,"AV1-TEST-24",percent:0.4)],waiting:[queueItem(8102,7102),queueItem(8103,7103)],scheduled:[queueItem(8104,7104,"later")],recovery:[["id":8105,"status":"failed","mode":"h264","recorded":record(7101),"reason":"fixture retry","canRetry":true],["id":8106,"status":"failed","mode":"h264","recorded":record(7102),"reason":"not retryable","canRetry":false]])
@@ -195,10 +197,30 @@ private final class NeoEncodeUIProtocol: URLProtocol {
     checks["compactCardsAlignBadgeThumbnailTextAndProgress"] = settledLayout
     checks["badgeUsesRawTextWithSinglePaddingAndLeftAlignment"] = page?.smokeCards.isEmpty == false && page?.smokeCards.allSatisfy { $0.smokeBadgeTextFits } == true
     let moving = page?.smokeCards.first, generation = moving?.smokeTitle.animationGeneration
+    let animations = moving?.smokeProgressAnimationCount ?? -1
+    checks["initialProgressIsImmediate"] = moving?.smokeProgressAnimationRequested == false && animations == 0
     checks["encodeTitleUsesOneWayMarquee"] = UIAccessibility.isReduceMotionEnabled || moving?.smokeTitle.smokeOneWay == true
     NeoEncodeUIProtocol.progress(0.73)
     let refreshed = await wait { page?.smokeInfo.runningItems.first?.percent == 0.73 }
     checks["socketNotificationRefreshesProgressWithoutReplacingCard"] = refreshed && page?.smokeCards.first === moving && moving?.smokeTitle.animationGeneration == generation
+    checks["sameJobProgressUsesSmoothUpdate"] = refreshed && (UIAccessibility.isReduceMotionEnabled || (moving?.smokeProgressAnimationCount ?? -1) > animations)
+    let probe = NeoEncodeCard(style:.default,reuseIdentifier:nil); probe.isHidden = true
+    shell.view.addSubview(probe)
+    func configureProgress(_ id: Int, _ value: Double?) {
+      let item = NeoEncodeItem(id:id,mode:"fixture",recorded:firstRecord,percent:value,log:nil,scheduledAt:nil,scheduledAtLabel:nil)
+      probe.configure(item,shell:shell,mobile:true,waiting:false,editing:false,reordering:false,selected:false,canMoveUp:false,canMoveDown:false,disabled:false)
+    }
+    configureProgress(9901,0.4); configureProgress(9901,0.7)
+    let sameJobAnimations = probe.smokeProgressAnimationCount
+    configureProgress(9901,0.7)
+    checks["unchangedProgressDoesNotRestartAnimation"] = probe.smokeProgressAnimationCount == sameJobAnimations && !probe.smokeProgressAnimationRequested
+    configureProgress(9902,0.7)
+    let newJobImmediate = !probe.smokeProgressAnimationRequested && probe.smokeRepresentedEncodeID == 9902
+    configureProgress(9902,nil); configureProgress(9902,0.2)
+    checks["newJobAndFirstKnownProgressAreImmediate"] = newJobImmediate && !probe.smokeProgressAnimationRequested && probe.smokeLastKnownProgress == Float(0.2)
+    probe.prepareForReuse(); configureProgress(9903,0.5)
+    checks["reusedProgressStartsAtCorrectPosition"] = !probe.smokeProgressAnimationRequested && probe.smokeRepresentedEncodeID == 9903 && probe.smokeLastKnownProgress == Float(0.5)
+    probe.removeFromSuperview()
     let feedbackState:[String:Any] = ["connected":connected,"socketConnected":page?.smokeSocketConnected ?? false,
       "applicationState":UIApplication.shared.applicationState.rawValue,"refreshed":refreshed,"percent":page?.smokeInfo.runningItems.first?.percent ?? -1,
       "sameCell":page?.smokeCards.first === moving,"generationBefore":generation ?? -1,"generationAfter":moving?.smokeTitle.animationGeneration ?? -1,

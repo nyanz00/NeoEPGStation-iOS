@@ -83,7 +83,7 @@ extension NeoPage {
         }
         onCompleted?(Set(result.failed.map { $0.job.recordedID }))
         if result.failed.isEmpty {
-          shell?.recordingNotice("\(successCount) 件をエンコードキューに追加しました。")
+          shell?.recordingNotice(NeoEncodePlan.successMessage(bulk:bulk,count:successCount))
           finish(dismiss: true)
         } else {
           dialog.setFailures(result.failed, successCount: successCount)

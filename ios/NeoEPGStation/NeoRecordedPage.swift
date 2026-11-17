@@ -189,7 +189,16 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   private var filters = NeoRecordedFilters()
   private var keyword: String { filters.keyword }
   private var pageLength = 24
+#if targetEnvironment(simulator)
+  private var historySmokeRows = false
+  private var historySmokeFailRestore = false
+#endif
   private var requestedPage = 1
+  private var pageHistory = NeoRecordedPageHistory()
+  private var historyContext: NeoRecordingQuery?, historyIdentity: Int?
+  private weak var historyAPI: NeoAPI?
+  private var historySwipe: (direction: Int, destination: Int, offset: Double, token: UUID)?
+  private var historySwipeToken = UUID(), historySwipeRunning = false
   private var task: Task<Void, Never>?
   private var cache: [NeoRecordingQuery: (result: NeoRecords, stored: Date)] = [:]
   private var cacheOrder: [NeoRecordingQuery] = []
@@ -286,7 +295,10 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
     let frame = body.bounds
-    let changed = collection.bounds.size != frame.size; collection.frame = frame
+    let changed = collection.bounds.size != frame.size
+    if historySwipeRunning {
+      collection.bounds.size = frame.size; collection.center = CGPoint(x:frame.midX,y:frame.midY)
+    } else { collection.frame = frame }
     let narrow = (view.window?.bounds.width ?? view.bounds.width) < 600
     if narrow != bulkMobile { bulkMobile = narrow; updateEditHeader() }
     if changed {
@@ -360,40 +372,56 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     locatedUserID = id; updateUserMenu(); clearCache(); reload(targetPage: 1)
   }
   func locate(_ id: Int, page: Int, userID: Int?) {
+    cancelPageHistoryInteraction(); pageHistory.reset(page:max(1,page))
     userFilterExplicit = true; locatedUserID = userID.flatMap { $0 > 0 ? $0 : nil }; focusedRecordingID = id; filters = NeoRecordedFilters(); reverse = false
     returnRecordingID = nil; returnOffset = nil; updateUserMenu()
     cache.removeAll(); cacheOrder.removeAll(); reload(targetPage: max(1, page))
   }
   func returnToFirstPage() {
+    cancelHistorySwipe(); pageHistory.reset()
     if page != 1 || requestedPage != 1 { reload(targetPage: 1) }
     else { collection.setContentOffset(CGPoint(x: 0, y: -collection.adjustedContentInset.top), animated: false) }
   }
   @objc private func refreshList() { cache.removeAll(); cacheOrder.removeAll(); reload() }
-  private func reload(targetPage: Int? = nil, preserveOffset: Bool = false) {
+  private func reload(targetPage: Int? = nil, preserveOffset: Bool = false,
+    recordVisit: Bool = false, historyDestination: Int? = nil, historyOffset: Double? = nil) {
+    if historyDestination == nil { cancelHistorySwipe() }
     task?.cancel(); loadGeneration += 1; let attempt = loadGeneration
     spinner.startAnimating(); message.text = nil
     clearHighlight()
     let requestedPage = targetPage ?? page, query = keyword, oldest = reverse
-    let savedOffset = preserveOffset ? collection.contentOffset : .zero
+    let savedOffset = historyOffset.map { CGPoint(x:0,y:CGFloat($0)) } ?? (preserveOffset ? collection.contentOffset : .zero)
     self.requestedPage = requestedPage
     let userID = locatedUserID
     let search = filters, limit = pageLength
     let key = NeoRecordingQuery(page: requestedPage, keyword: query, reverse: oldest, userID: userID, filters: search, limit: limit)
+    let context = NeoRecordingQuery(page:1,keyword:query,reverse:oldest,userID:userID,filters:search,limit:limit)
+    let api = shell?.api, revision = shell?.api?.identityRevision, halfWidth = shell?.api?.isHalfWidthDisplayed
+    if historyContext != context || historyIdentity != revision || historyAPI !== api {
+      cancelHistorySwipe(); pageHistory.reset(page:requestedPage)
+      historyContext = context; historyIdentity = revision; historyAPI = api
+    }
     let entry = cache[key]
     let cached = entry.flatMap { Date().timeIntervalSince($0.stored) < 30 ? $0.result : nil }
     collection.layer.removeAllAnimations(); collection.alpha = records.isEmpty ? 0 : 1
-    let api = shell?.api, revision = shell?.api?.identityRevision, halfWidth = shell?.api?.isHalfWidthDisplayed
     task = Task { [weak self] in
       guard let self else { return }
       defer {
         if self.loadGeneration == attempt { self.spinner.stopAnimating(); self.refresh.endRefreshing(); self.collection.alpha = 1 }
       }
       do {
+#if targetEnvironment(simulator)
+        if self.historySmokeFailRestore, historyDestination != nil {
+          self.historySmokeFailRestore = false; throw NeoError("fixture history read failure")
+        }
+#endif
         let result: NeoRecords
         if let cached { result = cached }
         else {
 #if targetEnvironment(simulator)
-        if self.shell?.smokeStage.isEmpty == false, !["recording-features.invalid","recording-actions.invalid","recorded-bulk.invalid","encode-ui.invalid"].contains(api?.base.host ?? "") { result = Self.fixtures }
+        if self.shell?.smokeStage.isEmpty == false, !["recording-features.invalid","recording-actions.invalid","recorded-bulk.invalid","encode-ui.invalid"].contains(api?.base.host ?? "") {
+          result = self.historySmokeRows ? NeoRecords(records:Array(repeating:Self.fixtures.records,count:6).flatMap { $0 },total:Self.fixtures.total) : Self.fixtures
+        }
         else { guard let requestAPI = api else { return }; result = try await requestAPI.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search) }
 #else
         guard let requestAPI = api else { return }; result = try await requestAPI.recordings(page: requestedPage, reverse: oldest, userID: userID, filters: search)
@@ -405,7 +433,9 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         }
         try Task.checkCancellation()
         let lastPage = max(1, Int(ceil(Double(result.total) / Double(limit))))
-        if requestedPage > lastPage { self.reload(targetPage: lastPage,preserveOffset:preserveOffset); return }
+        if requestedPage > lastPage {
+          self.reload(targetPage:lastPage,preserveOffset:preserveOffset,recordVisit:recordVisit,historyDestination:historyDestination,historyOffset:historyOffset); return
+        }
         let urls = result.records.compactMap { $0.thumbnails?.first.flatMap { api?.url("/thumbnails/\($0)") } }
         // Show the list immediately. Cells share asynchronous thumbnail loads;
         // preparing every image first held the entire list for up to 400ms.
@@ -419,13 +449,19 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         self.collection.layoutIfNeeded()
         let maximumOffset = max(-self.collection.adjustedContentInset.top,self.collection.contentSize.height-self.collection.bounds.height+self.collection.adjustedContentInset.bottom)
         self.collection.setContentOffset(CGPoint(x:0,y:min(maximumOffset,max(-self.collection.adjustedContentInset.top,savedOffset.y))),animated:false)
+        let offset = Double(self.collection.contentOffset.y)
+        if let destination = historyDestination { self.pageHistory.restore(at:destination,page:requestedPage,offset:offset) }
+        else if recordVisit { self.pageHistory.visit(requestedPage,offset:offset) }
+        else if self.pageHistory.current.page != requestedPage { self.pageHistory.reset(page:requestedPage,offset:offset) }
+        else { self.pageHistory.updateOffset(offset) }
+        self.historySwipeRunning = false; self.historySwipe = nil; self.collection.isHidden = false
         self.prepareVisibleDetails()
         if let id = self.focusedRecordingID, let index = result.records.firstIndex(where: { $0.id == id }) {
           self.collection.scrollToItem(at: IndexPath(item: index, section: 0), at: .centeredVertically, animated: false)
           self.showHighlight(id)
           self.focusedRecordingID = nil
         }
-        self.lastFadeDuration = preserveOffset || UIAccessibility.isReduceMotionEnabled ? 0 : cached == nil ? 0.5 : 0.32
+        self.lastFadeDuration = preserveOffset || historyDestination != nil || UIAccessibility.isReduceMotionEnabled ? 0 : cached == nil ? 0.5 : 0.32
         // CSS `ease` in RecordedPage.tsx, applied once to the entire list/footer.
         let fade = CABasicAnimation(keyPath: "opacity"); fade.fromValue = 0; fade.toValue = 1
         fade.duration = self.lastFadeDuration; fade.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
@@ -434,6 +470,8 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
       } catch {
         if Task.isCancelled { return }
         guard self.shell?.api === api else { return }
+        self.requestedPage = self.page; self.historySwipeRunning = false; self.historySwipe = nil
+        self.collection.isHidden = false; self.collection.transform = .identity
         self.collection.alpha = 1
         if self.records.isEmpty && requestedPage == 1 && search.isEmpty
           && self.navigationController?.viewControllers.first === self && self.shell?.smokeStage.isEmpty == true {
@@ -463,7 +501,53 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); preparationTask?.cancel(); shell?.api?.pauseDetailPreparation() }
   private func selectPage(_ value: Int) {
     guard !editMode, value != page, (1...max(1, Int(ceil(Double(total) / Double(pageLength))))).contains(value) else { return }
-    reload(targetPage: value)
+    pageHistory.updateOffset(Double(collection.contentOffset.y))
+    reload(targetPage:value,recordVisit:true)
+  }
+  var canPageBack: Bool { !editMode && !historySwipeRunning && requestedPage == page && pageHistory.canBack }
+  var canPageForward: Bool { !editMode && !historySwipeRunning && requestedPage == page && pageHistory.canForward }
+  var pageHistoryNavigationBusy: Bool { historySwipeRunning }
+  func cancelPageHistoryInteraction() {
+    if historySwipeRunning {
+      task?.cancel(); loadGeneration += 1; requestedPage = page
+      spinner.stopAnimating(); refresh.endRefreshing()
+    }
+    cancelHistorySwipe()
+  }
+  @discardableResult func beginHistorySwipe(_ direction: Int) -> Bool {
+    guard (direction == -1 ? canPageBack : canPageForward), let target = pageHistory.target(direction) else { return false }
+    task?.cancel(); loadGeneration += 1; spinner.stopAnimating(); refresh.endRefreshing()
+    pageHistory.updateOffset(Double(collection.contentOffset.y)); historySwipeToken = UUID()
+    historySwipe = (direction,target.index,target.entry.offset,historySwipeToken); historySwipeRunning = true
+    collection.layer.removeAnimation(forKey:"recorded-list-fade-in"); collection.alpha = 1
+    return true
+  }
+  func updateHistorySwipe(translation: CGFloat) {
+    guard let swipe = historySwipe else { return }
+    let direction: CGFloat = swipe.direction == -1 ? 1 : -1
+    collection.transform = CGAffineTransform(translationX:direction*max(0,translation*direction),y:0)
+  }
+  func finishHistorySwipe(_ finish: Bool) {
+    guard let swipe = historySwipe else { return }
+    let x: CGFloat = swipe.direction == -1 ? collection.bounds.width : -collection.bounds.width
+    UIView.animate(withDuration:UIAccessibility.isReduceMotionEnabled ? 0 : 0.15,delay:0,
+      options:[.beginFromCurrentState,.curveEaseOut],animations:{
+        self.collection.transform = finish ? CGAffineTransform(translationX:x,y:0) : .identity
+      },completion:{ [weak self] _ in
+        guard let self, self.historySwipeToken == swipe.token else { return }
+        self.collection.transform = .identity
+        if finish {
+          self.collection.isHidden = true
+          let target = self.pageHistory.entries[swipe.destination].page
+          self.reload(targetPage:target,historyDestination:swipe.destination,historyOffset:swipe.offset)
+        } else { self.historySwipe = nil; self.historySwipeRunning = false }
+      })
+  }
+  func navigatePageHistory(_ direction: Int) { if beginHistorySwipe(direction) { finishHistorySwipe(true) } }
+  private func cancelHistorySwipe() {
+    guard historySwipeRunning else { return }
+    historySwipeToken = UUID(); historySwipe = nil; historySwipeRunning = false
+    collection.layer.removeAllAnimations(); collection.transform = .identity; collection.isHidden = false
   }
   private func jumpToPage() {
     let count = max(1,Int(ceil(Double(total)/Double(pageLength))))
@@ -531,6 +615,14 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
   func smokeScrollEnd() { scrollViewDidEndDragging(collection,willDecelerate:false) }
   var smokeScrollOffset: CGFloat { collection.contentOffset.y }
   var smokeCurrentPage: Int { page }
+  var smokeHistoryPages: [Int] { pageHistory.entries.map(\.page) }
+  var smokeHistoryIndex: Int { pageHistory.index }
+  func smokeSelectPage(_ value: Int) { selectPage(value) }
+  func smokeHistoryUser(_ id: Int?) { selectUser(id) }
+  func smokeFailNextHistoryRestore() { historySmokeFailRestore = true; clearCache() }
+  func smokeHistoryFixture(_ enabled: Bool) {
+    historySmokeRows = enabled; cancelPageHistoryInteraction(); pageHistory.reset(); clearCache(); reload(targetPage:1)
+  }
   var smokeSelectorAligned: Bool {
     view.layoutIfNeeded()
     return userButton.superview === header && userButton.frame.size == CGSize(width: 160, height: 40)

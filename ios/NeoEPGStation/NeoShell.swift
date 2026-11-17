@@ -427,6 +427,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private var popup: NeoAnchoredMenu?
   private var swipeStart = CGPoint.zero
   private var swipeAction: NeoSwipeAction?
+  private weak var pageSwipe: NeoRecordedPage?
+  private var popupHiddenForNavigation = false
   private var waveSwipe: Int?
   private weak var swipeScroll: UIScrollView?
   private var scrollWasEnabled = false
@@ -471,7 +473,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     dim.backgroundColor = UIColor.black.withAlphaComponent(0.5); dim.alpha = 0
     dim.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(closeMenu)))
     contentPan = UIPanGestureRecognizer(target: self, action: #selector(dragContent(_:))); contentPan.delegate = self
-    contentPan.maximumNumberOfTouches = 1; content.addGestureRecognizer(contentPan)
+    contentPan.maximumNumberOfTouches = 1; view.addGestureRecognizer(contentPan)
     closingPan = UIPanGestureRecognizer(target: self, action: #selector(dragMenu(_:))); closingPan.delegate = self
     closingPan.maximumNumberOfTouches = 1
     sidebar.addGestureRecognizer(closingPan)
@@ -575,6 +577,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
   func showRoute(_ id: String) {
     guard api != nil, popInteraction == nil, !routeBackRunning else { return }
+    if id != route {
+      pageSwipe?.cancelPageHistoryInteraction(); recordedHistoryPage?.cancelPageHistoryInteraction(); pageSwipe = nil
+      if scrollWasEnabled { swipeScroll?.isScrollEnabled = true }
+      swipeScroll = nil; swipeAction = nil
+    }
     dismissPopup()
     if id != route { historyReturnSnapshot = nil; historyReturnRevision = nil }
     route = id
@@ -624,9 +631,10 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     active?.topViewController?.view.setNeedsLayout(); view.setNeedsLayout()
   }
   func goBack() {
-    guard active?.transitionCoordinator == nil, !routeBackRunning else { return }
+    guard active?.transitionCoordinator == nil, !routeBackRunning, recordedHistoryPage?.pageHistoryNavigationBusy != true else { return }
     dismissPopup()
     if let active, active.viewControllers.count > 1 { active.popViewController(animated: true) }
+    else if let page = recordedHistoryPage, page.canPageBack { page.navigatePageHistory(-1) }
     else if canReturnToHistory { beginHistoryReturn(); finishHistoryReturn(true) }
   }
   func openDetail(_ recording: NeoRecording) {
@@ -786,7 +794,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   func showPopup(anchor: UIView, entries: [NeoMenuEntry], appearance: NeoAnchoredMenu.Appearance) {
     dismissPopup(); guard !entries.isEmpty, anchor.window != nil else { return }
     let menu = NeoAnchoredMenu(anchor: anchor, entries: entries, appearance: appearance)
-    menu.onDismiss = { [weak self] in self?.popup = nil }
+    menu.onDismiss = { [weak self] in self?.popup = nil; self?.popupHiddenForNavigation = false }
     popup = menu; menu.show(in: view)
   }
   func dismissPopup() { popup?.dismiss() }
@@ -861,19 +869,40 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       setMenu(abs(velocity) > 350 ? velocity > 0 : progress > sidebarWidth / 2, animated: true)
     } else if state == .cancelled || state == .failed { menuDragging = false; setMenu(menuOpen, animated: true) }
   }
-  private var canGoBack: Bool { (active?.viewControllers.count ?? 1) > 1 || canReturnToHistory }
+  private var recordedHistoryPage: NeoRecordedPage? {
+    guard route == "recorded", active?.viewControllers.count == 1 else { return nil }
+    return active?.topViewController as? NeoRecordedPage
+  }
+  private var canGoBack: Bool { (active?.viewControllers.count ?? 1) > 1 || recordedHistoryPage?.canPageBack == true || canReturnToHistory }
   @objc private func dragContent(_ recognizer: UIPanGestureRecognizer) {
-    if recognizer.state == .began {
+    updateContentSwipe(state:recognizer.state,translation:recognizer.translation(in:content).x,velocity:recognizer.velocity(in:content).x)
+  }
+  private func updateContentSwipe(state: UIGestureRecognizer.State, translation: CGFloat, velocity: CGFloat) {
+    if state == .began {
       scrollWasEnabled = swipeScroll?.isScrollEnabled == true
       swipeScroll?.isScrollEnabled = false
+      if popup != nil { popup?.hideForNavigation(); popupHiddenForNavigation = true }
+      if let page = pageSwipe {
+        let direction = swipeAction == .forward ? 1 : -1
+        if !page.beginHistorySwipe(direction) { pageSwipe = nil; swipeAction = nil }
+      }
     }
     if let direction = waveSwipe {
-      if recognizer.state == .ended { finishWaveSwipe(direction,translation:recognizer.translation(in:content).x,velocity:recognizer.velocity(in:content).x) }
-    } else if swipeAction == .menu { dragMenu(recognizer) }
-    else if swipeAction == .back { dragBack(recognizer) }
-    if [.ended, .cancelled, .failed].contains(recognizer.state) {
+      if state == .ended { finishWaveSwipe(direction,translation:translation,velocity:velocity) }
+    } else if let page = pageSwipe {
+      if state == .changed || state == .began { page.updateHistorySwipe(translation:translation) }
+      else if [.ended,.cancelled,.failed].contains(state) {
+        let sign: CGFloat = swipeAction == .forward ? -1 : 1
+        let complete = state == .ended && (translation*sign > content.bounds.width*0.28 || velocity*sign > 450)
+        page.finishHistorySwipe(complete)
+      }
+    } else if swipeAction == .menu { updateMenu(state:state,translation:translation,velocity:velocity) }
+    else if swipeAction == .back { updateBack(state:state,translation:translation,velocity:velocity) }
+    if [.ended, .cancelled, .failed].contains(state) {
       if scrollWasEnabled { swipeScroll?.isScrollEnabled = true }
       swipeScroll = nil; swipeAction = nil; waveSwipe = nil
+      pageSwipe = nil
+      if popupHiddenForNavigation { dismissPopup(); popupHiddenForNavigation = false }
     }
   }
   private func beginWaveSwipe(horizontal: CGFloat) -> Bool {
@@ -1018,7 +1047,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     if [.ended,.cancelled,.failed].contains(pending.state) { updateBack(state:pending.state,translation:pending.translation,velocity:pending.velocity) }
   }
   private func acceptsSidebarBack(start: CGPoint) -> Bool {
-    tablet && tabletExpanded && start.x <= max(24, view.safeAreaInsets.left+24) && start.y >= view.bounds.height*0.3 && canGoBack
+    tablet && tabletExpanded && start.x <= max(24, view.safeAreaInsets.left+24) && canGoBack
   }
   func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
     if recognizer === closingPan || recognizer === backdropPan {
@@ -1035,9 +1064,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       return acceptsSidebarBack(start: swipeStart)
     }
     if recognizer !== contentPan { return true }
+    guard let touched = touch.view,
+      touched.isDescendant(of:content) || popup.map({ touched.isDescendant(of:$0) }) == true else { return false }
     swipeStart = touch.location(in: view); swipeScroll = nil
     var candidate = touch.view
-    while let current = candidate, current !== content {
+    while let current = candidate, current !== view {
       if current is UISlider || current is UISwitch || current is UITextField || current is UITextView { return false }
       if let scroll = current as? UIScrollView {
         if scroll.contentSize.width > scroll.bounds.width + 1 { return false }
@@ -1062,14 +1093,21 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private func beginNavigationSwipe(_ recognizer: UIGestureRecognizer, velocity: CGPoint) -> Bool {
     guard abs(velocity.x) >= abs(velocity.y), abs(velocity.x) > 0 else { return false }
     if recognizer === closingPan || recognizer === backdropPan { return (tablet ? tabletReveal > 0 : menuOpen) && velocity.x < 0 }
-    guard recognizer === contentPan || recognizer === sidebarBackPan, api != nil, !menuOpen, popup == nil, presentedViewController == nil,
+    guard recognizer === contentPan || recognizer === sidebarBackPan, api != nil, !menuOpen, presentedViewController == nil,
       popInteraction == nil, pendingBack == nil, !routeBackRunning else { return false }
-    if active?.transitionCoordinator == nil, recognizer === contentPan, beginWaveSwipe(horizontal:velocity.x) { return true }
+    guard recordedHistoryPage?.pageHistoryNavigationBusy != true else { return false }
+    pageSwipe = nil
+    if popup == nil, active?.transitionCoordinator == nil, recognizer === contentPan, beginWaveSwipe(horizontal:velocity.x) { return true }
     swipeAction = NeoNavigationGesture.action(startY: Double(swipeStart.y), height: Double(view.bounds.height),
-      canGoBack: canGoBack, tablet: tablet && tabletExpanded, horizontal: Double(velocity.x), vertical: Double(velocity.y), persistentMenu: tablet)
+      canGoBack: canGoBack, tablet: tablet && tabletExpanded, horizontal: Double(velocity.x), vertical: Double(velocity.y), persistentMenu: tablet,
+      fullScreenBack:true,canGoForward:recordedHistoryPage?.canPageForward == true)
     if active?.transitionCoordinator != nil && !(swipeAction == .back && canDeferBackUntilPushCompletes) { return false }
-    if recognizer === sidebarBackPan { return tablet && tabletExpanded && swipeAction == .back }
-    if tablet && tabletExpanded && swipeAction == .back { return false }
+    if let page = recordedHistoryPage,
+      (swipeAction == .back && page.canPageBack) || (swipeAction == .forward && page.canPageForward) { pageSwipe = page }
+    if recognizer === sidebarBackPan {
+      let allowed = tablet && tabletExpanded && swipeAction == .back
+      if !allowed { pageSwipe = nil }; return allowed
+    }
     return swipeAction != nil
   }
   func saveShortcuts(_ values: [String]) throws { try storage.saveShortcuts(values); shortcuts = values; rebuildBottom(); view.setNeedsLayout() }
@@ -1310,7 +1348,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     }
     if smokeStage == "encode" {
       Task { [self] in
-        let checks = await NeoEncodeSmoke.run(shell:self)
+        var checks = await runRecordedHistorySmoke(recorded)
+        let encodeChecks = await NeoEncodeSmoke.run(shell:self)
+        checks.merge(encodeChecks,uniquingKeysWith:{ _,new in new })
         writeIPadSmoke(recorded,checks:checks,retained:retained)
       }
       return
@@ -1588,6 +1628,103 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       "uiEngine": "Swift / UIKit", "retainedList": retained, "sidebarWidth": api == nil ? 0 : 240,
       "backDetails": backSmokeDetails])
   }
+  private func runRecordedHistorySmoke(_ recorded: NeoRecordedPage) async -> [String:Bool] {
+    var checks: [String:Bool] = [:]
+    func wait(_ condition: () -> Bool) async -> Bool {
+      for _ in 0..<150 { if condition() { return true }; try? await Task.sleep(nanoseconds:20_000_000) }
+      return condition()
+    }
+    func classify(_ forward: Bool) -> Bool {
+      swipeStart = CGPoint(x:sidebarWidth+80,y:view.bounds.height*0.1)
+      return beginNavigationSwipe(contentPan,velocity:CGPoint(x:forward ? -500 : 500,y:0))
+    }
+    @discardableResult func swipe(_ forward: Bool, finish: Bool) -> Bool {
+      guard classify(forward) else { return false }
+      let oldPage = recorded.smokeCurrentPage, originX = recorded.collection.frame.minX
+      let tx = content.bounds.width*(forward ? -0.35 : 0.35)
+      updateContentSwipe(state:.began,translation:0,velocity:forward ? -500 : 500)
+      updateContentSwipe(state:.changed,translation:tx,velocity:0)
+      recorded.view.setNeedsLayout(); recorded.view.layoutIfNeeded()
+      checks["pageSwipeFollowsFingerBeforeChangingPage"] = (checks["pageSwipeFollowsFingerBeforeChangingPage"] ?? true)
+        && abs(recorded.collection.transform.tx-tx)<1 && abs(recorded.collection.frame.minX-originX-tx)<1 && recorded.smokeCurrentPage == oldPage
+      updateContentSwipe(state:finish ? .ended : .cancelled,translation:tx,velocity:forward ? -500 : 500)
+      return true
+    }
+    showRoute("recorded"); active?.popToRootViewController(animated:false); setMenu(false,animated:false)
+    historyReturnRevision = nil; historyReturnSnapshot = nil
+    let oldUser = api?.viewer ?? "master", oldHeaders = api?.profileHeaders ?? [:]
+    recorded.smokeHistoryFixture(true)
+    defer {
+      dismissPopup(); popInteraction?.cancel(); popInteraction = nil; pendingBack = nil; pageSwipe = nil; swipeAction = nil
+      active?.popToRootViewController(animated:false)
+      api?.activate(user:oldUser,headers:oldHeaders); recorded.smokeHistoryUser(nil); recorded.smokeHistoryFixture(false)
+    }
+    let ready = await wait { recorded.smokeLoadSettled && recorded.records.count == 24 }
+    checks["pageHistoryFixtureLoaded"] = ready
+    guard ready else { return checks }
+    view.layoutIfNeeded(); recorded.collection.layoutIfNeeded()
+    recorded.collection.setContentOffset(CGPoint(x:0,y:120),animated:false)
+    recorded.smokeSelectPage(7); _ = await wait { recorded.smokeLoadSettled && recorded.smokeCurrentPage == 7 }
+    recorded.collection.setContentOffset(CGPoint(x:0,y:240),animated:false)
+    recorded.smokeSelectPage(3); _ = await wait { recorded.smokeLoadSettled && recorded.smokeCurrentPage == 3 }
+    recorded.collection.setContentOffset(CGPoint(x:0,y:360),animated:false)
+    checks["pageVisitsKeepVisitedOrder"] = recorded.smokeHistoryPages == [1,7,3]
+    let cancelled = swipe(false,finish:false)
+    _ = await wait { !recorded.pageHistoryNavigationBusy }
+    checks["cancelledPageSwipeKeepsPageCursorAndScroll"] = cancelled && recorded.smokeCurrentPage == 3
+      && recorded.smokeHistoryIndex == 2 && abs(recorded.collection.contentOffset.y-360)<1 && recorded.collection.transform == .identity
+    recorded.smokeFailNextHistoryRestore()
+    let failedSwipe = swipe(false,finish:true)
+    let failureShown = await wait {
+      guard let alert = recorded.presentedViewController as? UIAlertController else { return false }
+      return !alert.isBeingPresented && alert.viewIfLoaded?.window != nil
+    }
+    checks["failedPageLoadDoesNotConsumeHistory"] = failedSwipe && failureShown && recorded.smokeCurrentPage == 3
+      && recorded.smokeHistoryIndex == 2 && !recorded.collection.isHidden && abs(recorded.collection.contentOffset.y-360)<1
+    recorded.presentedViewController?.dismiss(animated:false)
+    _ = await wait { recorded.presentedViewController == nil && presentedViewController == nil }
+    let back = swipe(false,finish:true)
+    _ = await wait { recorded.smokeLoadSettled && !recorded.pageHistoryNavigationBusy && recorded.smokeCurrentPage == 7 }
+    checks["backRestoresVisitedPageAndScroll"] = back && recorded.smokeHistoryIndex == 1 && abs(recorded.collection.contentOffset.y-240)<1
+    let forward = swipe(true,finish:true)
+    _ = await wait { recorded.smokeLoadSettled && !recorded.pageHistoryNavigationBusy && recorded.smokeCurrentPage == 3 }
+    checks["forwardRestoresPageAndScroll"] = forward && recorded.smokeHistoryIndex == 2 && abs(recorded.collection.contentOffset.y-360)<1
+    _ = swipe(false,finish:true); _ = await wait { recorded.smokeLoadSettled && !recorded.pageHistoryNavigationBusy && recorded.smokeCurrentPage == 7 }
+    recorded.smokeSelectPage(2); _ = await wait { recorded.smokeLoadSettled && recorded.smokeCurrentPage == 2 }
+    checks["newVisitDiscardsForwardPages"] = recorded.smokeHistoryPages == [1,7,2] && !recorded.canPageForward
+    openDetail(NeoRecordedPage.fixtures.records[0])
+    let detailReady = await wait { (active?.topViewController as? NeoDetailPage)?.openingContentFinished == true && active?.transitionCoordinator == nil }
+    if detailReady, let detail = active?.topViewController as? NeoDetailPage {
+      detail.smokeOpenPlay()
+      let opened = popup?.titles == ["TS","AV1 / MKV"] && popup?.superview === view && contentPan.view === view
+      let accepted = classify(false) && swipeAction == .back && pageSwipe == nil
+      checks["playPopupAllowsFullScreenBack"] = opened && accepted
+      if accepted {
+        let held = popup
+        updateContentSwipe(state:.began,translation:0,velocity:500)
+        checks["popupHidesWithoutRemovingGestureAncestor"] = held === popup && held?.superview === view && held?.smokeNavigationClosing == true
+        updateContentSwipe(state:.changed,translation:content.bounds.width*0.4,velocity:500)
+        updateContentSwipe(state:.ended,translation:content.bounds.width*0.4,velocity:500)
+        _ = await wait { active?.topViewController === recorded && active?.transitionCoordinator == nil && popInteraction == nil }
+      }
+      checks["popupAndDetailCloseInSameSwipe"] = active?.topViewController === recorded && popup == nil && recorded.smokeCurrentPage == 2
+    } else { checks["playPopupAllowsFullScreenBack"] = false }
+    checks["hiddenPopupCannotActivateCandidate"] = NeoAnchoredMenu.navigationDismissalSmoke(in:view)
+    api?.activate(user:"8",headers:[:])
+    _ = await wait { recorded.smokeLoadSettled }
+    checks["accountChangeClearsRecordedPageHistory"] = !recorded.canPageBack && !recorded.canPageForward && recorded.smokeHistoryPages.count == 1
+    recorded.smokeHistoryUser(nil); _ = await wait { recorded.smokeLoadSettled }
+    recorded.smokeHistoryUser(7); _ = await wait { recorded.smokeLoadSettled && recorded.smokeCurrentPage == 1 }
+    recorded.smokeSelectPage(4); _ = await wait { recorded.smokeLoadSettled && recorded.smokeCurrentPage == 4 }
+    let filteredHistory = recorded.smokeHistoryPages == [1,4]
+    recorded.smokeHistoryUser(nil); _ = await wait { recorded.smokeLoadSettled && recorded.smokeCurrentPage == 1 }
+    checks["filterChangeKeepsHistorySeparate"] = filteredHistory && recorded.smokeHistoryPages == [1] && !recorded.canPageBack && !recorded.canPageForward
+    checks["noForwardHistoryIgnoresLeftSwipe"] = !classify(true)
+    let rootAccepted = classify(false)
+    checks["menuOnlyAfterBackHistoryExhausted"] = tablet && tabletExpanded ? !rootAccepted : rootAccepted && swipeAction == .menu
+    pageSwipe = nil; swipeAction = nil
+    return checks
+  }
   private func runNavigationTimingSmoke() async -> [String:Bool] {
     var checks = [String:Bool]()
     func settle() async {
@@ -1725,6 +1862,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     return pageReady && target && followed && cancelled && detailFirst && returned && button && cleared && isolated
   }
   private func runBackSmoke(_ recorded: NeoRecordedPage, completion: @escaping (Bool) -> Void) {
+    // This scenario isolates stack navigation from pagination history.
+    recorded.returnToFirstPage()
     func later(_ delay: TimeInterval = 0.45, _ action: @escaping () -> Void) {
       DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: action)
     }

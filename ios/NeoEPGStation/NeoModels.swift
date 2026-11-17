@@ -222,14 +222,44 @@ enum NeoRelatedSearch {
   }
 }
 
-enum NeoSwipeAction { case menu, back }
+enum NeoSwipeAction { case menu, back, forward }
 enum NeoNavigationGesture {
-  // The starting region fixes the action for the whole drag. No edge restriction.
+  // Shell navigation opts into history-aware full-screen gestures. Players
+  // retain their existing menu/back regions unless they explicitly opt in.
   static func action(startY: Double, height: Double, canGoBack: Bool, tablet: Bool,
-    horizontal: Double, vertical: Double, persistentMenu: Bool = false) -> NeoSwipeAction? {
-    guard horizontal > 0, horizontal >= abs(vertical) else { return nil }
+    horizontal: Double, vertical: Double, persistentMenu: Bool = false,
+    fullScreenBack: Bool = false, canGoForward: Bool = false) -> NeoSwipeAction? {
+    guard abs(horizontal) > 0, abs(horizontal) >= abs(vertical) else { return nil }
+    if horizontal < 0 { return fullScreenBack && canGoForward ? .forward : nil }
+    if fullScreenBack && canGoBack { return .back }
     if startY >= height * (persistentMenu ? 0.3 : 0.4) && canGoBack { return .back }
     return tablet ? nil : .menu
+  }
+}
+/// Per-list session history. Entries contain no recording data or rendered views.
+struct NeoRecordedPageHistory {
+  struct Entry: Equatable { var page: Int; var offset: Double }
+  private(set) var entries = [Entry(page:1,offset:0)]
+  private(set) var index = 0
+  var current: Entry { entries[index] }
+  var canBack: Bool { index > 0 }
+  var canForward: Bool { index+1 < entries.count }
+  func target(_ direction: Int) -> (index: Int, entry: Entry)? {
+    guard direction == -1 || direction == 1, entries.indices.contains(index+direction) else { return nil }
+    return (index+direction,entries[index+direction])
+  }
+  mutating func reset(page: Int = 1, offset: Double = 0) {
+    entries = [Entry(page:max(1,page),offset:offset.isFinite ? offset : 0)]; index = 0
+  }
+  mutating func updateOffset(_ offset: Double) { entries[index].offset = offset.isFinite ? offset : 0 }
+  mutating func visit(_ page: Int, offset: Double = 0) {
+    let entry = Entry(page:max(1,page),offset:offset.isFinite ? offset : 0)
+    if current.page == entry.page { entries[index] = entry; return }
+    entries.removeSubrange((index+1)..<entries.count); entries.append(entry); index += 1
+  }
+  @discardableResult mutating func restore(at destination: Int, page: Int, offset: Double) -> Bool {
+    guard entries.indices.contains(destination) else { return false }
+    index = destination; entries[index] = Entry(page:max(1,page),offset:offset.isFinite ? offset : 0); return true
   }
 }
 struct NeoRecordingQuery: Hashable {

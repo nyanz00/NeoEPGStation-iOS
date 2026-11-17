@@ -129,6 +129,9 @@ jobs:
           mkdir -p build/native-tests dist
           swiftc -parse-as-library ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift ios/NeoEPGStation/NeoEncodeModels.swift ios/NeoEPGStation/NeoEncodeUpdates.swift tests/encode/main.swift -o build/native-tests/encode
           build/native-tests/encode | tee dist/encode-models.txt
+          swiftc -parse-as-library ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift tests/page-history/main.swift -o build/native-tests/page-history
+          build/native-tests/page-history | tee dist/page-history-models.txt
+          swiftc -frontend -parse ios/NeoEPGStation/NeoShell.swift ios/NeoEPGStation/NeoRecordedPage.swift ios/NeoEPGStation/NeoMenus.swift
       - name: Check recorded bulk models and API
         if: ${{ inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'recorded-bulk' }}
         run: |

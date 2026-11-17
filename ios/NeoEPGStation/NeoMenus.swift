@@ -16,10 +16,21 @@ final class NeoAnchoredMenu: UIView {
   private let appearance: Appearance
   private var buttons: [UIButton] = []
   private var animator: UIViewPropertyAnimator?
+  private var navigationClosing = false
   var onDismiss: (() -> Void)?
   private(set) var menuFrame = CGRect.zero
   var titles: [String] { entries.map(\.title) }
 #if targetEnvironment(simulator)
+  var smokeNavigationClosing: Bool { navigationClosing }
+  static func navigationDismissalSmoke(in host: UIView) -> Bool {
+    let anchor = UIView(frame:CGRect(x:12,y:120,width:100,height:36)); host.addSubview(anchor)
+    defer { anchor.removeFromSuperview() }
+    var selected = 0
+    let menu = NeoAnchoredMenu(anchor:anchor,entries:[NeoMenuEntry(title:"choice") { selected += 1 }],appearance:.files)
+    menu.show(in:host,animated:false); menu.hideForNavigation(); menu.select(0)
+    let correct = menu.superview === host && menu.navigationClosing && selected == 0
+    menu.dismiss(); return correct && menu.superview == nil
+  }
   var smokeFileStyle: Bool {
     buttons.forEach { $0.layoutIfNeeded() }
     let webSuccess = UIColor(red: 102/255, green: 187/255, blue: 106/255, alpha: 1)
@@ -111,8 +122,14 @@ final class NeoAnchoredMenu: UIView {
     removeFromSuperview(); onDismiss?(); onDismiss = nil
     UIAccessibility.post(notification: .screenChanged, argument: anchor)
   }
+  // Keep the hit-test view attached until its ancestor pan recognizer ends.
+  func hideForNavigation() {
+    navigationClosing = true
+    if animator?.state == .active { animator?.stopAnimation(true) }; animator = nil
+    surface.alpha = 0
+  }
   func select(_ index: Int) {
-    guard superview != nil, entries.indices.contains(index) else { return }
+    guard !navigationClosing, superview != nil, entries.indices.contains(index) else { return }
     let action = entries[index].action; dismiss(); action()
   }
 #if targetEnvironment(simulator)

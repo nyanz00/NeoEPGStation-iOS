@@ -26,6 +26,10 @@ final class NeoEncodeCard: UITableViewCell {
   private var mobile = true, waiting = false, selectionMode = false, reordering = false, selectedCard = false
   private var canMoveUp = false, canMoveDown = false, disabled = false
   private var touch = UITapGestureRecognizer()
+  private var representedEncodeID: Int?
+  private var lastKnownProgress: Float?
+  private var lastProgressAnimationRequested = false
+  private var progressAnimationCount = 0
 
   override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
     super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -89,8 +93,26 @@ final class NeoEncodeCard: UITableViewCell {
     if item.percent == nil && !waiting { indeterminate.startAnimating() } else { indeterminate.stopAnimating() }
     percentLabel.isHidden = waiting; percentValue.isHidden = waiting; log.isHidden = waiting || item.log == nil
     let p = min(1, max(0, item.percent ?? 0)); percentLabel.text = item.mode; percentValue.text = "\(Int(floor(p * 100)))%"
-    if let value = item.percent { progress.setProgress(Float(min(1, max(0, value))), animated: false); progress.isHidden = waiting }
-    else { progress.setProgress(0, animated: false); progress.isHidden = true; progress.accessibilityLabel = "エンコード中" }
+    let normalizedProgress = item.percent.map { Float(min(1, max(0, $0))) }
+    let sameEncode = representedEncodeID == item.id
+    let previousProgress = sameEncode ? lastKnownProgress : nil
+    let shouldAnimate = normalizedProgress != nil && previousProgress != nil
+      && normalizedProgress != previousProgress && sameEncode && window != nil
+      && !UIAccessibility.isReduceMotionEnabled
+    lastProgressAnimationRequested = shouldAnimate
+    if let value = normalizedProgress {
+      if !sameEncode || normalizedProgress != lastKnownProgress {
+        progress.setProgress(value, animated: shouldAnimate)
+        if shouldAnimate { progressAnimationCount += 1 }
+      }
+      progress.isHidden = waiting
+      progress.accessibilityLabel = nil
+    } else {
+      if progress.progress != 0 { progress.setProgress(0, animated: false) }
+      progress.isHidden = true; progress.accessibilityLabel = "エンコード中"
+    }
+    representedEncodeID = item.id
+    lastKnownProgress = normalizedProgress
     log.text = item.log; alpha = disabled ? 0.55 : 1
     card.layer.borderColor = selected ? NeoStyle.accent.cgColor : NeoStyle.border.cgColor
     card.backgroundColor = selected ? UIColor.white.withAlphaComponent(0.16) : NeoStyle.paper
@@ -135,6 +157,10 @@ final class NeoEncodeCard: UITableViewCell {
     log.frame = CGRect(x: x, y: y+28, width: width, height: 16)
   }
 #if targetEnvironment(simulator)
+  var smokeProgressAnimationRequested: Bool { lastProgressAnimationRequested }
+  var smokeProgressAnimationCount: Int { progressAnimationCount }
+  var smokeRepresentedEncodeID: Int? { representedEncodeID }
+  var smokeLastKnownProgress: Float? { lastKnownProgress }
   var smokeChannel: String? { channel.text }
   var smokeTitle: NeoMarqueeTitle { title }
   var smokeBadgeTextFits: Bool {
@@ -162,5 +188,6 @@ final class NeoEncodeCard: UITableViewCell {
   @objc private func selectCard() { if selectionMode { onSelect?() } }
   override func prepareForReuse() {
     super.prepareForReuse(); thumbnail.load(nil); onSelect = nil; onCancel = nil; onMoveUp = nil; onMoveDown = nil
+    representedEncodeID = nil; lastKnownProgress = nil; lastProgressAnimationRequested = false
   }
 }
