@@ -7,6 +7,7 @@ class NeoPage: UIViewController {
   let body = UIView()
   let titleLabel = NeoStyle.label()
   var actions: [UIView] = []
+  func width(forHeaderAction action: UIView) -> CGFloat { 44 }
   init(title: String, shell: NeoShell) {
     self.shell = shell
     super.init(nibName: nil, bundle: nil)

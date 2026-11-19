@@ -1,12 +1,12 @@
 import UIKit
 
 enum NeoProgramRuleButton {
-  static func make(_ title: String, filled: Bool, identifier: String, action: @escaping () -> Void) -> UIButton {
+  static func make(_ title: String, filled: Bool, identifier: String, icon: String = "PlaylistAddOutlined", action: @escaping () -> Void) -> UIButton {
     let button = UIButton(type: .system)
     var configuration: UIButton.Configuration = filled ? .filled() : .plain()
     configuration.title = title
     configuration.image = UIGraphicsImageRenderer(size: CGSize(width: 20, height: 20)).image { _ in
-      NeoIcon.image("PlaylistAddOutlined").draw(in: CGRect(x: 0, y: 0, width: 20, height: 20))
+      NeoIcon.image(icon).draw(in: CGRect(x: 0, y: 0, width: 20, height: 20))
     }.withRenderingMode(.alwaysTemplate)
     configuration.baseForegroundColor = filled ? NeoStyle.successText : NeoStyle.accent
     configuration.baseBackgroundColor = filled ? NeoStyle.accent : .clear

@@ -232,6 +232,7 @@ class NeoPage: UIViewController {
   var headerAccessory: UIView? { didSet { guard oldValue !== headerAccessory else { return }; oldValue?.removeFromSuperview(); if let headerAccessory { headerAccessory.alpha = body.alpha; header.addSubview(headerAccessory) }; view.setNeedsLayout() } }
   private var menu: UIButton!, back: UIButton!
   var actions: [UIView] = [] { didSet { oldValue.forEach { $0.removeFromSuperview() }; actions.forEach(header.addSubview); view.setNeedsLayout() } }
+  func width(forHeaderAction action: UIView) -> CGFloat { 44 }
   init(title: String, shell: NeoShell) { super.init(nibName: nil, bundle: nil); self.shell = shell; titleLabel.text = title }
   required init?(coder: NSCoder) { fatalError() }
   override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
@@ -267,7 +268,11 @@ class NeoPage: UIViewController {
     let canBack = (navigationController?.viewControllers.count ?? 1) > 1 || shell?.canReturnToHistory == true
     back.isHidden = !canBack; back.frame = CGRect(x: 48, y: 6, width: 40, height: 44)
     var right = width - 4
-    for action in actions.reversed() { right -= 44; action.frame = CGRect(x: right, y: 6, width: 44, height: 44) }
+    for action in actions.reversed() {
+      let actionWidth = self.width(forHeaderAction: action)
+      right -= actionWidth
+      action.frame = CGRect(x: right, y: 6, width: actionWidth, height: 44)
+    }
     if let headerAccessory {
       right -= 162
       headerAccessory.frame = CGRect(x: right, y: 8, width: 160, height: 40)

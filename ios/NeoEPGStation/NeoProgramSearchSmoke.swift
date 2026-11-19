@@ -1161,13 +1161,15 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
           }
           checks["recordingRuleEditOpensSettingsEntry"] = editorReady
           if editorReady, let editor = editPage.presentedViewController as? NeoProgramRuleEditor {
+            let save = button(in: editor.view, identifier: "ruleEditor.save")
             checks["recordingRuleEditShowsEditTitle"] = (identified(editor.view, "ruleEditor.title") as? UILabel)?.attributedText?.string == "ルール編集"
+              && save?.configuration?.title == "更新"
             capture("rule-editor-edit-recording")
             button(in: editor.view, identifier: "ruleEditor.tab.encode")?.sendActions(for: .touchUpInside)
             _ = await waitFor { identified(editor.view, "ruleEditor.encode.1") != nil }
             capture("rule-editor-edit-encode")
             button(in: editor.view, identifier: "ruleEditor.tab.recording")?.sendActions(for: .touchUpInside)
-            button(in: editor.view, identifier: "ruleEditor.save")?.sendActions(for: .touchUpInside)
+            save?.sendActions(for: .touchUpInside)
             let returnedToOrigin = await waitFor {
               navigation.topViewController === page
                 && editPage.presentedViewController == nil
@@ -1214,7 +1216,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     if let timePage = navigation.topViewController as? NeoProgramSearchPage, timePage !== page, timePageReady {
       let timeSummaryReady = await waitFor {
         identified(timePage.view, "programSearch.timeRule.summary") != nil
-          && identified(timePage.view, "programSearch.timeRule.settings") != nil
+          && button(in: timePage.view, identifier: "programSearch.timeRule.settings")?.configuration?.title == "ルール設定"
           && (identified(timePage.view, "programSearch.count") as? UILabel)?.text == "予約数 1件"
           && (identified(timePage.view, "programSearch.list") as? UITableView)?.numberOfRows(inSection: 0) == 1
       }

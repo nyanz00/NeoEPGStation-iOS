@@ -50,11 +50,8 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
   private lazy var floatingRule = NeoProgramRuleButton.make(ruleActionTitle, filled: true, identifier: "programSearch.rule.floating") { [weak self] in
     self?.openRuleEditor()
   }
-  private lazy var timeRuleAction: UIButton = {
-    let button = NeoStyle.iconButton("EditOutlined", label: "ルール設定") { [weak self] in self?.openRuleEditor() }
-    button.accessibilityIdentifier = "programSearch.timeRule.settings"
-    return button
-  }()
+  private lazy var timeRuleAction = NeoProgramRuleButton.make("ルール設定", filled: false,
+    identifier: "programSearch.timeRule.settings", icon: "EditOutlined") { [weak self] in self?.openRuleEditor() }
   private var insets: CGFloat { max(0, (list.bounds.width - 980) / 2) + (list.bounds.width >= 900 ? 24 : 12) }
   private var hasResults: Bool { if case .results = stage { return true }; return false }
 
@@ -68,6 +65,9 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
     super.init(title: ruleID == nil ? "検索" : "ルール編集", shell: shell)
   }
   required init?(coder: NSCoder) { fatalError() }
+  override func width(forHeaderAction action: UIView) -> CGFloat {
+    action === timeRuleAction ? 118 : super.width(forHeaderAction: action)
+  }
 
   override func viewDidLoad() {
     super.viewDidLoad()

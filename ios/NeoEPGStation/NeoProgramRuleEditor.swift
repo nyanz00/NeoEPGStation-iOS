@@ -49,7 +49,19 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     return value
   }()
   private lazy var saveButton: UIButton = {
-    let value = NeoStyle.button("追加", filled: true, action: { [weak self] in self?.save() })
+    let value = UIButton(type: .system)
+    var configuration = UIButton.Configuration.filled()
+    configuration.baseBackgroundColor = NeoStyle.accent
+    configuration.baseForegroundColor = NeoStyle.successText
+    configuration.cornerStyle = .fixed
+    configuration.background.cornerRadius = 7
+    configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+      var attributes = attributes
+      attributes.font = .systemFont(ofSize: 14, weight: .medium)
+      return attributes
+    }
+    value.configuration = configuration
+    value.addAction(UIAction { [weak self] _ in self?.save() }, for: .touchUpInside)
     value.accessibilityIdentifier = "ruleEditor.save"
     return value
   }()
@@ -184,7 +196,6 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     cancelButton.layer.borderWidth = 1
     cancelButton.layer.borderColor = UIColor.white.withAlphaComponent(0.7).cgColor
     cancelButton.tintColor = .white
-    saveButton.accessibilityLabel = editingRule ? "更新" : "追加"
 
     errorLabel.numberOfLines = 0
     errorLabel.textColor = UIColor(red: 244 / 255, green: 67 / 255, blue: 54 / 255, alpha: 1)
@@ -221,7 +232,9 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
       cancelButton.isEnabled = !saving
       saveButton.isEnabled = !saving
       saveButton.alpha = saving ? 0.45 : 1
-      saveButton.setTitle(saving ? (editingRule ? "更新中…" : "追加中…") : (editingRule ? "更新" : "追加"), for: .normal)
+      let title = saving ? (editingRule ? "更新中…" : "追加中…") : (editingRule ? "更新" : "追加")
+      saveButton.configuration?.title = title
+      saveButton.accessibilityLabel = title
       view.setNeedsLayout()
     }
   }
