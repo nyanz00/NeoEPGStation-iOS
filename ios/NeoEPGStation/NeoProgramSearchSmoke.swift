@@ -407,11 +407,12 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       return value as? Int
     }
 
-    func revealControl(_ control: UIView) {
-      guard let list = viewWithID("programSearch.list") as? UITableView else { return }
-      page.view.layoutIfNeeded()
+    func revealControl(_ control: UIView, in searchPage: NeoProgramSearchPage? = nil) {
+      let activePage = searchPage ?? page
+      guard let list = identified(activePage.view, "programSearch.list") as? UITableView else { return }
+      activePage.view.layoutIfNeeded()
       list.scrollRectToVisible(control.convert(control.bounds, to: list).insetBy(dx: 0, dy: -24), animated: false)
-      page.view.layoutIfNeeded()
+      activePage.view.layoutIfNeeded()
     }
 
     func popupState(anchorID: String, menuID: String) -> (anchor: CGRect, menu: CGRect, viewport: CGRect)? {
@@ -850,26 +851,32 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     }
     checks["programSearchFormControlsReady"] = true
 
-    if let ignoreKeyword = identified(page.view, "programSearch.ignoreKeyword") as? UITextField,
-      let keywordClear = button(in: page.view, identifier: "programSearch.keyword.clear"),
-      let ignoreClear = button(in: page.view, identifier: "programSearch.ignoreKeyword.clear") {
+    checks["programSearchKeywordClearOnlyOwnsField"] = false
+    checks["programSearchIgnoreKeywordClearOnlyOwnsField"] = false
+    if let ignoreKeyword = identified(page.view, "programSearch.ignoreKeyword") as? UITextField {
+      page.view.endEditing(true)
       keyword.text = "clear-me"
       keyword.sendActions(for: .editingChanged)
       ignoreKeyword.text = "exclude-me"
       ignoreKeyword.sendActions(for: .editingChanged)
-      keywordClear.sendActions(for: .touchUpInside)
-      let keywordOnly = await waitFor {
-        keyword.text?.isEmpty == true && ignoreKeyword.text == "exclude-me"
-          && keywordClear.isHidden && !ignoreClear.isHidden && ignoreClear.isEnabled
+      let clearsVisible = await waitFor {
+        page.view.layoutIfNeeded()
+        return keyword.rightViewMode == .always && ignoreKeyword.rightViewMode == .always
+          && button(in: keyword, identifier: "programSearch.keyword.clear")?.isEnabled == true
+          && button(in: ignoreKeyword, identifier: "programSearch.ignoreKeyword.clear")?.isEnabled == true
       }
-      checks["programSearchKeywordClearOnlyOwnsField"] = keywordOnly
-      ignoreClear.sendActions(for: .touchUpInside)
-      checks["programSearchIgnoreKeywordClearOnlyOwnsField"] = await waitFor {
-        keyword.text?.isEmpty == true && ignoreKeyword.text?.isEmpty == true
+      if clearsVisible,
+        let keywordClear = button(in: keyword, identifier: "programSearch.keyword.clear"),
+        let ignoreClear = button(in: ignoreKeyword, identifier: "programSearch.ignoreKeyword.clear") {
+        revealControl(keyword)
+        keywordClear.sendActions(for: .touchUpInside)
+        checks["programSearchKeywordClearOnlyOwnsField"] = keyword.text?.isEmpty == true
+          && ignoreKeyword.text == "exclude-me" && keyword.rightViewMode == .never && ignoreKeyword.rightViewMode == .always
+        revealControl(ignoreKeyword)
+        ignoreClear.sendActions(for: .touchUpInside)
+        checks["programSearchIgnoreKeywordClearOnlyOwnsField"] = keyword.text?.isEmpty == true
+          && ignoreKeyword.text?.isEmpty == true && ignoreKeyword.rightViewMode == .never
       }
-    } else {
-      checks["programSearchKeywordClearOnlyOwnsField"] = false
-      checks["programSearchIgnoreKeywordClearOnlyOwnsField"] = false
     }
 
     // Exercise a new-rule POST before the normal search.  The first response
@@ -1105,6 +1112,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     shell.goBack()
     let returned = await waitFor {
       navigation.topViewController === page
+        && navigation.transitionCoordinator == nil
         && NeoProgramSearchSmokeProtocol.count("POST /api/schedules/search") >= 3
         && (identified(page.view, "programSearch.keyword") as? UITextField)?.text == "Fixture"
     }
@@ -1127,7 +1135,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       page.openProgramRule(for: recording)
       let editPageReady = await waitFor {
         guard let editPage = navigation.topViewController as? NeoProgramSearchPage else { return false }
-        return editPage !== page && editPage.viewIfLoaded?.window != nil
+        return editPage !== page && editPage.viewIfLoaded?.window != nil && navigation.transitionCoordinator == nil
           && NeoProgramSearchSmokeProtocol.count("GET /api/rules/41") > 0
       }
       checks["recordingRuleActionOpensEditPage"] = editPageReady
@@ -1144,7 +1152,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
         checks["recordingRuleEditRestoresFieldsAndAutoSearches"] = restored && autoSearch
           && editPage.titleLabel.text == "ルール編集"
         if let ruleButton = button(in: editPage.view, identifier: "programSearch.rule") {
-          revealControl(ruleButton)
+          revealControl(ruleButton, in: editPage)
           ruleButton.sendActions(for: .touchUpInside)
           let editorReady = await waitFor {
             guard let editor = editPage.presentedViewController as? NeoProgramRuleEditor else { return false }
@@ -1194,11 +1202,12 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       checks["recordingRuleEditPutsOnceAndReturns"] = false
     }
 
+    _ = await waitFor { navigation.transitionCoordinator == nil }
     let scheduleCountBeforeTimeRule = NeoProgramSearchSmokeProtocol.count("POST /api/schedules/search")
     shell.pushPage { NeoProgramSearchPage(shell: shell, ruleID: 42) }
     let timePageReady = await waitFor {
       guard let timePage = navigation.topViewController as? NeoProgramSearchPage else { return false }
-      return timePage !== page && timePage.viewIfLoaded?.window != nil
+      return timePage !== page && timePage.viewIfLoaded?.window != nil && navigation.transitionCoordinator == nil
         && NeoProgramSearchSmokeProtocol.count("GET /api/rules/42") > 0
         && NeoProgramSearchSmokeProtocol.count("GET /api/reserves") > 0
     }
@@ -1206,6 +1215,8 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       let timeSummaryReady = await waitFor {
         identified(timePage.view, "programSearch.timeRule.summary") != nil
           && identified(timePage.view, "programSearch.timeRule.settings") != nil
+          && (identified(timePage.view, "programSearch.count") as? UILabel)?.text == "予約数 1件"
+          && (identified(timePage.view, "programSearch.list") as? UITableView)?.numberOfRows(inSection: 0) == 1
       }
       let reserveURL = NeoProgramSearchSmokeProtocol.lastURL("GET /api/reserves")
       checks["programSearchTimeRuleRequestAndNoScheduleSearch"] = timeSummaryReady

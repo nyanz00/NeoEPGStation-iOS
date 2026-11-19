@@ -152,10 +152,10 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     tabs.backgroundColor = UIColor.white.withAlphaComponent(0.04)
     tabs.accessibilityIdentifier = "ruleEditor.tabs"
     card.addSubview(tabs)
-    configureTab(recordingTab, title: "録画・保存", identifier: "ruleEditor.tab.recording") { [weak self] in
+    configureTab(recordingTab, identifier: "ruleEditor.tab.recording") { [weak self] in
       self?.selectTab(0)
     }
-    configureTab(encodeTab, title: "エンコード", identifier: "ruleEditor.tab.encode") { [weak self] in
+    configureTab(encodeTab, identifier: "ruleEditor.tab.encode") { [weak self] in
       self?.selectTab(1)
     }
     tabs.addSubview(recordingTab)
@@ -659,17 +659,26 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
   }
 
   private func refreshTabs() {
-    let selected = UIColor.white
-    let unselected = NeoStyle.muted
-    recordingTab.setTitleColor(activeTab == 0 ? selected : unselected, for: .normal)
-    encodeTab.setTitleColor(activeTab == 1 ? selected : unselected, for: .normal)
-    encodeTab.setTitle("エンコード \(encodeRowCount)", for: .normal)
+    updateTab(recordingTab, title: "録画・保存", selected: activeTab == 0)
+    updateTab(encodeTab, title: "エンコード \(encodeRowCount)", selected: activeTab == 1)
     tabIndicator.frame = CGRect(x: activeTab == 0 ? 0 : tabs.bounds.width / 2, y: max(0, tabs.bounds.height - 2), width: tabs.bounds.width / 2, height: 2)
   }
 
-  private func configureTab(_ button: UIButton, title: String, identifier: String, action: @escaping () -> Void) {
-    button.setTitle(title, for: .normal)
-    button.titleLabel?.font = .systemFont(ofSize: 14, weight: .medium)
+  private func updateTab(_ button: UIButton, title: String, selected: Bool) {
+    var configuration = UIButton.Configuration.plain()
+    configuration.title = title
+    configuration.baseForegroundColor = selected ? .white : NeoStyle.muted
+    configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+      var attributes = attributes
+      attributes.font = .systemFont(ofSize: 14, weight: .medium)
+      return attributes
+    }
+    button.configuration = configuration
+    button.accessibilityLabel = title
+    button.accessibilityTraits = selected ? [.button, .selected] : [.button]
+  }
+
+  private func configureTab(_ button: UIButton, identifier: String, action: @escaping () -> Void) {
     button.accessibilityIdentifier = identifier
     button.addAction(UIAction { _ in action() }, for: .touchUpInside)
   }
@@ -805,7 +814,9 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
   private func makeTextField(text: String, placeholder: String, label: String, identifier: String) -> UITextField {
     let field = UITextField()
     field.text = text
-    field.placeholder = placeholder
+    field.attributedPlaceholder = NSAttributedString(string: placeholder, attributes: [
+      .foregroundColor: UIColor.white.withAlphaComponent(0.5)
+    ])
     field.accessibilityLabel = label
     field.accessibilityIdentifier = identifier
     field.textColor = .white
