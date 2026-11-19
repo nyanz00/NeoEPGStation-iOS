@@ -785,7 +785,7 @@ private final class NeoProgramBookingView: UIView {
     let columnWidth = max(0, (innerWidth - gap) / 2)
     mode.frame = CGRect(x: inset, y: 8, width: columnWidth, height: 44)
     viewer.frame = CGRect(x: mode.frame.maxX + gap, y: 8, width: columnWidth, height: 44)
-    let checkY = 8 + 44 + 8
+    let checkY: CGFloat = 8 + 44 + 8
     for (button, frame) in zip([deleteOriginal, updateThumbnail], checkFrames(width: innerWidth)) {
       button.frame = CGRect(x: inset + frame.minX, y: checkY + frame.minY, width: frame.width, height: frame.height)
     }
