@@ -5,11 +5,13 @@ import UIKit
 class NeoPage: UIViewController {
   weak var shell: NeoShell?
   let body = UIView()
+  let titleLabel = NeoStyle.label()
   var actions: [UIView] = []
   init(title: String, shell: NeoShell) {
     self.shell = shell
     super.init(nibName: nil, bundle: nil)
     self.title = title
+    titleLabel.text = title
   }
   required init?(coder: NSCoder) { fatalError() }
   func alert(_ text: String) {}

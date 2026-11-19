@@ -250,7 +250,8 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     let titleWidth = max(0, cardWidth - horizontalInset - 56)
     let titleHeight = titleLabel.sizeThatFits(CGSize(width: titleWidth, height: .greatestFiniteMagnitude)).height
     let headerHeight = max(54, titleHeight + 20)
-    let userHeight: CGFloat = 64
+    let compactUserStrip = cardWidth < 340
+    let userHeight: CGFloat = compactUserStrip ? 88 : 64
     let tabHeight: CGFloat = 48
     let footerHeight: CGFloat = 60
 
@@ -284,15 +285,16 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
 
     let userY = headerHeight
     userStrip.frame = CGRect(x: 0, y: userY, width: cardWidth, height: userHeight)
-    userLabel.frame = CGRect(x: horizontalInset, y: 22, width: 86, height: 20)
+    userLabel.frame = CGRect(x: horizontalInset, y: compactUserStrip ? 9 : 22, width: 86, height: 20)
     let enabledWidth: CGFloat = 82
-    let pickerX = horizontalInset + userLabel.frame.width + 8
+    let pickerX = compactUserStrip ? horizontalInset : userLabel.frame.maxX + 8
+    let pickerY: CGFloat = compactUserStrip ? 34 : 10
     userPicker.frame = CGRect(
-      x: pickerX, y: 10,
-      width: max(120, cardWidth - pickerX - horizontalInset - enabledWidth - 8),
+      x: pickerX, y: pickerY,
+      width: max(0, cardWidth - pickerX - horizontalInset - enabledWidth - 8),
       height: 44
     )
-    enabledButton.frame = CGRect(x: cardWidth - horizontalInset - enabledWidth, y: 12, width: enabledWidth, height: 40)
+    enabledButton.frame = CGRect(x: cardWidth - horizontalInset - enabledWidth, y: pickerY + 2, width: enabledWidth, height: 40)
 
     let tabY = userY + userHeight
     tabs.frame = CGRect(x: 0, y: tabY, width: cardWidth, height: tabHeight)
