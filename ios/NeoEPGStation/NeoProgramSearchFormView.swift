@@ -825,7 +825,7 @@ private final class NeoProgramSearchAdaptiveRow: UIStackView {
     super.init(frame: frame)
   }
 
-  required init?(coder: NSCoder) {
+  required init(coder: NSCoder) {
     breakpoint = 900
     super.init(coder: coder)
   }
