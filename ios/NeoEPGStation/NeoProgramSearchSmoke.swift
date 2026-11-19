@@ -205,6 +205,50 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       }
     }
 
+    func finite(_ rect: CGRect) -> Bool {
+      [rect.minX, rect.minY, rect.width, rect.height].allSatisfy { $0.isFinite }
+    }
+
+    func wrapFits(_ wrap: UIView, count: Int, minimum: Bool = false) -> Bool {
+      wrap.layoutIfNeeded()
+      guard finite(wrap.frame), finite(wrap.bounds), wrap.bounds.width > 0, wrap.bounds.height > 0 else { return false }
+      let buttons = wrap.subviews.compactMap { $0 as? UIButton }
+      guard minimum ? buttons.count >= count : buttons.count == count else { return false }
+      let bounds = wrap.bounds.insetBy(dx: -1, dy: -1)
+      return buttons.allSatisfy { button in
+        button.layoutIfNeeded()
+        let frame = button.frame
+        return finite(frame) && frame.width > 0 && frame.height > 0 && bounds.contains(frame)
+      }
+    }
+
+    func formWrapChecks(in root: UIView) -> [String: Bool] {
+      root.layoutIfNeeded()
+      let list = identified(root, "programSearch.list") as? UITableView
+      list?.layoutIfNeeded()
+      list?.tableHeaderView?.layoutIfNeeded()
+      let requirements: [(String, String, Int, Bool)] = [
+        ("programSearch.keywordOptions", "programSearchKeywordOptionsGeometry", 5, false),
+        ("programSearch.ignoreOptions", "programSearchIgnoreOptionsGeometry", 5, false),
+        ("programSearch.channelWaveOptions", "programSearchChannelWaveOptionsGeometry", 1, true),
+        ("programSearch.weekOptions", "programSearchWeekOptionsGeometry", 7, false)
+      ]
+      return Dictionary(uniqueKeysWithValues: requirements.map { identifier, key, count, minimum in
+        (key, identified(root, identifier).map { wrapFits($0, count: count, minimum: minimum) } ?? false)
+      })
+    }
+
+    func statusChipFitsIntrinsicWidth(in root: UIView) -> Bool {
+      guard let marked = identified(root, "programSearch.statusChip") else { return false }
+      marked.layoutIfNeeded()
+      let label = (marked as? UILabel) ?? views(in: marked).compactMap { $0 as? UILabel }.first
+      guard let label, label.text == "競合", let container = marked is UILabel ? marked.superview : marked else { return false }
+      container.layoutIfNeeded()
+      label.layoutIfNeeded()
+      let expected = label.intrinsicContentSize.width + 16
+      return finite(container.bounds) && expected.isFinite && expected > 0 && abs(container.bounds.width - expected) <= 1
+    }
+
     func capture(_ name: String) {
       guard let window = shell.view.window, window.bounds.width > 0, window.bounds.height > 0 else { return }
       window.layoutIfNeeded()
@@ -229,6 +273,12 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     checks["programSearchPageReady"] = true
     page.view.layoutIfNeeded()
     shell.view.endEditing(true)
+    let formWrapReady = await waitFor({
+      let results = formWrapChecks(in: page.view)
+      return results.values.allSatisfy { $0 }
+    }, attempts: 90)
+    checks.merge(formWrapChecks(in: page.view), uniquingKeysWith: { _, new in new })
+    checks["programSearchFormWrapGeometry"] = formWrapReady
     capture("form")
 
     guard let keyword = identified(page.view, "programSearch.keyword") as? UITextField,
@@ -280,6 +330,11 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     checks["programSearchResultCardVisible"] = list.cellForRow(at: IndexPath(row: 0, section: 0))?.window != nil
     checks["programSearchReservationBadge"] = checks["programSearchReservationBadge"] == true
       || views(in: list).compactMap { $0 as? UILabel }.contains { $0.text == "競合" }
+    checks["programSearchStatusChipFitsIntrinsicWidth"] = await waitFor({
+      list.layoutIfNeeded()
+      list.cellForRow(at: IndexPath(row: 0, section: 0))?.layoutIfNeeded()
+      return statusChipFitsIntrinsicWidth(in: list)
+    }, attempts: 60)
     capture("results")
     page.tableView(list, didSelectRowAt: IndexPath(row: 0, section: 0))
 

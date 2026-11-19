@@ -518,8 +518,11 @@ private final class NeoProgramBroadcastView: UIView {
     }
     if compact {
       timeIcon.frame = CGRect(x: inset, y: timeY, width: 18, height: 18)
-      date.frame = CGRect(x: inset + 24, y: timeY, width: max(0, toggleX - inset - 82), height: 20)
-      duration.frame = CGRect(x: toggleX - 58, y: timeY + 1, width: 58, height: 18)
+      let dateX = timeIcon.frame.maxX + 4
+      let durationWidth = ceil(duration.intrinsicContentSize.width)
+      let dateWidth = min(ceil(date.intrinsicContentSize.width), max(0, right - dateX - durationWidth - 4))
+      date.frame = CGRect(x: dateX, y: timeY, width: dateWidth, height: 20)
+      duration.frame = CGRect(x: date.frame.maxX + 4, y: timeY + 1, width: durationWidth, height: 18)
     }
 
     if expanded {

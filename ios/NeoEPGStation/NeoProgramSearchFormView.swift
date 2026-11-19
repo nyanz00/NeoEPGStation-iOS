@@ -43,6 +43,7 @@ final class NeoProgramSearchFormView: UIView {
   private let genreWeekOptions = NeoProgramSearchWrapView()
   private let detailsBody = UIStackView()
   private let detailsButton = UIButton(type: .system)
+  private let detailsChevron = UIImageView(image: UIImage(systemName: "chevron.down"))
   private let genreButton = NeoSelectButton()
   private let subGenreButton = NeoSelectButton()
   private let startHourButton = NeoSelectButton()
@@ -58,7 +59,7 @@ final class NeoProgramSearchFormView: UIView {
   private var timeText: [String: String] = [:]
   private var channelQuery = ""
   private var detailsExpanded = true
-  private var marginWidthClass: Bool?
+  private var adaptiveRows: [NeoProgramSearchAdaptiveRow] = []
 
   init(
     form: NeoProgramSearchForm,
@@ -99,18 +100,16 @@ final class NeoProgramSearchFormView: UIView {
     keywordField.becomeFirstResponder()
   }
 
-  override func layoutSubviews() {
-    super.layoutSubviews()
-    let wide = bounds.width >= 600
-    if marginWidthClass != wide {
-      marginWidthClass = wide
-      let inset: CGFloat = wide ? 24 : 12
-      content.spacing = wide ? 16 : 12
-      content.layoutMargins = UIEdgeInsets(top: inset, left: inset, bottom: inset, right: inset)
-      detailsBody.layoutMargins = UIEdgeInsets(top: 0, left: wide ? 16 : 12, bottom: wide ? 16 : 12, right: wide ? 16 : 12)
-      content.invalidateIntrinsicContentSize()
-      notifyLayoutChange()
-    }
+  /// A table header is measured before its views receive their first frames.
+  /// Give the wrapping rows their actual width before Auto Layout measures it.
+  func prepareLayout(width: CGFloat, viewportWidth: CGFloat) {
+    let inset: CGFloat = viewportWidth >= 900 ? 24 : 16
+    let margins = UIEdgeInsets(top: inset, left: inset, bottom: inset, right: inset)
+    if content.layoutMargins != margins { content.layoutMargins = margins }
+    let innerWidth = max(0, width - 2 * inset)
+    for group in [selectedChannels, keywordOptions, ignoreOptions, typeOptions] { group.prepareLayout(width: innerWidth) }
+    genreWeekOptions.prepareLayout(width: max(0, innerWidth - detailsBody.layoutMargins.left - detailsBody.layoutMargins.right))
+    adaptiveRows.forEach { $0.prepareLayout(viewportWidth: viewportWidth) }
   }
 
   private func configure() {
@@ -130,6 +129,7 @@ final class NeoProgramSearchFormView: UIView {
     content.spacing = 12
     content.alignment = .fill
     content.isLayoutMarginsRelativeArrangement = true
+    content.insetsLayoutMarginsFromSafeArea = false
     content.layoutMargins = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
     content.translatesAutoresizingMaskIntoConstraints = false
     card.addSubview(content)
@@ -138,9 +138,10 @@ final class NeoProgramSearchFormView: UIView {
       content.trailingAnchor.constraint(equalTo: card.trailingAnchor), content.bottomAnchor.constraint(equalTo: card.bottomAnchor)
     ])
 
-    [selectedChannels, keywordOptions, ignoreOptions, typeOptions, genreWeekOptions].forEach { wrap in
-      wrap.onHeightChange = { [weak self] in self?.notifyLayoutChange() }
-    }
+    keywordOptions.accessibilityIdentifier = "programSearch.keywordOptions"
+    ignoreOptions.accessibilityIdentifier = "programSearch.ignoreOptions"
+    typeOptions.accessibilityIdentifier = "programSearch.channelWaveOptions"
+    genreWeekOptions.accessibilityIdentifier = "programSearch.weekOptions"
     configureTextField(keywordField, placeholder: "", identifier: "programSearch.keyword", returnKey: .search)
     keywordField.accessibilityLabel = "キーワード"
     configureTextField(ignoreKeywordField, placeholder: "", identifier: "programSearch.ignoreKeyword")
@@ -158,13 +159,19 @@ final class NeoProgramSearchFormView: UIView {
     configureDateField(endTimeField, identifier: "programSearch.endTime", label: "終了時刻", isDate: false)
 
     detailsButton.setTitle("詳細条件", for: .normal)
-    detailsButton.setImage(UIImage(systemName: "chevron.down"), for: .normal)
     detailsButton.tintColor = .white
     detailsButton.setTitleColor(.white, for: .normal)
-    detailsButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
+    detailsButton.titleLabel?.font = .systemFont(ofSize: 16)
     detailsButton.contentHorizontalAlignment = .left
-    detailsButton.semanticContentAttribute = .forceRightToLeft
-    detailsButton.contentEdgeInsets = UIEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
+    detailsButton.contentEdgeInsets = UIEdgeInsets(top: 14, left: 16, bottom: 14, right: 48)
+    detailsChevron.tintColor = NeoStyle.muted; detailsChevron.contentMode = .scaleAspectFit
+    detailsChevron.isUserInteractionEnabled = false; detailsChevron.translatesAutoresizingMaskIntoConstraints = false
+    detailsButton.addSubview(detailsChevron)
+    NSLayoutConstraint.activate([
+      detailsChevron.trailingAnchor.constraint(equalTo: detailsButton.trailingAnchor, constant: -16),
+      detailsChevron.centerYAnchor.constraint(equalTo: detailsButton.centerYAnchor),
+      detailsChevron.widthAnchor.constraint(equalToConstant: 18), detailsChevron.heightAnchor.constraint(equalToConstant: 18),
+    ])
     detailsButton.accessibilityLabel = "詳細条件"
     detailsButton.addTarget(self, action: #selector(toggleDetails), for: .touchUpInside)
 
@@ -172,6 +179,7 @@ final class NeoProgramSearchFormView: UIView {
     detailsBody.spacing = 16
     detailsBody.alignment = .fill
     detailsBody.isLayoutMarginsRelativeArrangement = true
+    detailsBody.insetsLayoutMarginsFromSafeArea = false
     detailsBody.layoutMargins = UIEdgeInsets(top: 0, left: 16, bottom: 16, right: 16)
 
     genreButton.accessibilityLabel = "大ジャンル"
@@ -219,9 +227,11 @@ final class NeoProgramSearchFormView: UIView {
 
     // The outer controller provides scrolling.  Keep this view a single
     // self-sizing form surface so a table-header owner can re-measure it.
-    content.addArrangedSubview(formLabeledField("キーワード", control: keywordField))
+    let key = formLabeledField("キーワード", control: keywordField)
+    content.addArrangedSubview(key); content.setCustomSpacing(2, after: key)
     content.addArrangedSubview(keywordOptions)
-    content.addArrangedSubview(formLabeledField("除外キーワード", control: ignoreKeywordField))
+    let ignore = formLabeledField("除外キーワード", control: ignoreKeywordField)
+    content.addArrangedSubview(ignore); content.setCustomSpacing(2, after: ignore)
     content.addArrangedSubview(ignoreOptions)
     let channelSection = UIStackView(arrangedSubviews: [
       NeoStyle.label("放送局", size: 13, muted: true), channelField, selectedChannels, channelSuggestionsScroll, typeOptions
@@ -240,12 +250,12 @@ final class NeoProgramSearchFormView: UIView {
     field.returnKeyType = returnKey
     field.textColor = .white
     field.tintColor = NeoStyle.accent
-    field.backgroundColor = NeoStyle.background
+    field.backgroundColor = .clear
     field.font = .systemFont(ofSize: 16)
     field.borderStyle = .none
     field.layer.cornerRadius = 4
     field.layer.borderWidth = 1
-    field.layer.borderColor = NeoStyle.border.cgColor
+    field.layer.borderColor = UIColor.white.withAlphaComponent(0.23).cgColor
     field.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 10, height: 1))
     field.leftViewMode = .always
     field.clearButtonMode = .whileEditing
@@ -353,7 +363,7 @@ final class NeoProgramSearchFormView: UIView {
       content.addArrangedSubview(actions)
     }
     detailsBody.isHidden = !detailsExpanded
-    detailsButton.setImage(UIImage(systemName: detailsExpanded ? "chevron.down" : "chevron.right"), for: .normal)
+    detailsChevron.transform = detailsExpanded ? CGAffineTransform(rotationAngle: .pi) : .identity
     detailsButton.accessibilityValue = detailsExpanded ? "展開" : "折りたたみ"
     detailsButton.accessibilityTraits = detailsExpanded ? [.button, .selected] : [.button]
   }
@@ -367,14 +377,14 @@ final class NeoProgramSearchFormView: UIView {
   private func hoursRow() -> UIView {
     let start = formLabeledField("開始時刻", control: startHourButton)
     let range = formLabeledField("範囲", control: rangeHourButton)
-    let separator = NeoStyle.label("～", size: 15); separator.textAlignment = .center
-    let within = NeoStyle.label("以内", size: 15); within.textAlignment = .center
+    let separator = NeoStyle.label("～", size: 15)
+    let within = NeoStyle.label("以内", size: 15)
     let row = NeoProgramSearchAdaptiveRow(arrangedSubviews: [start, separator, range, within], breakpoint: 600)
     row.axis = .vertical; row.spacing = 8; row.alignment = .fill; row.distribution = .fill
     startHourButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
     rangeHourButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
     row.accessibilityIdentifier = "programSearch.hours"
-    row.onAxisChange = { [weak self] in self?.notifyLayoutChange() }
+    adaptiveRows.append(row)
     return row
   }
 
@@ -385,7 +395,7 @@ final class NeoProgramSearchFormView: UIView {
     ], breakpoint: 600)
     row.axis = .vertical; row.spacing = 12; row.distribution = .fillEqually
     row.accessibilityIdentifier = "programSearch.duration"
-    row.onAxisChange = { [weak self] in self?.notifyLayoutChange() }
+    adaptiveRows.append(row)
     return row
   }
 
@@ -396,7 +406,7 @@ final class NeoProgramSearchFormView: UIView {
     let row = NeoProgramSearchAdaptiveRow(arrangedSubviews: [start, end])
     row.axis = .vertical; row.spacing = 12; row.distribution = .fill
     row.accessibilityIdentifier = "programSearch.period"
-    row.onAxisChange = { [weak self] in self?.notifyLayoutChange() }
+    adaptiveRows.append(row)
     return row
   }
 
@@ -688,9 +698,14 @@ extension NeoProgramSearchFormView: UITextFieldDelegate {
 }
 
 private final class NeoProgramSearchWrapView: UIView {
-  var onHeightChange: (() -> Void)?
   private(set) var arrangedSubviews: [UIView] = []
-  private var lastHeight: CGFloat = -1
+  private var layoutWidth: CGFloat = 0
+  private lazy var reservedHeight: NSLayoutConstraint = {
+    let constraint = heightAnchor.constraint(equalToConstant: 0)
+    constraint.priority = UILayoutPriority(999)
+    constraint.isActive = true
+    return constraint
+  }()
   var horizontalSpacing: CGFloat = 8
   var verticalSpacing: CGFloat = 2
 
@@ -698,52 +713,37 @@ private final class NeoProgramSearchWrapView: UIView {
     arrangedSubviews.forEach { $0.removeFromSuperview() }
     arrangedSubviews = items
     items.forEach { addSubview($0) }
-    invalidateIntrinsicContentSize(); setNeedsLayout()
+    updateHeight(); setNeedsLayout()
   }
 
-  override var intrinsicContentSize: CGSize {
-    guard bounds.width > 0 else { return CGSize(width: UIView.noIntrinsicMetric, height: 0) }
-    return CGSize(width: UIView.noIntrinsicMetric, height: height(for: bounds.width))
+  func prepareLayout(width: CGFloat) {
+    guard width != layoutWidth else { return }
+    layoutWidth = width; updateHeight(); setNeedsLayout()
   }
 
-  override func sizeThatFits(_ size: CGSize) -> CGSize {
-    let width = size.width > 0 ? size.width : bounds.width
-    return CGSize(width: width, height: height(for: width))
-  }
-
-  override func systemLayoutSizeFitting(_ targetSize: CGSize, withHorizontalFittingPriority horizontalFittingPriority: UILayoutPriority, verticalFittingPriority: UILayoutPriority) -> CGSize {
-    let width = targetSize.width > 0 ? targetSize.width : bounds.width
-    return CGSize(width: targetSize.width, height: height(for: width))
+  private func updateHeight() {
+    let height = frames(width: layoutWidth).last?.maxY ?? 0
+    if reservedHeight.constant != height { reservedHeight.constant = height }
   }
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    let newHeight = height(for: bounds.width)
-    var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0
-    for view in arrangedSubviews {
-      let size = view.sizeThatFits(CGSize(width: bounds.width, height: UIView.layoutFittingCompressedSize.height))
-      let width = min(bounds.width, max(size.width, view.intrinsicContentSize.width))
-      if x > 0 && x + width > bounds.width { x = 0; y += lineHeight + verticalSpacing; lineHeight = 0 }
-      view.frame = CGRect(x: x, y: y, width: min(width, bounds.width), height: max(30, size.height))
-      x += width + horizontalSpacing; lineHeight = max(lineHeight, view.bounds.height)
-    }
-    if abs(newHeight - lastHeight) > 0.5 {
-      lastHeight = newHeight
-      invalidateIntrinsicContentSize()
-      onHeightChange?()
-    }
+    for (view, frame) in zip(arrangedSubviews, frames(width: layoutWidth)) { view.frame = frame }
   }
 
-  private func height(for width: CGFloat) -> CGFloat {
-    guard width > 0 else { return 0 }
+  private func frames(width: CGFloat) -> [CGRect] {
+    guard width > 0 else { return [] }
     var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0
+    var result: [CGRect] = []
     for view in arrangedSubviews {
       let size = view.sizeThatFits(CGSize(width: width, height: UIView.layoutFittingCompressedSize.height))
-      let itemWidth = min(width, max(size.width, view.intrinsicContentSize.width)); let itemHeight = max(30, size.height)
+      let itemWidth = min(width, ceil(max(size.width, view.intrinsicContentSize.width)))
+      let itemHeight: CGFloat = 36
       if x > 0 && x + itemWidth > width { x = 0; y += lineHeight + verticalSpacing; lineHeight = 0 }
+      result.append(CGRect(x: x, y: y, width: itemWidth, height: itemHeight))
       x += itemWidth + horizontalSpacing; lineHeight = max(lineHeight, itemHeight)
     }
-    return arrangedSubviews.isEmpty ? 0 : y + lineHeight
+    return result
   }
 }
 
@@ -810,8 +810,6 @@ private extension UIStackView {
 }
 
 private final class NeoProgramSearchAdaptiveRow: UIStackView {
-  var onAxisChange: (() -> Void)?
-  private var lastWide: Bool?
   private let breakpoint: CGFloat
 
   init(arrangedSubviews: [UIView], breakpoint: CGFloat = 900) {
@@ -830,14 +828,8 @@ private final class NeoProgramSearchAdaptiveRow: UIStackView {
     super.init(coder: coder)
   }
 
-  override func layoutSubviews() {
-    let wide = bounds.width >= breakpoint
-    if lastWide != wide {
-      lastWide = wide
-      axis = wide ? .horizontal : .vertical
-      spacing = wide ? 12 : 12
-      onAxisChange?()
-    }
-    super.layoutSubviews()
+  func prepareLayout(viewportWidth: CGFloat) {
+    let desired: NSLayoutConstraint.Axis = viewportWidth >= breakpoint ? .horizontal : .vertical
+    if axis != desired { axis = desired }
   }
 }

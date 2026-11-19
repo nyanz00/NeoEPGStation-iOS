@@ -57,6 +57,7 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
       list.bottomAnchor.constraint(equalTo: body.keyboardLayoutGuide.topAnchor),
     ])
     headerStack.axis = .vertical; headerStack.spacing = 24; headerStack.isLayoutMarginsRelativeArrangement = true
+    headerStack.insetsLayoutMarginsFromSafeArea = false
     noticeStack.axis = .vertical
     resultCount.textAlignment = .right; resultCount.accessibilityIdentifier = "programSearch.count"
     headerStack.addArrangedSubview(noticeStack); headerStack.addArrangedSubview(resultCount)
@@ -334,6 +335,7 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
     guard width > 0 else { return }
     let padding = width >= 900 ? 24.0 : 12.0
     headerStack.layoutMargins = UIEdgeInsets(top: padding, left: insets, bottom: hasResults ? 12 : padding, right: insets)
+    formView?.prepareLayout(width: max(0, width - 2 * insets), viewportWidth: width)
     let size = headerStack.systemLayoutSizeFitting(CGSize(width: width, height: 0),
       withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel)
     let frame = CGRect(origin: .zero, size: CGSize(width: width, height: ceil(size.height)))
@@ -433,6 +435,7 @@ private final class NeoProgramSearchCell: UITableViewCell {
   private let time = NeoStyle.label(size: 12, muted: true), summary = NeoStyle.label(size: 14)
   private let chip = UILabel(), chipWrap = UIView()
   private var start: NSLayoutConstraint!, end: NSLayoutConstraint!
+  private var chipWidth: NSLayoutConstraint!
   private var dashed = false
 
   override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
@@ -451,9 +454,12 @@ private final class NeoProgramSearchCell: UITableViewCell {
     [titleRow, channel, time, summary].forEach(stack.addArrangedSubview)
     stack.setCustomSpacing(4, after: time)
     chipWrap.layer.cornerRadius = 12; chipWrap.clipsToBounds = true
+    chipWrap.accessibilityIdentifier = "programSearch.statusChip"
     chip.font = .systemFont(ofSize: 13); chip.textColor = NeoStyle.successText
     chipWrap.addSubview(chip); chip.translatesAutoresizingMaskIntoConstraints = false
     chip.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+    chipWidth = chipWrap.widthAnchor.constraint(equalToConstant: 0)
+    chipWidth.priority = UILayoutPriority(999); chipWidth.isActive = true
     card.addSubview(stack); stack.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
       start, end, card.topAnchor.constraint(equalTo: contentView.topAnchor),
@@ -479,6 +485,7 @@ private final class NeoProgramSearchCell: UITableViewCell {
     time.text = "\(start) - \(finish)（\(program.durationMinutes)分）"
     summary.text = program.description; summary.isHidden = program.description?.isEmpty != false
     chip.text = status?.label(inResult: true); chipWrap.isHidden = status == nil
+    chipWidth.constant = status == nil ? 0 : ceil(chip.intrinsicContentSize.width) + 16
     let conflict = status?.primary == .conflict, scheduled = status?.primary == .normal || conflict
     chipWrap.backgroundColor = conflict ? Self.errorColor : NeoStyle.accent
     outline.strokeColor = (scheduled ? Self.errorColor : (status != nil || selected ? NeoStyle.accent : NeoStyle.border)).cgColor
