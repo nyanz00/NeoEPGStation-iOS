@@ -389,6 +389,9 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
     case .annict: buildAnnictPreferences(api)
     case .discord: break
     case .display:
+      toggle("放送詳細を常に表示する", explanation:"番組ダイアログを開いたとき、ジャンルと映像・音声情報を展開して表示する", on:api.alwaysShowProgramBroadcastDetails) { api.alwaysShowProgramBroadcastDetails = $0 }
+      toggle("番組からの検索に放送局を含める", on:api.programRelatedIncludesChannel) { api.programRelatedIncludesChannel = $0 }
+      toggle("番組からの検索にジャンルを含める", on:api.programRelatedIncludesGenre) { api.programRelatedIncludesGenre = $0 }
       toggle("録画済みの上部にページ切り替えを表示", on:api.topRecordedPagination) { api.topRecordedPagination = $0 }
       toggle("拡張ページ切り替え", explanation:"現在のページ番号から移動先を入力できます。幅に余裕がある場合は先頭・末尾ボタンも表示します。", on:api.extendedPagination) { api.extendedPagination = $0 }
       toggle("THUMBボタンを表示しない", on: shell.storage.hideRecordedThumbnailButton) { [weak shell] in shell?.storage.hideRecordedThumbnailButton = $0 }
@@ -401,6 +404,16 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
       button("表示件数を保存") { [weak self, weak length] in
         guard let self, let value = Int(length?.text ?? ""), (1...1000).contains(value) else { self?.alert("表示件数は1〜1000で入力してください。"); return }
         self.view.endEditing(true); api.recordedLength = value; self.alert("設定を保存しました。")
+      }
+      let searchLimit = UITextField(); searchLimit.text = String(api.programSearchLimit); searchLimit.keyboardType = .numberPad
+      searchLimit.textColor = .white; searchLimit.borderStyle = .roundedRect; searchLimit.backgroundColor = NeoStyle.paper
+      searchLimit.widthAnchor.constraint(equalToConstant: 100).isActive = true; searchLimit.accessibilityLabel = "検索最大表示件数"
+      row("検索最大表示件数", control: searchLimit)
+      button("検索最大表示件数を保存") { [weak self, weak searchLimit] in
+        guard let self, let value = Int(searchLimit?.text ?? ""), (1...10_000).contains(value) else {
+          self?.alert("検索最大表示件数は1〜10000で入力してください。"); return
+        }
+        self.view.endEditing(true); api.programSearchLimit = value; self.alert("設定を保存しました。")
       }
       guard api.accountReady, Int(api.viewer).map({ $0 > 0 }) == true else { info("視聴履歴の保存件数を変更するには通常ユーザーを選択してください。"); return }
       let user = api.viewer, revision = api.identityRevision

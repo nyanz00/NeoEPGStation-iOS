@@ -83,11 +83,16 @@ def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
     if stage in ('recorded-bulk','encode'):
         for source in (ui_container/'Documents').glob('encode-*.png' if stage == 'encode' else 'recorded-bulk-*.png'):
             shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
+    if stage == 'program-search':
+        for source in (ui_container/'Documents').glob('program-search-*.png'):
+            shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
+    expected_route = ('connection' if stage == 'ipad-connection' else 'settings' if stage.startswith('settings')
+                      else 'history' if stage == 'history' else 'search' if stage == 'program-search' else 'recorded')
     if (result.get('success') is not True or result.get('recordCount') != 4
         or result.get('theme') != 'neon-teal-dark'
         or result.get('uiEngine') != 'Swift / UIKit'
         or result.get('retainedList') is not True
-        or result.get('route') != ('connection' if stage == 'ipad-connection' else 'settings' if stage.startswith('settings') else 'history' if stage == 'history' else 'recorded')):
+        or result.get('route') != expected_route):
         if failures is None:
             raise RuntimeError(f'UI smoke failed: {result}')
         failures.append(f'{prefix}/{stage}: {[key for key, value in result.get("checks", {}).items() if value is not True]}')
@@ -164,15 +169,16 @@ app = Path('build/simulator/Build/Products/Release-iphonesimulator/NeoEPGStation
 if '--ipad-only' in sys.argv:
     capture_ipad(app, device)
     sys.exit(0)
-focused = '--encode-only' in sys.argv or '--recorded-bulk-only' in sys.argv or '--detail-tools-only' in sys.argv or '--navigation-only' in sys.argv or '--recording-features-only' in sys.argv or '--captions-only' in sys.argv or '--recorded-fixes-only' in sys.argv or '--recording-actions-only' in sys.argv
+focused_stages = ('program-search', 'encode', 'recorded-bulk', 'detail-tools', 'recording-actions',
+                  'recorded-fixes', 'captions', 'recording-features', 'navigation')
+focused_stage = next((stage for stage in focused_stages if f'--{stage}-only' in sys.argv), None)
 only_pad = '--only-ipad' in sys.argv
-if only_pad and not focused:
+if only_pad and focused_stage is None:
     raise ValueError('--only-ipad requires a focused recording or navigation check')
 if not only_pad:
     run('xcrun', 'simctl', 'bootstatus', device['udid'], '-b', timeout=600)
     run('xcrun', 'simctl', 'install', device['udid'], str(app), timeout=600)
-if focused:
-    focused_stage = 'encode' if '--encode-only' in sys.argv else 'recorded-bulk' if '--recorded-bulk-only' in sys.argv else 'detail-tools' if '--detail-tools-only' in sys.argv else 'recording-actions' if '--recording-actions-only' in sys.argv else 'recorded-fixes' if '--recorded-fixes-only' in sys.argv else 'captions' if '--captions-only' in sys.argv else 'recording-features' if '--recording-features-only' in sys.argv else 'navigation'
+if focused_stage is not None:
     failures = []
     if not only_pad:
         capture_ui(device['udid'], focused_stage, 'ui-iphone', failures=failures)
@@ -203,7 +209,7 @@ if '--ui-only' in sys.argv:
     # Recheck navigation against the exact same binary independently of the
     # synthetic video encoder used by the native playback suite.
     requested_stage = next((arg.split('=', 1)[1] for arg in sys.argv if arg.startswith('--ui-stage=')), None)
-    if requested_stage is not None and requested_stage not in ui_stages+['navigation','recording-features','recorded-fixes','recording-actions','detail-tools','recorded-bulk','encode']:
+    if requested_stage is not None and requested_stage not in ui_stages+list(focused_stages):
         raise ValueError('Unknown iPhone UI stage')
     for index, stage in enumerate([requested_stage] if requested_stage else ui_stages):
         capture_ui(device['udid'], stage, 'ui-iphone', terminate_existing=index > 0)

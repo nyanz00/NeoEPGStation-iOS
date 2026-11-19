@@ -3,7 +3,7 @@ import Foundation
 struct NeoLiveChannel: Codable, Equatable {
   let id: Int, name: String, channelType: String
   var serviceId: Int? = nil, type: Int? = nil, remoteControlKeyId: Int? = nil
-  var hasLogoData: Bool? = nil
+  var hasLogoData: Bool? = nil, halfWidthName: String? = nil
   var waveLabel: String { channelType.hasPrefix("GR-ALT") ? String(channelType.dropFirst(3)) : channelType }
   var defaultVisible: Bool {
     if let type, ![1,2,0xa1,0xa2,0xa5,0xa6,0xad].contains(type) { return false }

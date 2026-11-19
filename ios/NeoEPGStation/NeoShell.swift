@@ -592,6 +592,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       if id == "recorded" { page = NeoRecordedPage(shell: self) }
       else if id == "onair" { page = NeoOnAirPage(shell: self) }
       else if id == "encode" { page = NeoEncodePage(shell: self) }
+      else if id == "search" { page = NeoProgramSearchPage(shell: self) }
       else if id == "settings" { page = NeoSettingsPage(shell: self) }
       else if id == "history" { page = NeoHistoryPage(shell: self) }
       else { page = NeoPlaceholderPage(id: id, shell: self) }
@@ -618,6 +619,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       }
     }
     showRoute(id)
+    if id == "search" { (controllers[id]?.viewControllers.first as? NeoProgramSearchPage)?.resetForNavigation() }
   }
   private func attach(_ nav: UINavigationController) {
     if active !== nav {
@@ -1339,6 +1341,13 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let original = recorded.collection
     showRoute("settings"); showRoute("recorded")
     let retained = original === recorded.collection
+    if smokeStage == "program-search" {
+      Task { [self] in
+        let checks = await NeoProgramSearchSmoke.run(shell: self)
+        writeIPadSmoke(recorded, checks: checks, retained: retained)
+      }
+      return
+    }
     if smokeStage == "recorded-bulk" {
       Task { [self] in
         let checks = await NeoRecordedBulkSmoke.run(shell:self)

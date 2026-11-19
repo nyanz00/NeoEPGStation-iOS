@@ -16,6 +16,12 @@
     BEEC00000000000000000002 = {isa = PBXBuildFile; fileRef = AEEC00000000000000000002; };
     BEEC00000000000000000001 = {isa = PBXBuildFile; fileRef = AEEC00000000000000000001; };
     BCAC00000000000000000013 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000013; };
+    BCAC00000000000000000014 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000014; };
+    BCAC00000000000000000015 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000015; };
+    BCAC00000000000000000016 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000016; };
+    BCAC00000000000000000017 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000017; };
+    BCAC00000000000000000018 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000018; };
+    BCAC00000000000000000019 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000019; };
     BCAC00000000000000000012 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000012; };
     BCAC00000000000000000011 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000011; };
     BCAC00000000000000000010 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000010; };
@@ -106,6 +112,12 @@
     AEEC00000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoEncodeActions.swift; sourceTree = "<group>"; };
     AEEC00000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoEncodeModels.swift; sourceTree = "<group>"; };
     ACAC00000000000000000013 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoRecordedBulkSmoke.swift; sourceTree = "<group>"; };
+    ACAC00000000000000000014 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoProgramSearchModels.swift; sourceTree = "<group>"; };
+    ACAC00000000000000000015 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoProgramSearchAPI.swift; sourceTree = "<group>"; };
+    ACAC00000000000000000016 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoProgramSearchPage.swift; sourceTree = "<group>"; };
+    ACAC00000000000000000017 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoProgramSearchFormView.swift; sourceTree = "<group>"; };
+    ACAC00000000000000000018 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoProgramDetailDialog.swift; sourceTree = "<group>"; };
+    ACAC00000000000000000019 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoProgramSearchSmoke.swift; sourceTree = "<group>"; };
     ACAC00000000000000000012 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoBulkRecordingDialog.swift; sourceTree = "<group>"; };
     ACAC00000000000000000011 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoRecordedBulkActions.swift; sourceTree = "<group>"; };
     ACAC00000000000000000010 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoRecordedBulk.swift; sourceTree = "<group>"; };
@@ -231,6 +243,12 @@
         AEEC00000000000000000007,
         AEEC00000000000000000008,
         ACAC00000000000000000013,
+        ACAC00000000000000000014,
+        ACAC00000000000000000015,
+        ACAC00000000000000000016,
+        ACAC00000000000000000017,
+        ACAC00000000000000000018,
+        ACAC00000000000000000019,
         ACAC0000000000000000000D,
         ACAC00000000000000000003,
         ACAC00000000000000000004,
@@ -505,6 +523,12 @@
         BEEC00000000000000000007,
         BEEC00000000000000000008,
         BCAC00000000000000000013,
+        BCAC00000000000000000014,
+        BCAC00000000000000000015,
+        BCAC00000000000000000016,
+        BCAC00000000000000000017,
+        BCAC00000000000000000018,
+        BCAC00000000000000000019,
         BCAC0000000000000000000D,
         BCAC00000000000000000003,
         BCAC00000000000000000004,
