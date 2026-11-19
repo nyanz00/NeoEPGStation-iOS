@@ -203,7 +203,8 @@ struct ProgramSearchTests {
       && writtenRule.encodeOption?.mode2 == nil && writtenRule.encodeOption?.mode3 == nil
       && writtenRule.encodeOption?.startDelayMinutes == 0, "rule save emits multi-station encoding and clears old slots")
     var cleared = restoredRule; cleared.encodes = []
-    expect((try cleared.write(searchOption: rule.searchOption, existing: rule)).encodeOption == nil,
+    let withoutEncode = try cleared.write(searchOption: rule.searchOption, existing: rule)
+    expect(withoutEncode.encodeOption == nil,
       "clearing all encode rows removes the encode option")
 
     var noUser = restoredRule; noUser.userID = nil
