@@ -16,11 +16,14 @@ class NeoPage: UIViewController {
 
 final class NeoShell: UIViewController {
   var api: NeoAPI?
+  var account: NeoAccountCoordinator?
   func pushPage(requestedAt: CFTimeInterval = CACurrentMediaTime(), _ make: () -> NeoPage) {}
   func smokeUseAPI(_ value: NeoAPI?) { api = value }
   func showRoute(_ id: String) {}
   func goBack() {}
 }
+
+struct NeoAccountCoordinator { var currentName: String }
 
 enum NeoPiPSmoke {
   static let directory = FileManager.default.temporaryDirectory

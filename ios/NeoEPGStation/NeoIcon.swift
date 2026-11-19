@@ -9,6 +9,45 @@ enum NeoIcon {
     let path = UIBezierPath()
     switch name {
     // Exact MUI paths and Web MulticastIcon (MDI); see licenses/README.md.
+    case "ArrowDropDown":
+      path.move(to: CGPoint(x: 7, y: 10))
+      path.addLine(to: CGPoint(x: 12, y: 15))
+      path.addLine(to: CGPoint(x: 17, y: 10))
+      path.close()
+    case "DescriptionOutlined":
+      path.move(to: CGPoint(x: 14, y: 2))
+      path.addLine(to: CGPoint(x: 6, y: 2))
+      path.addCurve(to: CGPoint(x: 4, y: 4), controlPoint1: CGPoint(x: 4.9, y: 2), controlPoint2: CGPoint(x: 4, y: 2.9))
+      path.addLine(to: CGPoint(x: 4, y: 20))
+      path.addCurve(to: CGPoint(x: 5.99, y: 22), controlPoint1: CGPoint(x: 4, y: 21.1), controlPoint2: CGPoint(x: 4.89, y: 22))
+      path.addLine(to: CGPoint(x: 18, y: 22))
+      path.addCurve(to: CGPoint(x: 20, y: 20), controlPoint1: CGPoint(x: 19.1, y: 22), controlPoint2: CGPoint(x: 20, y: 21.1))
+      path.addLine(to: CGPoint(x: 20, y: 8))
+      path.close()
+      path.move(to: CGPoint(x: 18, y: 20))
+      path.addLine(to: CGPoint(x: 6, y: 20))
+      path.addLine(to: CGPoint(x: 6, y: 4))
+      path.addLine(to: CGPoint(x: 13, y: 4))
+      path.addLine(to: CGPoint(x: 13, y: 9))
+      path.addLine(to: CGPoint(x: 18, y: 9))
+      path.close()
+      path.append(UIBezierPath(rect: CGRect(x: 8, y: 12, width: 8, height: 2)))
+      path.append(UIBezierPath(rect: CGRect(x: 8, y: 16, width: 8, height: 2)))
+      path.usesEvenOddFillRule = true
+    case "EventAvailableOutlined":
+      path.append(UIBezierPath(roundedRect: CGRect(x: 3, y: 3, width: 18, height: 18), cornerRadius: 2))
+      path.append(UIBezierPath(rect: CGRect(x: 6, y: 1, width: 2, height: 2)))
+      path.append(UIBezierPath(rect: CGRect(x: 16, y: 1, width: 2, height: 2)))
+      path.append(UIBezierPath(rect: CGRect(x: 5, y: 5, width: 14, height: 2)))
+      path.append(UIBezierPath(rect: CGRect(x: 5, y: 9, width: 14, height: 10)))
+      path.move(to: CGPoint(x: 10.56, y: 17.46))
+      path.addLine(to: CGPoint(x: 16.49, y: 11.53))
+      path.addLine(to: CGPoint(x: 15.43, y: 10.47))
+      path.addLine(to: CGPoint(x: 10.56, y: 15.34))
+      path.addLine(to: CGPoint(x: 8.45, y: 13.23))
+      path.addLine(to: CGPoint(x: 7.39, y: 14.29))
+      path.close()
+      path.usesEvenOddFillRule = true
     case "SelectAllOutlined":
       path.move(to:CGPoint(x:3,y:5))
       path.addLine(to:CGPoint(x:5,y:5))

@@ -98,12 +98,14 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     var status = 200
     let value: Any
     if path == "/api/channels", request.httpMethod == "GET" {
-      value = [[
-        "id": 1,
-        "name": "Fixture Station",
-        "channelType": "GR",
-        "hasLogoData": false
-      ]]
+      value = Array(1...18).map { id -> [String: Any] in
+        [
+          "id": id,
+          "name": id == 1 ? "Fixture Station" : String(format: "Fixture Station %02d", id),
+          "channelType": "GR",
+          "hasLogoData": false
+        ]
+      }
     } else if path == "/api/config", request.httpMethod == "GET" {
       value = ["encode": [] as [String], "broadcast": ["GR": true]] as [String: Any]
     } else if path == "/api/schedules/search", request.httpMethod == "POST" {
@@ -121,7 +123,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
         let id = start == 1791025200000 ? 9002 : 9001
         value = [
           "normal": [[String: Any]](),
-          "conflicts": [["reserveId": 5000 + id, "userId": 7, "programId": id] as [String: Any]],
+          "conflicts": id == 9002 ? [[String: Any]]() : [["reserveId": 5000 + id, "userId": 7, "programId": id] as [String: Any]],
           "overlaps": [[String: Any]](),
           "skips": [[String: Any]]()
         ] as [String: Any]
@@ -209,6 +211,39 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       [rect.minX, rect.minY, rect.width, rect.height].allSatisfy { $0.isFinite }
     }
 
+    func tableCell(_ table: UITableView, identifier: String) -> (UITableViewCell, IndexPath)? {
+      for section in 0..<table.numberOfSections {
+        for row in 0..<table.numberOfRows(inSection: section) {
+          let indexPath = IndexPath(row: row, section: section)
+          guard let cell = table.cellForRow(at: indexPath) else { continue }
+          if cell.accessibilityIdentifier == identifier { return (cell, indexPath) }
+        }
+      }
+      return nil
+    }
+
+    func revealTableCell(_ table: UITableView, identifier: String) -> (UITableViewCell, IndexPath)? {
+      for section in 0..<table.numberOfSections {
+        for row in 0..<table.numberOfRows(inSection: section) {
+          let indexPath = IndexPath(row: row, section: section)
+          table.scrollToRow(at: indexPath, at: .middle, animated: false)
+          table.layoutIfNeeded()
+          if let cell = table.cellForRow(at: indexPath), cell.accessibilityIdentifier == identifier {
+            return (cell, indexPath)
+          }
+        }
+      }
+      return nil
+    }
+
+    func visibleViewport(of root: UIView) -> CGRect {
+      root.layoutIfNeeded()
+      let keyboardFrame = root.keyboardLayoutGuide.layoutFrame
+      let bottom = keyboardFrame.minY.isFinite && keyboardFrame.minY > 0
+        && keyboardFrame.minY < root.bounds.maxY - 1 ? keyboardFrame.minY : root.bounds.maxY
+      return CGRect(x: 0, y: 0, width: root.bounds.width, height: max(0, bottom))
+    }
+
     func wrapFits(_ wrap: UIView, count: Int, minimum: Bool = false) -> Bool {
       wrap.layoutIfNeeded()
       guard finite(wrap.frame), finite(wrap.bounds), wrap.bounds.width > 0, wrap.bounds.height > 0 else { return false }
@@ -281,6 +316,389 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     checks["programSearchFormWrapGeometry"] = formWrapReady
     capture("form")
 
+    func viewWithID(_ identifier: String) -> UIView? {
+      identified(page.view, identifier) ?? identified(shell.view, identifier)
+    }
+
+    func popupState(anchorID: String, menuID: String) -> (anchor: CGRect, menu: CGRect, viewport: CGRect)? {
+      guard let anchor = viewWithID(anchorID), let menu = viewWithID(menuID) else { return nil }
+      let root: UIView = anchor.isDescendant(of: page.view) && menu.isDescendant(of: page.view) ? page.view : shell.view
+      let anchorRect = anchor.convert(anchor.bounds, to: root)
+      let menuRect = menu.convert(menu.bounds, to: root)
+      let viewport = root === page.view ? visibleViewport(of: root) : root.bounds
+      guard finite(anchorRect), finite(menuRect), finite(viewport) else { return nil }
+      return (anchorRect, menuRect, viewport)
+    }
+
+    func waitForMenu(_ identifier: String, minimumRows: Int = 1) async -> UITableView? {
+      let ready = await waitFor {
+        guard let menu = viewWithID(identifier) as? UITableView else { return false }
+        menu.layoutIfNeeded()
+        return menu.numberOfRows(inSection: 0) >= minimumRows
+      }
+      return ready ? viewWithID(identifier) as? UITableView : nil
+    }
+
+    func waitForPicker() async -> NeoProgramSearchPickerController? {
+      for _ in 0..<180 {
+        if let picker = page.presentedViewController as? NeoProgramSearchPickerController,
+          picker.viewIfLoaded?.window != nil, !picker.isBeingPresented {
+          picker.view.layoutIfNeeded()
+          return picker
+        }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+      }
+      return nil
+    }
+
+    // Exercise the public form surface before the first search.  These checks
+    // intentionally restore the form afterwards so the wire assertions below
+    // continue to describe the original Fixture search.
+    if let channel = viewWithID("programSearch.channel") as? UITextField,
+      let channelControl = viewWithID("programSearch.channelControl"),
+      let channelToggle = button(in: page.view, identifier: "programSearch.channelToggle"),
+      let formList = viewWithID("programSearch.list") as? UITableView,
+      let clearForm = button(in: page.view, identifier: "programSearch.clear") {
+      checks["programSearchFormPublicIDs"] = true
+      checks["programSearch.channelFieldHandlesTaps"] = channel.isDescendant(of: channelControl)
+        && channelControl.gestureRecognizers?.contains { $0 is UITapGestureRecognizer && !$0.cancelsTouchesInView } == true
+      formList.setContentOffset(.zero, animated: false)
+      formList.layoutIfNeeded()
+      _ = channel.becomeFirstResponder()
+      page.view.layoutIfNeeded()
+      let keyboardShown = await waitFor({
+        page.view.bounds.maxY - visibleViewport(of: page.view).maxY > 80
+      }, attempts: 30)
+      if !keyboardShown { checks["programSearchKeyboardViewportNotAvailable"] = true }
+      channelToggle.sendActions(for: .touchUpInside)
+      let firstMenu = await waitForMenu("programSearch.channelSuggestions", minimumRows: 18)
+      if let firstMenu, let state = popupState(anchorID: "programSearch.channelControl", menuID: "programSearch.channelSuggestions") {
+        checks["programSearch.channelMenuHasManyRows"] = firstMenu.numberOfRows(inSection: 0) >= 18
+        checks["programSearch.channelMenuScrollKeepsKeyboard"] = firstMenu.keyboardDismissMode == .none
+        checks["programSearch.channelFocusOnOpen"] = channel.isFirstResponder
+        checks["programSearch.channelMenuBoundsAndAnchorVisible"] = state.viewport.contains(state.menu)
+          && state.viewport.intersects(state.anchor) && state.menu.width > 0 && state.menu.height > 0
+        checks["programSearch.channelMenuChoosesAvailableSide"] = (state.menu.minY >= state.anchor.maxY - 2)
+          || (state.menu.maxY <= state.anchor.minY + 2)
+        capture("channel-menu")
+        if keyboardShown { capture("channel-keyboard") }
+      } else {
+        checks["programSearch.channelMenuHasManyRows"] = false
+        checks["programSearch.channelMenuScrollKeepsKeyboard"] = false
+        checks["programSearch.channelFocusOnOpen"] = false
+        checks["programSearch.channelMenuBoundsAndAnchorVisible"] = false
+        checks["programSearch.channelMenuChoosesAvailableSide"] = false
+      }
+
+      channelToggle.sendActions(for: .touchUpInside)
+      let closed = await waitFor { viewWithID("programSearch.channelSuggestions") == nil }
+      checks["programSearch.channelFocusRetainedAfterClose"] = closed && channel.isFirstResponder
+      channelToggle.sendActions(for: .touchUpInside)
+      let reopened = await waitForMenu("programSearch.channelSuggestions", minimumRows: 18)
+      checks["programSearch.channelFocusRetainedOnReopen"] = reopened != nil && channel.isFirstResponder
+
+      // The fixture form is normally long enough to try a second anchor
+      // direction.  If this viewport cannot place the station field near an
+      // edge, record the skip rather than turning an iPad/small-window layout
+      // into a brittle failure.
+      if reopened != nil {
+        channelToggle.sendActions(for: .touchUpInside)
+      }
+      formList.layoutIfNeeded()
+      let anchorInList = channelControl.convert(channelControl.bounds, to: formList)
+      let maxOffset = max(0, formList.contentSize.height - formList.bounds.height)
+      let canTryAbove = maxOffset > 1 && anchorInList.maxY > formList.bounds.height * 0.55
+      if canTryAbove {
+        let desiredOffset = anchorInList.maxY - formList.bounds.height * 0.82
+        formList.setContentOffset(CGPoint(x: 0, y: min(maxOffset, max(0, desiredOffset))), animated: false)
+        formList.layoutIfNeeded()
+        page.view.layoutIfNeeded()
+        channel.becomeFirstResponder()
+        channelToggle.sendActions(for: .touchUpInside)
+        let aboveMenu = await waitForMenu("programSearch.channelSuggestions", minimumRows: 18)
+        if aboveMenu != nil, let state = popupState(anchorID: "programSearch.channelControl", menuID: "programSearch.channelSuggestions") {
+          checks["programSearch.channelMenuFlipsAbove"] = state.menu.maxY <= state.anchor.minY + 2
+            && state.viewport.contains(state.menu) && state.viewport.intersects(state.anchor)
+        } else {
+          checks["programSearch.channelMenuFlipsAbove"] = false
+        }
+        channelToggle.sendActions(for: .touchUpInside)
+        _ = await waitFor { viewWithID("programSearch.channelSuggestions") == nil }
+      } else {
+        checks["programSearch.channelMenuFlipsAbove"] = true
+        checks["programSearch.channelMenuFlipAboveSkipped"] = true
+      }
+      formList.setContentOffset(.zero, animated: false)
+      formList.layoutIfNeeded()
+      page.view.layoutIfNeeded()
+
+      channel.becomeFirstResponder()
+      channelToggle.sendActions(for: .touchUpInside)
+      if let stationMenu = await waitForMenu("programSearch.channelSuggestions", minimumRows: 18) {
+        stationMenu.layoutIfNeeded()
+        let initialOffset = stationMenu.contentOffset.y
+        let formOffset = formList.contentOffset
+        let bottomOffset = stationMenu.contentSize.height + stationMenu.contentInset.bottom - stationMenu.bounds.height
+        stationMenu.setContentOffset(CGPoint(x: 0, y: min(initialOffset + 96, bottomOffset)), animated: false)
+        stationMenu.layoutIfNeeded()
+        checks["programSearch.channelCandidateScrollRetainsFocus"] = stationMenu.keyboardDismissMode == .none
+          && channel.isFirstResponder && stationMenu.contentOffset.y > initialOffset
+          && formList.contentOffset == formOffset
+        if let (_, row2) = revealTableCell(stationMenu, identifier: "programSearch.channelOption.2") {
+          stationMenu.delegate?.tableView?(stationMenu, didSelectRowAt: row2)
+          let selected2 = await waitFor {
+            viewWithID("programSearch.channelChip.2") != nil
+              && viewWithID("programSearch.channelSuggestions") == nil
+          }
+          checks["programSearch.channelCandidateSelection"] = selected2 && channel.isFirstResponder
+        } else {
+          checks["programSearch.channelCandidateSelection"] = false
+        }
+        channelToggle.sendActions(for: .touchUpInside)
+        if let secondMenu = await waitForMenu("programSearch.channelSuggestions", minimumRows: 18),
+          let (_, row3) = revealTableCell(secondMenu, identifier: "programSearch.channelOption.3") {
+          secondMenu.delegate?.tableView?(secondMenu, didSelectRowAt: row3)
+          let selected3 = await waitFor {
+            viewWithID("programSearch.channelChip.3") != nil
+              && viewWithID("programSearch.channelSuggestions") == nil
+          }
+          checks["programSearch.channelMultiSelect"] = selected3 && viewWithID("programSearch.channelChip.2") != nil
+          let waveButtons = viewWithID("programSearch.channelWaveOptions").map { views(in: $0).compactMap { $0 as? UIButton } } ?? []
+          checks["programSearch.channelSelectionDisablesWave"] = !waveButtons.isEmpty && waveButtons.allSatisfy { !$0.isEnabled }
+        } else {
+          checks["programSearch.channelMultiSelect"] = false
+          checks["programSearch.channelSelectionDisablesWave"] = false
+        }
+      } else {
+        checks["programSearch.channelCandidateScrollRetainsFocus"] = false
+        checks["programSearch.channelCandidateSelection"] = false
+        checks["programSearch.channelMultiSelect"] = false
+        checks["programSearch.channelSelectionDisablesWave"] = false
+      }
+
+      clearForm.sendActions(for: .touchUpInside)
+      _ = await waitFor {
+        (viewWithID("programSearch.channelChip.2") == nil && viewWithID("programSearch.channelChip.3") == nil)
+          && channel.text?.isEmpty == true
+      }
+      page.view.endEditing(true)
+    } else {
+      checks["programSearchFormPublicIDs"] = false
+    }
+
+    if let genreButton = button(in: page.view, identifier: "programSearch.genre"),
+      let subGenreButton = button(in: page.view, identifier: "programSearch.subGenre"),
+      let startHourButton = button(in: page.view, identifier: "programSearch.startHour"),
+      let rangeHourButton = button(in: page.view, identifier: "programSearch.rangeHour"),
+      let clearForm = button(in: page.view, identifier: "programSearch.clear") {
+      checks["programSearchDetailButtonsReady"] = true
+      checks["programSearchSubGenreInitiallyDisabled"] = !subGenreButton.isEnabled
+      if subGenreButton.bounds.height <= 0 || subGenreButton.isHidden {
+        button(in: page.view, label: "詳細条件")?.sendActions(for: .touchUpInside)
+        _ = await waitFor { !subGenreButton.isHidden && subGenreButton.bounds.height > 0 }
+      }
+
+      genreButton.sendActions(for: .touchUpInside)
+      if let genreMenu = await waitForMenu("programSearch.options.genre", minimumRows: 14) {
+        checks["programSearchGenreLabels"] = tableCell(genreMenu, identifier: "programSearch.option.genre.all")?.0.textLabel?.text == "すべて"
+          && tableCell(genreMenu, identifier: "programSearch.option.genre.3")?.0.textLabel?.text == "ドラマ"
+        checks["programSearchGenreAnchorVisible"] = popupState(anchorID: "programSearch.genre", menuID: "programSearch.options.genre").map {
+          $0.viewport.intersects($0.anchor) && $0.viewport.contains($0.menu)
+        } ?? false
+        capture("genre-menu")
+        if let (_, drama) = revealTableCell(genreMenu, identifier: "programSearch.option.genre.3") {
+          genreMenu.delegate?.tableView?(genreMenu, didSelectRowAt: drama)
+        }
+        if let genreMenu = await waitForMenu("programSearch.options.genre", minimumRows: 14),
+          let (_, anime) = revealTableCell(genreMenu, identifier: "programSearch.option.genre.7") {
+          genreMenu.delegate?.tableView?(genreMenu, didSelectRowAt: anime)
+          let title = genreButton.title(for: .normal) ?? ""
+          checks["programSearchGenreMultiSelect"] = title.contains("ドラマ") && title.contains("アニメ・特撮")
+        } else {
+          checks["programSearchGenreMultiSelect"] = false
+        }
+      } else {
+        checks["programSearchGenreLabels"] = false
+        checks["programSearchGenreAnchorVisible"] = false
+        checks["programSearchGenreMultiSelect"] = false
+      }
+
+      subGenreButton.sendActions(for: .touchUpInside)
+      if let subMenu = await waitForMenu("programSearch.options.subGenre", minimumRows: 1) {
+        checks["programSearchSubGenreLabels"] = tableCell(subMenu, identifier: "programSearch.option.subGenre.3.header")?.0.textLabel?.text == "ドラマ"
+          && tableCell(subMenu, identifier: "programSearch.option.subGenre.3.all")?.0.textLabel?.text == "すべて"
+        checks["programSearchSubGenreAnchorVisible"] = popupState(anchorID: "programSearch.subGenre", menuID: "programSearch.options.subGenre").map {
+          $0.viewport.intersects($0.anchor) && $0.viewport.contains($0.menu)
+        } ?? false
+        if let (_, domestic) = revealTableCell(subMenu, identifier: "programSearch.option.subGenre.3.0") {
+          subMenu.delegate?.tableView?(subMenu, didSelectRowAt: domestic)
+        }
+        if let subMenu = await waitForMenu("programSearch.options.subGenre", minimumRows: 1),
+          let (_, overseas) = revealTableCell(subMenu, identifier: "programSearch.option.subGenre.3.1") {
+          subMenu.delegate?.tableView?(subMenu, didSelectRowAt: overseas)
+          let title = subGenreButton.title(for: .normal) ?? ""
+          checks["programSearchSubGenreMultiSelect"] = title.contains("国内ドラマ") && title.contains("海外ドラマ")
+        } else {
+          checks["programSearchSubGenreMultiSelect"] = false
+        }
+      } else {
+        checks["programSearchSubGenreLabels"] = false
+        checks["programSearchSubGenreAnchorVisible"] = false
+        checks["programSearchSubGenreMultiSelect"] = false
+      }
+      page.view.endEditing(true)
+      clearForm.sendActions(for: .touchUpInside)
+
+      startHourButton.sendActions(for: .touchUpInside)
+      if let startMenu = await waitForMenu("programSearch.options.startHour", minimumRows: 25) {
+        checks["programSearchStartHourLabels"] = tableCell(startMenu, identifier: "programSearch.option.startHour.none")?.0.textLabel?.text == "指定なし"
+          && tableCell(startMenu, identifier: "programSearch.option.startHour.0")?.0.textLabel?.text == "0時"
+          && revealTableCell(startMenu, identifier: "programSearch.option.startHour.23")?.0.textLabel?.text == "23時"
+        checks["programSearchStartHourAnchorVisible"] = popupState(anchorID: "programSearch.startHour", menuID: "programSearch.options.startHour").map {
+          $0.viewport.intersects($0.anchor) && $0.viewport.contains($0.menu)
+        } ?? false
+        if let (_, hour23) = tableCell(startMenu, identifier: "programSearch.option.startHour.23") ?? revealTableCell(startMenu, identifier: "programSearch.option.startHour.23") {
+          startMenu.delegate?.tableView?(startMenu, didSelectRowAt: hour23)
+        }
+        checks["programSearchStartHourSelect"] = (startHourButton.title(for: .normal) ?? "").contains("23時")
+      } else {
+        checks["programSearchStartHourLabels"] = false
+        checks["programSearchStartHourAnchorVisible"] = false
+        checks["programSearchStartHourSelect"] = false
+      }
+
+      rangeHourButton.sendActions(for: .touchUpInside)
+      if let rangeMenu = await waitForMenu("programSearch.options.rangeHour", minimumRows: 24) {
+        checks["programSearchRangeHourLabels"] = tableCell(rangeMenu, identifier: "programSearch.option.rangeHour.none")?.0.textLabel?.text == "指定なし"
+          && tableCell(rangeMenu, identifier: "programSearch.option.rangeHour.1")?.0.textLabel?.text == "1時間"
+          && revealTableCell(rangeMenu, identifier: "programSearch.option.rangeHour.23")?.0.textLabel?.text == "23時間"
+        checks["programSearchRangeHourAnchorVisible"] = popupState(anchorID: "programSearch.rangeHour", menuID: "programSearch.options.rangeHour").map {
+          $0.viewport.intersects($0.anchor) && $0.viewport.contains($0.menu)
+        } ?? false
+        if let (_, hour2) = revealTableCell(rangeMenu, identifier: "programSearch.option.rangeHour.2") {
+          rangeMenu.delegate?.tableView?(rangeMenu, didSelectRowAt: hour2)
+        }
+        checks["programSearchRangeHourSelect"] = (rangeHourButton.title(for: .normal) ?? "").contains("2時間")
+      } else {
+        checks["programSearchRangeHourLabels"] = false
+        checks["programSearchRangeHourAnchorVisible"] = false
+        checks["programSearchRangeHourSelect"] = false
+      }
+      clearForm.sendActions(for: .touchUpInside)
+    } else {
+      checks["programSearchDetailButtonsReady"] = false
+    }
+
+    func openPicker(accessoryID: String) async -> NeoProgramSearchPickerController? {
+      guard let accessory = button(in: page.view, identifier: accessoryID) else { return nil }
+      page.view.endEditing(true)
+      accessory.sendActions(for: .touchUpInside)
+      return await waitForPicker()
+    }
+
+    if let startDateField = viewWithID("programSearch.startDate") as? UITextField,
+      let datePicker = await openPicker(accessoryID: "programSearch.startDate.picker") {
+      let card = identified(datePicker.view, "programSearch.picker.card")
+      let dateGrid = identified(datePicker.view, "programSearch.picker.date")
+      let cardRect = card?.convert(card?.bounds ?? .zero, to: datePicker.view) ?? .null
+      let bounds = datePicker.view.safeAreaLayoutGuide.layoutFrame
+      let expectedWidth = bounds.width >= 600 ? 400 : max(0, bounds.width - 24)
+      checks["programSearchDatePickerCardContainedAndCentered"] = card != nil && finite(cardRect)
+        && bounds.contains(cardRect)
+        && abs(cardRect.width - expectedWidth) <= 1
+        && abs(cardRect.midX - bounds.midX) <= 2 && abs(cardRect.midY - bounds.midY) <= 2
+        && dateGrid != nil
+      capture("picker-date")
+      if let dateGrid,
+        let day = views(in: dateGrid).compactMap({ $0 as? UIButton }).first(where: {
+          $0.isEnabled && $0.accessibilityLabel?.hasSuffix("日") == true
+        }),
+        let select = button(in: datePicker.view, identifier: "programSearch.picker.select") {
+        day.sendActions(for: .touchUpInside)
+        select.sendActions(for: .touchUpInside)
+        let selected = await waitFor { page.presentedViewController == nil }
+        checks["programSearchDatePickerSelect"] = selected && !(startDateField.text ?? "").isEmpty
+      } else {
+        checks["programSearchDatePickerSelect"] = false
+      }
+
+      let beforeCancel = startDateField.text ?? ""
+      if let picker = await openPicker(accessoryID: "programSearch.startDate.picker"),
+        let cancel = button(in: picker.view, identifier: "programSearch.picker.cancel") {
+        cancel.sendActions(for: .touchUpInside)
+        let cancelled = await waitFor { page.presentedViewController == nil }
+        checks["programSearchDatePickerCancel"] = cancelled && (startDateField.text ?? "") == beforeCancel
+      } else {
+        checks["programSearchDatePickerCancel"] = false
+      }
+      if let picker = await openPicker(accessoryID: "programSearch.startDate.picker"),
+        let clear = button(in: picker.view, identifier: "programSearch.picker.clear") {
+        clear.sendActions(for: .touchUpInside)
+        let cleared = await waitFor { page.presentedViewController == nil }
+        checks["programSearchDatePickerClear"] = cleared && (startDateField.text ?? "").isEmpty
+      } else {
+        checks["programSearchDatePickerClear"] = false
+      }
+    } else {
+      checks["programSearchDatePickerCardContainedAndCentered"] = false
+      checks["programSearchDatePickerSelect"] = false
+      checks["programSearchDatePickerCancel"] = false
+      checks["programSearchDatePickerClear"] = false
+    }
+
+    if let startTimeField = viewWithID("programSearch.startTime") as? UITextField,
+      let timePickerController = await openPicker(accessoryID: "programSearch.startTime.picker"),
+      let timePicker = identified(timePickerController.view, "programSearch.picker.time") as? UIPickerView {
+      let card = identified(timePickerController.view, "programSearch.picker.card")
+      let cardRect = card?.convert(card?.bounds ?? .zero, to: timePickerController.view) ?? .null
+      let bounds = timePickerController.view.safeAreaLayoutGuide.layoutFrame
+      let expectedWidth = bounds.width >= 600 ? 400 : max(0, bounds.width - 24)
+      checks["programSearchTimePickerCardContainedAndCentered"] = card != nil && finite(cardRect)
+        && bounds.contains(cardRect)
+        && abs(cardRect.width - expectedWidth) <= 1
+        && abs(cardRect.midX - bounds.midX) <= 2 && abs(cardRect.midY - bounds.midY) <= 2
+        && timePicker.numberOfComponents == 2
+        && timePicker.numberOfRows(inComponent: 0) == 24
+        && timePicker.numberOfRows(inComponent: 1) == 60
+      capture("picker-time")
+      timePicker.selectRow(23, inComponent: 0, animated: false)
+      timePicker.selectRow(45, inComponent: 1, animated: false)
+      timePicker.delegate?.pickerView?(timePicker, didSelectRow: 23, inComponent: 0)
+      timePicker.delegate?.pickerView?(timePicker, didSelectRow: 45, inComponent: 1)
+      if let select = button(in: timePickerController.view, identifier: "programSearch.picker.select") {
+        select.sendActions(for: .touchUpInside)
+        let selected = await waitFor { page.presentedViewController == nil }
+        checks["programSearchTimePickerSelect"] = selected && startTimeField.text == "23:45"
+      } else {
+        checks["programSearchTimePickerSelect"] = false
+      }
+      let beforeCancel = startTimeField.text ?? ""
+      if let picker = await openPicker(accessoryID: "programSearch.startTime.picker"),
+        let cancel = button(in: picker.view, identifier: "programSearch.picker.cancel") {
+        cancel.sendActions(for: .touchUpInside)
+        let cancelled = await waitFor { page.presentedViewController == nil }
+        checks["programSearchTimePickerCancel"] = cancelled && startTimeField.text == beforeCancel
+      } else {
+        checks["programSearchTimePickerCancel"] = false
+      }
+      if let picker = await openPicker(accessoryID: "programSearch.startTime.picker"),
+        let clear = button(in: picker.view, identifier: "programSearch.picker.clear") {
+        clear.sendActions(for: .touchUpInside)
+        let cleared = await waitFor { page.presentedViewController == nil }
+        checks["programSearchTimePickerClear"] = cleared && (startTimeField.text ?? "").isEmpty
+      } else {
+        checks["programSearchTimePickerClear"] = false
+      }
+    } else {
+      checks["programSearchTimePickerCardContainedAndCentered"] = false
+      checks["programSearchTimePickerSelect"] = false
+      checks["programSearchTimePickerCancel"] = false
+      checks["programSearchTimePickerClear"] = false
+    }
+
+    button(in: page.view, identifier: "programSearch.clear")?.sendActions(for: .touchUpInside)
+    page.view.endEditing(true)
+
     guard let keyword = identified(page.view, "programSearch.keyword") as? UITextField,
       let search = button(in: page.view, identifier: "programSearch.search") else {
       checks["programSearchFormControlsReady"] = false
@@ -350,7 +768,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     detail.view.layoutIfNeeded()
 
     let detailButtons = views(in: detail.view).compactMap { $0 as? UIButton }
-    let buttonTitles = Set(detailButtons.compactMap { $0.title(for: .normal) })
+    let buttonTitles = Set(detailButtons.filter { !$0.isHidden }.compactMap { $0.title(for: .normal) })
     let forbidden = Set(["予約", "削除", "編集", "解除", "除外", "詳細"])
     checks["programDetailReadOnly"] = buttonTitles.contains("検索") && buttonTitles.contains("閉じる")
       && buttonTitles.isDisjoint(with: forbidden)
@@ -366,7 +784,18 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       return found
     }
 
-    let expand = detailButtons.first { $0.accessibilityLabel?.contains("情報を表示") == true }
+    let timeLabel = identified(detail.view, "program-detail-time") as? UILabel
+    let durationLabel = identified(detail.view, "program-detail-duration") as? UILabel
+    let card = identified(detail.view, "program-detail-card")
+    checks["programDetailShowsTimeBeforeExpansion"] = timeLabel?.text?.contains("19:00") == true
+      && timeLabel?.text?.contains("19:30") == true && durationLabel?.text == "(30分)"
+      && (timeLabel?.bounds.width ?? 0) >= (timeLabel?.intrinsicContentSize.width ?? 1) - 1
+      && (durationLabel?.bounds.width ?? 0) >= (durationLabel?.intrinsicContentSize.width ?? 1) - 1
+    let initialTimeFrame = timeLabel.map { $0.convert($0.bounds, to: detail.view) }
+    let initialCardFrame = card?.frame
+    capture("detail-collapsed")
+
+    let expand = detailButtons.first { $0.accessibilityIdentifier == "program-detail-broadcast-toggle" }
     let initiallyCollapsed = expand?.accessibilityValue == "非表示"
     expand?.sendActions(for: .touchUpInside)
     let expanded = await waitFor {
@@ -374,6 +803,8 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       return detailButtons.first { $0.accessibilityLabel?.contains("情報を閉じる") == true }?.accessibilityValue == "表示中"
     }
     checks["programDetailBroadcastDetailsExpand"] = initiallyCollapsed && expanded
+    checks["programDetailExpansionKeepsCardAndTimeInPlace"] = expanded && initialCardFrame != nil && initialCardFrame == card?.frame
+      && initialTimeFrame != nil && initialTimeFrame == timeLabel.map { $0.convert($0.bounds, to: detail.view) }
     let userChipReady = await waitFor {
       NeoProgramSearchSmokeProtocol.count("GET /api/users") > 0
         && views(in: detail.view).compactMap { $0 as? UILabel }.contains { $0.text == "Fixture user・競合" }
@@ -397,11 +828,37 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     checks["relatedSearchCarriesChannelAndGenre"] = relatedChannels == [1]
       && relatedGenres.contains { ($0["genre"] as? NSNumber)?.intValue == 3 && ($0["subGenre"] as? NSNumber)?.intValue == 0 }
 
-    let relatedPage = navigation.topViewController
-    _ = await waitFor {
-      guard let relatedPage else { return false }
-      return identified(relatedPage.view, "programSearch.count") is UILabel
-        && (identified(relatedPage.view, "programSearch.count") as? UILabel)?.text == "1件ヒット"
+    if let relatedPage = navigation.topViewController as? NeoProgramSearchPage,
+       let relatedList = identified(relatedPage.view, "programSearch.list") as? UITableView,
+       await waitFor({ relatedList.numberOfRows(inSection: 0) == 1 && navigation.transitionCoordinator == nil }) {
+      relatedList.scrollToRow(at: IndexPath(row: 0, section: 0), at: .top, animated: false)
+      relatedPage.tableView(relatedList, didSelectRowAt: IndexPath(row: 0, section: 0))
+      let arrived = await waitFor {
+        guard let dialog = relatedPage.presentedViewController as? NeoProgramDetailDialog else { return false }
+        return dialog.viewIfLoaded?.window != nil && !dialog.isBeingPresented
+      }
+      if arrived, let dialog = relatedPage.presentedViewController as? NeoProgramDetailDialog {
+        dialog.view.layoutIfNeeded()
+        let mode = button(in: dialog.view, identifier: "program-detail-booking-mode")
+        let user = button(in: dialog.view, identifier: "program-detail-booking-viewer")
+        let checkboxes = ["program-detail-booking-delete", "program-detail-booking-thumbnail"].compactMap { button(in: dialog.view, identifier: $0) }
+        let footer = ["program-detail-search", "program-detail-footer-close", "program-detail-details", "program-detail-reserve"].compactMap {
+          button(in: dialog.view, identifier: $0)
+        }
+        checks["programDetailUnreservedBookingLayout"] = mode?.title(for: .normal) == "TS" && user?.title(for: .normal)?.isEmpty == false
+          && !(mode?.isUserInteractionEnabled ?? true) && !(user?.isUserInteractionEnabled ?? true)
+          && checkboxes.count == 2 && checkboxes.allSatisfy { !$0.isEnabled && !$0.frame.isEmpty }
+          && footer.count == 4 && footer.prefix(2).allSatisfy(\.isEnabled) && footer.suffix(2).allSatisfy { !$0.isEnabled }
+          && footer.allSatisfy { !$0.isHidden && !$0.frame.isEmpty }
+          && zip(footer, footer.dropFirst()).allSatisfy { $0.0.frame.maxX <= $0.1.frame.minX }
+        capture("detail-unreserved")
+        button(in: dialog.view, identifier: "program-detail-footer-close")?.sendActions(for: .touchUpInside)
+        checks["programDetailUnreservedCloses"] = await waitFor { relatedPage.presentedViewController == nil }
+      } else {
+        checks["programDetailUnreservedBookingLayout"] = false
+      }
+    } else {
+      checks["programDetailUnreservedBookingLayout"] = false
     }
     _ = await waitFor { navigation.transitionCoordinator == nil }
     shell.goBack()

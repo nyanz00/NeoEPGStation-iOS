@@ -24,6 +24,7 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
   private var queryGeneration = 0, stage: Stage = .loadingSetup
   private var channelsByID: [Int: NeoLiveChannel] = [:], availableTypes: [String] = []
   private var ready = false, appearing = false, appeared = false, headerMeasurementPending = false
+  private var lastListSize: CGSize = .zero
   private var refreshPreferences = false, refreshOnReturn = false
   private var submitted: NeoProgramSearchOption?
   private var programs: [NeoScheduledProgram] = [], reservations: [Int: NeoProgramReserveStatus] = [:]
@@ -78,10 +79,15 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
     if refreshOnReturn { refreshOnReturn = false; refreshRetainedResults() }
   }
   override func viewWillDisappear(_ animated: Bool) {
-    super.viewWillDisappear(animated); appearing = false; appeared = false; view.endEditing(true)
+    super.viewWillDisappear(animated); appearing = false; appeared = false
+    formView?.dismissDropdown()
+    view.endEditing(true)
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews(); measureHeader(); focusIfNeeded()
+    let resized = lastListSize != list.bounds.size
+    lastListSize = list.bounds.size
+    formView?.layoutDropdown(in: list, keepStationVisible: resized)
   }
   deinit { task?.cancel(); namesTask?.cancel() }
 
@@ -104,6 +110,7 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
       cancelWork(); context = current; apiForContext = api
       detail?.dismiss(animated: false); detail = nil; viewerNames = nil
       ready = false; refreshPreferences = false; refreshOnReturn = false; channelsByID = [:]; availableTypes = []
+      formView?.dismissDropdown()
       formView?.removeFromSuperview(); formView = nil
       submitted = nil; programs = []; reservations = [:]; lastOpened = nil
       if hadContext { form = .init(); autoSearch = false; shouldScrollToResults = false }
@@ -146,7 +153,7 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
         availableTypes = channels.map(\.channelType).filter { config.broadcast?[$0] != false && seen.insert($0).inserted }
         if form.channelIDs.isEmpty { form.channelTypes = availableTypes }
         ready = true
-        let fields = NeoProgramSearchFormView(form: form, channels: channels, availableTypes: availableTypes, presenter: self,
+        let fields = NeoProgramSearchFormView(form: form, channels: channels, availableTypes: availableTypes, presenter: self, dropdownHost: body,
           onChange: { [weak self] in self?.form = $0 },
           onClear: { [weak self] in self?.clear(resetFocus: false) },
           onSearch: { [weak self] in self?.submit() })
@@ -187,6 +194,7 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
   private func submit() {
     guard ready, shell?.api?.accountReady == true else { return }
     if case .searching = stage { return }
+    formView?.dismissDropdown()
     do {
       let prepared = try form.prepared()
       if prepared.form != form { form = prepared.form; formView?.update(form) }
@@ -362,6 +370,10 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
   func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
     hasResults ? max(1, programs.count) : 0
   }
+
+  func scrollViewDidScroll(_ scrollView: UIScrollView) {
+    formView?.layoutDropdown(in: scrollView)
+  }
   func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
     guard !programs.isEmpty else {
       let cell = UITableViewCell(); cell.backgroundColor = .clear; cell.selectionStyle = .none
@@ -386,11 +398,16 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
       tableView.reloadRows(at: paths, with: .none)
     }
     let channel = channelsByID[program.channelId], owner = Context(api)
+    let bookingUserName = Int(api.viewer).flatMap { viewerID -> String? in
+      guard viewerID > 0 else { return nil }
+      return viewerNames?[viewerID] ?? shell?.account?.currentName
+    }
     let dialog = NeoProgramDetailDialog(program: program, channel: channel,
       logoURL: channel?.hasLogoData == true ? api.url("/channels/\(program.channelId)/logo") : nil,
       reservationLabel: status?.label(inResult: false), reservationConflict: status?.primary == .conflict,
       reservationUsers: reservationLabels(status, waiting: viewerNames == nil),
-      alwaysShowBroadcastDetails: api.alwaysShowProgramBroadcastDetails) { [weak self] in
+      alwaysShowBroadcastDetails: api.alwaysShowProgramBroadcastDetails,
+      bookingUserName: bookingUserName) { [weak self] in
         guard let self, let shell, shell.api === api, api.accountReady, Context(api) == owner,
               navigationController?.topViewController === self else { return }
         let related = NeoProgramSearchForm.related(to: program, includeChannel: api.programRelatedIncludesChannel,
@@ -398,7 +415,10 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
       refreshOnReturn = true
       shell.pushPage { NeoProgramSearchPage(shell: shell, relatedForm: related) }
       }
-    detail = dialog; view.endEditing(true); present(dialog, animated: true)
+    detail = dialog
+    formView?.dismissDropdown()
+    view.endEditing(true)
+    present(dialog, animated: !UIAccessibility.isReduceMotionEnabled)
     guard let status, viewerNames == nil, let context else { return }
     namesTask?.cancel()
     let generation = queryGeneration

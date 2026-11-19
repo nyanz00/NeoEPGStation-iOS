@@ -275,6 +275,7 @@ jobs:
               ios/NeoEPGStation/NeoStyle.swift ios/NeoEPGStation/NeoIcon.swift ios/NeoEPGStation/NeoDateInput.swift \
               ios/NeoEPGStation/NeoProgramSearchModels.swift ios/NeoEPGStation/NeoProgramSearchAPI.swift \
               ios/NeoEPGStation/NeoProgramSearchFormView.swift ios/NeoEPGStation/NeoProgramSearchPage.swift \
+              ios/NeoEPGStation/NeoProgramSearchControls.swift ios/NeoEPGStation/NeoProgramSearchPicker.swift \
               ios/NeoEPGStation/NeoProgramDetailDialog.swift ios/NeoEPGStation/NeoProgramSearchSmoke.swift tests/program-search/ui-typecheck.swift
           fi
       - name: Check dead loopback relay and remote playlist recovery
