@@ -1,5 +1,36 @@
 import UIKit
 
+enum NeoProgramRuleButton {
+  static func make(_ title: String, filled: Bool, identifier: String, action: @escaping () -> Void) -> UIButton {
+    let button = UIButton(type: .system)
+    var configuration: UIButton.Configuration = filled ? .filled() : .plain()
+    configuration.title = title
+    configuration.image = UIGraphicsImageRenderer(size: CGSize(width: 20, height: 20)).image { _ in
+      NeoIcon.image("PlaylistAddOutlined").draw(in: CGRect(x: 0, y: 0, width: 20, height: 20))
+    }.withRenderingMode(.alwaysTemplate)
+    configuration.baseForegroundColor = filled ? NeoStyle.successText : NeoStyle.accent
+    configuration.baseBackgroundColor = filled ? NeoStyle.accent : .clear
+    configuration.imagePadding = 4
+    configuration.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8)
+    configuration.cornerStyle = .fixed
+    configuration.background.cornerRadius = 6
+    if !filled {
+      configuration.background.strokeColor = NeoStyle.accent.withAlphaComponent(0.5)
+      configuration.background.strokeWidth = 1
+    }
+    configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+      var attributes = attributes
+      attributes.font = .systemFont(ofSize: 14, weight: .medium)
+      return attributes
+    }
+    button.configuration = configuration
+    button.accessibilityIdentifier = identifier
+    button.accessibilityLabel = title
+    button.addAction(UIAction { _ in action() }, for: .touchUpInside)
+    return button
+  }
+}
+
 /// The outlined input used for the channel and date/time fields in program search.
 final class NeoProgramSearchInput: UIView {
   private static let leadingInset: CGFloat = 14

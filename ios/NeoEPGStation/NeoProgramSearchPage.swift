@@ -7,15 +7,26 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
       revision = api.identityRevision; viewer = api.viewer; halfWidth = api.isHalfWidthDisplayed; limit = api.programSearchLimit
     }
   }
-  private enum Failure { case setup, search, reservations }
+  private enum Failure { case account, setup, rule, search, reservations, timeReservations }
   private enum Stage {
-    case loadingSetup, form, searching, loadingReservations, results
+    case loadingSetup, form, searching, loadingReservations, loadingTimeReservations, results
     case failed(Failure, String)
   }
 
   private let list = UITableView(frame: .zero, style: .plain)
   private let headerStack = UIStackView(), noticeStack = UIStackView(), resultCount = NeoStyle.label(size: 14, muted: true)
   private let footer = UIView()
+  private let ruleID: Int?
+  private let ruleOrigin: Context?
+  private weak var ruleOriginAPI: NeoAPI?
+  private var loadedRule: NeoProgramRule?
+  private var configuration: NeoServerConfig?
+  private var channelRoster: [NeoLiveChannel] = []
+  private var timeRuleSummary: UIView?
+  private var timeReservationCount = 0
+  private var editorTask: Task<Void, Never>?
+  private var editorGeneration = 0
+  private weak var ruleEditor: NeoProgramRuleEditor?
   private var formView: NeoProgramSearchFormView?
   private var form = NeoProgramSearchForm(), autoSearch: Bool, focusOnArrival: Bool
   private var context: Context?
@@ -31,13 +42,30 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
   private var lastOpened: Int?, shouldScrollToResults = false
   private var viewerNames: [Int: String]?
   private weak var detail: NeoProgramDetailDialog?
+  private var isTimeRule: Bool { loadedRule?.isTimeSpecification == true }
+  private var ruleActionTitle: String { ruleID == nil ? "ルール作成" : "ルール設定" }
+  private lazy var footerRule = NeoProgramRuleButton.make(ruleActionTitle, filled: true, identifier: "programSearch.rule.bottom") { [weak self] in
+    self?.openRuleEditor()
+  }
+  private lazy var floatingRule = NeoProgramRuleButton.make(ruleActionTitle, filled: true, identifier: "programSearch.rule.floating") { [weak self] in
+    self?.openRuleEditor()
+  }
+  private lazy var timeRuleAction: UIButton = {
+    let button = NeoStyle.iconButton("EditOutlined", label: "ルール設定") { [weak self] in self?.openRuleEditor() }
+    button.accessibilityIdentifier = "programSearch.timeRule.settings"
+    return button
+  }()
   private var insets: CGFloat { max(0, (list.bounds.width - 980) / 2) + (list.bounds.width >= 900 ? 24 : 12) }
   private var hasResults: Bool { if case .results = stage { return true }; return false }
 
-  init(shell: NeoShell, relatedForm: NeoProgramSearchForm? = nil) {
+  init(shell: NeoShell, relatedForm: NeoProgramSearchForm? = nil, ruleID: Int? = nil) {
+    self.ruleID = ruleID
+    ruleOrigin = ruleID == nil ? nil : shell.api.map(Context.init)
+    ruleOriginAPI = ruleID == nil ? nil : shell.api
     autoSearch = relatedForm != nil; focusOnArrival = relatedForm == nil
+    if ruleID != nil { focusOnArrival = false }
     if let relatedForm { form = relatedForm }
-    super.init(title: "検索", shell: shell)
+    super.init(title: ruleID == nil ? "検索" : "ルール編集", shell: shell)
   }
   required init?(coder: NSCoder) { fatalError() }
 
@@ -63,11 +91,18 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
     resultCount.textAlignment = .right; resultCount.accessibilityIdentifier = "programSearch.count"
     headerStack.addArrangedSubview(noticeStack); headerStack.addArrangedSubview(resultCount)
     let clear = Self.clearButton { [weak self] in self?.clear(resetFocus: false) }
-    footer.addSubview(clear); clear.translatesAutoresizingMaskIntoConstraints = false
+    let footerActions = UIStackView(arrangedSubviews: [clear, footerRule])
+    footerActions.spacing = 8; footerActions.translatesAutoresizingMaskIntoConstraints = false
+    footer.addSubview(footerActions)
+    floatingRule.isHidden = true
+    body.addSubview(floatingRule); floatingRule.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
-      clear.topAnchor.constraint(equalTo: footer.topAnchor, constant: 6),
-      clear.trailingAnchor.constraint(equalTo: footer.layoutMarginsGuide.trailingAnchor),
-      clear.heightAnchor.constraint(equalToConstant: 36),
+      footerActions.topAnchor.constraint(equalTo: footer.topAnchor, constant: 6),
+      footerActions.trailingAnchor.constraint(equalTo: footer.layoutMarginsGuide.trailingAnchor),
+      footerActions.heightAnchor.constraint(equalToConstant: 40),
+      floatingRule.trailingAnchor.constraint(equalTo: body.trailingAnchor, constant: -12),
+      floatingRule.bottomAnchor.constraint(equalTo: list.bottomAnchor, constant: -16),
+      floatingRule.heightAnchor.constraint(equalToConstant: 42),
     ])
     NotificationCenter.default.addObserver(self, selector: #selector(accountChanged(_:)), name: .neoAccountChanged, object: nil)
     NotificationCenter.default.addObserver(self, selector: #selector(accountChanged(_:)), name: .neoTextPreferencesChanged, object: nil)
@@ -76,20 +111,26 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
   override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); appearing = true; synchronize() }
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated); appeared = true; synchronize(); focusIfNeeded()
-    if refreshOnReturn { refreshOnReturn = false; refreshRetainedResults() }
+    if refreshOnReturn {
+      refreshOnReturn = false
+      if isTimeRule { loadTimeReservations() }
+      else { refreshRetainedResults() }
+    }
   }
   override func viewWillDisappear(_ animated: Bool) {
     super.viewWillDisappear(animated); appearing = false; appeared = false
     formView?.dismissDropdown()
     view.endEditing(true)
+    if ruleEditor == nil, editorTask != nil { cancelRuleEditor() }
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews(); measureHeader(); focusIfNeeded()
     let resized = lastListSize != list.bounds.size
     lastListSize = list.bounds.size
     formView?.layoutDropdown(in: list, keepStationVisible: resized)
+    refreshFloatingRule()
   }
-  deinit { task?.cancel(); namesTask?.cancel() }
+  deinit { task?.cancel(); namesTask?.cancel(); editorTask?.cancel() }
 
   func resetForNavigation() {
     autoSearch = false
@@ -108,8 +149,11 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
     if changedIdentity {
       let hadContext = context != nil
       cancelWork(); context = current; apiForContext = api
+      cancelRuleEditor()
       detail?.dismiss(animated: false); detail = nil; viewerNames = nil
       ready = false; refreshPreferences = false; refreshOnReturn = false; channelsByID = [:]; availableTypes = []
+      channelRoster = []; configuration = nil; loadedRule = nil; timeReservationCount = 0
+      timeRuleSummary?.removeFromSuperview(); timeRuleSummary = nil; actions = []
       formView?.dismissDropdown()
       formView?.removeFromSuperview(); formView = nil
       submitted = nil; programs = []; reservations = [:]; lastOpened = nil
@@ -117,16 +161,27 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
       stage = .loadingSetup; render()
     } else if context != current {
       cancelWork(); context = current
-      refreshPreferences = ready && submitted != nil
+      refreshPreferences = ready && (submitted != nil || isTimeRule)
       if ready { stage = .form; render() }
+    }
+    if ruleID != nil, ruleOriginAPI !== api || ruleOrigin?.revision != current.revision || ruleOrigin?.viewer != current.viewer {
+      stage = .failed(.account, "元の画面からルールを開き直してください。")
+      render()
+      return
     }
     guard appearing, api.accountReady, task == nil else { return }
     if ready {
-      if refreshPreferences, let submitted { refreshPreferences = false; run(submitted, scroll: false) }
+      if refreshPreferences {
+        refreshPreferences = false
+        if isTimeRule { loadTimeReservations() }
+        else if let submitted { run(submitted, scroll: false) }
+      }
       else if case .loadingReservations = stage { loadReservations() }
+      else if case .loadingTimeReservations = stage { loadTimeReservations() }
       return
     }
     if case .failed(.setup, _) = stage { return }
+    if case .failed(.rule, _) = stage { return }
     loadSetup()
   }
 
@@ -139,28 +194,50 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
   private func loadSetup() {
     guard let api = shell?.api, let context, api.accountReady else { return }
     cancelWork()
-    let generation = queryGeneration, headers = api.profileHeaders
+    let generation = queryGeneration, headers = api.profileHeaders, ruleID = self.ruleID
     stage = .loadingSetup; render()
     task = Task { [weak self] in
       do {
         async let roster = api.programSearchChannels(user: context.viewer, headers: headers)
         async let configuration: NeoServerConfig = api.request(api.url("/config"), user: context.viewer, headers: headers)
+        let rule: NeoProgramRule?
+        if let ruleID {
+          do { rule = try await api.programRule(ruleID, user: context.viewer, headers: headers) }
+          catch {
+            guard let self, accepts(api, context, generation) else { return }
+            task = nil; stage = .failed(.rule, error.localizedDescription); render()
+            return
+          }
+        } else { rule = nil }
         let (channels, config) = try await (roster, configuration)
         guard let self, accepts(api, context, generation) else { return }
         task = nil
+        channelRoster = channels
+        self.configuration = config
+        loadedRule = rule
         channelsByID = Dictionary(channels.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var seen = Set<String>()
         availableTypes = channels.map(\.channelType).filter { config.broadcast?[$0] != false && seen.insert($0).inserted }
-        if form.channelIDs.isEmpty { form.channelTypes = availableTypes }
+        if let rule { form = NeoProgramSearchForm(restoring: rule.searchOption) }
+        else if form.channelIDs.isEmpty { form.channelTypes = availableTypes }
         ready = true
+        if let rule, rule.isTimeSpecification {
+          showTimeRule(rule)
+          loadTimeReservations()
+          return
+        }
         let fields = NeoProgramSearchFormView(form: form, channels: channels, availableTypes: availableTypes, presenter: self, dropdownHost: body,
+          ruleActionTitle: ruleActionTitle,
           onChange: { [weak self] in self?.form = $0 },
           onClear: { [weak self] in self?.clear(resetFocus: false) },
-          onSearch: { [weak self] in self?.submit() })
+          onSearch: { [weak self] in self?.submit() },
+          onRuleAction: { [weak self] in self?.openRuleEditor() })
         fields.onLayoutChange = { [weak self] in self?.scheduleHeaderMeasurement() }
         formView = fields; headerStack.insertArrangedSubview(fields, at: 0)
         stage = .form; render()
-        if autoSearch, !form.channelIDs.isEmpty || !form.channelTypes.isEmpty {
+        if let rule {
+          run(rule.searchOption, scroll: true)
+        } else if autoSearch, !form.channelIDs.isEmpty || !form.channelTypes.isEmpty {
           autoSearch = false; submit()
         } else { focusIfNeeded() }
       } catch {
@@ -196,10 +273,15 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
     if case .searching = stage { return }
     formView?.dismissDropdown()
     do {
-      let prepared = try form.prepared()
-      if prepared.form != form { form = prepared.form; formView?.update(form) }
+      let option: NeoProgramSearchOption
+      if let loadedRule { option = try form.ruleOption(preserving: loadedRule.searchOption) }
+      else {
+        let prepared = try form.prepared()
+        if prepared.form != form { form = prepared.form; formView?.update(form) }
+        option = prepared.option
+      }
       view.endEditing(true)
-      run(prepared.option, scroll: true)
+      run(option, scroll: true)
     } catch { alert(error.localizedDescription) }
   }
 
@@ -238,6 +320,139 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
         task = nil; stage = .failed(.reservations, error.localizedDescription); render()
       }
     }
+  }
+
+  private func showTimeRule(_ rule: NeoProgramRule) {
+    let name = NeoStyle.label(rule.searchOption.keyword ?? "番組名未指定", size: 20, bold: true)
+    name.numberOfLines = 0
+    let station = rule.searchOption.channelIds?.first.map { channelsByID[$0]?.name ?? String($0) } ?? "放送局未指定"
+    let schedule = NeoStyle.label("\(station) ・ \(rule.scheduleLabel)", size: 14, muted: true)
+    schedule.numberOfLines = 0
+    let card = UIStackView(arrangedSubviews: [NeoStyle.label("時刻指定ルール", size: 12, muted: true), name, schedule])
+    card.axis = .vertical; card.spacing = 8
+    card.isLayoutMarginsRelativeArrangement = true
+    card.layoutMargins = UIEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+    card.backgroundColor = NeoStyle.paper
+    card.layer.borderWidth = 1; card.layer.borderColor = NeoStyle.border.cgColor; card.layer.cornerRadius = 6
+    card.accessibilityIdentifier = "programSearch.timeRule.summary"
+    timeRuleSummary = card
+    headerStack.insertArrangedSubview(card, at: 0)
+    actions = [timeRuleAction]
+  }
+
+  private func loadTimeReservations() {
+    guard let ruleID, isTimeRule, let api = shell?.api, let context else { return }
+    cancelWork()
+    stage = .loadingTimeReservations; render()
+    guard api.accountReady else { return }
+    let generation = queryGeneration, headers = api.profileHeaders
+    task = Task { [weak self] in
+      do {
+        let list = try await api.programRuleReservations(ruleID, halfWidth: context.halfWidth, user: context.viewer, headers: headers)
+        guard let self, accepts(api, context, generation) else { return }
+        task = nil
+        var seen = Set<Int>()
+        let rows = list.reserves.filter { seen.insert($0.id).inserted }
+        programs = rows.map(\.displayProgram)
+        reservations = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.status) })
+        timeReservationCount = list.total
+        stage = .results; render()
+      } catch {
+        guard let self, accepts(api, context, generation) else { return }
+        task = nil; stage = .failed(.timeReservations, error.localizedDescription); render()
+      }
+    }
+  }
+
+  private func openRuleEditor() {
+    guard ready, editorTask == nil, presentedViewController == nil, let config = configuration,
+          let api = shell?.api, let owner = context, api.accountReady, ownsEditorAccount(api, owner) else { return }
+    let existing = loadedRule
+    let conditions: NeoProgramSearchOption
+    do {
+      if let existing, existing.isTimeSpecification { conditions = existing.searchOption }
+      else { conditions = try form.ruleOption(preserving: existing?.searchOption) }
+    } catch { alert(error.localizedDescription); return }
+
+    formView?.dismissDropdown()
+    view.endEditing(true)
+    setRuleButtonsEnabled(false)
+    let generation = editorGeneration, headers = api.profileHeaders
+    editorTask = Task { [weak self] in
+      do {
+        let result: NeoViewers = try await api.request(api.url("/users"), user: owner.viewer, headers: headers)
+        guard let self, !Task.isCancelled, editorGeneration == generation, ownsEditorAccount(api, owner) else { return }
+        editorTask = nil; setRuleButtonsEnabled(true)
+        guard appeared, view.window != nil, presentedViewController == nil, navigationController?.topViewController === self else { return }
+        let viewer = Int(owner.viewer).flatMap { $0 > 0 ? $0 : nil }
+        let draft = NeoProgramRuleDraft(rule: existing, activeUserID: viewer)
+        let editor = NeoProgramRuleEditor(draft: draft, editing: existing != nil, users: result.users,
+          channels: ruleEditorChannels(fallback: conditions.channelIds ?? []), encodeModes: config.encode, directories: config.recorded) { [weak self] draft in
+          self?.saveRule(draft, conditions: conditions, existing: existing, api: api, owner: owner)
+        }
+        ruleEditor = editor
+        present(editor, animated: !UIAccessibility.isReduceMotionEnabled)
+      } catch {
+        guard let self, !Task.isCancelled, editorGeneration == generation, ownsEditorAccount(api, owner) else { return }
+        editorTask = nil; setRuleButtonsEnabled(true)
+        if appeared { alert("ルール設定に必要なユーザー情報を取得できませんでした: \(error.localizedDescription)") }
+      }
+    }
+  }
+
+  private func ruleEditorChannels(fallback: [Int]) -> [NeoLiveChannel] {
+    let preferred = programs.isEmpty ? fallback : programs.map(\.channelId)
+    var seen = Set<Int>()
+    return (preferred.compactMap { channelsByID[$0] } + channelRoster).filter { seen.insert($0.id).inserted }
+  }
+
+  private func saveRule(_ draft: NeoProgramRuleDraft, conditions: NeoProgramSearchOption, existing: NeoProgramRule?, api: NeoAPI, owner: Context) {
+    guard editorTask == nil, let editor = ruleEditor, ownsEditorAccount(api, owner) else { return }
+    guard api.accountReady else { editor.showSaveError("アクティブユーザーを確認中です。時間をおいて保存してください。"); return }
+    let option: NeoProgramRuleWrite
+    do { option = try draft.write(searchOption: conditions, existing: existing) }
+    catch { editor.showSaveError(error.localizedDescription); return }
+    editor.setSaving(true)
+    let generation = editorGeneration, headers = api.profileHeaders
+    editorTask = Task { [weak self, weak editor] in
+      do {
+        let warnings = try await api.saveProgramRule(option, replacing: existing?.id, user: owner.viewer, headers: headers)
+        guard let self, let editor, !Task.isCancelled, editorGeneration == generation,
+              ownsEditorAccount(api, owner), ruleEditor === editor else { return }
+        editorTask = nil
+        editor.dismiss(animated: !UIAccessibility.isReduceMotionEnabled) { [weak self] in
+          guard let self, let shell, ownsEditorAccount(api, owner), navigationController?.topViewController === self else { return }
+          ruleEditor = nil
+          let message = existing == nil ? "ルールを追加しました" : "ルールを更新しました"
+          if (navigationController?.viewControllers.count ?? 1) > 1 { shell.goBack() }
+          else { clear(resetFocus: true) }
+          if warnings.isEmpty { shell.recordingNotice(message) }
+          else { shell.recordingNotice("\(message)。\(warnings.joined(separator: "。"))", error: true) }
+        }
+      } catch {
+        guard let self, let editor, !Task.isCancelled, editorGeneration == generation,
+              ownsEditorAccount(api, owner), ruleEditor === editor else { return }
+        editorTask = nil
+        editor.setSaving(false)
+        editor.showSaveError("ルールの保存に失敗しました: \(error.localizedDescription)")
+      }
+    }
+  }
+
+  private func ownsEditorAccount(_ api: NeoAPI, _ owner: Context) -> Bool {
+    shell?.api === api && apiForContext === api && api.identityRevision == owner.revision && api.viewer == owner.viewer
+  }
+
+  private func cancelRuleEditor() {
+    editorGeneration += 1
+    editorTask?.cancel(); editorTask = nil
+    ruleEditor?.dismiss(animated: false); ruleEditor = nil
+    setRuleButtonsEnabled(true)
+  }
+
+  private func setRuleButtonsEnabled(_ enabled: Bool) {
+    formView?.ruleButton.isEnabled = enabled
+    footerRule.isEnabled = enabled; floatingRule.isEnabled = enabled; timeRuleAction.isEnabled = enabled
   }
 
   private func showResults() {
@@ -284,16 +499,18 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
 
   private func retry(_ failure: Failure) {
     switch failure {
-    case .setup: loadSetup()
+    case .account: shell?.goBack()
+    case .setup, .rule: loadSetup()
     case .search: if let submitted { run(submitted, scroll: shouldScrollToResults) }
     case .reservations: loadReservations()
+    case .timeReservations: loadTimeReservations()
     }
   }
 
   private func render() {
     noticeStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
     switch stage {
-    case .loadingSetup, .searching, .loadingReservations:
+    case .loadingSetup, .searching, .loadingReservations, .loadingTimeReservations:
       let spinner = UIActivityIndicatorView(style: .medium)
       spinner.color = NeoStyle.accent; spinner.startAnimating()
       spinner.accessibilityLabel = "読み込み中"
@@ -302,23 +519,28 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
     case let .failed(failure, detail):
       let prefix: String
       switch failure {
+      case .account: prefix = "接続先またはアクティブユーザーが変わりました"
       case .setup: prefix = "検索に必要な情報の取得に失敗しました"
+      case .rule: prefix = "ルールの取得に失敗しました"
       case .search: prefix = "検索に失敗しました"
       case .reservations: prefix = "予約情報の取得に失敗しました"
+      case .timeReservations: prefix = "このルールの予約取得に失敗しました"
       }
-      noticeStack.addArrangedSubview(failureView(message: "\(prefix): \(detail)", retry: { [weak self] in self?.retry(failure) }))
+      noticeStack.addArrangedSubview(failureView(message: "\(prefix): \(detail)", actionTitle: failure == .account ? "戻る" : "再試行",
+        retry: { [weak self] in self?.retry(failure) }))
     case .form, .results: break
     }
     noticeStack.isHidden = noticeStack.arrangedSubviews.isEmpty
     if case .searching = stage { formView?.searchEnabled = false }
     else { formView?.searchEnabled = true }
     resultCount.isHidden = !hasResults
-    resultCount.text = "\(programs.count)件ヒット"
+    resultCount.text = isTimeRule ? "予約数 \(timeReservationCount)件" : "\(programs.count)件ヒット"
     updateFooter()
     list.reloadData(); measureHeader()
+    refreshFloatingRule()
   }
 
-  private func failureView(message: String, retry: @escaping () -> Void) -> UIView {
+  private func failureView(message: String, actionTitle: String, retry: @escaping () -> Void) -> UIView {
     let stack = UIStackView(); stack.axis = .vertical; stack.alignment = .trailing; stack.spacing = 4
     stack.isLayoutMarginsRelativeArrangement = true
     stack.layoutMargins = UIEdgeInsets(top: 8, left: 16, bottom: 8, right: 12)
@@ -326,7 +548,7 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
     let text = NeoStyle.label(message); text.textColor = UIColor(red: 1, green: 0.73, blue: 0.73, alpha: 1)
     text.numberOfLines = 0; text.lineBreakMode = .byCharWrapping
     stack.addArrangedSubview(text); text.widthAnchor.constraint(equalTo: stack.layoutMarginsGuide.widthAnchor).isActive = true
-    let button = NeoStyle.button("再試行", action: retry); button.tintColor = text.textColor
+    let button = NeoStyle.button(actionTitle, action: retry); button.tintColor = text.textColor
     button.heightAnchor.constraint(equalToConstant: 36).isActive = true; stack.addArrangedSubview(button)
     return stack
   }
@@ -353,12 +575,26 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
     updateFooter()
   }
   private func updateFooter() {
-    guard hasResults, list.bounds.width > 0 else { if list.tableFooterView != nil { list.tableFooterView = nil }; return }
+    guard hasResults, !isTimeRule, list.bounds.width > 0 else {
+      if list.tableFooterView != nil { list.tableFooterView = nil }
+      return
+    }
     footer.layoutMargins = UIEdgeInsets(top: 0, left: insets, bottom: 0, right: insets)
     let size = CGSize(width: list.bounds.width, height: 54)
     if list.tableFooterView !== footer || footer.frame.size != size {
       footer.frame = CGRect(origin: .zero, size: size); list.tableFooterView = footer
     }
+  }
+
+  private func refreshFloatingRule() {
+    guard ready, hasResults, !isTimeRule, let formButton = formView?.ruleButton, list.bounds.height > 0 else {
+      floatingRule.isHidden = true
+      return
+    }
+    let viewport = list.bounds
+    let formButtonVisible = viewport.intersects(formButton.convert(formButton.bounds, to: list))
+    let footerButtonVisible = footerRule.window != nil && viewport.intersects(footerRule.convert(footerRule.bounds, to: list))
+    floatingRule.isHidden = formButtonVisible || footerButtonVisible
   }
   private static func clearButton(_ action: @escaping () -> Void) -> UIButton {
     let b = NeoStyle.recordingButton("クリア", icon: "Close", action: action)
@@ -373,11 +609,13 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
 
   func scrollViewDidScroll(_ scrollView: UIScrollView) {
     formView?.layoutDropdown(in: scrollView)
+    refreshFloatingRule()
   }
   func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
     guard !programs.isEmpty else {
       let cell = UITableViewCell(); cell.backgroundColor = .clear; cell.selectionStyle = .none
-      var content = cell.defaultContentConfiguration(); content.text = "条件に一致する番組はありません"
+      var content = cell.defaultContentConfiguration()
+      content.text = isTimeRule ? "このルールの予約はありません" : "条件に一致する番組はありません"
       content.textProperties.color = NeoStyle.muted; content.textProperties.font = .systemFont(ofSize: 16)
       content.textProperties.alignment = .center; content.directionalLayoutMargins = .init(top: 40, leading: 12, bottom: 40, trailing: 12)
       cell.contentConfiguration = content; return cell
@@ -412,8 +650,8 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
               navigationController?.topViewController === self else { return }
         let related = NeoProgramSearchForm.related(to: program, includeChannel: api.programRelatedIncludesChannel,
           includeGenre: api.programRelatedIncludesGenre)
-      refreshOnReturn = true
-      shell.pushPage { NeoProgramSearchPage(shell: shell, relatedForm: related) }
+        refreshOnReturn = true
+        shell.pushPage { NeoProgramSearchPage(shell: shell, relatedForm: related) }
       }
     detail = dialog
     formView?.dismissDropdown()
@@ -440,6 +678,13 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
       else { user = "ユーザー未指定" }
       return "\(user)・\(entry.kind.label)"
     } ?? []
+  }
+}
+
+extension NeoPage {
+  func openProgramRule(for recording: NeoRecording) {
+    guard let ruleID = recording.ruleId, ruleID > 0, let shell, shell.api?.accountReady == true else { return }
+    shell.pushPage { NeoProgramSearchPage(shell: shell, ruleID: ruleID) }
   }
 }
 

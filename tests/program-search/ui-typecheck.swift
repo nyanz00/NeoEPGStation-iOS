@@ -5,6 +5,7 @@ import UIKit
 class NeoPage: UIViewController {
   weak var shell: NeoShell?
   let body = UIView()
+  var actions: [UIView] = []
   init(title: String, shell: NeoShell) {
     self.shell = shell
     super.init(nibName: nil, bundle: nil)
@@ -21,6 +22,7 @@ final class NeoShell: UIViewController {
   func smokeUseAPI(_ value: NeoAPI?) { api = value }
   func showRoute(_ id: String) {}
   func goBack() {}
+  func recordingNotice(_ message: String, error: Bool = false) {}
 }
 
 struct NeoAccountCoordinator { var currentName: String }

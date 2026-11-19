@@ -9,7 +9,7 @@ struct NeoProgramKeywordFields: Equatable {
   }
 }
 
-// The same conditions can later be sent as Rule.searchOption. They do not
+// These conditions are also sent as Rule.searchOption. They do not
 // depend on the result limit, current user, or presentation state.
 struct NeoProgramSearchOption: Codable, Equatable {
   struct Genre: Codable, Equatable { let genre: Int; let subGenre: Int? }
@@ -19,6 +19,7 @@ struct NeoProgramSearchOption: Codable, Equatable {
   var keyCS: Bool?, keyRegExp: Bool?, name: Bool?, description: Bool?, extended: Bool?
   var ignoreKeyCS: Bool?, ignoreKeyRegExp: Bool?, ignoreName: Bool?, ignoreDescription: Bool?, ignoreExtended: Bool?
   var channelIds: [Int]?, channelTypes: [String]?, BS4K: Bool?
+  var GR: Bool?, BS: Bool?, CS: Bool?, SKY: Bool?
   var genres: [Genre]?, times: [Time]?, searchPeriods: [Period]?
   var durationMin: Int?, durationMax: Int?, isFree: Bool?
 }
@@ -84,7 +85,9 @@ struct NeoProgramSearchForm: Equatable {
     let start = NeoProgramSearchTime.epoch(date: startDate, time: startTime.isEmpty ? "00:00" : startTime)
     let end = NeoProgramSearchTime.epoch(date: endDate, time: endTime.isEmpty ? "23:59" : endTime)
     if let start, let end, start > end { throw ValidationError("開始日時は終了日時以前にしてください") }
-    if start != nil || end != nil { option.searchPeriods = [.init(startAt: start ?? 0, endAt: end ?? 253_402_300_799_999)] }
+    if start != nil || end != nil {
+      option.searchPeriods = [.init(startAt: start ?? 0, endAt: end ?? NeoProgramSearchTime.openPeriodEnd)]
+    }
     return (form, option)
   }
 
@@ -107,6 +110,8 @@ struct NeoProgramSearchForm: Equatable {
 }
 
 enum NeoProgramSearchTime {
+  static let openPeriodEnd: Int64 = 253_402_300_799_999
+
   static func editing(_ raw: String, previous: String) -> String {
     guard raw.utf16.count >= previous.utf16.count else { return raw }
     let digits = String(raw.precomposedStringWithCompatibilityMapping.filter { $0 >= "0" && $0 <= "9" }.prefix(4))

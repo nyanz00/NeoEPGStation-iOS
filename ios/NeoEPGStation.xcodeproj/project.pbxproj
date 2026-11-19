@@ -22,6 +22,8 @@
     BCAC00000000000000000017 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000017; };
     BCAC00000000000000000020 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000020; };
     BCAC00000000000000000021 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000021; };
+    BCAC00000000000000000022 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000022; };
+    BCAC00000000000000000023 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000023; };
     BCAC00000000000000000018 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000018; };
     BCAC00000000000000000019 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000019; };
     BCAC00000000000000000012 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000012; };
@@ -120,6 +122,8 @@
     ACAC00000000000000000017 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoProgramSearchFormView.swift; sourceTree = "<group>"; };
     ACAC00000000000000000020 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoProgramSearchControls.swift; sourceTree = "<group>"; };
     ACAC00000000000000000021 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoProgramSearchPicker.swift; sourceTree = "<group>"; };
+    ACAC00000000000000000022 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoProgramRuleModels.swift; sourceTree = "<group>"; };
+    ACAC00000000000000000023 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoProgramRuleEditor.swift; sourceTree = "<group>"; };
     ACAC00000000000000000018 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoProgramDetailDialog.swift; sourceTree = "<group>"; };
     ACAC00000000000000000019 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoProgramSearchSmoke.swift; sourceTree = "<group>"; };
     ACAC00000000000000000012 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoBulkRecordingDialog.swift; sourceTree = "<group>"; };
@@ -253,6 +257,8 @@
         ACAC00000000000000000017,
         ACAC00000000000000000020,
         ACAC00000000000000000021,
+        ACAC00000000000000000022,
+        ACAC00000000000000000023,
         ACAC00000000000000000018,
         ACAC00000000000000000019,
         ACAC0000000000000000000D,
@@ -535,6 +541,8 @@
         BCAC00000000000000000017,
         BCAC00000000000000000020,
         BCAC00000000000000000021,
+        BCAC00000000000000000022,
+        BCAC00000000000000000023,
         BCAC00000000000000000018,
         BCAC00000000000000000019,
         BCAC0000000000000000000D,

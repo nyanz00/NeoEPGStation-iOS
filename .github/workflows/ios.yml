@@ -127,7 +127,8 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p build/native-tests dist
-          swiftc -parse-as-library ios/NeoEPGStation/NeoDateInput.swift ios/NeoEPGStation/NeoProgramSearchModels.swift tests/program-search/main.swift -o build/native-tests/program-search
+          swiftc -parse-as-library ios/NeoEPGStation/NeoDateInput.swift ios/NeoEPGStation/NeoProgramSearchModels.swift \
+            ios/NeoEPGStation/NeoProgramRuleModels.swift tests/program-search/main.swift -o build/native-tests/program-search
           build/native-tests/program-search | tee dist/program-search-models.txt
       - name: Check detail tool models
         if: ${{ inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'detail-tools' }}
@@ -274,6 +275,7 @@ jobs:
               ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift \
               ios/NeoEPGStation/NeoStyle.swift ios/NeoEPGStation/NeoIcon.swift ios/NeoEPGStation/NeoDateInput.swift \
               ios/NeoEPGStation/NeoProgramSearchModels.swift ios/NeoEPGStation/NeoProgramSearchAPI.swift \
+              ios/NeoEPGStation/NeoProgramRuleModels.swift ios/NeoEPGStation/NeoProgramRuleEditor.swift \
               ios/NeoEPGStation/NeoProgramSearchFormView.swift ios/NeoEPGStation/NeoProgramSearchPage.swift \
               ios/NeoEPGStation/NeoProgramSearchControls.swift ios/NeoEPGStation/NeoProgramSearchPicker.swift \
               ios/NeoEPGStation/NeoProgramDetailDialog.swift ios/NeoEPGStation/NeoProgramSearchSmoke.swift tests/program-search/ui-typecheck.swift

@@ -9,6 +9,23 @@ enum NeoIcon {
     let path = UIBezierPath()
     switch name {
     // Exact MUI paths and Web MulticastIcon (MDI); see licenses/README.md.
+    case "PlaylistAddOutlined":
+      path.append(UIBezierPath(rect: CGRect(x: 3, y: 6, width: 11, height: 2)))
+      path.append(UIBezierPath(rect: CGRect(x: 3, y: 10, width: 11, height: 2)))
+      path.append(UIBezierPath(rect: CGRect(x: 3, y: 14, width: 7, height: 2)))
+      path.move(to: CGPoint(x: 18, y: 14))
+      path.addLine(to: CGPoint(x: 18, y: 10))
+      path.addLine(to: CGPoint(x: 16, y: 10))
+      path.addLine(to: CGPoint(x: 16, y: 14))
+      path.addLine(to: CGPoint(x: 12, y: 14))
+      path.addLine(to: CGPoint(x: 12, y: 16))
+      path.addLine(to: CGPoint(x: 16, y: 16))
+      path.addLine(to: CGPoint(x: 16, y: 20))
+      path.addLine(to: CGPoint(x: 18, y: 20))
+      path.addLine(to: CGPoint(x: 18, y: 16))
+      path.addLine(to: CGPoint(x: 22, y: 16))
+      path.addLine(to: CGPoint(x: 22, y: 14))
+      path.close()
     case "ArrowDropDown":
       path.move(to: CGPoint(x: 7, y: 10))
       path.addLine(to: CGPoint(x: 12, y: 15))

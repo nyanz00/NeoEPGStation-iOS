@@ -155,6 +155,84 @@ struct ProgramSearchTests {
     expect(NeoProgramSearchMetadata.relatedKeyword("番組(特別版) #02") == "番組(特別版)",
       "related keyword preserves multi-character parentheses and trims episode suffix")
 
+    let ruleJSON = #"""
+    {"id":44,"userId":7,"isTimeSpecification":true,
+     "searchOption":{"keyword":"時刻番組","channelIds":[101],"GR":true,"BS":true,
+       "times":[{"week":126,"start":84600,"range":2700}],
+       "searchPeriods":[{"startAt":1767193200000,"endAt":1767195000000}],"isFree":true},
+     "reserveOption":{"enable":false,"allowEndLack":false,"avoidDuplicate":true,
+       "periodToAvoidDuplicate":2.5,"tags":[4,8]},
+     "saveOption":{"parentDirectoryName":"録画","directory":"${name}","recordedFormat":"ts"},
+     "encodeOption":{"mode1":"x264","channelId1":101,"mode2":"x265","channelIds2":[201,202],
+       "mode3":"copy","channelId3":303,"encodeParentDirectoryName1":"enc",
+       "directory1":"dir1","isDeleteOriginalAfterEncode":true,"updateThumbnail":true,"startDelayMinutes":5}}
+    """#
+    let rule = try JSONDecoder().decode(NeoProgramRule.self, from: Data(ruleJSON.utf8))
+    let restoredRule = NeoProgramRuleDraft(rule: rule)
+    expect(restoredRule.userID == 7 && restoredRule.timeName == "時刻番組" && restoredRule.timeChannelID == 101
+      && restoredRule.startTime == "23:30" && restoredRule.endTime == "00:15" && restoredRule.week == 126,
+      "rule draft restores user, time, channel and weekdays")
+    expect(!restoredRule.enabled && !restoredRule.allowEndLack && restoredRule.avoidDuplicate
+      && restoredRule.duplicateDays == "2.5" && restoredRule.parentDirectoryName == "録画"
+      && restoredRule.directory == "${name}" && restoredRule.recordedFormat == "ts",
+      "rule draft restores reserve and save fields")
+    expect(restoredRule.encodes.count == 3 && restoredRule.encodes[0].channelIDs == [101]
+      && restoredRule.encodes[1].channelIDs == [201, 202] && restoredRule.encodes[2].channelIDs == [303]
+      && restoredRule.deleteOriginal && restoredRule.updateThumbnail && restoredRule.delayMinutes == "5",
+      "rule draft restores legacy, multi-station and third encode slots")
+    expect(rule.scheduleLabel == "月・火・水・木・金・土 23:30～00:15", "rule summary formats its time window")
+    let crossMidnight = try NeoProgramRuleTime.window(start: "23:30", end: "00:15")
+    expect(crossMidnight.start == 84600 && crossMidnight.range == 2700, "rule time window keeps cross-midnight seconds")
+    var preserveLegacyEncode = restoredRule; preserveLegacyEncode.enabled = true
+    let preservedRule = try preserveLegacyEncode.write(searchOption: rule.searchOption, existing: rule)
+    expect(preservedRule.encodeOption?.channelId1 == 101 && preservedRule.encodeOption?.mode3 == "copy"
+      && preservedRule.encodeOption?.channelId3 == 303, "unchanged rule save preserves legacy and third encode slots")
+
+    var saved = restoredRule
+    saved.enabled = true; saved.allowEndLack = true; saved.avoidDuplicate = false; saved.duplicateDays = ""
+    saved.parentDirectoryName = "新録画"; saved.directory = "out"; saved.recordedFormat = "mp4"
+    saved.encodes = [.init(mode: "hevc", channelIDs: [501, 502], parentDirectoryName: "enc", directory: "encoded")]
+    saved.deleteOriginal = false; saved.updateThumbnail = false; saved.delayMinutes = "0"
+    let writtenRule = try saved.write(searchOption: rule.searchOption, existing: rule)
+    expect(writtenRule.reserveOption.enable && writtenRule.reserveOption.allowEndLack
+      && !writtenRule.reserveOption.avoidDuplicate && writtenRule.reserveOption.periodToAvoidDuplicate == nil
+      && writtenRule.reserveOption.tags == [4, 8], "rule save emits edited reserve fields and preserves tags")
+    expect(writtenRule.saveOption?.parentDirectoryName == "新録画" && writtenRule.saveOption?.directory == "out"
+      && writtenRule.saveOption?.recordedFormat == "mp4", "rule save emits all recording fields")
+    expect(writtenRule.encodeOption?.channelIds1 == [501, 502] && writtenRule.encodeOption?.channelId1 == nil
+      && writtenRule.encodeOption?.mode2 == nil && writtenRule.encodeOption?.mode3 == nil
+      && writtenRule.encodeOption?.startDelayMinutes == 0, "rule save emits multi-station encoding and clears old slots")
+    var cleared = restoredRule; cleared.encodes = []
+    expect((try cleared.write(searchOption: rule.searchOption, existing: rule)).encodeOption == nil,
+      "clearing all encode rows removes the encode option")
+
+    var noUser = restoredRule; noUser.userID = nil
+    expectThrows({ _ = try noUser.write(searchOption: rule.searchOption) }, "missing rule user")
+    var noTime = restoredRule; noTime.timeName = ""
+    expectThrows({ _ = try noTime.write(searchOption: rule.searchOption) }, "missing time name")
+    var sameTime = restoredRule; sameTime.startTime = sameTime.endTime
+    expectThrows({ _ = try sameTime.write(searchOption: rule.searchOption) }, "same rule start and end")
+    var badDelay = restoredRule; badDelay.delayMinutes = "-1"
+    expectThrows({ _ = try badDelay.write(searchOption: rule.searchOption) }, "negative encode delay")
+
+    var legacy = NeoProgramSearchOption(); legacy.keyword = "old"; legacy.keyCS = true
+    legacy.GR = true; legacy.BS = true; legacy.CS = false; legacy.SKY = true
+    legacy.times = [.init(week: 127, start: 3600, range: 1800), .init(week: 1, start: 7200, range: 900)]
+    legacy.searchPeriods = [.init(startAt: 1767193200000, endAt: 1767195000000), .init(startAt: 1767283200000, endAt: 1767286800000)]
+    legacy.genres = [.init(genre: 7, subGenre: 3)]; legacy.durationMin = 600; legacy.isFree = true
+    var editedSearch = NeoProgramSearchForm(restoring: legacy); editedSearch.keyword = "new"
+    let retained = try editedSearch.ruleOption(preserving: legacy)
+    expect(retained.keyword == "new" && retained.GR == true && retained.BS == true && retained.CS == false && retained.SKY == true
+      && retained.times?.count == 2 && retained.searchPeriods?.count == 2 && retained.genres?.count == 1
+      && retained.durationMin == 600 && retained.isFree == true,
+      "editing one search field preserves legacy waves and additional ranges")
+
+    let reservationJSON = #"{"reserves":[{"id":1,"channelId":2,"name":"A","startAt":0,"endAt":60000,"userId":7,"ruleId":44,"programId":8,"description":null,"extended":null,"isConflict":true,"isSkip":false,"isOverlap":false}],"total":1}"#
+    let reservation = try JSONDecoder().decode(NeoProgramRuleReservationList.self, from: Data(reservationJSON.utf8)).reserves[0]
+    expect(reservation.status.primary == .conflict && reservation.status.label(inResult: false) == "競合"
+      && reservation.displayProgram.name == "A" && reservation.displayProgram.durationMinutes == 1,
+      "rule reservation exposes conflict status and display program")
+
     print("Program search tests passed (\(assertionCount) assertions)")
   }
 }

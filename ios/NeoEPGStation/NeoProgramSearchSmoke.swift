@@ -13,7 +13,9 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
   private static let lock = NSLock()
   private static var calls: [String: Int] = [:]
   private static var bodies: [String: [[String: Any]]] = [:]
+  private static var urls: [String: [URL]] = [:]
   private static var reservationFailures = 0
+  private static var ruleCreateFailures = 0
   private static var nonSearchWrites = 0
   private var stopped = false
   private let stateLock = NSLock()
@@ -53,7 +55,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
 
   static func reset() {
     lock.lock(); defer { lock.unlock() }
-    calls.removeAll(); bodies.removeAll(); reservationFailures = 1; nonSearchWrites = 0
+    calls.removeAll(); bodies.removeAll(); urls.removeAll(); reservationFailures = 1; ruleCreateFailures = 1; nonSearchWrites = 0
   }
 
   static func count(_ key: String) -> Int {
@@ -64,6 +66,16 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
   static func searchBodies() -> [[String: Any]] {
     lock.lock(); defer { lock.unlock() }
     return bodies["POST /api/schedules/search"] ?? []
+  }
+
+  static func requestBodies(_ key: String) -> [[String: Any]] {
+    lock.lock(); defer { lock.unlock() }
+    return bodies[key] ?? []
+  }
+
+  static func lastURL(_ key: String) -> URL? {
+    lock.lock(); defer { lock.unlock() }
+    return urls[key]?.last
   }
 
   static func mutationWriteCount() -> Int {
@@ -92,6 +104,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     let path = request.url?.path ?? ""
     lock.lock()
     calls[key, default: 0] += 1
+    if let url = request.url { urls[key, default: []].append(url) }
     if request.httpMethod != "GET", path != "/api/schedules/search" { nonSearchWrites += 1 }
     if !body.isEmpty { bodies[key, default: []].append(body) }
 
@@ -108,10 +121,41 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       }
     } else if path == "/api/config", request.httpMethod == "GET" {
       value = ["encode": [] as [String], "broadcast": ["GR": true]] as [String: Any]
+    } else if path == "/api/rules/41", request.httpMethod == "GET" {
+      value = Self.normalRule()
+    } else if path == "/api/rules/42", request.httpMethod == "GET" {
+      value = Self.timeRule()
+    } else if path == "/api/rules", request.httpMethod == "POST" {
+      if ruleCreateFailures > 0 {
+        ruleCreateFailures -= 1
+        status = 503
+        value = ["message": "fixture rule create failure"]
+      } else {
+        value = ["ruleId": 43]
+      }
+    } else if path == "/api/rules/41", request.httpMethod == "PUT" {
+      value = ["code": 200]
     } else if path == "/api/schedules/search", request.httpMethod == "POST" {
       let option = body["option"] as? [String: Any] ?? [:]
       let hasRelatedChannel = (option["channelIds"] as? [Any])?.contains { ($0 as? NSNumber)?.intValue == 1 } == true
       value = [Self.program(hasRelatedChannel ? 9002 : 9001, related: hasRelatedChannel)]
+    } else if path == "/api/reserves", request.httpMethod == "GET" {
+      let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+      let ruleID = query.first(where: { $0.name == "ruleId" })?.value.flatMap(Int.init)
+      if ruleID == 42 {
+        value = [
+          "reserves": [[
+            "id": 5200, "userId": 7, "ruleId": 42, "programId": 9001, "channelId": 1,
+            "startAt": 1791025200000.0, "endAt": 1791027000000.0,
+            "name": "Time fixture", "description": "時刻指定予約",
+            "isConflict": false, "isSkip": false, "isOverlap": false
+          ] as [String: Any]],
+          "total": 1
+        ] as [String: Any]
+      } else {
+        status = 404
+        value = ["message": "unexpected reserve fixture"]
+      }
     } else if path == "/api/reserves/lists", request.httpMethod == "GET" {
       if reservationFailures > 0 {
         reservationFailures -= 1
@@ -157,6 +201,34 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       "audioComponentType": 3
     ]
   }
+
+  private static func normalRule() -> [String: Any] {
+    [
+      "id": 41,
+      "userId": 7,
+      "isTimeSpecification": false,
+      "searchOption": [
+        "keyword": "Edited Rule", "name": true, "description": true,
+        "channelIds": [1], "times": [["week": 127]],
+        "durationMin": 1800, "searchPeriods": [["startAt": 0, "endAt": 253402300799999]]
+      ] as [String: Any],
+      "reserveOption": ["enable": true, "allowEndLack": true, "avoidDuplicate": true, "periodToAvoidDuplicate": 7] as [String: Any],
+      "saveOption": ["parentDirectoryName": "Fixture", "directory": "Edited", "recordedFormat": "%TITLE%"] as [String: Any]
+    ]
+  }
+
+  private static func timeRule() -> [String: Any] {
+    [
+      "id": 42,
+      "userId": 7,
+      "isTimeSpecification": true,
+      "searchOption": [
+        "keyword": "Time fixture", "channelIds": [1],
+        "times": [["week": 127, "start": 84600, "range": 3600]]
+      ] as [String: Any],
+      "reserveOption": ["enable": true, "allowEndLack": true, "avoidDuplicate": false] as [String: Any]
+    ]
+  }
 }
 
 @MainActor enum NeoProgramSearchSmoke {
@@ -173,6 +245,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       "X-Viewer-Session": "program-search-fixture"
     ])
     api.programSearchLimit = 10
+    api.isHalfWidthDisplayed = false
     api.programRelatedIncludesChannel = true
     api.programRelatedIncludesGenre = true
     api.alwaysShowProgramBroadcastDetails = false
@@ -325,6 +398,15 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       identified(page.view, identifier) ?? identified(shell.view, identifier)
     }
 
+    func queryValue(_ url: URL?, _ name: String) -> String? {
+      URLComponents(url: url ?? URL(string: "https://program-search.invalid")!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == name }?.value
+    }
+
+    func intValue(_ value: Any?) -> Int? {
+      if let value = value as? NSNumber { return value.intValue }
+      return value as? Int
+    }
+
     func revealControl(_ control: UIView) {
       guard let list = viewWithID("programSearch.list") as? UITableView else { return }
       page.view.layoutIfNeeded()
@@ -383,7 +465,6 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       let keyboardShown = await waitFor({
         page.view.bounds.maxY - visibleViewport(of: page.view).maxY > 80
       }, attempts: 30)
-      if !keyboardShown { checks["programSearchKeyboardViewportNotAvailable"] = true }
       channelToggle.sendActions(for: .touchUpInside)
       let firstMenu = await waitForMenu("programSearch.channelSuggestions", minimumRows: 18)
       if let firstMenu, let state = popupState(anchorID: "programSearch.channelControl", menuID: "programSearch.channelSuggestions") {
@@ -495,6 +576,47 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
         (viewWithID("programSearch.channelChip.2") == nil && viewWithID("programSearch.channelChip.3") == nil)
           && channel.text?.isEmpty == true
       }
+      page.view.endEditing(true)
+
+      // Blurring the station field must not discard the open candidates or
+      // the query.  A candidate remains selectable after the keyboard closes;
+      // the caret is also a pure open/close control when focus is absent.
+      channel.text = "Fixture"
+      _ = channel.becomeFirstResponder()
+      channel.sendActions(for: .editingChanged)
+      var blurMenu = await waitForMenu("programSearch.channelSuggestions", minimumRows: 18)
+      if blurMenu == nil {
+        channelToggle.sendActions(for: .touchUpInside)
+        blurMenu = await waitForMenu("programSearch.channelSuggestions", minimumRows: 18)
+      }
+      let retainedQuery = channel.text ?? ""
+      _ = channel.resignFirstResponder()
+      let menuAndQueryRetained = await waitFor {
+        viewWithID("programSearch.channelSuggestions") != nil
+          && channel.text == retainedQuery && !channel.isFirstResponder
+      }
+      checks["programSearchChannelBlurRetainsMenuAndQuery"] = menuAndQueryRetained
+      if let blurMenu,
+        let (_, row4) = revealTableCell(blurMenu, identifier: "programSearch.channelOption.4") {
+        blurMenu.delegate?.tableView?(blurMenu, didSelectRowAt: row4)
+        checks["programSearchChannelBlurSelectsWithoutKeyboard"] = await waitFor {
+          viewWithID("programSearch.channelChip.4") != nil
+            && viewWithID("programSearch.channelSuggestions") == nil
+            && !channel.isFirstResponder
+        }
+      } else {
+        checks["programSearchChannelBlurSelectsWithoutKeyboard"] = false
+      }
+
+      _ = channel.resignFirstResponder()
+      channelToggle.sendActions(for: .touchUpInside)
+      let caretOpened = await waitForMenu("programSearch.channelSuggestions", minimumRows: 18)
+      checks["programSearchChannelCaretOpensWithoutFocus"] = caretOpened != nil && !channel.isFirstResponder
+      channelToggle.sendActions(for: .touchUpInside)
+      checks["programSearchChannelCaretClosesWithoutFocus"] = await waitFor {
+        viewWithID("programSearch.channelSuggestions") == nil && !channel.isFirstResponder
+      }
+      clearForm.sendActions(for: .touchUpInside)
       page.view.endEditing(true)
     } else {
       checks["programSearchFormPublicIDs"] = false
@@ -727,6 +849,103 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       return checks
     }
     checks["programSearchFormControlsReady"] = true
+
+    if let ignoreKeyword = identified(page.view, "programSearch.ignoreKeyword") as? UITextField,
+      let keywordClear = button(in: page.view, identifier: "programSearch.keyword.clear"),
+      let ignoreClear = button(in: page.view, identifier: "programSearch.ignoreKeyword.clear") {
+      keyword.text = "clear-me"
+      keyword.sendActions(for: .editingChanged)
+      ignoreKeyword.text = "exclude-me"
+      ignoreKeyword.sendActions(for: .editingChanged)
+      keywordClear.sendActions(for: .touchUpInside)
+      let keywordOnly = await waitFor {
+        keyword.text?.isEmpty == true && ignoreKeyword.text == "exclude-me"
+          && keywordClear.isHidden && !ignoreClear.isHidden && ignoreClear.isEnabled
+      }
+      checks["programSearchKeywordClearOnlyOwnsField"] = keywordOnly
+      ignoreClear.sendActions(for: .touchUpInside)
+      checks["programSearchIgnoreKeywordClearOnlyOwnsField"] = await waitFor {
+        keyword.text?.isEmpty == true && ignoreKeyword.text?.isEmpty == true
+      }
+    } else {
+      checks["programSearchKeywordClearOnlyOwnsField"] = false
+      checks["programSearchIgnoreKeywordClearOnlyOwnsField"] = false
+    }
+
+    // Exercise a new-rule POST before the normal search.  The first response
+    // fails while retaining the same editor and draft; retrying succeeds and
+    // resets the root form without issuing a schedule search.
+    if let createRule = button(in: page.view, identifier: "programSearch.rule") {
+      keyword.text = "CreateDraft"
+      keyword.sendActions(for: .editingChanged)
+      revealControl(createRule)
+      createRule.sendActions(for: .touchUpInside)
+      let createEditorReady = await waitFor {
+        guard let editor = page.presentedViewController as? NeoProgramRuleEditor else { return false }
+        editor.view.layoutIfNeeded()
+        return editor.view.window != nil && identified(editor.view, "ruleEditor.card") != nil
+      }
+      checks["programSearchRuleCreateOpensEditor"] = createEditorReady
+      if createEditorReady, let editor = page.presentedViewController as? NeoProgramRuleEditor {
+        capture("rule-editor-recording")
+        let encodeTab = button(in: editor.view, identifier: "ruleEditor.tab.encode")
+        encodeTab?.sendActions(for: .touchUpInside)
+        _ = await waitFor { identified(editor.view, "ruleEditor.encode.1") != nil }
+        capture("rule-editor-encode")
+        button(in: editor.view, identifier: "ruleEditor.encode.add")?.sendActions(for: .touchUpInside)
+        let secondEncodeAdded = await waitFor { identified(editor.view, "ruleEditor.encode.2") != nil }
+        if secondEncodeAdded {
+          button(in: editor.view, identifier: "ruleEditor.encode.2.remove")?.sendActions(for: .touchUpInside)
+        }
+        let secondEncodeRemoved: Bool
+        if secondEncodeAdded {
+          secondEncodeRemoved = await waitFor { identified(editor.view, "ruleEditor.encode.2") == nil }
+        } else {
+          secondEncodeRemoved = false
+        }
+        checks["programSearchRuleEncodeAddRemove"] = secondEncodeAdded && secondEncodeRemoved
+        button(in: editor.view, identifier: "ruleEditor.tab.recording")?.sendActions(for: .touchUpInside)
+
+        let save = button(in: editor.view, identifier: "ruleEditor.save")
+        save?.sendActions(for: .touchUpInside)
+        let createFailed = await waitFor {
+          guard let current = page.presentedViewController as? NeoProgramRuleEditor else { return false }
+          current.view.layoutIfNeeded()
+          let error = identified(current.view, "ruleEditor.error") as? UILabel
+          return current.view.window != nil && error?.isHidden == false && !(error?.text ?? "").isEmpty
+        }
+        checks["programSearchRuleCreateFailureRetainsEditorDraft"] = createFailed
+          && (page.presentedViewController as? NeoProgramRuleEditor) === editor
+          && (identified(page.view, "programSearch.keyword") as? UITextField)?.text == "CreateDraft"
+        let createBodies = NeoProgramSearchSmokeProtocol.requestBodies("POST /api/rules")
+        let firstCreate = createBodies.first
+        let firstOption = firstCreate?["searchOption"] as? [String: Any]
+        checks["programSearchRuleCreateSendsExpectedBody"] = createBodies.count == 1
+          && intValue(firstCreate?["userId"]) == 7
+          && firstCreate?["isTimeSpecification"] as? Bool == false
+          && firstOption?["keyword"] as? String == "CreateDraft"
+        button(in: editor.view, identifier: "ruleEditor.save")?.sendActions(for: .touchUpInside)
+        let rootReset = await waitFor {
+          page.presentedViewController == nil
+            && (identified(page.view, "programSearch.keyword") as? UITextField)?.text?.isEmpty == true
+            && (identified(page.view, "programSearch.list") as? UITableView)?.numberOfRows(inSection: 0) == 0
+        }
+        checks["programSearchRuleCreateRetryResetsRoot"] = rootReset
+          && NeoProgramSearchSmokeProtocol.count("POST /api/rules") == 2
+      } else {
+        checks["programSearchRuleCreateFailureRetainsEditorDraft"] = false
+        checks["programSearchRuleEncodeAddRemove"] = false
+        checks["programSearchRuleCreateSendsExpectedBody"] = false
+        checks["programSearchRuleCreateRetryResetsRoot"] = false
+      }
+    } else {
+      checks["programSearchRuleCreateOpensEditor"] = false
+      checks["programSearchRuleEncodeAddRemove"] = false
+      checks["programSearchRuleCreateFailureRetainsEditorDraft"] = false
+      checks["programSearchRuleCreateSendsExpectedBody"] = false
+      checks["programSearchRuleCreateRetryResetsRoot"] = false
+    }
+
     keyword.text = "Fixture"
     keyword.sendActions(for: .editingChanged)
     search.sendActions(for: .touchUpInside)
@@ -893,12 +1112,111 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     checks["relatedSearchBackRetainsOriginalResults"] = returned
       && (identified(page.view, "programSearch.count") as? UILabel)?.text == "1件ヒット"
     let clear = button(in: page.view, identifier: "programSearch.clear")
+    let writesBeforeClear = NeoProgramSearchSmokeProtocol.mutationWriteCount()
     clear?.sendActions(for: .touchUpInside)
     let cleared = await waitFor {
       (identified(page.view, "programSearch.keyword") as? UITextField)?.text?.isEmpty == true
         && (identified(page.view, "programSearch.list") as? UITableView)?.numberOfRows(inSection: 0) == 0
     }
-    checks["clearResetsResultWithoutMutation"] = cleared && NeoProgramSearchSmokeProtocol.mutationWriteCount() == 0
+    checks["clearResetsResultWithoutMutation"] = cleared
+      && NeoProgramSearchSmokeProtocol.mutationWriteCount() == writesBeforeClear
+
+    let recordingJSON = #"{"id":300,"name":"Edited recording","startAt":1791021600000,"endAt":1791023400000,"isRecording":false,"channelId":1,"channelName":"Fixture Station","ruleId":41}"#
+    if let recording = try? JSONDecoder().decode(NeoRecording.self, from: Data(recordingJSON.utf8)) {
+      let searchCountBeforeEdit = NeoProgramSearchSmokeProtocol.count("POST /api/schedules/search")
+      page.openProgramRule(for: recording)
+      let editPageReady = await waitFor {
+        guard let editPage = navigation.topViewController as? NeoProgramSearchPage else { return false }
+        return editPage !== page && editPage.viewIfLoaded?.window != nil
+          && NeoProgramSearchSmokeProtocol.count("GET /api/rules/41") > 0
+      }
+      checks["recordingRuleActionOpensEditPage"] = editPageReady
+      if let editPage = navigation.topViewController as? NeoProgramSearchPage, editPage !== page, editPageReady {
+        let restored = await waitFor {
+          editPage.view.layoutIfNeeded()
+          return (identified(editPage.view, "programSearch.keyword") as? UITextField)?.text == "Edited Rule"
+            && identified(editPage.view, "programSearch.channelChip.1") != nil
+            && (identified(editPage.view, "programSearch.durationMin") as? UITextField)?.text == "30"
+        }
+        let autoSearch = await waitFor {
+          NeoProgramSearchSmokeProtocol.count("POST /api/schedules/search") >= searchCountBeforeEdit + 1
+        }
+        checks["recordingRuleEditRestoresFieldsAndAutoSearches"] = restored && autoSearch
+          && editPage.titleLabel.text == "ルール編集"
+        if let ruleButton = button(in: editPage.view, identifier: "programSearch.rule") {
+          revealControl(ruleButton)
+          ruleButton.sendActions(for: .touchUpInside)
+          let editorReady = await waitFor {
+            guard let editor = editPage.presentedViewController as? NeoProgramRuleEditor else { return false }
+            editor.view.layoutIfNeeded()
+            return editor.view.window != nil && identified(editor.view, "ruleEditor.card") != nil
+          }
+          checks["recordingRuleEditOpensSettingsEntry"] = editorReady
+          if editorReady, let editor = editPage.presentedViewController as? NeoProgramRuleEditor {
+            checks["recordingRuleEditShowsEditTitle"] = (identified(editor.view, "ruleEditor.title") as? UILabel)?.attributedText?.string == "ルール編集"
+            capture("rule-editor-edit-recording")
+            button(in: editor.view, identifier: "ruleEditor.tab.encode")?.sendActions(for: .touchUpInside)
+            _ = await waitFor { identified(editor.view, "ruleEditor.encode.1") != nil }
+            capture("rule-editor-edit-encode")
+            button(in: editor.view, identifier: "ruleEditor.tab.recording")?.sendActions(for: .touchUpInside)
+            button(in: editor.view, identifier: "ruleEditor.save")?.sendActions(for: .touchUpInside)
+            let returnedToOrigin = await waitFor {
+              navigation.topViewController === page
+                && editPage.presentedViewController == nil
+                && NeoProgramSearchSmokeProtocol.count("PUT /api/rules/41") == 1
+            }
+            let updateBody = NeoProgramSearchSmokeProtocol.requestBodies("PUT /api/rules/41").first
+            let updateOption = updateBody?["searchOption"] as? [String: Any]
+            checks["recordingRuleEditPutsOnceAndReturns"] = returnedToOrigin
+              && intValue(updateBody?["userId"]) == 7
+              && updateBody?["isTimeSpecification"] as? Bool == false
+              && updateOption?["keyword"] as? String == "Edited Rule"
+          } else {
+            checks["recordingRuleEditShowsEditTitle"] = false
+            checks["recordingRuleEditPutsOnceAndReturns"] = false
+          }
+        } else {
+          checks["recordingRuleEditOpensSettingsEntry"] = false
+          checks["recordingRuleEditShowsEditTitle"] = false
+          checks["recordingRuleEditPutsOnceAndReturns"] = false
+        }
+      } else {
+        checks["recordingRuleEditRestoresFieldsAndAutoSearches"] = false
+        checks["recordingRuleEditOpensSettingsEntry"] = false
+        checks["recordingRuleEditShowsEditTitle"] = false
+        checks["recordingRuleEditPutsOnceAndReturns"] = false
+      }
+    } else {
+      checks["recordingRuleActionOpensEditPage"] = false
+      checks["recordingRuleEditRestoresFieldsAndAutoSearches"] = false
+      checks["recordingRuleEditOpensSettingsEntry"] = false
+      checks["recordingRuleEditShowsEditTitle"] = false
+      checks["recordingRuleEditPutsOnceAndReturns"] = false
+    }
+
+    let scheduleCountBeforeTimeRule = NeoProgramSearchSmokeProtocol.count("POST /api/schedules/search")
+    shell.pushPage { NeoProgramSearchPage(shell: shell, ruleID: 42) }
+    let timePageReady = await waitFor {
+      guard let timePage = navigation.topViewController as? NeoProgramSearchPage else { return false }
+      return timePage !== page && timePage.viewIfLoaded?.window != nil
+        && NeoProgramSearchSmokeProtocol.count("GET /api/rules/42") > 0
+        && NeoProgramSearchSmokeProtocol.count("GET /api/reserves") > 0
+    }
+    if let timePage = navigation.topViewController as? NeoProgramSearchPage, timePage !== page, timePageReady {
+      let timeSummaryReady = await waitFor {
+        identified(timePage.view, "programSearch.timeRule.summary") != nil
+          && identified(timePage.view, "programSearch.timeRule.settings") != nil
+      }
+      let reserveURL = NeoProgramSearchSmokeProtocol.lastURL("GET /api/reserves")
+      checks["programSearchTimeRuleRequestAndNoScheduleSearch"] = timeSummaryReady
+        && queryValue(reserveURL, "type") == "all"
+        && queryValue(reserveURL, "ruleId") == "42"
+        && queryValue(reserveURL, "isHalfWidth") == "false"
+        && NeoProgramSearchSmokeProtocol.count("POST /api/schedules/search") == scheduleCountBeforeTimeRule
+      capture("time-rule")
+    } else {
+      checks["programSearchTimeRuleRequestAndNoScheduleSearch"] = false
+    }
     return checks
   }
 }

@@ -18,6 +18,8 @@ final class NeoProgramSearchFormView: UIView {
   private let onChange: Change
   private let onClear: () -> Void
   private let onSearch: () -> Void
+  private let ruleActionTitle: String
+  private let onRuleAction: () -> Void
 
   /// Called after an accordion, chip, or wrapping layout changes.  A table
   /// header owner can re-measure itself on the next run loop turn.
@@ -26,11 +28,16 @@ final class NeoProgramSearchFormView: UIView {
   var searchEnabled: Bool = true {
     didSet { searchButton.isEnabled = searchEnabled; searchButton.alpha = searchEnabled ? 1 : 0.45 }
   }
+  private(set) lazy var ruleButton = NeoProgramRuleButton.make(ruleActionTitle, filled: false, identifier: "programSearch.rule") { [weak self] in
+    self?.onRuleAction()
+  }
 
   private let card = UIView()
   private let content = UIStackView()
   private let keywordField = UITextField()
   private let ignoreKeywordField = UITextField()
+  private let keywordClearButton = UIButton(type: .system)
+  private let ignoreKeywordClearButton = UIButton(type: .system)
   private let channelField = UITextField()
   private let durationMinField = UITextField()
   private let durationMaxField = UITextField()
@@ -74,18 +81,22 @@ final class NeoProgramSearchFormView: UIView {
     availableTypes: [String],
     presenter: UIViewController,
     dropdownHost: UIView,
+    ruleActionTitle: String,
     onChange: @escaping Change,
     onClear: @escaping () -> Void,
-    onSearch: @escaping () -> Void
+    onSearch: @escaping () -> Void,
+    onRuleAction: @escaping () -> Void
   ) {
     self.form = form
     self.channels = channels
     self.availableTypes = availableTypes
     self.presenter = presenter
     self.dropdownHost = dropdownHost
+    self.ruleActionTitle = ruleActionTitle
     self.onChange = onChange
     self.onClear = onClear
     self.onSearch = onSearch
+    self.onRuleAction = onRuleAction
     super.init(frame: .zero)
     configure()
     render()
@@ -172,8 +183,10 @@ final class NeoProgramSearchFormView: UIView {
     genreWeekOptions.accessibilityIdentifier = "programSearch.weekOptions"
     configureTextField(keywordField, placeholder: "", identifier: "programSearch.keyword", returnKey: .search)
     keywordField.accessibilityLabel = "キーワード"
+    configureKeywordClearButton(keywordField, button: keywordClearButton, label: "キーワード", identifier: "programSearch.keyword.clear", action: #selector(keywordClearTapped))
     configureTextField(ignoreKeywordField, placeholder: "", identifier: "programSearch.ignoreKeyword")
     ignoreKeywordField.accessibilityLabel = "除外キーワード"
+    configureKeywordClearButton(ignoreKeywordField, button: ignoreKeywordClearButton, label: "除外キーワード", identifier: "programSearch.ignoreKeyword.clear", action: #selector(ignoreKeywordClearTapped))
     configureTextField(channelField, placeholder: "", identifier: "programSearch.channel", outlined: true)
     channelField.delegate = self
     channelField.addTarget(self, action: #selector(channelQueryChanged), for: .editingChanged)
@@ -182,7 +195,7 @@ final class NeoProgramSearchFormView: UIView {
     channelArrow.setImage(NeoIcon.image("ArrowDropDown"), for: .normal)
     channelArrow.tintColor = .white
     channelArrow.accessibilityIdentifier = "programSearch.channelToggle"
-    channelArrow.addTarget(self, action: #selector(toggleChannelDropdown), for: .touchUpInside)
+    channelArrow.addTarget(self, action: #selector(toggleChannelChoices), for: .touchUpInside)
     let channelTap = UITapGestureRecognizer(target: self, action: #selector(toggleChannelDropdown))
     channelTap.cancelsTouchesInView = false
     channelTap.delegate = self
@@ -267,6 +280,8 @@ final class NeoProgramSearchFormView: UIView {
     actions.addArrangedSubview(UIView())
     actions.addArrangedSubview(clearButton)
     actions.addArrangedSubview(searchButton)
+    actions.addArrangedSubview(ruleButton)
+    ruleButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
     actions.arrangedSubviews[0].setContentHuggingPriority(.defaultLow, for: .horizontal)
   }
 
@@ -302,6 +317,25 @@ final class NeoProgramSearchFormView: UIView {
     field.accessibilityLabel = identifier.replacingOccurrences(of: "programSearch.", with: "")
   }
 
+  private func configureKeywordClearButton(
+    _ field: UITextField, button: UIButton, label: String, identifier: String, action: Selector
+  ) {
+    // Use a row-local accessory instead of UITextField's while-editing clear
+    // affordance so it remains available after the field resigns first
+    // responder.  The trailing slot is removed while empty to keep the text
+    // area aligned with the other form fields.
+    field.clearButtonMode = .never
+    button.frame = CGRect(x: 0, y: 0, width: 40, height: 44)
+    button.setImage(NeoIcon.image("Close"), for: .normal)
+    button.tintColor = NeoStyle.muted
+    button.accessibilityIdentifier = identifier
+    button.accessibilityLabel = "\(label)をクリア"
+    button.accessibilityTraits = [.button]
+    button.addTarget(self, action: action, for: .touchUpInside)
+    field.rightView = button
+    field.rightViewMode = .never
+  }
+
   private func makePeriodField(_ field: UITextField, key: String, label: String, index: Int) -> NeoProgramSearchInput {
     let isDate = index.isMultiple(of: 2)
     configureTextField(field, placeholder: "", identifier: "programSearch.\(key)", outlined: true)
@@ -329,7 +363,10 @@ final class NeoProgramSearchFormView: UIView {
     button.imageEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 6)
     button.backgroundColor = filled ? NeoStyle.accent : .clear
     button.layer.cornerRadius = 6
-    button.contentEdgeInsets = UIEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
+    button.contentEdgeInsets = UIEdgeInsets(top: 10, left: 6, bottom: 10, right: 6)
+    button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    button.titleLabel?.adjustsFontSizeToFitWidth = true
+    button.titleLabel?.minimumScaleFactor = 0.8
     button.accessibilityIdentifier = identifier
     button.accessibilityLabel = title
     button.addTarget(self, action: action, for: .touchUpInside)
@@ -350,6 +387,7 @@ final class NeoProgramSearchFormView: UIView {
     endDateField.text = dateText["endDate"] ?? dateDisplay(form.endDate)
     startTimeField.text = timeText["startTime"] ?? form.startTime
     endTimeField.text = timeText["endTime"] ?? form.endTime
+    updateKeywordClearButtons()
     freeSwitch.isOn = form.isFree
 
     keywordOptions.setItems(keywordFieldButtons(for: form.keywordFields, keyword: true))
@@ -718,6 +756,19 @@ final class NeoProgramSearchFormView: UIView {
     }
   }
 
+  private func updateKeywordClearButtons() {
+    let keywordHasValue = !(keywordField.text ?? "").isEmpty
+    let ignoreHasValue = !(ignoreKeywordField.text ?? "").isEmpty
+    keywordClearButton.isHidden = !keywordHasValue
+    keywordClearButton.isEnabled = keywordHasValue
+    keywordClearButton.accessibilityElementsHidden = !keywordHasValue
+    keywordField.rightViewMode = keywordHasValue ? .always : .never
+    ignoreKeywordClearButton.isHidden = !ignoreHasValue
+    ignoreKeywordClearButton.isEnabled = ignoreHasValue
+    ignoreKeywordClearButton.accessibilityElementsHidden = !ignoreHasValue
+    ignoreKeywordField.rightViewMode = ignoreHasValue ? .always : .never
+  }
+
   private func emit(_ next: NeoProgramSearchForm) {
     form = next
     onChange(next)
@@ -751,6 +802,7 @@ final class NeoProgramSearchFormView: UIView {
     }
     form = next
     onChange(next)
+    updateKeywordClearButtons()
     updatePeriodAppearance()
   }
 
@@ -765,6 +817,8 @@ final class NeoProgramSearchFormView: UIView {
     toggleDropdown(.channels)
   }
 
+  @objc private func toggleChannelChoices() { toggleDropdown(.channels) }
+
   @objc private func toggleDetails() {
     dismissDropdown()
     detailsExpanded.toggle()
@@ -772,8 +826,19 @@ final class NeoProgramSearchFormView: UIView {
     notifyLayoutChange()
   }
   @objc private func freeChanged() { var next = form; next.isFree = freeSwitch.isOn; emit(next) }
+  @objc private func keywordClearTapped() { clearKeywordField(keywordField) }
+  @objc private func ignoreKeywordClearTapped() { clearKeywordField(ignoreKeywordField) }
   @objc private func clearTapped() { onClear() }
   @objc private func searchTapped() { if searchEnabled { onSearch() } }
+
+  private func clearKeywordField(_ field: UITextField) {
+    guard !(field.text ?? "").isEmpty else { return }
+    var next = form
+    if field === keywordField { next.keyword = "" }
+    else if field === ignoreKeywordField { next.ignoreKeyword = "" }
+    else { return }
+    emit(next)
+  }
 
   private func presentPicker(index: Int) {
     guard let presenter, presenter.presentedViewController == nil else { return }
@@ -809,10 +874,8 @@ extension NeoProgramSearchFormView: UITextFieldDelegate, UIGestureRecognizerDele
   }
 
   func textFieldDidEndEditing(_ textField: UITextField) {
-    if textField === channelField {
-      if dropdownKind == .channels { dismissDropdown() }
-      else { updateDropdownAppearance() }
-    } else { updatePeriodAppearance() }
+    if textField === channelField { updateDropdownAppearance() }
+    else { updatePeriodAppearance() }
   }
 
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {

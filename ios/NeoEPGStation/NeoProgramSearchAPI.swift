@@ -1,6 +1,34 @@
 import Foundation
 
 extension NeoAPI {
+  func programRule(_ id: Int, user: String, headers: [String: String]) async throws -> NeoProgramRule {
+    let rule: NeoProgramRule = try await request(url("/rules/\(id)"), user: user, headers: headers)
+    guard rule.id == id else { throw NeoError("指定したルールの情報を取得できませんでした。") }
+    return rule
+  }
+
+  func programRuleReservations(_ id: Int, halfWidth: Bool, user: String, headers: [String: String]) async throws -> NeoProgramRuleReservationList {
+    var parts = URLComponents(url: url("/reserves"), resolvingAgainstBaseURL: false)!
+    parts.queryItems = [.init(name: "type", value: "all"), .init(name: "ruleId", value: String(id)),
+      .init(name: "isHalfWidth", value: String(halfWidth))]
+    return try await request(parts.url!, user: user, headers: headers)
+  }
+
+  func saveProgramRule(_ rule: NeoProgramRuleWrite, replacing id: Int?, user: String, headers: [String: String]) async throws -> [String] {
+    struct Added: Decodable { let ruleId: Int }
+    struct Updated: Decodable { let annictStatusError: String?; let annictLinkError: String? }
+    guard let body = try JSONSerialization.jsonObject(with: JSONEncoder().encode(rule)) as? [String: Any] else {
+      throw NeoError("ルール設定を保存用の形式に変換できませんでした。")
+    }
+    if let id {
+      let result: Updated = try await request(url("/rules/\(id)"), method: "PUT", body: body, user: user, headers: headers)
+      return [result.annictStatusError, result.annictLinkError].compactMap { $0 }
+    }
+    let result: Added = try await request(url("/rules"), method: "POST", body: body, user: user, headers: headers)
+    guard result.ruleId > 0 else { throw NeoError("追加されたルールのIDを確認できませんでした。") }
+    return []
+  }
+
   var programSearchLimit: Int {
     get { min(10_000, max(1, UserDefaults.standard.object(forKey: "search.limit." + base.absoluteString) as? Int ?? 300)) }
     set { UserDefaults.standard.set(min(10_000, max(1, newValue)), forKey: "search.limit." + base.absoluteString) }
