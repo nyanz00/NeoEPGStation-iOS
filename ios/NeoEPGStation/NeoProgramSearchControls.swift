@@ -5,6 +5,7 @@ final class NeoProgramSearchInput: UIView {
   private static let leadingInset: CGFloat = 14
   private static let trailingInset: CGFloat = 4
   private static let accessoryWidth: CGFloat = 40
+  private let outline = UIView()
   private let field: UITextField
   private let floatingLabel: UILabel
   private let placeholder: String
@@ -16,7 +17,9 @@ final class NeoProgramSearchInput: UIView {
     self.placeholder = placeholder
     floatingLabel = NeoStyle.label(label, size: 12, muted: true)
     super.init(frame: .zero)
-    layer.cornerRadius = 6
+    outline.layer.cornerRadius = 6
+    outline.isUserInteractionEnabled = false
+    addSubview(outline)
     floatingLabel.backgroundColor = NeoStyle.paper
     floatingLabel.textAlignment = .center
     floatingLabel.isAccessibilityElement = false
@@ -52,8 +55,8 @@ final class NeoProgramSearchInput: UIView {
     let floated = focused || hasSelection || !(field.text ?? "").isEmpty
     let error = UIColor(red: 244 / 255, green: 67 / 255, blue: 54 / 255, alpha: 1)
     let color = invalid ? error : focused ? NeoStyle.accent : NeoStyle.muted
-    layer.borderWidth = focused ? 2 : 1
-    layer.borderColor = (focused || invalid ? color : UIColor.white.withAlphaComponent(0.23)).cgColor
+    outline.layer.borderWidth = focused ? 2 : 1
+    outline.layer.borderColor = (focused || invalid ? color : UIColor.white.withAlphaComponent(0.23)).cgColor
     floatingLabel.isHidden = !floated
     floatingLabel.textColor = color
     let hint = floated ? placeholder : fieldLabel
@@ -63,6 +66,7 @@ final class NeoProgramSearchInput: UIView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
+    outline.frame = bounds
     let size = floatingLabel.intrinsicContentSize
     floatingLabel.frame = CGRect(x: 10, y: -size.height / 2, width: size.width + 8, height: size.height)
   }
@@ -166,13 +170,14 @@ final class NeoProgramSearchDropdown: UIView, UITableViewDataSource, UITableView
     guard available.intersects(rect), rect.width > 0 else { surface.isHidden = true; return }
     let heightLimit = isStationList ? (window?.bounds.height ?? bounds.height) * 0.4 : 360
     let desired = min(heightLimit, CGFloat(rows.count) * list.rowHeight + list.contentInset.top + list.contentInset.bottom)
-    let above = max(0, rect.minY - available.minY)
+    let upperEdge = rect.minY - (isStationList ? 8 : 0)
+    let above = max(0, upperEdge - available.minY)
     let below = max(0, available.maxY - rect.maxY)
     let opensBelow = below >= desired || below >= above
     let height = min(desired, opensBelow ? below : above)
     let width = min(rect.width, bounds.width)
     let x = min(max(0, rect.minX), bounds.width - width)
-    surface.frame = CGRect(x: x, y: opensBelow ? rect.maxY : rect.minY - height, width: width, height: height)
+    surface.frame = CGRect(x: x, y: opensBelow ? rect.maxY : upperEdge - height, width: width, height: height)
     surface.layer.shadowPath = UIBezierPath(roundedRect: surface.bounds, cornerRadius: 6).cgPath
     list.frame = surface.bounds
     surface.isHidden = height <= 0

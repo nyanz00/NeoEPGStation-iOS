@@ -236,6 +236,11 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       return nil
     }
 
+    func optionText(in table: UITableView, identifier: String) -> String? {
+      guard let (cell, _) = tableCell(table, identifier: identifier) ?? revealTableCell(table, identifier: identifier) else { return nil }
+      return (cell.contentConfiguration as? UIListContentConfiguration)?.text
+    }
+
     func visibleViewport(of root: UIView) -> CGRect {
       root.layoutIfNeeded()
       let keyboardFrame = root.keyboardLayoutGuide.layoutFrame
@@ -320,6 +325,13 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       identified(page.view, identifier) ?? identified(shell.view, identifier)
     }
 
+    func revealControl(_ control: UIView) {
+      guard let list = viewWithID("programSearch.list") as? UITableView else { return }
+      page.view.layoutIfNeeded()
+      list.scrollRectToVisible(control.convert(control.bounds, to: list).insetBy(dx: 0, dy: -24), animated: false)
+      page.view.layoutIfNeeded()
+    }
+
     func popupState(anchorID: String, menuID: String) -> (anchor: CGRect, menu: CGRect, viewport: CGRect)? {
       guard let anchor = viewWithID(anchorID), let menu = viewWithID(menuID) else { return nil }
       let root: UIView = anchor.isDescendant(of: page.view) && menu.isDescendant(of: page.view) ? page.view : shell.view
@@ -332,7 +344,9 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
 
     func waitForMenu(_ identifier: String, minimumRows: Int = 1) async -> UITableView? {
       let ready = await waitFor {
-        guard let menu = viewWithID(identifier) as? UITableView else { return false }
+        page.view.layoutIfNeeded()
+        guard let menu = viewWithID(identifier) as? UITableView,
+          menu.superview?.isHidden == false, !menu.bounds.isEmpty else { return false }
         menu.layoutIfNeeded()
         return menu.numberOfRows(inSection: 0) >= minimumRows
       }
@@ -417,7 +431,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
         channelToggle.sendActions(for: .touchUpInside)
         let aboveMenu = await waitForMenu("programSearch.channelSuggestions", minimumRows: 18)
         if aboveMenu != nil, let state = popupState(anchorID: "programSearch.channelControl", menuID: "programSearch.channelSuggestions") {
-          checks["programSearch.channelMenuFlipsAbove"] = state.menu.maxY <= state.anchor.minY + 2
+          checks["programSearch.channelMenuFlipsAbove"] = state.menu.maxY <= state.anchor.minY - 7
             && state.viewport.contains(state.menu) && state.viewport.intersects(state.anchor)
         } else {
           checks["programSearch.channelMenuFlipsAbove"] = false
@@ -498,14 +512,15 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
         _ = await waitFor { !subGenreButton.isHidden && subGenreButton.bounds.height > 0 }
       }
 
+      revealControl(genreButton)
       genreButton.sendActions(for: .touchUpInside)
       if let genreMenu = await waitForMenu("programSearch.options.genre", minimumRows: 14) {
-        checks["programSearchGenreLabels"] = tableCell(genreMenu, identifier: "programSearch.option.genre.all")?.0.textLabel?.text == "すべて"
-          && tableCell(genreMenu, identifier: "programSearch.option.genre.3")?.0.textLabel?.text == "ドラマ"
+        capture("genre-menu")
+        checks["programSearchGenreLabels"] = optionText(in: genreMenu, identifier: "programSearch.option.genre.all") == "すべて"
+          && optionText(in: genreMenu, identifier: "programSearch.option.genre.3") == "ドラマ"
         checks["programSearchGenreAnchorVisible"] = popupState(anchorID: "programSearch.genre", menuID: "programSearch.options.genre").map {
           $0.viewport.intersects($0.anchor) && $0.viewport.contains($0.menu)
         } ?? false
-        capture("genre-menu")
         if let (_, drama) = revealTableCell(genreMenu, identifier: "programSearch.option.genre.3") {
           genreMenu.delegate?.tableView?(genreMenu, didSelectRowAt: drama)
         }
@@ -523,10 +538,11 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
         checks["programSearchGenreMultiSelect"] = false
       }
 
+      revealControl(subGenreButton)
       subGenreButton.sendActions(for: .touchUpInside)
       if let subMenu = await waitForMenu("programSearch.options.subGenre", minimumRows: 1) {
-        checks["programSearchSubGenreLabels"] = tableCell(subMenu, identifier: "programSearch.option.subGenre.3.header")?.0.textLabel?.text == "ドラマ"
-          && tableCell(subMenu, identifier: "programSearch.option.subGenre.3.all")?.0.textLabel?.text == "すべて"
+        checks["programSearchSubGenreLabels"] = optionText(in: subMenu, identifier: "programSearch.option.subGenre.3.header") == "ドラマ"
+          && optionText(in: subMenu, identifier: "programSearch.option.subGenre.3.all") == "すべて"
         checks["programSearchSubGenreAnchorVisible"] = popupState(anchorID: "programSearch.subGenre", menuID: "programSearch.options.subGenre").map {
           $0.viewport.intersects($0.anchor) && $0.viewport.contains($0.menu)
         } ?? false
@@ -549,13 +565,15 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       page.view.endEditing(true)
       clearForm.sendActions(for: .touchUpInside)
 
+      revealControl(startHourButton)
       startHourButton.sendActions(for: .touchUpInside)
       if let startMenu = await waitForMenu("programSearch.options.startHour", minimumRows: 25) {
-        checks["programSearchStartHourLabels"] = tableCell(startMenu, identifier: "programSearch.option.startHour.none")?.0.textLabel?.text == "指定なし"
-          && tableCell(startMenu, identifier: "programSearch.option.startHour.0")?.0.textLabel?.text == "0時"
-          && revealTableCell(startMenu, identifier: "programSearch.option.startHour.23")?.0.textLabel?.text == "23時"
+        capture("start-hour-menu")
+        checks["programSearchStartHourLabels"] = optionText(in: startMenu, identifier: "programSearch.option.startHour.none") == "指定なし"
+          && optionText(in: startMenu, identifier: "programSearch.option.startHour.0") == "0時"
+          && optionText(in: startMenu, identifier: "programSearch.option.startHour.23") == "23時"
         checks["programSearchStartHourAnchorVisible"] = popupState(anchorID: "programSearch.startHour", menuID: "programSearch.options.startHour").map {
-          $0.viewport.intersects($0.anchor) && $0.viewport.contains($0.menu)
+          $0.viewport.contains($0.anchor) && $0.viewport.contains($0.menu)
         } ?? false
         if let (_, hour23) = tableCell(startMenu, identifier: "programSearch.option.startHour.23") ?? revealTableCell(startMenu, identifier: "programSearch.option.startHour.23") {
           startMenu.delegate?.tableView?(startMenu, didSelectRowAt: hour23)
@@ -567,13 +585,15 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
         checks["programSearchStartHourSelect"] = false
       }
 
+      revealControl(rangeHourButton)
       rangeHourButton.sendActions(for: .touchUpInside)
       if let rangeMenu = await waitForMenu("programSearch.options.rangeHour", minimumRows: 24) {
-        checks["programSearchRangeHourLabels"] = tableCell(rangeMenu, identifier: "programSearch.option.rangeHour.none")?.0.textLabel?.text == "指定なし"
-          && tableCell(rangeMenu, identifier: "programSearch.option.rangeHour.1")?.0.textLabel?.text == "1時間"
-          && revealTableCell(rangeMenu, identifier: "programSearch.option.rangeHour.23")?.0.textLabel?.text == "23時間"
+        capture("range-hour-menu")
+        checks["programSearchRangeHourLabels"] = optionText(in: rangeMenu, identifier: "programSearch.option.rangeHour.none") == "指定なし"
+          && optionText(in: rangeMenu, identifier: "programSearch.option.rangeHour.1") == "1時間"
+          && optionText(in: rangeMenu, identifier: "programSearch.option.rangeHour.23") == "23時間"
         checks["programSearchRangeHourAnchorVisible"] = popupState(anchorID: "programSearch.rangeHour", menuID: "programSearch.options.rangeHour").map {
-          $0.viewport.intersects($0.anchor) && $0.viewport.contains($0.menu)
+          $0.viewport.contains($0.anchor) && $0.viewport.contains($0.menu)
         } ?? false
         if let (_, hour2) = revealTableCell(rangeMenu, identifier: "programSearch.option.rangeHour.2") {
           rangeMenu.delegate?.tableView?(rangeMenu, didSelectRowAt: hour2)
@@ -592,6 +612,8 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     func openPicker(accessoryID: String) async -> NeoProgramSearchPickerController? {
       guard let accessory = button(in: page.view, identifier: accessoryID) else { return nil }
       page.view.endEditing(true)
+      revealControl(viewWithID("programSearch.period") ?? accessory)
+      if accessoryID == "programSearch.startDate.picker" { capture("period-fields") }
       accessory.sendActions(for: .touchUpInside)
       return await waitForPicker()
     }

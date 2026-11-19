@@ -401,6 +401,7 @@ final class NeoProgramSearchFormView: UIView {
   private func formLabeledField(_ title: String, control: UIView) -> UIView {
     let stack = UIStackView(arrangedSubviews: [NeoStyle.label(title, size: 13, muted: true), control])
     stack.axis = .vertical; stack.spacing = 5; stack.alignment = .fill
+    stack.accessibilityLabel = title
     return stack
   }
 
@@ -546,7 +547,8 @@ final class NeoProgramSearchFormView: UIView {
     if kind != .channels { presenter?.view.endEditing(true) }
     dropdownKind = kind
     updateDropdownAppearance()
-    dropdown.show(in: host, anchor: anchor, rows: dropdownRows(for: kind),
+    let labeledField = kind == .channels ? anchor : anchor.superview ?? anchor
+    dropdown.show(in: host, anchor: labeledField, rows: dropdownRows(for: kind),
       identifier: kind == .channels ? "programSearch.channelSuggestions" : "programSearch.options.\(kind.rawValue)",
       isStationList: kind == .channels)
   }
