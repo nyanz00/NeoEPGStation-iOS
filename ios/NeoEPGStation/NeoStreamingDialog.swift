@@ -37,7 +37,7 @@ final class NeoStreamingDialog: UIViewController {
     let row = UIStackView(); row.spacing = 12; row.distribution = .fillEqually
     let stream = NeoDropdownButton(frame: .zero); let type = file.type == "ts" ? "HLS-TS" : "HLS"
     stream.setTitle(type, for: .normal)
-    stream.dropdownMenu = UIMenu(children: [UIAction(title: type, state: .on) { _ in }])
+    stream.dropdownRows = [.init(title: type, selected: true) {}]
     row.addArrangedSubview(field("ストリーム", button: stream)); row.addArrangedSubview(field("画質", button: quality))
     fields.addArrangedSubview(row); updateQuality()
     if file.type == "encoded" {
@@ -93,9 +93,9 @@ final class NeoStreamingDialog: UIViewController {
   }
   private func updateQuality() {
     showValue(qualities[mode], on: quality)
-    quality.dropdownMenu = UIMenu(children: qualities.enumerated().filter { !$0.element.isEmpty }.map { index, name in
-      UIAction(title: name, state: index == mode ? .on : .off) { [weak self] _ in self?.mode = index; self?.updateQuality() }
-    })
+    quality.dropdownRows = qualities.enumerated().filter { !$0.element.isEmpty }.map { index, name in
+      .init(title: name, selected: index == mode) { [weak self] in self?.mode = index; self?.updateQuality() }
+    }
   }
   private func showValue(_ text: String, on button: UIButton) {
     fieldLabels[ObjectIdentifier(button)]?.text = text
@@ -124,17 +124,17 @@ final class NeoStreamingDialog: UIViewController {
   private func updateSubtitle() {
     showValue(tracks.first { $0.subtitleIndex == selectedSubtitle }?.displayName ?? "字幕なし", on: subtitle)
     let items = [(-1, "字幕なし")]+tracks.map { ($0.subtitleIndex, $0.displayName) }
-    subtitle.dropdownMenu = UIMenu(children: items.map { index, name in
-      UIAction(title: name, state: index == selectedSubtitle ? .on : .off) { [weak self] _ in self?.selectedSubtitle = index; self?.updateSubtitle() }
-    })
+    subtitle.dropdownRows = items.map { index, name in
+      .init(title: name, selected: index == selectedSubtitle) { [weak self] in self?.selectedSubtitle = index; self?.updateSubtitle() }
+    }
   }
   private func selectDanmaku(_ index: Int) { selectedComment = index; updateDanmaku() }
   private func updateDanmaku() {
     showValue(commentTracks.first { $0.subtitleIndex == selectedComment }?.displayName ?? "弾幕なし",on:danmaku)
     let items = [(-1,"弾幕なし")]+commentTracks.map { ($0.subtitleIndex,$0.displayName) }
-    danmaku.dropdownMenu = UIMenu(children:items.map { index,name in
-      UIAction(title:name,state:index == selectedComment ? .on : .off) { [weak self] _ in self?.selectDanmaku(index) }
-    })
+    danmaku.dropdownRows = items.map { index, name in
+      .init(title: name, selected: index == selectedComment) { [weak self] in self?.selectDanmaku(index) }
+    }
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
@@ -163,27 +163,33 @@ final class NeoStreamingDialog: UIViewController {
     defer { dialog.loader.close() }
     dialog.mode = 0
     dialog.loadViewIfNeeded()
-    dialog.view.frame = UIScreen.main.bounds
+    let window = UIWindow(frame: UIScreen.main.bounds)
+    dialog.view.frame = window.bounds
+    window.addSubview(dialog.view)
     dialog.view.layoutIfNeeded()
 
-    let field = dialog.quality, trigger = field.smokeMenuButton
+    let field = dialog.quality
     field.layoutIfNeeded()
     guard let value = dialog.fieldLabels[ObjectIdentifier(field)], value.superview === field, !value.bounds.isEmpty,
-      value.text == "1080p", field.menu == nil, !field.bounds.isEmpty, trigger.frame == field.bounds,
-      trigger.showsMenuAsPrimaryAction, trigger.menu?.children.count == 2 else { return false }
+      value.text == "1080p", field.menu == nil, field.dropdownRows.count == 2 else { return false }
     let center = CGPoint(x: field.bounds.midX, y: field.bounds.midY)
-    guard field.hitTest(center, with: nil) === trigger else { return false }
+    guard field.hitTest(center, with: nil) === field else { return false }
 
     let originalFrame = value.frame
-    trigger.isHidden = true
+    field.sendActions(for: .touchUpInside)
+    guard let dropdown = field.smokeDropdown, dropdown.isOpen else { return false }
+    defer { dropdown.dismiss(animated: false) }
+    let table = dropdown.smokeList
+    dropdown.layoutIfNeeded()
+    let anchor = field.convert(field.bounds, to: dropdown)
+    let choices = table.convert(table.bounds, to: dropdown)
+    let anchored = !choices.isEmpty && (choices.minY >= anchor.maxY || choices.maxY <= anchor.minY)
     let keptVisible = !value.isHidden && value.text == "1080p" && value.frame == originalFrame
-    trigger.isHidden = false
-    dialog.mode = 1
-    dialog.updateQuality()
+    table.delegate?.tableView?(table, didSelectRowAt: IndexPath(row: 1, section: 0))
     dialog.view.layoutIfNeeded()
-    let selected = trigger.menu?.children.compactMap { $0 as? UIAction }.first { $0.state == .on }
-    return keptVisible && value.text == "720p" && value.frame == originalFrame
-      && trigger.accessibilityValue == "720p" && selected?.title == "720p"
+    let selected = field.dropdownRows.first(where: { $0.selected })
+    return anchored && keptVisible && !dropdown.isOpen && value.text == "720p" && value.frame == originalFrame
+      && field.accessibilityValue == "720p" && selected?.title == "720p"
   }
 
   static func runFeedbackProbe(host: UIViewController, source: URL, choice: Int, completion: @escaping (Int,Int,Int,[String:Bool]) -> Void) {

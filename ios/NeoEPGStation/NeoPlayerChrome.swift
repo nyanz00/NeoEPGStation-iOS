@@ -751,7 +751,9 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
           let button = NeoSelectButton(frame:.zero); button.setTitle(text(current), for: .normal)
           button.tintColor = NeoStyle.accent
           button.heightAnchor.constraint(equalToConstant: 44).isActive = true
-          button.dropdownMenu = UIMenu(children: values.map { value in UIAction(title: text(value), state: value == current ? .on : .off) { _ in action(value) } })
+          button.dropdownRows = values.map { value in
+            .init(title: text(value), selected: value == current) { action(value) }
+          }
           let caption = NeoStyle.label(label,bold:true); caption.numberOfLines = 0; caption.lineBreakMode = .byWordWrapping
           caption.setContentCompressionResistancePriority(.defaultLow,for:.horizontal); button.setContentCompressionResistancePriority(.required,for:.horizontal)
           let row = UIStackView(arrangedSubviews: [caption, button])
@@ -780,11 +782,11 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       retention.tintColor = NeoStyle.accent; retention.contentHorizontalAlignment = .left
       retention.accessibilityIdentifier = "player-retention-dropdown"; retention.accessibilityLabel = "巻き戻し用キャッシュ"
       retention.heightAnchor.constraint(equalToConstant: 44).isActive = true
-      retention.dropdownMenu = UIMenu(children: NeoPlaybackCache.presets.map { value in
-        UIAction(title: retentionLabel(value), state: value == retained ? .on : .off) { [weak self] _ in
+      retention.dropdownRows = NeoPlaybackCache.presets.map { value in
+        .init(title: retentionLabel(value), selected: value == retained) { [weak self] in
           self?.onAction?("retention:\(value)"); self?.renderPanel()
         }
-      })
+      }
       let retentionCaption = NeoStyle.label("巻き戻し用キャッシュ",bold:true); retentionCaption.numberOfLines = 0; retentionCaption.lineBreakMode = .byWordWrapping
       retentionCaption.setContentCompressionResistancePriority(.defaultLow,for:.horizontal); retention.setContentCompressionResistancePriority(.required,for:.horizontal)
       let retentionRow = UIStackView(arrangedSubviews: [retentionCaption, retention])
@@ -824,9 +826,9 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
   private func buildLiveSettings() {
     let options = context["liveOptions"] as? [[String:Any]] ?? []
     let selectedType = context["liveType"] as? String ?? "m2ts", selectedMode = context["liveMode"] as? Int ?? 0
-    func choice(_ label: String, value: String, menu: UIMenu) {
+    func choice(_ label: String, value: String, rows: [NeoDropdownList.Row]) {
       let button = NeoSelectButton(frame:.zero); button.setTitle(value,for:.normal)
-      button.dropdownMenu = menu
+      button.dropdownRows = rows
       button.heightAnchor.constraint(equalToConstant:44).isActive = true
       let caption = NeoStyle.label(label,bold:true); caption.numberOfLines = 0; caption.lineBreakMode = .byWordWrapping
       caption.setContentCompressionResistancePriority(.defaultLow,for:.horizontal); button.setContentCompressionResistancePriority(.required,for:.horizontal)
@@ -834,18 +836,20 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
       stack.addArrangedSubview(row)
     }
     let types = ["m2ts","m2tsll"].filter { type in options.contains { $0["type"] as? String == type } }
-    choice("ストリーム",value:selectedType == "m2tsll" ? "M2TS-LL" : "M2TS",menu:UIMenu(children:types.map { type in
-      UIAction(title:type == "m2tsll" ? "M2TS-LL" : "M2TS",state:type == selectedType ? .on : .off) { [weak self] _ in
+    choice("ストリーム", value: selectedType == "m2tsll" ? "M2TS-LL" : "M2TS", rows: types.map { type in
+      .init(title: type == "m2tsll" ? "M2TS-LL" : "M2TS", selected: type == selectedType) { [weak self] in
         if let index = options.firstIndex(where: { $0["type"] as? String == type }) { self?.onAction?("live-option:\(index)") }
       }
-    }))
-    choice("画質",value:context["liveQuality"] as? String ?? "",menu:UIMenu(children:options.indices.filter { options[$0]["type"] as? String == selectedType }.map { index in
-      UIAction(title:options[index]["quality"] as? String ?? "",state:options[index]["mode"] as? Int == selectedMode ? .on : .off) { [weak self] _ in self?.onAction?("live-option:\(index)") }
-    }))
+    })
+    choice("画質", value: context["liveQuality"] as? String ?? "", rows: options.indices.filter { options[$0]["type"] as? String == selectedType }.map { index in
+      .init(title: options[index]["quality"] as? String ?? "", selected: options[index]["mode"] as? Int == selectedMode) { [weak self] in
+        self?.onAction?("live-option:\(index)")
+      }
+    })
     let saved = UserDefaults.standard.integer(forKey:"live.bufferMs"), current = saved > 0 ? saved : selectedType == "m2tsll" ? 300 : 1500
-    choice("バッファ",value:"\(Double(current)/1000) 秒",menu:UIMenu(children:[300,500,1000,1500,3000,5000].map { value in
-      UIAction(title:"\(Double(value)/1000) 秒",state:value == current ? .on : .off) { [weak self] _ in self?.onAction?("live-buffer:\(value)") }
-    }))
+    choice("バッファ", value: "\(Double(current)/1000) 秒", rows: [300,500,1000,1500,3000,5000].map { value in
+      .init(title: "\(Double(value)/1000) 秒", selected: value == current) { [weak self] in self?.onAction?("live-buffer:\(value)") }
+    })
     append("一時停止後の再生とライブへ戻る操作では、最新の放送へ接続します。",size:12,muted:true)
   }
   private func loadRelated() {
@@ -1324,11 +1328,10 @@ final class NeoPlayerChrome: UIView, UITableViewDataSource, UITableViewDelegate,
     let returns = tab == "settings" && settingsCategory == "general" && panelOpen
     let retention = stack.arrangedSubviews.compactMap { $0 as? UIStackView }.flatMap(\.arrangedSubviews)
       .first { $0.accessibilityIdentifier == "player-retention-dropdown" } as? NeoSelectButton
-    let retentionActions = retention?.dropdownMenu?.children.compactMap { $0 as? UIAction } ?? []
-    let smokeMenuButton = retention?.smokeMenuButton
-    let retentionDropdown = retention?.dropdownMenu != nil && smokeMenuButton?.menu != nil && smokeMenuButton?.showsMenuAsPrimaryAction == true
+    let retentionActions = retention?.dropdownRows ?? []
+    let retentionDropdown = retention?.hasDropdown == true && retention?.menu == nil
       && retentionActions.map(\.title) == ["オフ", "30秒", "1分", "2分", "3分", "4分", "5分"]
-      && retentionActions.filter { $0.state == .on }.count == 1
+      && retentionActions.filter(\.selected).count == 1
     let oldWait = NeoCommentOverlay.waitBeforePlayback
     let waitToggle = stack.arrangedSubviews.compactMap { $0 as? UIStackView }.flatMap(\.arrangedSubviews)
       .first { $0.accessibilityIdentifier == "player-wait-for-comments" } as? UISwitch

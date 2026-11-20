@@ -496,11 +496,17 @@ private final class NeoLiveStreamDialog: NeoLiveDialog {
   private func updateChoices() {
     stream.setTitle((selected?.label ?? "")+" ▾",for:.normal); quality.setTitle((selected?.quality ?? "")+" ▾",for:.normal)
     let types = (NeoViewingPreferences.lowLatency ? ["m2tsll","m2ts"] : ["m2ts","m2tsll"]).filter { type in options.contains { $0.type == type } }
-    stream.dropdownMenu = UIMenu(children:types.map { type in UIAction(title:type == "m2tsll" ? "M2TS-LL" : "M2TS",state:type == selected?.type ? .on : .off) { [weak self] _ in
-      guard let self else { return }
-      let values = self.options.filter { $0.type == type }; let index = NeoViewingPreferences.initialQuality(values.map(\.quality),saved:0)
-      self.selected = values.indices.contains(index) ? values[index] : nil; self.updateChoices()
-    } })
-    quality.dropdownMenu = UIMenu(children:options.filter { $0.type == selected?.type }.map { value in UIAction(title:value.quality,state:value == selected ? .on : .off) { [weak self] _ in self?.selected = value; self?.updateChoices() } })
+    stream.dropdownRows = types.map { type in
+      .init(title: type == "m2tsll" ? "M2TS-LL" : "M2TS", selected: type == selected?.type) { [weak self] in
+        guard let self else { return }
+        let values = options.filter { $0.type == type }
+        let index = NeoViewingPreferences.initialQuality(values.map(\.quality), saved: 0)
+        selected = values.indices.contains(index) ? values[index] : nil
+        updateChoices()
+      }
+    }
+    quality.dropdownRows = options.filter { $0.type == selected?.type }.map { value in
+      .init(title: value.quality, selected: value == selected) { [weak self] in self?.selected = value; self?.updateChoices() }
+    }
   }
 }

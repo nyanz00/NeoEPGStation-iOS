@@ -499,6 +499,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       // into a brittle failure.
       if reopened != nil {
         channelToggle.sendActions(for: .touchUpInside)
+        _ = await waitFor { viewWithID("programSearch.channelSuggestions") == nil }
       }
       formList.layoutIfNeeded()
       let anchorInList = channelControl.convert(channelControl.bounds, to: formList)
@@ -543,25 +544,35 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
         if let (_, row2) = revealTableCell(stationMenu, identifier: "programSearch.channelOption.2") {
           stationMenu.delegate?.tableView?(stationMenu, didSelectRowAt: row2)
           let selected2 = await waitFor {
-            viewWithID("programSearch.channelChip.2") != nil
-              && viewWithID("programSearch.channelSuggestions") == nil
+            guard let menu = viewWithID("programSearch.channelSuggestions") as? UITableView,
+              let (cell, _) = tableCell(menu, identifier: "programSearch.channelOption.2") else { return false }
+            return viewWithID("programSearch.channelChip.2") != nil
+              && menu.superview?.isHidden == false
+              && menu.numberOfRows(inSection: 0) >= 18
+              && cell.accessibilityTraits.contains(.selected)
           }
           checks["programSearch.channelCandidateSelection"] = selected2 && channel.isFirstResponder
+          if let (_, row3) = revealTableCell(stationMenu, identifier: "programSearch.channelOption.3") {
+            stationMenu.delegate?.tableView?(stationMenu, didSelectRowAt: row3)
+            let selected3 = await waitFor {
+              guard let menu = viewWithID("programSearch.channelSuggestions") as? UITableView,
+                let (cell, _) = tableCell(menu, identifier: "programSearch.channelOption.3") else { return false }
+              return viewWithID("programSearch.channelChip.2") != nil
+                && viewWithID("programSearch.channelChip.3") != nil
+                && menu.superview?.isHidden == false
+                && menu.numberOfRows(inSection: 0) >= 18
+                && cell.accessibilityTraits.contains(.selected)
+            }
+            checks["programSearch.channelMultiSelect"] = selected2 && selected3 && channel.isFirstResponder
+              && viewWithID("programSearch.channelSuggestions") != nil
+            let waveButtons = viewWithID("programSearch.channelWaveOptions").map { views(in: $0).compactMap { $0 as? UIButton } } ?? []
+            checks["programSearch.channelSelectionDisablesWave"] = !waveButtons.isEmpty && waveButtons.allSatisfy { !$0.isEnabled }
+          } else {
+            checks["programSearch.channelMultiSelect"] = false
+            checks["programSearch.channelSelectionDisablesWave"] = false
+          }
         } else {
           checks["programSearch.channelCandidateSelection"] = false
-        }
-        channelToggle.sendActions(for: .touchUpInside)
-        if let secondMenu = await waitForMenu("programSearch.channelSuggestions", minimumRows: 18),
-          let (_, row3) = revealTableCell(secondMenu, identifier: "programSearch.channelOption.3") {
-          secondMenu.delegate?.tableView?(secondMenu, didSelectRowAt: row3)
-          let selected3 = await waitFor {
-            viewWithID("programSearch.channelChip.3") != nil
-              && viewWithID("programSearch.channelSuggestions") == nil
-          }
-          checks["programSearch.channelMultiSelect"] = selected3 && viewWithID("programSearch.channelChip.2") != nil
-          let waveButtons = viewWithID("programSearch.channelWaveOptions").map { views(in: $0).compactMap { $0 as? UIButton } } ?? []
-          checks["programSearch.channelSelectionDisablesWave"] = !waveButtons.isEmpty && waveButtons.allSatisfy { !$0.isEnabled }
-        } else {
           checks["programSearch.channelMultiSelect"] = false
           checks["programSearch.channelSelectionDisablesWave"] = false
         }
@@ -576,6 +587,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       _ = await waitFor {
         (viewWithID("programSearch.channelChip.2") == nil && viewWithID("programSearch.channelChip.3") == nil)
           && channel.text?.isEmpty == true
+          && viewWithID("programSearch.channelSuggestions") == nil
       }
       page.view.endEditing(true)
 
@@ -601,8 +613,13 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
         let (_, row4) = revealTableCell(blurMenu, identifier: "programSearch.channelOption.4") {
         blurMenu.delegate?.tableView?(blurMenu, didSelectRowAt: row4)
         checks["programSearchChannelBlurSelectsWithoutKeyboard"] = await waitFor {
-          viewWithID("programSearch.channelChip.4") != nil
-            && viewWithID("programSearch.channelSuggestions") == nil
+          guard let menu = viewWithID("programSearch.channelSuggestions") as? UITableView,
+            let (cell, _) = tableCell(menu, identifier: "programSearch.channelOption.4") else { return false }
+          return viewWithID("programSearch.channelChip.4") != nil
+            && menu.superview?.isHidden == false
+            && menu.numberOfRows(inSection: 0) >= 18
+            && cell.accessibilityTraits.contains(.selected)
+            && channel.text == retainedQuery
             && !channel.isFirstResponder
         }
       } else {
@@ -610,9 +627,19 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       }
 
       _ = channel.resignFirstResponder()
+      let closedAfterBlurSelection: Bool
+      if viewWithID("programSearch.channelSuggestions") != nil {
+        channelToggle.sendActions(for: .touchUpInside)
+        closedAfterBlurSelection = await waitFor {
+          viewWithID("programSearch.channelSuggestions") == nil && !channel.isFirstResponder
+        }
+      } else {
+        closedAfterBlurSelection = true
+      }
       channelToggle.sendActions(for: .touchUpInside)
       let caretOpened = await waitForMenu("programSearch.channelSuggestions", minimumRows: 18)
-      checks["programSearchChannelCaretOpensWithoutFocus"] = caretOpened != nil && !channel.isFirstResponder
+      checks["programSearchChannelCaretOpensWithoutFocus"] = closedAfterBlurSelection
+        && caretOpened != nil && !channel.isFirstResponder
       channelToggle.sendActions(for: .touchUpInside)
       checks["programSearchChannelCaretClosesWithoutFocus"] = await waitFor {
         viewWithID("programSearch.channelSuggestions") == nil && !channel.isFirstResponder

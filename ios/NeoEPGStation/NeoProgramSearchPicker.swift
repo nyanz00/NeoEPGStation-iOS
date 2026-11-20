@@ -361,7 +361,7 @@ final class NeoProgramSearchPickerController: UIViewController {
     let monthTitle = String(format: "%04d年%02d月", visibleYear, visibleMonth)
     monthButton.setTitle(monthTitle, for: .normal)
     monthButton.accessibilityValue = monthTitle
-    monthButton.dropdownMenu = makeMonthMenu()
+    monthButton.dropdownRows = makeMonthRows()
 
     let firstDay = calendar.date(from: DateComponents(year: visibleYear, month: visibleMonth, day: 1))
     let firstWeekday = firstDay.map { calendar.component(.weekday, from: $0) } ?? 2
@@ -396,24 +396,22 @@ final class NeoProgramSearchPickerController: UIViewController {
     timeValueLabel.accessibilityValue = timeValueLabel.text
   }
 
-  private func makeMonthMenu() -> UIMenu {
+  private func makeMonthRows() -> [NeoDropdownList.Row] {
     let lowerYear = max(1, visibleYear - 50)
     let upperYear = min(9999, visibleYear + 50)
-    let yearActions = (lowerYear...upperYear).map { year in
-      UIAction(title: String(format: "%04d年", year), state: year == visibleYear ? .on : .off) { [weak self] _ in
+    let years = (lowerYear...upperYear).map { year in
+      NeoDropdownList.Row(title: String(format: "%04d年", year), selected: year == visibleYear) { [weak self] in
         self?.visibleYear = year
         self?.renderCalendar()
       }
     }
-    let monthActions = (1...12).map { month in
-      UIAction(title: "\(month)月", state: month == visibleMonth ? .on : .off) { [weak self] _ in
+    let months = (1...12).map { month in
+      NeoDropdownList.Row(title: "\(month)月", selected: month == visibleMonth) { [weak self] in
         self?.visibleMonth = month
         self?.renderCalendar()
       }
     }
-    let years = UIMenu(title: "年", options: [.displayInline, .singleSelection], children: yearActions)
-    let months = UIMenu(title: "月", options: [.displayInline, .singleSelection], children: monthActions)
-    return UIMenu(title: "年月を選択", children: [years, months])
+    return [.init(title: "年", style: .heading)] + years + [.init(title: "月", style: .heading)] + months
   }
 
   @objc private func previousMonthTapped() {

@@ -356,16 +356,17 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         let result = try await api.viewers(); guard !Task.isCancelled, self.shell?.api === api else { return }
         self.users = result.users; self.updateUserMenu()
       } catch { if !Task.isCancelled {
-        self.userButton.dropdownMenu = UIMenu(children: [UIAction(title: "ユーザーを取得できません。再試行") { [weak self] _ in self?.loadUsers() }])
+        self.userButton.dropdownRows = [.init(title: "ユーザーを取得できません。再試行") { [weak self] in self?.loadUsers() }]
       } }
     }
   }
   private func updateUserMenu() {
     let name = locatedUserID.map { id in users.first { $0.id == id }?.name ?? shell?.account?.currentName ?? String(id) } ?? "master（すべて）"
     userButton.setValue(name)
-    userButton.dropdownMenu = UIMenu(children: [UIAction(title: "master（すべて）", state: locatedUserID == nil ? .on : .off) { [weak self] _ in self?.selectUser(nil) }] + users.filter { $0.id > 0 }.map { user in
-      UIAction(title: user.name, state: user.id == locatedUserID ? .on : .off) { [weak self] _ in self?.selectUser(user.id) }
-    })
+    userButton.dropdownRows = [.init(title: "master（すべて）", selected: locatedUserID == nil) { [weak self] in self?.selectUser(nil) }]
+      + users.filter { $0.id > 0 }.map { user in
+        .init(title: user.name, selected: user.id == locatedUserID) { [weak self] in self?.selectUser(user.id) }
+      }
   }
   private func selectUser(_ id: Int?) {
     userFilterExplicit = true; guard id != locatedUserID else { return }
@@ -627,8 +628,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     view.layoutIfNeeded()
     return userButton.superview === header && userButton.frame.size == CGSize(width: 160, height: 40)
       && userButton.frame.minX >= titleLabel.frame.maxX && userButton.frame.maxX <= (actions.first?.frame.minX ?? 0)
-      && collection.frame == body.bounds && userButton.smokeMenuButton.showsMenuAsPrimaryAction
-      && userButton.dropdownMenu?.children.count == 3
+      && collection.frame == body.bounds && userButton.menu == nil && userButton.dropdownRows.count == 3
   }
   var smokeLoadSettled: Bool { isViewLoaded && total > 0 && !spinner.isAnimating && requestedPage == page }
   var smokeRequestedPage: Int { requestedPage }

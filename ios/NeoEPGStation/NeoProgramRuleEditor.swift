@@ -705,13 +705,13 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     userPicker.setTitle("\(selectedName) ▾", for: .normal)
     userPicker.accessibilityIdentifier = "ruleEditor.user"
     userPicker.accessibilityLabel = "予約ユーザー"
-    userPicker.dropdownMenu = UIMenu(options: [.singleSelection], children: entries.map { id, name in
-      UIAction(title: name, state: id == draft.userID ? .on : .off) { [weak self] _ in
+    userPicker.dropdownRows = entries.map { id, name in
+      .init(title: name, selected: id == draft.userID) { [weak self] in
         guard let self else { return }
         self.draft.userID = id
         self.configureUserPicker()
       }
-    })
+    }
   }
 
   private func configureTimeChannelPicker(_ picker: NeoSelectButton) {
@@ -721,13 +721,13 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     }
     let title = draft.timeChannelID.flatMap { id in entries.first(where: { $0.0 == id })?.1 } ?? "放送局を選択"
     picker.setTitle("\(title) ▾", for: .normal)
-    picker.dropdownMenu = UIMenu(options: [.singleSelection], children: entries.map { id, name in
-      UIAction(title: name, state: id == draft.timeChannelID ? .on : .off) { [weak self, weak picker] _ in
+    picker.dropdownRows = entries.map { id, name in
+      .init(title: name, selected: id == draft.timeChannelID) { [weak self, weak picker] in
         guard let self, let picker else { return }
         self.draft.timeChannelID = id
         self.configureTimeChannelPicker(picker)
       }
-    })
+    }
   }
 
   private func configureModePicker(_ picker: NeoSelectButton, index: Int) {
@@ -738,21 +738,21 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     picker.setTitle("\(current.isEmpty ? "なし" : current) ▾", for: .normal)
     picker.accessibilityLabel = "エンコードプリセット"
     picker.accessibilityIdentifier = "ruleEditor.encode.\(index + 1).mode"
-    var children: [UIMenuElement] = [
-      UIAction(title: "なし", state: current.isEmpty ? .on : .off) { [weak self] _ in
+    var options: [NeoDropdownList.Row] = [
+      .init(title: "なし", selected: current.isEmpty) { [weak self] in
         guard let self, self.draft.encodes.indices.contains(index) else { return }
         self.draft.encodes[index].mode = ""
         self.rebuildContent()
       }
     ]
-    children.append(contentsOf: values.map { value in
-      UIAction(title: value, state: current == value ? .on : .off) { [weak self] _ in
+    options.append(contentsOf: values.map { value in
+      .init(title: value, selected: current == value) { [weak self] in
         guard let self, self.draft.encodes.indices.contains(index) else { return }
         self.draft.encodes[index].mode = value
         self.rebuildContent()
       }
     })
-    picker.dropdownMenu = UIMenu(options: [.singleSelection], children: children)
+    picker.dropdownRows = options
   }
 
   private func configureChannelPicker(_ picker: NeoSelectButton, index: Int) {
@@ -774,15 +774,15 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     picker.setTitle("\(title) ▾", for: .normal)
     picker.accessibilityLabel = "対象局（未指定なら全局）"
     picker.accessibilityIdentifier = "ruleEditor.encode.\(index + 1).channels"
-    var children: [UIMenuElement] = [
-      UIAction(title: "全局（未指定）", state: selected.isEmpty ? .on : .off) { [weak self, weak picker] _ in
+    var options: [NeoDropdownList.Row] = [
+      .init(title: "全局（未指定）", style: .checkbox, selected: selected.isEmpty) { [weak self, weak picker] in
         guard let self, let picker, self.draft.encodes.indices.contains(index) else { return }
         self.draft.encodes[index].channelIDs = []
         self.configureChannelPicker(picker, index: index)
       }
     ]
-    children.append(contentsOf: values.map { channel in
-      UIAction(title: channel.name, state: selectedSet.contains(channel.id) ? .on : .off) { [weak self, weak picker] _ in
+    options.append(contentsOf: values.map { channel in
+      .init(title: channel.name, style: .checkbox, selected: selectedSet.contains(channel.id)) { [weak self, weak picker] in
         guard let self, let picker, self.draft.encodes.indices.contains(index) else { return }
         if let position = self.draft.encodes[index].channelIDs.firstIndex(of: channel.id) {
           self.draft.encodes[index].channelIDs.remove(at: position)
@@ -792,7 +792,8 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
         self.configureChannelPicker(picker, index: index)
       }
     })
-    picker.dropdownMenu = UIMenu(title: "対象局", options: [], children: children)
+    picker.keepsDropdownOpenAfterSelection = true
+    picker.dropdownRows = options
   }
 
   private func configureDirectoryPicker(_ picker: NeoSelectButton, selected: String, onSelect: @escaping (String) -> Void) {
@@ -810,13 +811,13 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
       onSelect(value)
       self.configureDirectoryPicker(picker, selected: value, onSelect: onSelect)
     }
-    var children: [UIMenuElement] = [
-      UIAction(title: "既定", state: selected.isEmpty ? .on : .off) { _ in updateSelection("") }
+    var options: [NeoDropdownList.Row] = [
+      .init(title: "既定", selected: selected.isEmpty) { updateSelection("") }
     ]
-    children.append(contentsOf: values.map { value in
-      UIAction(title: value, state: value == selected ? .on : .off) { _ in updateSelection(value) }
+    options.append(contentsOf: values.map { value in
+      .init(title: value, selected: value == selected) { updateSelection(value) }
     })
-    picker.dropdownMenu = UIMenu(options: [.singleSelection], children: children)
+    picker.dropdownRows = options
   }
 
   private static func isAudioVideoChannel(_ channel: NeoLiveChannel) -> Bool {

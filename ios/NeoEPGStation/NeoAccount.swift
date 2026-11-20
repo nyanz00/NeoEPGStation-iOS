@@ -52,8 +52,7 @@ final class NeoProfileSecrets {
     api.suspendAuthentication(preservingIdentity: true)
     resolve(String(user), restoring: true)
   }
-  // Deferred native menu stays anchored to the shared outlined selector.
-  func loadSelectionMenu(completion: @escaping ([UIMenuElement]) -> Void) {
+  func loadSelectionRows(completion: @escaping ([NeoDropdownList.Row]) -> Void) {
     guard current, !busy else { completion([]); return }
     busy = true; let attempt = revision
     Task { [weak self] in
@@ -66,7 +65,7 @@ final class NeoProfileSecrets {
         self.users = users.users; self.profiles = profiles.profiles; busy = false
         let values = [("master", "master（すべて）")] + users.users.filter { $0.id > 0 }.map { (String($0.id), $0.name) }
         completion(values.map { id, name in
-          UIAction(title: name, state: api.viewer == id ? .on : .off) { [weak self] _ in
+          .init(title: name, selected: api.viewer == id) { [weak self] in
             guard let self, self.current, !self.busy else { return }
             if id == "master" { self.commit(id, profile: nil, token: nil) }
             else { self.resolve(id, restoring: false) }
@@ -75,7 +74,7 @@ final class NeoProfileSecrets {
       } catch {
         guard current, revision == attempt else { completion([]); return }
         busy = false
-        completion([UIAction(title: "ユーザーを取得できません。再試行してください。", attributes: .disabled) { _ in }])
+        completion([.init(title: "ユーザーを取得できません。再試行してください。", style: .empty)])
       }
     }
   }

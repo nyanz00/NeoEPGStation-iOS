@@ -298,12 +298,12 @@ final class NeoBulkRecordingDialog: NeoLiveDialog {
   private func refreshUserPicker() {
     let selected = users.first { $0.id == selectedUser }
     userPicker.setTitle((selected?.name ?? "ユーザーを選択") + " ▾", for: .normal)
-    userPicker.dropdownMenu = UIMenu(options: [.singleSelection], children: users.map { user in
-      UIAction(title: user.name, state: user.id == selectedUser ? .on : .off) { [weak self] _ in
+    userPicker.dropdownRows = users.map { user in
+      .init(title: user.name, selected: user.id == selectedUser) { [weak self] in
         guard let self, !self.busy else { return }
         self.selectUser(user)
       }
-    })
+    }
     if let empty = view.viewWithTag(410) { empty.isHidden = !didSetUsers || !users.isEmpty || messageIsError }
     updateControls()
   }
@@ -380,9 +380,9 @@ final class NeoBulkRecordingDialog: NeoLiveDialog {
   private func refreshDeletePicker() {
     let options: [(NeoBulkDeleteOption, String)] = [(.all, "すべて"), (.original, "オリジナルファイルだけ"), (.encoded, "エンコードファイルだけ"), (.names, "ファイル名を指定")]
     deleteOptionPicker.setTitle((options.first { $0.0 == deleteOption }?.1 ?? "すべて") + " ▾", for: .normal)
-    deleteOptionPicker.dropdownMenu = UIMenu(options: [.singleSelection], children: options.map { option, title in
-      UIAction(title: title, state: option == deleteOption ? .on : .off) { [weak self] _ in self?.selectDeleteOption(option) }
-    })
+    deleteOptionPicker.dropdownRows = options.map { option, title in
+      .init(title: title, selected: option == deleteOption) { [weak self] in self?.selectDeleteOption(option) }
+    }
   }
 
   private func selectUser(_ user: NeoViewer) {

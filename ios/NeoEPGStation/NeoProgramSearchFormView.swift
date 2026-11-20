@@ -51,7 +51,7 @@ final class NeoProgramSearchFormView: UIView {
     label: "放送局", placeholder: "局名を入力して絞り込み", field: channelField, accessory: channelArrow, fieldContent: selectedChannels
   )
   private var periodControls: [NeoProgramSearchInput] = []
-  private let dropdown = NeoProgramSearchDropdown()
+  private let dropdown = NeoDropdownList()
   private var dropdownKind: DropdownKind?
   private let keywordOptions = NeoProgramSearchWrapView()
   private let ignoreOptions = NeoProgramSearchWrapView()
@@ -609,7 +609,7 @@ final class NeoProgramSearchFormView: UIView {
     }
   }
 
-  private func dropdownRows(for kind: DropdownKind) -> [NeoProgramSearchDropdown.Row] {
+  private func dropdownRows(for kind: DropdownKind) -> [NeoDropdownList.Row] {
     switch kind {
     case .channels: return channelRows()
     case .genre: return genreRows()
@@ -618,7 +618,7 @@ final class NeoProgramSearchFormView: UIView {
     }
   }
 
-  private func channelRows() -> [NeoProgramSearchDropdown.Row] {
+  private func channelRows() -> [NeoDropdownList.Row] {
     let needle = normalizedChannelQuery(channelQuery)
     let matches = channels.filter { channel in
       needle.isEmpty || normalizedChannelQuery(channel.name).contains(needle)
@@ -637,13 +637,11 @@ final class NeoProgramSearchFormView: UIView {
     var next = form
     if let index = next.channelIDs.firstIndex(of: id) { next.channelIDs.remove(at: index) }
     else { next.channelIDs.append(id) }
-    channelQuery = ""
-    dismissDropdown()
     emit(next)
   }
 
-  private func genreRows() -> [NeoProgramSearchDropdown.Row] {
-    var options: [NeoProgramSearchDropdown.Row] = [
+  private func genreRows() -> [NeoDropdownList.Row] {
+    var options: [NeoDropdownList.Row] = [
       .init(title: "すべて", identifier: "programSearch.option.genre.all", style: .checkbox, selected: form.genres.isEmpty,
         action: { [weak self] in self?.selectGenre(nil) })
     ]
@@ -668,8 +666,8 @@ final class NeoProgramSearchFormView: UIView {
     emit(next)
   }
 
-  private func subGenreRows() -> [NeoProgramSearchDropdown.Row] {
-    var rows: [NeoProgramSearchDropdown.Row] = []
+  private func subGenreRows() -> [NeoDropdownList.Row] {
+    var rows: [NeoDropdownList.Row] = []
     for genre in form.genres {
       let values = subGenreNames(genre)
       let prefix = "\(genre):"
@@ -696,12 +694,12 @@ final class NeoProgramSearchFormView: UIView {
     return rows
   }
 
-  private func hourRows(for kind: DropdownKind) -> [NeoProgramSearchDropdown.Row] {
+  private func hourRows(for kind: DropdownKind) -> [NeoDropdownList.Row] {
     let range = kind == .rangeHour
     let selected = range ? form.rangeHour : form.startHour
     let unit = range ? "時間" : "時"
     let firstHour = range ? 1 : 0
-    func row(_ hour: Int?) -> NeoProgramSearchDropdown.Row {
+    func row(_ hour: Int?) -> NeoDropdownList.Row {
       .init(title: hour.map { "\($0)\(unit)" } ?? "指定なし",
         identifier: "programSearch.option.\(kind.rawValue).\(hour.map { String($0) } ?? "none")",
         selected: hour == selected, action: { [weak self] in

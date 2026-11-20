@@ -275,6 +275,7 @@ jobs:
             xcrun swiftc -typecheck -target arm64-apple-ios18.0-simulator -sdk "$sdk" \
               ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift ios/NeoEPGStation/NeoLiveModels.swift \
               ios/NeoEPGStation/NeoStyle.swift ios/NeoEPGStation/NeoIcon.swift ios/NeoEPGStation/NeoDateInput.swift \
+              ios/NeoEPGStation/NeoDropdown.swift \
               ios/NeoEPGStation/NeoProgramSearchModels.swift ios/NeoEPGStation/NeoProgramSearchAPI.swift \
               ios/NeoEPGStation/NeoProgramRuleModels.swift ios/NeoEPGStation/NeoProgramRuleEditor.swift \
               ios/NeoEPGStation/NeoProgramSearchFormView.swift ios/NeoEPGStation/NeoProgramSearchPage.swift \

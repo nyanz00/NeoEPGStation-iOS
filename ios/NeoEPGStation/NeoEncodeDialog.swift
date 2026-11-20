@@ -195,25 +195,25 @@ final class NeoEncodeDialog: NeoLiveDialog {
   }
   private func refreshPickers() {
     modePicker.setTitle((settings.mode.isEmpty ? "" : settings.mode) + " ▾", for: .normal)
-    modePicker.dropdownMenu = UIMenu(options: [.singleSelection], children: configModes.map { value in
-      UIAction(title: value, state: settings.mode == value ? .on : .off) { [weak self] _ in
+    modePicker.dropdownRows = configModes.map { value in
+      .init(title: value, selected: settings.mode == value) { [weak self] in
         guard let self, !self.locked else { return }; self.settings.mode = value; self.refreshPickers(); self.refreshControls()
       }
-    })
+    }
     rootPicker.setTitle((settings.parentDir.isEmpty ? "" : settings.parentDir) + " ▾", for: .normal)
-    rootPicker.dropdownMenu = UIMenu(options: [.singleSelection], children: configDirectories.map { value in
-      UIAction(title: value, state: settings.parentDir == value ? .on : .off) { [weak self] _ in
+    rootPicker.dropdownRows = configDirectories.map { value in
+      .init(title: value, selected: settings.parentDir == value) { [weak self] in
         guard let self, !self.locked else { return }; self.settings.parentDir = value; self.refreshPickers(); self.refreshControls()
       }
-    })
+    }
     let sources = commonSources
     if let sourceVideoFileID, let selected = sources.first(where: { $0.id == sourceVideoFileID }) { sourceName = selected.name }
     sourcePicker.setTitle((sourceName.isEmpty ? "" : sourceName) + " ▾", for: .normal)
-    sourcePicker.dropdownMenu = UIMenu(options: [.singleSelection], children: sources.map { source in
-      UIAction(title: source.name, state: source.id == sourceVideoFileID ? .on : .off) { [weak self] _ in
+    sourcePicker.dropdownRows = sources.map { source in
+      .init(title: source.name, selected: source.id == sourceVideoFileID) { [weak self] in
         guard let self, !self.locked else { return }; self.sourceVideoFileID = source.id; self.sourceName = source.name; self.refreshPickers(); self.refreshControls()
       }
-    })
+    }
   }
   private var commonSources: [NeoVideoFile] {
     guard let first = records.first?.videoFiles else { return [] }

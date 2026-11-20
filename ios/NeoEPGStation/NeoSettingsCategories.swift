@@ -334,11 +334,11 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
       engine.titleLabel?.font = .systemFont(ofSize: 14); engine.titleLabel?.numberOfLines = 2
       engine.widthAnchor.constraint(lessThanOrEqualToConstant: 180).isActive = true
       engine.accessibilityIdentifier = "playback-experiment-engine"
-      engine.dropdownMenu = UIMenu(children: NeoPlaybackExperiment.allCases.map { value in
-        UIAction(title: value.title, state: value == NeoPlaybackExperiment.selected ? .on : .off) { [weak self] _ in
+      engine.dropdownRows = NeoPlaybackExperiment.allCases.map { value in
+        .init(title: value.title, selected: value == NeoPlaybackExperiment.selected) { [weak self] in
           NeoPlaybackExperiment.selected = value; self?.render()
         }
-      })
+      }
       return makeRow("再生エンジン", explanation: "Aetherはエンコード済みPLAY・STREAMINGに使用します。コメント・字幕・PiP・視聴履歴は共通のプレイヤー機能を使います。TSはARIB字幕対応のVLCで再生します。診断用はAV1動画を比較します。次の再生から適用します。", control: engine)
       }
       if NeoPlaybackExperiment.selected == .checkpointPlayer {
@@ -346,11 +346,11 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
         guard let self else { return UIView() }
         let checkpoint = NeoSelectButton(frame:.zero)
         checkpoint.setTitle(NeoPlaybackExperiment.checkpointMode.title, for: .normal)
-        checkpoint.dropdownMenu = UIMenu(children: NeoCheckpointMode.allCases.map { value in
-          UIAction(title: value.title, state: NeoPlaybackExperiment.checkpointMode == value ? .on : .off) { [weak self] _ in
+        checkpoint.dropdownRows = NeoCheckpointMode.allCases.map { value in
+          .init(title: value.title, selected: NeoPlaybackExperiment.checkpointMode == value) { [weak self] in
             NeoPlaybackExperiment.checkpointMode = value; self?.render()
           }
-        })
+        }
         return makeRow("チェックポイント", explanation: "1080p以下のAV1が対象です。自動はサーバー解析の最大間隔が10秒以上の場合に使用します。未解析・旧版は解析完了後に選択します。オフでは通常経路で再生します。過去60秒・先読み20秒、保持上限128MiB。次の再生から適用します。", control: checkpoint)
         }
       }
@@ -445,10 +445,10 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
       selector.accessibilityIdentifier = "account-user-selector"
       selector.widthAnchor.constraint(equalToConstant: 160).isActive = true
       selector.heightAnchor.constraint(equalToConstant: 40).isActive = true
-      selector.dropdownMenu = UIMenu(children: [UIDeferredMenuElement.uncached { [weak shell] completion in
+      selector.loadDropdownRows = { [weak shell] completion in
         guard let account = shell?.account else { completion([]); return }
-        account.loadSelectionMenu(completion: completion)
-      }])
+        account.loadSelectionRows(completion: completion)
+      }
       row("現在のユーザー", control: selector)
       info("このアプリで使用する標準ユーザー。masterでは視聴履歴を記録しません。")
       if !api.accountReady {
@@ -531,7 +531,9 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
       let control = NeoSelectButton(frame:.zero)
       control.setTitle(values.first { $0.0 == selected }?.1 ?? selected,for:.normal)
       control.accessibilityIdentifier = "viewing-"+title
-      control.dropdownMenu = UIMenu(children:values.map { key,text in UIAction(title:text,state:key == selected ? .on : .off) { [weak self] _ in save(key); self?.render() } })
+      control.dropdownRows = values.map { key, text in
+        .init(title: text, selected: key == selected) { [weak self] in save(key); self?.render() }
+      }
       return self.makeRow(title,control:control)
     }
     stack.addArrangedSubview(category == .viewing ? NeoDeferredSettingsRow(build:build) : build())
@@ -711,7 +713,7 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
   var smokeAccountSelector: Bool {
     guard category == .account, let selector = stack.arrangedSubviews.flatMap({ $0.subviews }).first(where: { $0 is NeoUserSelector }) as? NeoUserSelector else { return false }
     return selector.bounds.size == CGSize(width: 160, height: 40)
-      && selector.smokeMenuButton.showsMenuAsPrimaryAction && selector.dropdownMenu != nil
+      && selector.menu == nil && selector.hasDropdown
   }
   func smokeSetHistoryDisabled(_ value: Bool) {
     if !contentConfigured { configureContent(); contentConfigured = true; render() }

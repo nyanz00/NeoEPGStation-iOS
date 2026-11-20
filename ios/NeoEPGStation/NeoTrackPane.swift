@@ -176,11 +176,11 @@ final class NeoTrackPane: UIStackView, UITextFieldDelegate, UIScrollViewDelegate
     } else {
       fileSelect.setTitle("ファイルを選択", for: .normal)
     }
-    fileSelect.dropdownMenu = UIMenu(title: "録画ファイルタイプ", children: mkvFiles.map { video in
-      UIAction(title: Self.fileLabel(video), state: video.id == fileID ? .on : .off) { [weak self] _ in
+    fileSelect.dropdownRows = mkvFiles.map { video in
+      .init(title: Self.fileLabel(video), selected: video.id == fileID) { [weak self] in
         self?.onSelectFile?(video.id)
       }
-    })
+    }
 
     if targetTitle == nil {
       if pendingTitle != nil { pendingTitleField.resignFirstResponder() }
