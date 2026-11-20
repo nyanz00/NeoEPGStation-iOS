@@ -31,6 +31,7 @@ final class NeoRuleCard: UITableViewCell {
   private let controlsStack = UIStackView()
   private let toggle = NeoRuleEnableSwitch()
   private let menuButton = UIButton(type: .system)
+  private let menuWidth: CGFloat = 40
   private var cardLeading: NSLayoutConstraint!
   private var cardTrailing: NSLayoutConstraint!
   private var selecting = false
@@ -82,15 +83,18 @@ final class NeoRuleCard: UITableViewCell {
     controlsStack.setContentHuggingPriority(.required, for: .horizontal)
     controlsStack.setContentCompressionResistancePriority(.required, for: .horizontal)
     contentStack.addArrangedSubview(controlsStack)
+    let actionsWidth = controlsStack.widthAnchor.constraint(equalToConstant: controlsWidth)
+    actionsWidth.priority = UILayoutPriority(999)
+    actionsWidth.isActive = true
 
     toggle.addTarget(self, action: #selector(toggleChanged), for: .valueChanged)
     controlsStack.addArrangedSubview(toggle)
 
     menuButton.setImage(NeoIcon.image("MoreVert"), for: .normal)
     menuButton.tintColor = .white
-    let menuWidth = menuButton.widthAnchor.constraint(equalToConstant: 40)
-    menuWidth.priority = .defaultHigh
-    menuWidth.isActive = true
+    let menuButtonWidth = menuButton.widthAnchor.constraint(equalToConstant: menuWidth)
+    menuButtonWidth.priority = .defaultHigh
+    menuButtonWidth.isActive = true
     menuButton.heightAnchor.constraint(equalToConstant: 40).isActive = true
     menuButton.addTarget(self, action: #selector(menuPressed), for: .touchUpInside)
     controlsStack.addArrangedSubview(menuButton)
@@ -119,6 +123,8 @@ final class NeoRuleCard: UITableViewCell {
 
   required init?(coder: NSCoder) { fatalError() }
 
+  private var controlsWidth: CGFloat { toggle.intrinsicContentSize.width + controlsStack.spacing + menuWidth }
+
   func configure(
     _ item: Content,
     selecting: Bool,
@@ -135,7 +141,8 @@ final class NeoRuleCard: UITableViewCell {
     cardTrailing.constant = -safeInset
 
     let estimatedTableWidth = tableWidth > 0 ? tableWidth : 320
-    let bodyWidth = max(1, estimatedTableWidth - safeInset * 2 - 32 - (selecting ? 56 : 114))
+    let actionsWidth = (selecting ? 44 : controlsWidth) + contentStack.spacing
+    let bodyWidth = max(1, estimatedTableWidth - safeInset * 2 - 32 - actionsWidth)
     headerFlow.preferredWidth = bodyWidth
     var headerItems: [UIView] = [
       NeoRuleHeaderTitle(item.title),

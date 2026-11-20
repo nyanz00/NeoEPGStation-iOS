@@ -296,6 +296,18 @@ private final class NeoRulesSmokeProtocol: URLProtocol {
     }
     checks["rulesPageReady"] = true
     page.view.layoutIfNeeded()
+    if let first = control(in: page.view, "rules.toggle.1001"),
+       let second = control(in: page.view, "rules.toggle.1002") {
+      let firstX = first.convert(CGPoint(x: first.bounds.midX, y: 0), to: page.view).x
+      let secondX = second.convert(CGPoint(x: second.bounds.midX, y: 0), to: page.view).x
+      checks["rulesCardSwitchesAreAligned"] = abs(firstX - secondX) < 1
+        && abs(first.bounds.width - 58) < 1 && abs(second.bounds.width - 58) < 1
+    } else {
+      checks["rulesCardSwitchesAreAligned"] = false
+    }
+    if let notice = shell.view.viewWithTag(80921) {
+      _ = await waitFor { notice.superview == nil }
+    }
     if let window = page.view.window, !window.bounds.isEmpty {
       let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
         window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
