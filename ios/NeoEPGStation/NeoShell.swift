@@ -409,6 +409,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   // Each destination keeps its own stack. Switching tabs never adds a back target.
   private var controllers: [String: UINavigationController] = [:]
   private var active: UINavigationController?
+  private var searchReturnRoute: String?
   private var historyReturnSnapshot: UIView?
   private var historyReturnRevision: Int?
   private var routeBackPreview: UIView?
@@ -570,7 +571,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   func showConnection(message: String? = nil) {
     cancelRecordingActions()
     dismissPopup()
-    api = nil; account = nil; menuOpen = false; route = "connection"
+    api = nil; account = nil; menuOpen = false; route = "connection"; searchReturnRoute = nil
     let page = NeoConnectionPage(shell: self)
     page.initialMessage = message
     let nav = UINavigationController(rootViewController: page); nav.setNavigationBarHidden(true, animated: false)
@@ -583,6 +584,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   func showRoute(_ id: String) {
     guard api != nil, popInteraction == nil, !routeBackRunning else { return }
     if id != route {
+      searchReturnRoute = nil
       pageSwipe?.cancelPageHistoryInteraction(); recordedHistoryPage?.cancelPageHistoryInteraction(); pageSwipe = nil
       if scrollWasEnabled { swipeScroll?.isScrollEnabled = true }
       swipeScroll = nil; swipeAction = nil
@@ -613,6 +615,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   // on that list resets pagination; programmatic route changes keep the stack.
   private func selectDestination(_ id: String) {
     guard api != nil, popInteraction == nil, !routeBackRunning, active?.transitionCoordinator == nil else { return }
+    let searchOrigin = id == "search" && id != route && controllers[route] != nil ? route : nil
     historyReturnSnapshot = nil; historyReturnRevision = nil
     if let nav = controllers[id] {
       if id == "rule" { nav.popToRootViewController(animated: id == route) }
@@ -626,8 +629,26 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       }
     }
     showRoute(id)
-    if id == "search" { (controllers[id]?.viewControllers.first as? NeoProgramSearchPage)?.resetForNavigation() }
+    if id == "search" {
+      if let searchOrigin { searchReturnRoute = searchOrigin }
+      (controllers[id]?.viewControllers.first as? NeoProgramSearchPage)?.resetForNavigation()
+    }
   }
+
+  func returnAfterRuleSave(from page: NeoProgramSearchPage) -> Bool {
+    guard let active, active.topViewController === page else { return false }
+    if active.viewControllers.count > 1 {
+      goBack()
+      return true
+    }
+    guard route == "search", let origin = searchReturnRoute, controllers[origin] != nil else { return false }
+    showRoute(origin)
+    return route == origin
+  }
+
+#if targetEnvironment(simulator)
+  func smokeSelectDestination(_ id: String) { selectDestination(id) }
+#endif
   private func attach(_ nav: UINavigationController) {
     if active !== nav {
       pendingBack?.target.view.transform = .identity

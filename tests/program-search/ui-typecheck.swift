@@ -25,6 +25,8 @@ final class NeoShell: UIViewController {
   func pushPage(requestedAt: CFTimeInterval = CACurrentMediaTime(), _ make: () -> NeoPage) {}
   func smokeUseAPI(_ value: NeoAPI?) { api = value }
   func showRoute(_ id: String) {}
+  func smokeSelectDestination(_ id: String) {}
+  func returnAfterRuleSave(from page: NeoProgramSearchPage) -> Bool { false }
   func goBack() {}
   func recordingNotice(_ message: String, error: Bool = false, warning: Bool = false) {}
   func showPopup(anchor: UIView, entries: [NeoMenuEntry], appearance: NeoAnchoredMenu.Appearance) {}

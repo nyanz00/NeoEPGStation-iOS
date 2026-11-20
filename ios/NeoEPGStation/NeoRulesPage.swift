@@ -150,7 +150,18 @@ final class NeoRulesPage: NeoPage, UITableViewDataSource, UITableViewDelegate, U
 
   override func width(forHeaderAction action: UIView) -> CGFloat {
     let wide = view.bounds.width >= 600
-    if action === userFilter { return wide ? 180 : 84 }
+    if action === userFilter {
+      if wide { return 180 }
+      // Keep the mobile selector readable on ordinary iPhones while leaving
+      // enough room for the page title and the three trailing icon actions on
+      // narrower windows.
+      let left: CGFloat = shell?.api == nil ? 16 : 48
+      let compactActionWidth = super.width(forHeaderAction: refreshButton)
+      let otherActions = CGFloat(actions.filter { $0 !== userFilter }.count) * compactActionWidth
+      let titleWidth = ceil(titleLabel.intrinsicContentSize.width)
+      let available = view.bounds.width - 4 - left - titleWidth - 4 - otherActions
+      return max(84, min(112, available))
+    }
     if wide, action === reservationFilter || action === selectButton { return 76 }
     return super.width(forHeaderAction: action)
   }
@@ -294,7 +305,7 @@ final class NeoRulesPage: NeoPage, UITableViewDataSource, UITableViewDelegate, U
 
   private func updateUsers() {
     let user = query.userID.flatMap { id in viewers?.first { $0.id == id }?.name }
-    userFilter.setValue(user ?? query.userID.map { "ユーザーID: \($0)" } ?? "master（すべて）")
+    userFilter.setValue(user ?? query.userID.map { "ユーザーID: \($0)" } ?? "master")
     userFilter.isEnabled = account?.api.accountReady == true && (viewers != nil || viewersFailed)
     if viewersFailed, viewers == nil {
       userFilter.dropdownRows = [.init(title: "ユーザーを取得できません。再試行") { [weak self] in self?.reloadRules() }]

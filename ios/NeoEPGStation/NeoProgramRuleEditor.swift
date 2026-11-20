@@ -33,7 +33,6 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     return value
   }()
   private let userStrip = UIView()
-  private let userLabel = NeoStyle.label("予約ユーザー", size: 14, muted: true)
   private let userPicker = NeoSelectButton()
   private let enabledButton = UIButton(type: .system)
   private let tabs = UIView()
@@ -146,8 +145,8 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     userStrip.backgroundColor = UIColor.white.withAlphaComponent(0.08)
     userStrip.accessibilityIdentifier = "ruleEditor.userStrip"
     card.addSubview(userStrip)
-    userStrip.addSubview(userLabel)
     userStrip.addSubview(userPicker)
+    userPicker.setFieldLabel("ユーザー", minimumHeight: 40)
     configureUserPicker()
     configureCheckbox(
       enabledButton,
@@ -264,7 +263,7 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     let titleHeight = titleLabel.sizeThatFits(CGSize(width: titleWidth, height: .greatestFiniteMagnitude)).height
     let headerHeight = max(54, titleHeight + 20)
     let compactUserStrip = cardWidth < 340
-    let userHeight: CGFloat = compactUserStrip ? 88 : 64
+    let userHeight: CGFloat = compactUserStrip ? 96 : 64
     let tabHeight: CGFloat = 48
     let footerHeight: CGFloat = 60
 
@@ -298,16 +297,19 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
 
     let userY = headerHeight
     userStrip.frame = CGRect(x: 0, y: userY, width: cardWidth, height: userHeight)
-    userLabel.frame = CGRect(x: horizontalInset, y: compactUserStrip ? 9 : 22, width: 86, height: 20)
     let enabledWidth: CGFloat = 82
-    let pickerX = compactUserStrip ? horizontalInset : userLabel.frame.maxX + 8
-    let pickerY: CGFloat = compactUserStrip ? 34 : 10
+    let pickerX = horizontalInset
+    let pickerY: CGFloat = compactUserStrip ? 8 : 12
     userPicker.frame = CGRect(
       x: pickerX, y: pickerY,
-      width: max(0, cardWidth - pickerX - horizontalInset - enabledWidth - 8),
-      height: 44
+      width: compactUserStrip
+        ? max(0, cardWidth - 2 * horizontalInset)
+        : max(0, cardWidth - pickerX - horizontalInset - enabledWidth - 8),
+      height: 40
     )
-    enabledButton.frame = CGRect(x: cardWidth - horizontalInset - enabledWidth, y: pickerY + 2, width: enabledWidth, height: 40)
+    enabledButton.frame = compactUserStrip
+      ? CGRect(x: horizontalInset, y: pickerY + 48, width: enabledWidth, height: 40)
+      : CGRect(x: cardWidth - horizontalInset - enabledWidth, y: pickerY, width: enabledWidth, height: 40)
 
     let tabY = userY + userHeight
     tabs.frame = CGRect(x: 0, y: tabY, width: cardWidth, height: tabHeight)
@@ -378,26 +380,27 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     if draft.isTimeSpecification {
       let timeFields = verticalStack(spacing: 12)
       let nameField = makeTextField(
-        text: draft.timeName, placeholder: "番組名",
+        text: draft.timeName,
         label: "番組名", identifier: "ruleEditor.time.name"
       )
       nameField.addAction(UIAction { [weak self, weak nameField] _ in
         self?.draft.timeName = nameField?.text ?? ""
       }, for: .editingChanged)
-      timeFields.addArrangedSubview(labeled("番組名", view: nameField))
+      timeFields.addArrangedSubview(outlinedField(nameField, label: "番組名"))
 
       let channelPicker = NeoSelectButton()
+      channelPicker.setFieldLabel("放送局", minimumHeight: 40)
       channelPicker.accessibilityLabel = "放送局"
       channelPicker.accessibilityIdentifier = "ruleEditor.time.channel"
       configureTimeChannelPicker(channelPicker)
-      timeFields.addArrangedSubview(labeled("放送局", view: channelPicker))
+      timeFields.addArrangedSubview(channelPicker)
 
       let start = makeTextField(
-        text: draft.startTime, placeholder: "HH:mm",
+        text: draft.startTime,
         label: "開始時刻", identifier: "ruleEditor.time.start"
       )
       let end = makeTextField(
-        text: draft.endTime, placeholder: "HH:mm",
+        text: draft.endTime,
         label: "終了時刻", identifier: "ruleEditor.time.end"
       )
       start.keyboardType = .numbersAndPunctuation
@@ -406,15 +409,17 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
       end.returnKeyType = .done
       start.addTarget(self, action: #selector(timeChanged(_:)), for: .editingChanged)
       end.addTarget(self, action: #selector(timeChanged(_:)), for: .editingChanged)
-      addTimePicker(to: start, title: "開始時刻")
-      addTimePicker(to: end, title: "終了時刻")
+      let startInput = outlinedField(start, label: "開始時刻", placeholder: "HH:mm", alwaysFloated: true)
+      let endInput = outlinedField(end, label: "終了時刻", placeholder: "HH:mm", alwaysFloated: true)
+      addTimePicker(to: start, title: "開始時刻") { [weak startInput] in startInput?.updateAppearance() }
+      addTimePicker(to: end, title: "終了時刻") { [weak endInput] in endInput?.updateAppearance() }
       timePrevious["start"] = start.text ?? ""
       timePrevious["end"] = end.text ?? ""
       timeStartField = start
       timeEndField = end
       let range = horizontalStack(spacing: 12)
-      range.addArrangedSubview(labeled("開始時刻", view: start))
-      range.addArrangedSubview(labeled("終了時刻", view: end))
+      range.addArrangedSubview(startInput)
+      range.addArrangedSubview(endInput)
       responsiveStacks.append(range)
       timeFields.addArrangedSubview(range)
 
@@ -463,14 +468,14 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
         self.refreshCheckboxInContent(identifier: "ruleEditor.avoidDuplicate", selected: self.draft.avoidDuplicate)
       })
       let days = self.makeTextField(
-        text: self.draft.duplicateDays, placeholder: "日数",
+        text: self.draft.duplicateDays,
         label: "対象日数", identifier: "ruleEditor.duplicateDays"
       )
       days.keyboardType = .decimalPad
       days.addAction(UIAction { [weak self, weak days] _ in
         self?.draft.duplicateDays = days?.text ?? ""
       }, for: .editingChanged)
-      stack.addArrangedSubview(self.labeled("対象日数", view: days))
+      stack.addArrangedSubview(self.outlinedField(days, label: "対象日数"))
       return stack
     })
     root.addArrangedSubview(makeSeparator())
@@ -478,32 +483,33 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     root.addArrangedSubview(makeSection("録画ファイル") {
       let stack = self.verticalStack(spacing: 12)
       let directoryPicker = NeoSelectButton()
+      directoryPicker.setFieldLabel("保存先", minimumHeight: 40)
       directoryPicker.accessibilityLabel = "保存先"
       directoryPicker.accessibilityIdentifier = "ruleEditor.recording.parentDirectory"
       self.configureDirectoryPicker(directoryPicker, selected: self.draft.parentDirectoryName) { [weak self] value in
         self?.draft.parentDirectoryName = value
       }
       let directory = self.makeTextField(
-        text: self.draft.directory, placeholder: "サブディレクトリ",
+        text: self.draft.directory,
         label: "サブディレクトリ", identifier: "ruleEditor.recording.directory"
       )
       directory.addAction(UIAction { [weak self, weak directory] _ in
         self?.draft.directory = directory?.text ?? ""
       }, for: .editingChanged)
       let destination = self.horizontalStack(spacing: 12)
-      destination.addArrangedSubview(self.labeled("保存先", view: directoryPicker))
-      destination.addArrangedSubview(self.labeled("サブディレクトリ", view: directory))
+      destination.addArrangedSubview(directoryPicker)
+      destination.addArrangedSubview(self.outlinedField(directory, label: "サブディレクトリ"))
       self.responsiveStacks.append(destination)
       stack.addArrangedSubview(destination)
 
       let format = self.makeTextField(
-        text: self.draft.recordedFormat, placeholder: "ファイル名形式",
+        text: self.draft.recordedFormat,
         label: "ファイル名形式", identifier: "ruleEditor.recording.format"
       )
       format.addAction(UIAction { [weak self, weak format] _ in
         self?.draft.recordedFormat = format?.text ?? ""
       }, for: .editingChanged)
-      stack.addArrangedSubview(self.labeled("ファイル名形式", view: format))
+      stack.addArrangedSubview(self.outlinedField(format, label: "ファイル名形式"))
       return stack
     })
     return root
@@ -550,7 +556,7 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
         self.refreshCheckboxInContent(identifier: "ruleEditor.encode.updateThumbnail", selected: self.draft.updateThumbnail)
       })
       let delay = self.makeTextField(
-        text: self.draft.delayMinutes, placeholder: "分",
+        text: self.draft.delayMinutes,
         label: "エンコード開始待機時間（分）", identifier: "ruleEditor.encode.delayMinutes"
       )
       delay.keyboardType = .numberPad
@@ -559,7 +565,8 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
       }, for: .editingChanged)
       delay.isEnabled = self.draft.encodes.prefix(self.encodeRowCount).allSatisfy { $0.mode.isEmpty }
         ? false : !self.saving
-      stack.addArrangedSubview(self.labeled("エンコード開始待機時間（分）", view: delay))
+      let delayInput = self.outlinedField(delay, label: "エンコード開始待機時間（分）")
+      stack.addArrangedSubview(delayInput)
       let hint = NeoStyle.label("録画完了後、通常のエンコードキューへ投入するまで待機", size: 12, muted: true)
       hint.numberOfLines = 0
       stack.addArrangedSubview(hint)
@@ -584,6 +591,7 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
       self.draft.encodes[index].parentDirectoryName = value
     }
     row.directoryField.text = draft.encodes[index].directory
+    row.directoryInput.updateAppearance()
     return row
   }
 
@@ -626,7 +634,7 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     else { draft.endTime = value }
   }
 
-  private func addTimePicker(to field: UITextField, title: String) {
+  private func addTimePicker(to field: UITextField, title: String, updateAppearance: (() -> Void)? = nil) {
     let button = NeoStyle.iconButton("ScheduleOutlined", label: "\(title)を時計から選択") { [weak self, weak field] in
       guard let self, let field, !saving, presentedViewController == nil else { return }
       view.endEditing(true)
@@ -634,10 +642,11 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
         guard let field else { return }
         field.text = value
         self?.timeChanged(field)
+        updateAppearance?()
       }
       present(picker, animated: !UIAccessibility.isReduceMotionEnabled)
     }
-    button.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
+    button.frame = CGRect(x: 0, y: 0, width: 40, height: 40)
     field.rightView = button
     field.rightViewMode = .always
   }
@@ -701,8 +710,11 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     if let selected = draft.userID, !entries.contains(where: { $0.0 == selected }) {
       entries.insert((selected, "ユーザー \(selected)"), at: 0)
     }
-    let selectedName = draft.userID.flatMap { id in entries.first(where: { $0.0 == id })?.1 } ?? "ユーザーを選択"
-    userPicker.setTitle("\(selectedName) ▾", for: .normal)
+    if let selectedName = draft.userID.flatMap({ id in entries.first(where: { $0.0 == id })?.1 }) {
+      userPicker.setTitle("\(selectedName) ▾", for: .normal)
+    } else {
+      userPicker.setTitle(nil, for: .normal)
+    }
     userPicker.accessibilityIdentifier = "ruleEditor.user"
     userPicker.accessibilityLabel = "予約ユーザー"
     userPicker.dropdownRows = entries.map { id, name in
@@ -719,8 +731,11 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     if let selected = draft.timeChannelID, !entries.contains(where: { $0.0 == selected }) {
       entries.insert((selected, "チャンネル \(selected)"), at: 0)
     }
-    let title = draft.timeChannelID.flatMap { id in entries.first(where: { $0.0 == id })?.1 } ?? "放送局を選択"
-    picker.setTitle("\(title) ▾", for: .normal)
+    if let title = draft.timeChannelID.flatMap({ id in entries.first(where: { $0.0 == id })?.1 }) {
+      picker.setTitle("\(title) ▾", for: .normal)
+    } else {
+      picker.setTitle(nil, for: .normal)
+    }
     picker.dropdownRows = entries.map { id, name in
       .init(title: name, selected: id == draft.timeChannelID) { [weak self, weak picker] in
         guard let self, let picker else { return }
@@ -735,7 +750,7 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     let current = draft.encodes[index].mode
     var values = encodeModes.filter { !$0.isEmpty }
     if !current.isEmpty && !values.contains(current) { values.insert(current, at: 0) }
-    picker.setTitle("\(current.isEmpty ? "なし" : current) ▾", for: .normal)
+    picker.setTitle(current.isEmpty ? nil : "\(current) ▾", for: .normal)
     picker.accessibilityLabel = "エンコードプリセット"
     picker.accessibilityIdentifier = "ruleEditor.encode.\(index + 1).mode"
     var options: [NeoDropdownList.Row] = [
@@ -771,7 +786,7 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     } else {
       title = "\(selected.count)局を選択"
     }
-    picker.setTitle("\(title) ▾", for: .normal)
+    picker.setTitle(selected.isEmpty ? nil : "\(title) ▾", for: .normal)
     picker.accessibilityLabel = "対象局（未指定なら全局）"
     picker.accessibilityIdentifier = "ruleEditor.encode.\(index + 1).channels"
     var options: [NeoDropdownList.Row] = [
@@ -805,7 +820,7 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
       uniqueValues.append(value)
     }
     values = uniqueValues
-    picker.setTitle("\(selected.isEmpty ? "既定" : selected) ▾", for: .normal)
+    picker.setTitle(selected.isEmpty ? nil : "\(selected) ▾", for: .normal)
     let updateSelection: (String) -> Void = { [weak self, weak picker] value in
       guard let self, let picker else { return }
       onSelect(value)
@@ -825,30 +840,34 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     return [0x01, 0x02, 0xa1, 0xa2, 0xa5, 0xa6, 0xad].contains(type)
   }
 
-  private func makeTextField(text: String, placeholder: String, label: String, identifier: String) -> UITextField {
+  private func outlinedField(
+    _ field: UITextField, label: String, placeholder: String = "", alwaysFloated: Bool = false
+  ) -> NeoProgramSearchInput {
+    let input = NeoProgramSearchInput(
+      label: label, placeholder: placeholder, field: field,
+      verticalInset: 8, minimumHeight: 40, alwaysFloated: alwaysFloated
+    )
+    if let identifier = field.accessibilityIdentifier {
+      input.accessibilityIdentifier = "\(identifier).label"
+    }
+    return input
+  }
+
+  private func makeTextField(text: String, label: String, identifier: String) -> UITextField {
     let field = UITextField()
     field.text = text
-    field.attributedPlaceholder = NSAttributedString(string: placeholder, attributes: [
-      .foregroundColor: UIColor.white.withAlphaComponent(0.5)
-    ])
     field.accessibilityLabel = label
     field.accessibilityIdentifier = identifier
     field.textColor = .white
     field.tintColor = NeoStyle.accent
     field.font = .systemFont(ofSize: 16)
     field.borderStyle = .none
-    field.layer.cornerRadius = 7
-    field.layer.borderWidth = 1
-    field.layer.borderColor = UIColor.white.withAlphaComponent(0.23).cgColor
-    field.backgroundColor = UIColor.white.withAlphaComponent(0.025)
-    field.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: 1))
-    field.leftViewMode = .always
+    field.backgroundColor = .clear
     field.autocorrectionType = .no
     field.autocapitalizationType = .none
     field.spellCheckingType = .no
     field.returnKeyType = .done
     field.delegate = self
-    field.heightAnchor.constraint(equalToConstant: 44).isActive = true
     return field
   }
 
@@ -972,12 +991,18 @@ private final class NeoRuleEncodeRow: UIStackView {
   let channelPicker = NeoSelectButton()
   let parentDirectoryPicker = NeoSelectButton()
   let directoryField = UITextField()
+  lazy var directoryInput: NeoProgramSearchInput = NeoProgramSearchInput(
+    label: "サブディレクトリ", field: directoryField, verticalInset: 8, minimumHeight: 40
+  )
   let destinationStack = UIStackView()
   let deleteButton: UIButton
 
   init(index: Int) {
     deleteButton = NeoStyle.iconButton("DeleteOutlineOutlined", label: "エンコード\(index + 1)を削除") {}
     super.init(frame: .zero)
+    modePicker.setFieldLabel("エンコードプリセット", minimumHeight: 40)
+    channelPicker.setFieldLabel("対象局（未指定なら全局）", minimumHeight: 40)
+    parentDirectoryPicker.setFieldLabel("保存先", minimumHeight: 40)
     axis = .vertical
     spacing = 12
     alignment = .fill
@@ -997,47 +1022,21 @@ private final class NeoRuleEncodeRow: UIStackView {
     header.addArrangedSubview(deleteButton)
     addArrangedSubview(header)
 
-    let modeLabel = NeoStyle.label("エンコードプリセット", size: 14, muted: true)
-    modePicker.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-    addArrangedSubview(UIStackView(arrangedSubviews: [modeLabel, modePicker]))
-    let modeBox = arrangedSubviews.last as! UIStackView
-    modeBox.axis = .vertical
-    modeBox.spacing = 4
+    addArrangedSubview(modePicker)
+    addArrangedSubview(channelPicker)
 
-    let channelLabel = NeoStyle.label("対象局（未指定なら全局）", size: 14, muted: true)
-    channelPicker.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-    addArrangedSubview(UIStackView(arrangedSubviews: [channelLabel, channelPicker]))
-    let channelBox = arrangedSubviews.last as! UIStackView
-    channelBox.axis = .vertical
-    channelBox.spacing = 4
-
-    let directoryLabel = NeoStyle.label("保存先", size: 14, muted: true)
-    parentDirectoryPicker.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-    let directoryBox = UIStackView(arrangedSubviews: [directoryLabel, parentDirectoryPicker])
-    directoryBox.axis = .vertical
-    directoryBox.spacing = 4
-    let subdirectory = UIStackView()
-    subdirectory.axis = .vertical
-    subdirectory.spacing = 4
-    subdirectory.addArrangedSubview(NeoStyle.label("サブディレクトリ", size: 14, muted: true))
-    directoryField.heightAnchor.constraint(equalToConstant: 44).isActive = true
     directoryField.borderStyle = .none
-    directoryField.layer.cornerRadius = 7
-    directoryField.layer.borderWidth = 1
-    directoryField.layer.borderColor = UIColor.white.withAlphaComponent(0.23).cgColor
-    directoryField.backgroundColor = UIColor.white.withAlphaComponent(0.025)
+    directoryField.backgroundColor = .clear
     directoryField.textColor = .white
     directoryField.font = .systemFont(ofSize: 16)
-    directoryField.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 12, height: 1))
-    directoryField.leftViewMode = .always
     directoryField.autocorrectionType = .no
     directoryField.autocapitalizationType = .none
     directoryField.spellCheckingType = .no
     directoryField.accessibilityLabel = "サブディレクトリ"
     directoryField.accessibilityIdentifier = "ruleEditor.encode.\(index + 1).directory"
-    subdirectory.addArrangedSubview(directoryField)
-    destinationStack.addArrangedSubview(directoryBox)
-    destinationStack.addArrangedSubview(subdirectory)
+    directoryInput.accessibilityIdentifier = "\(directoryField.accessibilityIdentifier ?? "ruleEditor.field").label"
+    destinationStack.addArrangedSubview(parentDirectoryPicker)
+    destinationStack.addArrangedSubview(directoryInput)
     destinationStack.axis = .vertical
     destinationStack.spacing = 12
     destinationStack.alignment = .fill

@@ -423,9 +423,9 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
         editor.dismiss(animated: !UIAccessibility.isReduceMotionEnabled) { [weak self] in
           guard let self, let shell, ownsEditorAccount(api, owner), navigationController?.topViewController === self else { return }
           ruleEditor = nil
+          guard viewIfLoaded?.window != nil else { return }
           let message = existing == nil ? "ルールを追加しました" : "ルールを更新しました"
-          if (navigationController?.viewControllers.count ?? 1) > 1 { shell.goBack() }
-          else { clear(resetFocus: true) }
+          if !shell.returnAfterRuleSave(from: self) { clear(resetFocus: true) }
           if warnings.isEmpty { shell.recordingNotice(message) }
           else { shell.recordingNotice("\(message)。\(warnings.joined(separator: "。"))", error: true) }
         }

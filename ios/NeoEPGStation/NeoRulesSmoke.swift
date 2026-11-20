@@ -110,6 +110,8 @@ private final class NeoRulesSmokeProtocol: URLProtocol {
       ]
     } else if method == "GET", path == "/api/config" {
       value = ["encode": [], "recorded": [], "broadcast": ["GR": true]]
+    } else if method == "POST", path == "/api/rules" {
+      value = ["ruleId": 2001]
     } else if method == "GET", path == "/api/rules" {
       ruleQueries.append(query)
       let matching = order.compactMap { id -> [String: Any]? in
@@ -326,7 +328,19 @@ private final class NeoRulesSmokeProtocol: URLProtocol {
       ["type": "normal", "offset": "0", "limit": "2", "userId": "7"]
     )
 
-    func selectUser(row: Int, expectedUser: Int, expectedIDs: [Int]) async -> Bool {
+    if let selector = control(in: page.view, "rules.user") as? NeoDropdownButton {
+      let expectedWidth: CGFloat
+      if page.view.bounds.width >= 600 {
+        expectedWidth = 180
+      } else {
+        expectedWidth = max(84, min(112, page.view.bounds.width - 188 - ceil(page.titleLabel.intrinsicContentSize.width)))
+      }
+      checks["rulesUserSelectorResponsiveWidth"] = abs(selector.bounds.width - expectedWidth) < 1
+    } else {
+      checks["rulesUserSelectorResponsiveWidth"] = false
+    }
+
+    func selectUser(row: Int, expectedUser: Int?, expectedIDs: [Int]) async -> Bool {
       guard let selector = control(in: page.view, "rules.user") as? NeoDropdownButton else { return false }
       selector.sendActions(for: .touchUpInside)
       let opened = await waitFor { selector.smokeDropdown?.isOpen == true }
@@ -344,7 +358,16 @@ private final class NeoRulesSmokeProtocol: URLProtocol {
     let userQuery = NeoRulesSmokeProtocol.rulesQueries().last
     checks["rulesUserFilterGETIncludesUser"] = query(userQuery, ["type": "normal", "offset": "0", "limit": "2", "userId": "8"])
     let userRestored = await selectUser(row: 1, expectedUser: 7, expectedIDs: [1001, 1002])
-    checks["rulesUserFilterRestoresActiveUser"] = userRestored
+    let masterSelected = await selectUser(row: 0, expectedUser: nil, expectedIDs: [1001, 1002])
+    if let selector = control(in: page.view, "rules.user") as? NeoDropdownButton {
+      checks["rulesMasterClosedValueIsShort"] = masterSelected && selector.accessibilityValue == "master"
+      checks["rulesMasterDropdownKeepsWebLabel"] = selector.dropdownRows.first?.title == "master（すべて）"
+    } else {
+      checks["rulesMasterClosedValueIsShort"] = false
+      checks["rulesMasterDropdownKeepsWebLabel"] = false
+    }
+    let userRestoredAgain = await selectUser(row: 1, expectedUser: 7, expectedIDs: [1001, 1002])
+    checks["rulesUserFilterRestoresActiveUser"] = userRestored && masterSelected && userRestoredAgain
     page.view.layoutIfNeeded()
 
     if let footer = identified(page.view, "rules.pagination"),
@@ -460,6 +483,93 @@ private final class NeoRulesSmokeProtocol: URLProtocol {
       select.sendActions(for: .touchUpInside)
       _ = await waitFor { !page.smokeSelecting }
     }
+
+    // Leave the rules list through the sidebar Search root, create a rule,
+    // and verify that the retained rules controller comes back unchanged.
+    var preservedQuery: NeoRuleListQuery?
+    var preservedIDs: [Int] = []
+    if let keyword = identified(page.view, "rules.keyword") as? UITextField,
+       let reserve = control(in: page.view, "rules.hasReserve") {
+      keyword.text = "Gamma"
+      keyword.sendActions(for: .editingChanged)
+      keyword.sendActions(for: .editingDidEndOnExit)
+      if page.smokeQuery.keyword != "Gamma" { _ = page.textFieldShouldReturn(keyword) }
+      let keywordReady = await waitFor {
+        page.smokeQuery.keyword == "Gamma" && page.smokeQuery.page == 1
+          && page.smokeRules.map(\.id) == [1003]
+      }
+      if keywordReady {
+        reserve.sendActions(for: .touchUpInside)
+        let filterReady = await waitFor {
+          page.smokeQuery.keyword == "Gamma" && page.smokeQuery.hasReserve
+            && page.smokeQuery.page == 1 && page.smokeRules.map(\.id) == [1003]
+        }
+        if filterReady {
+          preservedQuery = page.smokeQuery
+          preservedIDs = page.smokeRules.map(\.id)
+        }
+      }
+    }
+
+    var crossTabPosted = false
+    var crossTabReturned = false
+    var searchPage: NeoProgramSearchPage?
+    if let preservedQuery {
+      shell.smokeSelectDestination("search")
+      let searchNavigationReady = await waitFor {
+        shell.children.compactMap { $0 as? UINavigationController }.contains {
+          $0.topViewController is NeoProgramSearchPage
+        }
+      }
+      if searchNavigationReady,
+         let searchNavigation = shell.children.compactMap({ $0 as? UINavigationController }).first(where: {
+           $0.topViewController is NeoProgramSearchPage
+         }),
+         let candidate = searchNavigation.topViewController as? NeoProgramSearchPage {
+        searchPage = candidate
+        let searchReady = await waitFor {
+          candidate.viewIfLoaded?.window != nil
+            && identified(candidate.view, "programSearch.keyword") != nil
+            && identified(candidate.view, "programSearch.rule") != nil
+        }
+        if searchReady,
+           let searchKeyword = identified(candidate.view, "programSearch.keyword") as? UITextField,
+           let create = identified(candidate.view, "programSearch.rule") as? UIControl {
+          searchKeyword.text = "CrossTabCreate"
+          searchKeyword.sendActions(for: .editingChanged)
+          candidate.view.layoutIfNeeded()
+          create.sendActions(for: .touchUpInside)
+          let editorReady = await waitFor {
+            guard let editor = candidate.presentedViewController as? NeoProgramRuleEditor else { return false }
+            editor.view.layoutIfNeeded()
+            return editor.view.window != nil && identified(editor.view, "ruleEditor.card") != nil
+          }
+          if editorReady, let editor = candidate.presentedViewController as? NeoProgramRuleEditor {
+            control(in: editor.view, "ruleEditor.tab.recording")?.sendActions(for: .touchUpInside)
+            control(in: editor.view, "ruleEditor.save")?.sendActions(for: .touchUpInside)
+            crossTabReturned = await waitFor {
+              page.viewIfLoaded?.window != nil && navigation.topViewController === page
+                && candidate.presentedViewController == nil && page.smokeQuery == preservedQuery
+            }
+            crossTabPosted = NeoRulesSmokeProtocol.count("POST /api/rules") == 1
+              && crossTabReturned
+              && page.smokeQuery.keyword == preservedQuery.keyword
+              && page.smokeQuery.hasReserve == preservedQuery.hasReserve
+              && page.smokeQuery.page == preservedQuery.page
+              && page.smokeRules.map(\.id) == preservedIDs
+              && (identified(page.view, "rules.keyword") as? UITextField)?.text == preservedQuery.keyword
+          }
+        }
+      }
+    }
+    checks["rulesCrossTabRuleCreatePostsAndReturns"] = crossTabPosted
+    checks["rulesCrossTabRuleCreatePreservesQuery"] = crossTabPosted && crossTabReturned
+    if page.viewIfLoaded?.window == nil {
+      searchPage?.presentedViewController?.dismiss(animated: false)
+      shell.smokeSelectDestination("rule")
+      _ = await waitFor { page.viewIfLoaded?.window != nil && navigation.topViewController === page }
+    }
+
     if let add = control(in: page.view, "rules.add") {
       add.sendActions(for: .touchUpInside)
       let navigated = await waitFor { navigation.topViewController is NeoProgramSearchPage }

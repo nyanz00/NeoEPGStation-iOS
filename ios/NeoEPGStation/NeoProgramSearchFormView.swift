@@ -45,6 +45,10 @@ final class NeoProgramSearchFormView: UIView {
   private let startTimeField = UITextField()
   private let endDateField = UITextField()
   private let endTimeField = UITextField()
+  private lazy var keywordControl = NeoProgramSearchInput(label: "キーワード", field: keywordField)
+  private lazy var ignoreKeywordControl = NeoProgramSearchInput(label: "除外キーワード", field: ignoreKeywordField)
+  private lazy var durationMinControl = NeoProgramSearchInput(label: "最小（分）", field: durationMinField, verticalInset: 0)
+  private lazy var durationMaxControl = NeoProgramSearchInput(label: "最大（分）", field: durationMaxField, verticalInset: 0)
   private let selectedChannels = NeoProgramSearchWrapView()
   private let channelArrow = UIButton(type: .system)
   private lazy var channelControl = NeoProgramSearchInput(
@@ -181,13 +185,11 @@ final class NeoProgramSearchFormView: UIView {
     ignoreOptions.accessibilityIdentifier = "programSearch.ignoreOptions"
     typeOptions.accessibilityIdentifier = "programSearch.channelWaveOptions"
     genreWeekOptions.accessibilityIdentifier = "programSearch.weekOptions"
-    configureTextField(keywordField, placeholder: "", identifier: "programSearch.keyword", returnKey: .search)
-    keywordField.accessibilityLabel = "キーワード"
+    configureTextField(keywordField, identifier: "programSearch.keyword", returnKey: .search)
     configureKeywordClearButton(keywordField, button: keywordClearButton, label: "キーワード", identifier: "programSearch.keyword.clear", action: #selector(keywordClearTapped))
-    configureTextField(ignoreKeywordField, placeholder: "", identifier: "programSearch.ignoreKeyword")
-    ignoreKeywordField.accessibilityLabel = "除外キーワード"
+    configureTextField(ignoreKeywordField, identifier: "programSearch.ignoreKeyword")
     configureKeywordClearButton(ignoreKeywordField, button: ignoreKeywordClearButton, label: "除外キーワード", identifier: "programSearch.ignoreKeyword.clear", action: #selector(ignoreKeywordClearTapped))
-    configureTextField(channelField, placeholder: "", identifier: "programSearch.channel", outlined: true)
+    configureTextField(channelField, identifier: "programSearch.channel")
     channelField.delegate = self
     channelField.addTarget(self, action: #selector(channelQueryChanged), for: .editingChanged)
     selectedChannels.setTrailingField(channelField)
@@ -236,13 +238,13 @@ final class NeoProgramSearchFormView: UIView {
     detailsBody.insetsLayoutMarginsFromSafeArea = false
     detailsBody.layoutMargins = UIEdgeInsets(top: 0, left: 16, bottom: 16, right: 16)
 
-    genreButton.accessibilityLabel = "大ジャンル"
+    genreButton.setFieldLabel("大ジャンル", alwaysFloated: true, minimumHeight: 40)
     genreButton.accessibilityIdentifier = "programSearch.genre"
-    subGenreButton.accessibilityLabel = "小ジャンル"
+    subGenreButton.setFieldLabel("小ジャンル", alwaysFloated: true, minimumHeight: 40)
     subGenreButton.accessibilityIdentifier = "programSearch.subGenre"
-    startHourButton.accessibilityLabel = "開始時刻"
+    startHourButton.setFieldLabel("開始時刻", minimumHeight: 40)
     startHourButton.accessibilityIdentifier = "programSearch.startHour"
-    rangeHourButton.accessibilityLabel = "範囲"
+    rangeHourButton.setFieldLabel("範囲", minimumHeight: 40)
     rangeHourButton.accessibilityIdentifier = "programSearch.rangeHour"
     [genreButton, subGenreButton, startHourButton, rangeHourButton].forEach {
       $0.showsMenuAsPrimaryAction = false
@@ -267,11 +269,9 @@ final class NeoProgramSearchFormView: UIView {
 
     // The outer controller provides scrolling.  Keep this view a single
     // self-sizing form surface so a table-header owner can re-measure it.
-    let key = formLabeledField("キーワード", control: keywordField)
-    content.addArrangedSubview(key); content.setCustomSpacing(2, after: key)
+    content.addArrangedSubview(keywordControl); content.setCustomSpacing(2, after: keywordControl)
     content.addArrangedSubview(keywordOptions)
-    let ignore = formLabeledField("除外キーワード", control: ignoreKeywordField)
-    content.addArrangedSubview(ignore); content.setCustomSpacing(2, after: ignore)
+    content.addArrangedSubview(ignoreKeywordControl); content.setCustomSpacing(2, after: ignoreKeywordControl)
     content.addArrangedSubview(ignoreOptions)
     let channelSection = UIStackView(arrangedSubviews: [channelControl, typeOptions])
     channelSection.axis = .vertical; channelSection.spacing = 5; channelSection.alignment = .fill
@@ -286,35 +286,24 @@ final class NeoProgramSearchFormView: UIView {
   }
 
   private func configureTextField(
-    _ field: UITextField, placeholder: String, identifier: String, returnKey: UIReturnKeyType = .default, outlined: Bool = false
+    _ field: UITextField, identifier: String, returnKey: UIReturnKeyType = .default
   ) {
-    field.placeholder = placeholder
     field.returnKeyType = returnKey
     field.textColor = .white
     field.tintColor = NeoStyle.accent
     field.backgroundColor = .clear
     field.font = .systemFont(ofSize: 16)
     field.borderStyle = .none
-    if !outlined {
-      field.layer.cornerRadius = 4
-      field.layer.borderWidth = 1
-      field.layer.borderColor = UIColor.white.withAlphaComponent(0.23).cgColor
-      field.leftView = UIView(frame: CGRect(x: 0, y: 0, width: 10, height: 1))
-      field.leftViewMode = .always
-      field.clearButtonMode = .whileEditing
-      field.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-    }
     field.autocorrectionType = .no
     field.autocapitalizationType = .none
     field.accessibilityIdentifier = identifier
-    field.accessibilityLabel = placeholder
     field.addTarget(self, action: #selector(textChanged(_:)), for: .editingChanged)
   }
 
   private func configureNumberField(_ field: UITextField, identifier: String) {
-    configureTextField(field, placeholder: "", identifier: identifier)
+    configureTextField(field, identifier: identifier)
     field.keyboardType = .numberPad
-    field.accessibilityLabel = identifier.replacingOccurrences(of: "programSearch.", with: "")
+    field.clearButtonMode = .whileEditing
   }
 
   private func configureKeywordClearButton(
@@ -338,7 +327,7 @@ final class NeoProgramSearchFormView: UIView {
 
   private func makePeriodField(_ field: UITextField, key: String, label: String, index: Int) -> NeoProgramSearchInput {
     let isDate = index.isMultiple(of: 2)
-    configureTextField(field, placeholder: "", identifier: "programSearch.\(key)", outlined: true)
+    configureTextField(field, identifier: "programSearch.\(key)")
     field.delegate = self
     field.keyboardType = .asciiCapableNumberPad
     field.heightAnchor.constraint(greaterThanOrEqualToConstant: 40).isActive = true
@@ -388,6 +377,10 @@ final class NeoProgramSearchFormView: UIView {
     startTimeField.text = timeText["startTime"] ?? form.startTime
     endTimeField.text = timeText["endTime"] ?? form.endTime
     updateKeywordClearButtons()
+    keywordControl.updateAppearance()
+    ignoreKeywordControl.updateAppearance()
+    durationMinControl.updateAppearance()
+    durationMaxControl.updateAppearance()
     freeSwitch.isOn = form.isFree
 
     keywordOptions.setItems(keywordFieldButtons(for: form.keywordFields, keyword: true))
@@ -421,8 +414,8 @@ final class NeoProgramSearchFormView: UIView {
         detailsStack.trailingAnchor.constraint(equalTo: surface.trailingAnchor), detailsStack.bottomAnchor.constraint(equalTo: surface.bottomAnchor)
       ])
       content.addArrangedSubview(surface)
-      detailsBody.addArrangedSubview(formLabeledField("大ジャンル", control: genreButton))
-      detailsBody.addArrangedSubview(formLabeledField("小ジャンル", control: subGenreButton))
+      detailsBody.addArrangedSubview(genreButton)
+      detailsBody.addArrangedSubview(subGenreButton)
       detailsBody.addArrangedSubview(hoursRow())
       detailsBody.addArrangedSubview(genreWeekOptions)
       detailsBody.addArrangedSubview(durationRow())
@@ -436,19 +429,10 @@ final class NeoProgramSearchFormView: UIView {
     detailsButton.accessibilityTraits = detailsExpanded ? [.button, .selected] : [.button]
   }
 
-  private func formLabeledField(_ title: String, control: UIView) -> UIView {
-    let stack = UIStackView(arrangedSubviews: [NeoStyle.label(title, size: 13, muted: true), control])
-    stack.axis = .vertical; stack.spacing = 5; stack.alignment = .fill
-    stack.accessibilityLabel = title
-    return stack
-  }
-
   private func hoursRow() -> UIView {
-    let start = formLabeledField("開始時刻", control: startHourButton)
-    let range = formLabeledField("範囲", control: rangeHourButton)
     let separator = NeoStyle.label("～", size: 15)
     let within = NeoStyle.label("以内", size: 15)
-    let row = NeoProgramSearchAdaptiveRow(arrangedSubviews: [start, separator, range, within], breakpoint: 600)
+    let row = NeoProgramSearchAdaptiveRow(arrangedSubviews: [startHourButton, separator, rangeHourButton, within], breakpoint: 600)
     row.axis = .vertical; row.spacing = 8; row.alignment = .fill; row.distribution = .fill
     startHourButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
     rangeHourButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -458,10 +442,7 @@ final class NeoProgramSearchFormView: UIView {
   }
 
   private func durationRow() -> UIView {
-    let row = NeoProgramSearchAdaptiveRow(arrangedSubviews: [
-      formLabeledField("最小（分）", control: durationMinField),
-      formLabeledField("最大（分）", control: durationMaxField)
-    ], breakpoint: 600)
+    let row = NeoProgramSearchAdaptiveRow(arrangedSubviews: [durationMinControl, durationMaxControl], breakpoint: 600)
     row.axis = .vertical; row.spacing = 12; row.distribution = .fillEqually
     row.accessibilityIdentifier = "programSearch.duration"
     adaptiveRows.append(row)
@@ -585,8 +566,7 @@ final class NeoProgramSearchFormView: UIView {
     if kind != .channels { presenter?.view.endEditing(true) }
     dropdownKind = kind
     updateDropdownAppearance()
-    let labeledField = kind == .channels ? anchor : anchor.superview ?? anchor
-    dropdown.show(in: host, anchor: labeledField, rows: dropdownRows(for: kind),
+    dropdown.show(in: host, anchor: anchor, rows: dropdownRows(for: kind),
       identifier: kind == .channels ? "programSearch.channelSuggestions" : "programSearch.options.\(kind.rawValue)",
       isStationList: kind == .channels)
   }
@@ -602,10 +582,7 @@ final class NeoProgramSearchFormView: UIView {
     channelArrow.accessibilityLabel = stationsOpen ? "放送局の候補を閉じる" : "放送局の候補を開く"
     channelArrow.imageView?.transform = stationsOpen ? CGAffineTransform(rotationAngle: .pi) : .identity
     for kind in [DropdownKind.genre, .subGenre, .startHour, .rangeHour] {
-      let field = dropdownAnchor(for: kind)
-      let isOpen = dropdownKind == kind
-      field.layer.borderWidth = isOpen ? 2 : 1
-      field.layer.borderColor = (isOpen ? NeoStyle.accent : UIColor.white.withAlphaComponent(0.23)).cgColor
+      (dropdownAnchor(for: kind) as? NeoSelectButton)?.setFieldActive(dropdownKind == kind)
     }
   }
 
@@ -706,8 +683,8 @@ final class NeoProgramSearchFormView: UIView {
           guard let self else { return }
           var next = form
           if range { next.rangeHour = hour } else { next.startHour = hour }
-          dismissDropdown()
           emit(next)
+          dismissDropdown()
         })
     }
     return [row(nil)] + (firstHour...23).map { (hour: Int) in row(hour) }
@@ -725,8 +702,8 @@ final class NeoProgramSearchFormView: UIView {
       return "\(title): \(selected.isEmpty ? "すべて" : selected.joined(separator: "、"))"
     }
     subGenreButton.setTitle(subGenres.isEmpty ? "すべて" : subGenres.joined(separator: " / "), for: .normal)
-    startHourButton.setTitle(form.startHour.map { "\($0)時" } ?? "指定なし", for: .normal)
-    rangeHourButton.setTitle(form.rangeHour.map { "\($0)時間" } ?? "指定なし", for: .normal)
+    startHourButton.setTitle(form.startHour.map { "\($0)時" }, for: .normal)
+    rangeHourButton.setTitle(form.rangeHour.map { "\($0)時間" }, for: .normal)
   }
 
   private func genreName(_ index: Int) -> String {

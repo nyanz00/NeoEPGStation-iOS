@@ -10,6 +10,9 @@ class NeoDropdownButton: UIButton {
   var loadDropdownRows: ((@escaping ([NeoDropdownList.Row]) -> Void) -> Void)?
   var keepsDropdownOpenAfterSelection = false
   var hasDropdown: Bool { !dropdownRows.isEmpty || loadDropdownRows != nil }
+  var dropdownIsOpen: Bool { dropdown?.isOpen == true }
+
+  func dropdownVisibilityChanged() {}
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -45,6 +48,10 @@ class NeoDropdownButton: UIButton {
     let list = NeoDropdownList()
     dropdown = list
     list.onDismiss = { [weak list] in list?.dismiss() }
+    list.onVisibilityChange = { [weak self, weak list] in
+      guard let self, let list, self.dropdown === list else { return }
+      dropdownVisibilityChanged()
+    }
     let rows = loadDropdownRows == nil ? dropdownRows : [.init(title: "読み込み中…", style: .empty)]
     list.show(in: host, anchor: self, rows: rows,
       identifier: accessibilityIdentifier.map { "\($0).options" }, blocksOutsideTouches: true,
@@ -65,6 +72,10 @@ class NeoDropdownButton: UIButton {
 // MUI small outlined Select surface.
 final class NeoSelectButton: NeoDropdownButton {
   private let value = NeoStyle.label(size:16), arrow = UIImageView()
+  private var heightConstraint: NSLayoutConstraint!
+  private var decoration: NeoOutlinedFieldLabel?
+  private var alwaysFloated = false
+  private var fieldActive = false
   override init(frame: CGRect) {
     super.init(frame:frame)
     layer.cornerRadius = 6; layer.borderWidth = 1
@@ -75,7 +86,8 @@ final class NeoSelectButton: NeoDropdownButton {
       path.move(to:CGPoint(x:7,y:10)); path.addLine(to:CGPoint(x:12,y:15)); path.addLine(to:CGPoint(x:17,y:10)); path.close(); path.fill()
     }
     [value,arrow].forEach { $0.isUserInteractionEnabled = false; addSubview($0) }
-    heightAnchor.constraint(greaterThanOrEqualToConstant:44).isActive = true
+    heightConstraint = heightAnchor.constraint(greaterThanOrEqualToConstant:44)
+    heightConstraint.isActive = true
   }
   required init?(coder: NSCoder) { fatalError() }
   override func setTitle(_ title: String?, for state: UIControl.State) {
@@ -83,13 +95,55 @@ final class NeoSelectButton: NeoDropdownButton {
     guard state == .normal else { return }
     let text = title?.hasSuffix(" ▾") == true ? String(title!.dropLast(2)) : title
     value.text = text; accessibilityValue = text; invalidateIntrinsicContentSize(); setNeedsLayout()
+    updateFieldAppearance()
   }
-  override var intrinsicContentSize: CGSize { CGSize(width:180,height:44) }
-  override var isEnabled: Bool { didSet { value.alpha = isEnabled ? 1 : 0.38; arrow.alpha = isEnabled ? 1 : 0.38 } }
+  override var intrinsicContentSize: CGSize { CGSize(width:180,height:heightConstraint?.constant ?? 44) }
+  override var isEnabled: Bool { didSet { updateFieldAppearance() } }
+
+  func setFieldLabel(_ label: String, alwaysFloated: Bool = false, minimumHeight: CGFloat? = nil) {
+    decoration?.removeFromSuperview()
+    let appearance = NeoOutlinedFieldLabel(label, trailingInset: 36)
+    decoration = appearance
+    self.alwaysFloated = alwaysFloated
+    accessibilityLabel = label
+    layer.borderWidth = 0
+    if let minimumHeight {
+      heightConstraint.constant = minimumHeight
+      invalidateIntrinsicContentSize()
+    }
+    addSubview(appearance)
+    updateFieldAppearance()
+    setNeedsLayout()
+  }
+
+  func setFieldActive(_ active: Bool) {
+    fieldActive = active
+    updateFieldAppearance()
+  }
+
+  override func dropdownVisibilityChanged() { updateFieldAppearance() }
+
+  override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
+    super.didUpdateFocus(in: context, with: coordinator)
+    updateFieldAppearance()
+  }
+
+  private func updateFieldAppearance() {
+    value.alpha = isEnabled ? 1 : decoration == nil ? 0.38 : 0.5
+    arrow.alpha = isEnabled ? 1 : decoration == nil ? 0.38 : 0.3 / 0.7
+    guard let decoration else { return }
+    let open = isEnabled && (fieldActive || dropdownIsOpen)
+    let focused = isEnabled && (open || isFocused)
+    arrow.transform = open ? CGAffineTransform(rotationAngle: .pi) : .identity
+    decoration.update(floated: alwaysFloated || focused || !(value.text ?? "").isEmpty, focused: focused, enabled: isEnabled)
+  }
+
   override func layoutSubviews() {
     super.layoutSubviews(); titleLabel?.isHidden = true
     value.frame = CGRect(x:14,y:3,width:max(0,bounds.width-46),height:max(0,bounds.height-6))
-    arrow.frame = CGRect(x:bounds.width-31,y:(bounds.height-24)/2,width:24,height:24)
+    arrow.bounds = CGRect(x: 0, y: 0, width: 24, height: 24)
+    arrow.center = CGPoint(x: bounds.width - 19, y: bounds.midY)
+    decoration?.frame = bounds
   }
 }
 
@@ -113,8 +167,11 @@ final class NeoDropdownList: UIView, UITableViewDataSource, UITableViewDelegate,
   private var minimumWidth: CGFloat = 0
   private var presentation = 0
   private var outsideTap: UITapGestureRecognizer?
-  private(set) var isOpen = false
+  private(set) var isOpen = false {
+    didSet { if oldValue != isOpen { onVisibilityChange?() } }
+  }
   var onDismiss: (() -> Void)?
+  var onVisibilityChange: (() -> Void)?
 
   init() {
     super.init(frame: .zero)

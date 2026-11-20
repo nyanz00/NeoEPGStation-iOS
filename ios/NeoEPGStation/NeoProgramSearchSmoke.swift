@@ -448,6 +448,141 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       return nil
     }
 
+    func outlinedLabel(near control: UIView) -> NeoOutlinedFieldLabel? {
+      var current: UIView? = control
+      while let view = current {
+        if let label = views(in: view).compactMap({ $0 as? NeoOutlinedFieldLabel }).first {
+          return label
+        }
+        current = view.superview
+      }
+      return nil
+    }
+
+    func closeEnough(_ lhs: CGRect, _ rhs: CGRect, tolerance: CGFloat = 1) -> Bool {
+      [abs(lhs.minX - rhs.minX), abs(lhs.minY - rhs.minY), abs(lhs.width - rhs.width), abs(lhs.height - rhs.height)]
+        .allSatisfy { $0 <= tolerance }
+    }
+
+    // The outlined labels are deliberately checked before the interaction
+    // flow below.  This catches the initial/empty state as well as the
+    // transient state while a select is open, without changing the request
+    // fixture used by the actual search assertions.
+    if let keyword = viewWithID("programSearch.keyword") as? UITextField,
+      let ignore = viewWithID("programSearch.ignoreKeyword") as? UITextField,
+      let durationMin = viewWithID("programSearch.durationMin") as? UITextField,
+      let durationMax = viewWithID("programSearch.durationMax") as? UITextField,
+      let genre = viewWithID("programSearch.genre") as? UIButton,
+      let startHour = viewWithID("programSearch.startHour") as? UIButton,
+      let clearForm = button(in: page.view, identifier: "programSearch.clear") {
+      clearForm.sendActions(for: .touchUpInside)
+      page.view.endEditing(true)
+      _ = await waitFor {
+        keyword.text?.isEmpty == true && ignore.text?.isEmpty == true
+          && durationMin.text?.isEmpty == true && durationMax.text?.isEmpty == true
+      }
+      page.view.layoutIfNeeded()
+
+      let keywordOutline = outlinedLabel(near: keyword)
+      let ignoreOutline = outlinedLabel(near: ignore)
+      let durationMinOutline = outlinedLabel(near: durationMin)
+      let durationMaxOutline = outlinedLabel(near: durationMax)
+      let genreOutline = outlinedLabel(near: genre)
+      let startOutline = outlinedLabel(near: startHour)
+      checks["programSearchOutlinedBlankStates"] = keywordOutline?.smokeCaption.text == "キーワード"
+        && ignoreOutline?.smokeCaption.text == "除外キーワード"
+        && durationMinOutline?.smokeCaption.text == "最小（分）"
+        && durationMaxOutline?.smokeCaption.text == "最大（分）"
+        && keywordOutline?.smokeFloated == false && ignoreOutline?.smokeFloated == false
+        && durationMinOutline?.smokeFloated == false && durationMaxOutline?.smokeFloated == false
+      checks["programSearchGenreForcedFloat"] = genreOutline?.smokeCaption.text == "大ジャンル"
+        && genreOutline?.smokeFloated == true
+      checks["programSearchStartHourBlankLabel"] = (startHour.title(for: .normal) ?? "").isEmpty
+        && startOutline?.smokeCaption.text == "開始時刻"
+        && startOutline?.smokeFloated == false
+
+      if startHour.isHidden || startHour.bounds.isEmpty {
+        button(in: page.view, label: "詳細条件")?.sendActions(for: .touchUpInside)
+        _ = await waitFor { !startHour.isHidden && !startHour.bounds.isEmpty }
+      }
+      revealControl(startHour)
+      startHour.sendActions(for: .touchUpInside)
+      if let startMenu = await waitForMenu("programSearch.options.startHour", minimumRows: 25) {
+        page.view.layoutIfNeeded()
+        checks["programSearchStartHourFloatsWhileOpen"] = startOutline?.smokeFloated == true
+        if let (_, hour23) = tableCell(startMenu, identifier: "programSearch.option.startHour.23")
+          ?? revealTableCell(startMenu, identifier: "programSearch.option.startHour.23") {
+          startMenu.delegate?.tableView?(startMenu, didSelectRowAt: hour23)
+        }
+        checks["programSearchStartHourFloatsAfterSelection"] = await waitFor {
+          (startHour.title(for: .normal) ?? "") == "23時" && startOutline?.smokeFloated == true
+        }
+      } else {
+        checks["programSearchStartHourFloatsWhileOpen"] = false
+        checks["programSearchStartHourFloatsAfterSelection"] = false
+      }
+
+      // A blank text field must animate both directions.  The selected hour
+      // is kept as a sentinel so a focus/blur relayout cannot silently reset
+      // another control's value.  Reduce Motion (or globally disabled
+      // animations in a test host) still exercises the final states.
+      if let keywordOutline,
+        let startOutline,
+        let keywordField = viewWithID("programSearch.keyword") as? UITextField {
+        keywordField.text = ""
+        keywordField.sendActions(for: .editingChanged)
+        keywordField.resignFirstResponder()
+        keywordField.superview?.layoutIfNeeded()
+        let fieldBefore = keywordField.frame
+        let outlineBefore = keywordOutline.frame
+        let selectedHour = startHour.title(for: .normal) ?? ""
+        let animationExpected = UIView.areAnimationsEnabled && !UIAccessibility.isReduceMotionEnabled
+
+        _ = keywordField.becomeFirstResponder()
+        page.view.layoutIfNeeded()
+        let focusDuration = keywordOutline.smokeMotionDuration
+        let focused = await waitFor { keywordOutline.smokeFloated && keywordField.isFirstResponder }
+        let fieldDuring = keywordField.frame
+
+        _ = keywordField.resignFirstResponder()
+        page.view.layoutIfNeeded()
+        let blurDuration = keywordOutline.smokeMotionDuration
+        let blurred = await waitFor { !keywordOutline.smokeFloated && !keywordField.isFirstResponder }
+        let fieldAfter = keywordField.frame
+        let animationDurationOK: Bool = {
+          guard animationExpected, let focusDuration, let blurDuration else { return !animationExpected }
+          return abs(focusDuration - 0.2) <= 0.03 && abs(blurDuration - 0.2) <= 0.03
+        }()
+        checks["programSearchOutlinedLabelFocusBlur"] = focused && blurred
+          && keywordField.text?.isEmpty == true
+          && (startHour.title(for: .normal) ?? "") == selectedHour
+        checks["programSearchOutlinedLabelMotionDuration"] = animationDurationOK
+        checks["programSearchOutlinedLabelNoLayoutShift"] = closeEnough(fieldBefore, fieldDuring)
+          && closeEnough(fieldBefore, fieldAfter) && closeEnough(outlineBefore, keywordOutline.frame)
+      } else {
+        checks["programSearchOutlinedLabelFocusBlur"] = false
+        checks["programSearchOutlinedLabelMotionDuration"] = false
+        checks["programSearchOutlinedLabelNoLayoutShift"] = false
+      }
+
+      clearForm.sendActions(for: .touchUpInside)
+      page.view.endEditing(true)
+      _ = await waitFor {
+        (keyword.text ?? "").isEmpty && (ignore.text ?? "").isEmpty
+          && (durationMin.text ?? "").isEmpty && (durationMax.text ?? "").isEmpty
+          && (startHour.title(for: .normal) ?? "").isEmpty
+      }
+    } else {
+      checks["programSearchOutlinedBlankStates"] = false
+      checks["programSearchGenreForcedFloat"] = false
+      checks["programSearchStartHourBlankLabel"] = false
+      checks["programSearchStartHourFloatsWhileOpen"] = false
+      checks["programSearchStartHourFloatsAfterSelection"] = false
+      checks["programSearchOutlinedLabelFocusBlur"] = false
+      checks["programSearchOutlinedLabelMotionDuration"] = false
+      checks["programSearchOutlinedLabelNoLayoutShift"] = false
+    }
+
     // Exercise the public form surface before the first search.  These checks
     // intentionally restore the form afterwards so the wire assertions below
     // continue to describe the original Fixture search.
@@ -922,9 +1057,24 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       checks["programSearchRuleCreateOpensEditor"] = createEditorReady
       if createEditorReady, let editor = page.presentedViewController as? NeoProgramRuleEditor {
         capture("rule-editor-recording")
+        if let directory = identified(editor.view, "ruleEditor.recording.directory") as? UITextField,
+          let directoryOutline = outlinedLabel(near: directory) {
+          checks["ruleEditorRecordingDirectoryLabel"] = directory.text?.isEmpty == true
+            && directoryOutline.smokeCaption.text == "サブディレクトリ"
+            && !directoryOutline.smokeFloated
+        } else {
+          checks["ruleEditorRecordingDirectoryLabel"] = false
+        }
         let encodeTab = button(in: editor.view, identifier: "ruleEditor.tab.encode")
         encodeTab?.sendActions(for: .touchUpInside)
         _ = await waitFor { identified(editor.view, "ruleEditor.encode.1") != nil }
+        if let mode = identified(editor.view, "ruleEditor.encode.1.mode"),
+          let modeOutline = outlinedLabel(near: mode) {
+          checks["ruleEditorEncodePresetLabel"] = modeOutline.smokeCaption.text == "エンコードプリセット"
+            && !modeOutline.smokeFloated
+        } else {
+          checks["ruleEditorEncodePresetLabel"] = false
+        }
         capture("rule-editor-encode")
         button(in: editor.view, identifier: "ruleEditor.encode.add")?.sendActions(for: .touchUpInside)
         let secondEncodeAdded = await waitFor { identified(editor.view, "ruleEditor.encode.2") != nil }
@@ -971,6 +1121,8 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
         checks["programSearchRuleEncodeAddRemove"] = false
         checks["programSearchRuleCreateSendsExpectedBody"] = false
         checks["programSearchRuleCreateRetryResetsRoot"] = false
+        checks["ruleEditorRecordingDirectoryLabel"] = false
+        checks["ruleEditorEncodePresetLabel"] = false
       }
     } else {
       checks["programSearchRuleCreateOpensEditor"] = false
@@ -978,6 +1130,8 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       checks["programSearchRuleCreateFailureRetainsEditorDraft"] = false
       checks["programSearchRuleCreateSendsExpectedBody"] = false
       checks["programSearchRuleCreateRetryResetsRoot"] = false
+      checks["ruleEditorRecordingDirectoryLabel"] = false
+      checks["ruleEditorEncodePresetLabel"] = false
     }
 
     keyword.text = "Fixture"
