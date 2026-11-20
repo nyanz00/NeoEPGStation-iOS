@@ -52,7 +52,7 @@ final class NeoRulesPage: NeoPage, UITableViewDataSource, UITableViewDelegate, U
   }
   private lazy var deleteSelection = NeoStyle.iconButton("DeleteOutlineOutlined", label: "選択したルールを削除") { [weak self] in
     guard let self, selecting else { return }
-    confirmDeletion(rules.filter { selectedIDs.contains($0.id) }, bulk: true)
+    confirmDeletion(rules.filter { self.selectedIDs.contains($0.id) }, bulk: true)
   }
   private lazy var addRule = NeoStyle.iconButton("AddOutlined", label: "ルールを作成") { [weak self] in self?.openEditor() }
   private lazy var searchInput = NeoProgramSearchInput(label: "ルールを検索", placeholder: "", field: keywordField,
@@ -477,7 +477,7 @@ final class NeoRulesPage: NeoPage, UITableViewDataSource, UITableViewDelegate, U
     loadChannelNames(owner, headers: headers)
     read = Task { [weak self] in
       guard let self else { return }
-      func acceptsRead() -> Bool {
+      @MainActor func acceptsRead() -> Bool {
         !Task.isCancelled && readToken == token && owns(owner) && owner.api.accountReady
       }
       if viewers == nil {
