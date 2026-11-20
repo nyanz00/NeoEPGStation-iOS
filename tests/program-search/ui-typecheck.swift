@@ -33,7 +33,10 @@ final class NeoShell: UIViewController {
 
 struct NeoAccountCoordinator { var currentName: String }
 struct NeoMenuEntry { let title: String; var icon: String? = nil; let action: () -> Void }
-enum NeoAnchoredMenu { enum Appearance { case pageActions } }
+final class NeoAnchoredMenu: UIView {
+  enum Appearance { case pageActions }
+  var titles: [String] { [] }
+}
 
 final class NeoUserSelector: NeoDropdownButton {
   func setValue(_ text: String) {}

@@ -83,13 +83,21 @@ private final class NeoRulesSmokeProtocol: URLProtocol {
     return putQueries.last
   }
 
-  private static func response(for request: URLRequest) -> (Int, [String: Any]) {
+  private static func response(for request: URLRequest) -> (Int, Any) {
     let method = request.httpMethod ?? "GET"
     let path = request.url?.path ?? ""
     let key = method + " " + path
     let query = queryMap(request.url)
     lock.lock()
+    defer { lock.unlock() }
     counts[key, default: 0] += 1
+
+    if method == "GET", path == "/api/channels" {
+      let channel: [String: Any] = [
+        "id": 1, "name": "Fixture Station", "channelType": "GR", "hasLogoData": false
+      ]
+      return (200, [channel])
+    }
 
     var status = 200
     var value: [String: Any] = [:]
@@ -100,10 +108,6 @@ private final class NeoRulesSmokeProtocol: URLProtocol {
           ["id": 8, "name": "Other user"],
         ]
       ]
-    } else if method == "GET", path == "/api/channels" {
-      value = [[
-        "id": 1, "name": "Fixture Station", "channelType": "GR", "hasLogoData": false
-      ]]
     } else if method == "GET", path == "/api/config" {
       value = ["encode": [], "recorded": [], "broadcast": ["GR": true]]
     } else if method == "GET", path == "/api/rules" {
@@ -147,7 +151,6 @@ private final class NeoRulesSmokeProtocol: URLProtocol {
       status = 404
       value = ["message": "unexpected fixture request: " + method + " " + path]
     }
-    lock.unlock()
     return (status, value)
   }
 
