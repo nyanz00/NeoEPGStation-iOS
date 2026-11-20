@@ -4,7 +4,7 @@ import UIKit
 // the native subtitle path; commentary stays in the shared comment worker.
 final class NeoStreamingDialog: UIViewController {
   private let file: NeoVideoFile, qualities: [String], start: (Int, Int, Int) -> Void
-  private let card = UIView(), scroll = UIScrollView(), stack = UIStackView()
+  private let backdrop = UIControl(), card = UIView(), scroll = UIScrollView(), stack = UIStackView()
   private let quality = NeoDropdownButton(frame: .zero), subtitle = NeoDropdownButton(frame: .zero), danmaku = NeoDropdownButton(frame:.zero)
   private let subtitleStatus = NeoStyle.label(size: 12, muted: true)
   private let loader: NeoCommentLoader
@@ -23,10 +23,14 @@ final class NeoStreamingDialog: UIViewController {
   }
   required init?(coder: NSCoder) { fatalError() }
   override func viewDidLoad() {
-    super.viewDidLoad(); view.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+    super.viewDidLoad(); view.backgroundColor = .clear
+    backdrop.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+    backdrop.isAccessibilityElement = false
+    backdrop.accessibilityIdentifier = "streamingDialog.backdrop"
+    backdrop.addTarget(self, action: #selector(backdropTapped), for: .touchUpInside)
     card.backgroundColor = NeoStyle.paper; card.layer.cornerRadius = 12; card.clipsToBounds = true
     card.layer.borderWidth = 1; card.layer.borderColor = NeoStyle.border.cgColor
-    view.addSubview(card); card.addSubview(scroll); scroll.addSubview(stack)
+    view.addSubview(backdrop); view.addSubview(card); card.addSubview(scroll); scroll.addSubview(stack)
     stack.axis = .vertical; stack.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
       stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor), stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
@@ -57,7 +61,6 @@ final class NeoStreamingDialog: UIViewController {
     for button in [cancel, watch] { button.heightAnchor.constraint(equalToConstant: 42).isActive = true; actions.addArrangedSubview(button) }
     cancel.widthAnchor.constraint(equalToConstant: 116).isActive = true; watch.widthAnchor.constraint(equalToConstant: 74).isActive = true
     stack.addArrangedSubview(padded(actions, top: 12, bottom: 12, horizontal: 12))
-    let tap = UITapGestureRecognizer(target: self, action: #selector(tappedBackground(_:))); tap.cancelsTouchesInView = false; view.addGestureRecognizer(tap)
   }
   private func padded(_ child: UIView, top: CGFloat, bottom: CGFloat, horizontal: CGFloat, isTitle: Bool = false) -> UIView {
     let box = UIView(); box.addSubview(child); child.translatesAutoresizingMaskIntoConstraints = false
@@ -138,6 +141,7 @@ final class NeoStreamingDialog: UIViewController {
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews()
+    backdrop.frame = view.bounds
     let inset = NeoStyle.dialogTitleInset(viewportWidth:view.bounds.width)
     for (index,edge) in titleEdges.enumerated() { edge.constant = index % 2 == 0 ? inset : -inset }
     let area = view.bounds.inset(by: view.safeAreaInsets).insetBy(dx: 12, dy: 12), width = min(444, area.width)
@@ -146,7 +150,7 @@ final class NeoStreamingDialog: UIViewController {
       withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel).height)
     card.frame = CGRect(x: area.midX-width/2, y: area.midY-height/2, width: width, height: height); scroll.frame = card.bounds
   }
-  @objc private func tappedBackground(_ gesture: UITapGestureRecognizer) { if !card.frame.contains(gesture.location(in: view)) { cancel() } }
+  @objc private func backdropTapped() { cancel() }
   private func cancel() { closed = true; loader.close(); dismiss(animated: true) }
   private func watch() {
     guard !closed else { return }; closed = true; loader.close()
@@ -159,37 +163,67 @@ final class NeoStreamingDialog: UIViewController {
   static func smokeQualityMenuKeepsValueInPlace() -> Bool {
     let file = NeoVideoFile(id: 1, name: "Fixture", type: "ts", size: 1, filename: nil)
     let source = URL(string: "https://encode-ui.invalid/fixture.ts")!
-    let dialog = NeoStreamingDialog(file: file, qualities: ["1080p", "720p"], source: source) { _, _, _ in }
-    defer { dialog.loader.close() }
+    // Keep the test on a phone-sized window and use a third real row so the
+    // last row's center is below the compact card, where the old root gesture
+    // recognizer incorrectly treated it as a background cancel.
+    let dialog = NeoStreamingDialog(file: file, qualities: ["1080p", "720p", "480p"], source: source) { _, _, _ in }
+    let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+    window.rootViewController = dialog; window.isHidden = false
+    defer {
+      dialog.loader.close()
+      window.rootViewController = nil; window.isHidden = true
+    }
     dialog.mode = 0
     dialog.loadViewIfNeeded()
-    let window = UIWindow(frame: UIScreen.main.bounds)
     dialog.view.frame = window.bounds
-    window.addSubview(dialog.view)
     dialog.view.layoutIfNeeded()
 
     let field = dialog.quality
     field.layoutIfNeeded()
     guard let value = dialog.fieldLabels[ObjectIdentifier(field)], value.superview === field, !value.bounds.isEmpty,
-      value.text == "1080p", field.menu == nil, field.dropdownRows.count == 2 else { return false }
+      value.text == "1080p", field.menu == nil, field.dropdownRows.count == 3 else { return false }
     let center = CGPoint(x: field.bounds.midX, y: field.bounds.midY)
     guard field.hitTest(center, with: nil) === field else { return false }
 
     let originalFrame = value.frame
     field.sendActions(for: .touchUpInside)
     guard let dropdown = field.smokeDropdown, dropdown.isOpen else { return false }
-    defer { dropdown.dismiss(animated: false) }
+    defer { field.smokeDropdown?.dismiss(animated: false) }
     let table = dropdown.smokeList
     dropdown.layoutIfNeeded()
+    table.layoutIfNeeded()
     let anchor = field.convert(field.bounds, to: dropdown)
     let choices = table.convert(table.bounds, to: dropdown)
     let anchored = !choices.isEmpty && (choices.minY >= anchor.maxY || choices.maxY <= anchor.minY)
     let keptVisible = !value.isHidden && value.text == "1080p" && value.frame == originalFrame
-    table.delegate?.tableView?(table, didSelectRowAt: IndexPath(row: 1, section: 0))
+    let rowPath = IndexPath(row: 2, section: 0)
+    guard let row = table.cellForRow(at: rowPath) else { return false }
+    let rowCenter = row.convert(CGPoint(x: row.bounds.midX, y: row.bounds.midY), to: dialog.view)
+    let rowHit = dialog.view.hitTest(rowCenter, with: nil)
+    let rowRoutesToDropdown = !dialog.card.frame.contains(rowCenter)
+      && (rowHit === row || rowHit?.isDescendant(of: table) == true)
+      && !(rowHit === dialog.backdrop || rowHit?.isDescendant(of: dialog.backdrop) == true)
+    guard rowRoutesToDropdown else { return false }
+
+    table.delegate?.tableView?(table, didSelectRowAt: rowPath)
     dialog.view.layoutIfNeeded()
     let selected = field.dropdownRows.first(where: { $0.selected })
-    return anchored && keptVisible && !dropdown.isOpen && value.text == "720p" && value.frame == originalFrame
-      && field.accessibilityValue == "720p" && selected?.title == "720p"
+    let selectedWithoutClosingDialog = !dropdown.isOpen && !dialog.closed && dialog.view.window === window
+    guard anchored && keptVisible && selectedWithoutClosingDialog && value.text == "480p" && value.frame == originalFrame
+      && field.accessibilityValue == "480p" && selected?.title == "480p" else { return false }
+
+    field.sendActions(for: .touchUpInside)
+    guard let outsideDropdown = field.smokeDropdown, outsideDropdown.isOpen else { return false }
+    let outsidePoint = CGPoint(x: 1, y: 1)
+    let openOutsideHit = dialog.view.hitTest(outsidePoint, with: nil)
+    let outsideRoutesToDropdown = openOutsideHit === outsideDropdown
+      || openOutsideHit?.isDescendant(of: outsideDropdown) == true
+    guard outsideRoutesToDropdown, outsideDropdown.accessibilityPerformEscape(), !outsideDropdown.isOpen,
+      !dialog.closed, dialog.view.window === window else { return false }
+    let backgroundHit = dialog.view.hitTest(outsidePoint, with: nil)
+    let backgroundUsesControl = backgroundHit === dialog.backdrop
+      || backgroundHit?.isDescendant(of: dialog.backdrop) == true
+    return backgroundUsesControl
   }
 
   static func runFeedbackProbe(host: UIViewController, source: URL, choice: Int, completion: @escaping (Int,Int,Int,[String:Bool]) -> Void) {

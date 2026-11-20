@@ -2,7 +2,7 @@ import Foundation
 
 /// The Web client's default Socket.IO namespace, over its Engine.IO v4 HTTP
 /// polling transport. No user credentials are copied to a configured socket port.
-/// These are invalidations only; encode data still comes from the guarded API.
+/// These events invalidate the UI. List data still comes from the guarded API.
 enum NeoEncodeSocketProtocol {
   static func endpoints(base: URL, port: Int?) -> [URL] {
     guard var parts = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return [] }
@@ -25,23 +25,24 @@ enum NeoEncodeSocketProtocol {
     return parts.url!
   }
   static func packets(_ payload: String) -> [String] { payload.components(separatedBy:"\u{1e}") }
-  static func isUpdate(_ packet: String) -> Bool {
+  static func isUpdate(_ packet: String, events: Set<String> = ["updateEncode", "updateStatus"]) -> Bool {
     guard packet.hasPrefix("42"), let data = String(packet.dropFirst(2)).data(using:.utf8),
       let event = try? JSONSerialization.jsonObject(with:data) as? [Any], let name = event.first as? String else { return false }
-    return name == "updateEncode" || name == "updateStatus"
+    return events.contains(name)
   }
 }
 
-@MainActor final class NeoEncodeUpdates {
+@MainActor final class NeoServerStatusUpdates {
   private var task: Task<Void,Never>?
-  func start(api: NeoAPI, port: Int?, connectionChanged: ((Bool) -> Void)? = nil, updated: @escaping () -> Void) {
+  func start(api: NeoAPI, port: Int?, events: Set<String> = ["updateEncode", "updateStatus"],
+    connectionChanged: ((Bool) -> Void)? = nil, updated: @escaping () -> Void) {
     guard task == nil else { return }
     let endpoints = NeoEncodeSocketProtocol.endpoints(base:api.base,port:port)
     task = Task {
       var endpointIndex = 0, failures = 0
       while !Task.isCancelled, !endpoints.isEmpty {
         do {
-          try await Self.connect(session:api.session,endpoint:endpoints[endpointIndex],connectionChanged:connectionChanged,updated:updated)
+          try await Self.connect(session:api.session,endpoint:endpoints[endpointIndex],events:events,connectionChanged:connectionChanged,updated:updated)
         } catch {
           connectionChanged?(false)
           if Task.isCancelled { break }
@@ -65,7 +66,7 @@ enum NeoEncodeSocketProtocol {
       let text = String(data:data,encoding:.utf8) else { throw URLError(.badServerResponse) }
     return text
   }
-  private static func connect(session: URLSession, endpoint: URL, connectionChanged: ((Bool) -> Void)?, updated: @escaping () -> Void) async throws {
+  private static func connect(session: URLSession, endpoint: URL, events: Set<String>, connectionChanged: ((Bool) -> Void)?, updated: @escaping () -> Void) async throws {
     let opened = try await request(session:session,url:NeoEncodeSocketProtocol.url(endpoint),timeout:3)
     guard let first = NeoEncodeSocketProtocol.packets(opened).first, first.first == "0",
       let json = String(first.dropFirst()).data(using:.utf8),
@@ -86,7 +87,7 @@ enum NeoEncodeSocketProtocol {
         if packet.hasPrefix("2") {
           _ = try await request(session:session,url:NeoEncodeSocketProtocol.url(endpoint,sid:sid),body:"3"+String(packet.dropFirst()),timeout:3)
         } else if packet.hasPrefix("40") { connectionChanged?(true); changed = true }
-        else if NeoEncodeSocketProtocol.isUpdate(packet) { changed = true }
+        else if NeoEncodeSocketProtocol.isUpdate(packet, events: events) { changed = true }
       }
       if changed { updated() }
     }

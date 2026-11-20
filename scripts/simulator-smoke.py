@@ -84,8 +84,9 @@ def capture_ui(udid, stage, prefix, terminate_existing=True, failures=None):
         for source in (ui_container/'Documents').glob('encode-*.png' if stage == 'encode' else 'recorded-bulk-*.png'):
             shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
     if stage == 'program-search':
-        for source in (ui_container/'Documents').glob('program-search-*.png'):
-            shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
+        for pattern in ('program-search-*.png', 'rules-*.png'):
+            for source in (ui_container/'Documents').glob(pattern):
+                shutil.copyfile(source,Path('dist')/f'{prefix}-{source.name}')
     expected_route = ('connection' if stage == 'ipad-connection' else 'settings' if stage.startswith('settings')
                       else 'history' if stage == 'history' else 'search' if stage == 'program-search' else 'recorded')
     if (result.get('success') is not True or result.get('recordCount') != 4

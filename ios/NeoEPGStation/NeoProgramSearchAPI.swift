@@ -1,6 +1,26 @@
 import Foundation
 
 extension NeoAPI {
+  func programRules(_ query: NeoRuleListQuery, user: String, headers: [String: String]) async throws -> NeoRuleList {
+    var parts = URLComponents(url: url("/rules"), resolvingAgainstBaseURL: false)!
+    parts.queryItems = query.queryItems
+    let list: NeoRuleList = try await request(parts.url!, user: user, headers: headers)
+    guard list.total >= 0, Set(list.rules.map(\.id)).count == list.rules.count, list.rules.allSatisfy({ $0.id > 0 }) else {
+      throw NeoError("ルール一覧の応答形式が一致しません。")
+    }
+    return list
+  }
+
+  func setProgramRuleEnabled(_ id: Int, enabled: Bool, user: String, headers: [String: String]) async throws -> NeoRuleMutationResult {
+    var parts = URLComponents(url: url("/rules/\(id)/\(enabled ? "enable" : "disable")"), resolvingAgainstBaseURL: false)!
+    if !enabled { parts.queryItems = [.init(name: "syncAnnictStopWatching", value: String(NeoAnnictPreferences.stopWatchingOnRuleDisable))] }
+    return try await request(parts.url!, method: "PUT", user: user, headers: headers)
+  }
+
+  func deleteProgramRule(_ id: Int, user: String, headers: [String: String]) async throws -> NeoRuleMutationResult {
+    try await request(url("/rules/\(id)"), method: "DELETE", user: user, headers: headers)
+  }
+
   func programRule(_ id: Int, user: String, headers: [String: String]) async throws -> NeoProgramRule {
     let rule: NeoProgramRule = try await request(url("/rules/\(id)"), user: user, headers: headers)
     guard rule.id == id else { throw NeoError("指定したルールの情報を取得できませんでした。") }
@@ -21,7 +41,9 @@ extension NeoAPI {
       throw NeoError("ルール設定を保存用の形式に変換できませんでした。")
     }
     if let id {
-      let result: Updated = try await request(url("/rules/\(id)"), method: "PUT", body: body, user: user, headers: headers)
+      var parts = URLComponents(url: url("/rules/\(id)"), resolvingAgainstBaseURL: false)!
+      parts.queryItems = [.init(name: "syncAnnictStopWatching", value: String(NeoAnnictPreferences.stopWatchingOnRuleDisable))]
+      let result: Updated = try await request(parts.url!, method: "PUT", body: body, user: user, headers: headers)
       return [result.annictStatusError, result.annictLinkError].compactMap { $0 }
     }
     let result: Added = try await request(url("/rules"), method: "POST", body: body, user: user, headers: headers)

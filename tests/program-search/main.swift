@@ -234,6 +234,20 @@ struct ProgramSearchTests {
       && reservation.displayProgram.name == "A" && reservation.displayProgram.durationMinutes == 1,
       "rule reservation exposes conflict status and display program")
 
-    print("Program search tests passed (\(assertionCount) assertions)")
+    let rulesQuery = NeoRuleListQuery(userID: 7, keyword: "作品", hasReserve: true, page: 3, limit: 24)
+    let queryParams = Dictionary(uniqueKeysWithValues: rulesQuery.queryItems.map { ($0.name, $0.value) })
+    expect(queryParams == ["type": "normal", "offset": "48", "limit": "24", "userId": "7", "keyword": "作品", "hasReserve": "true"],
+      "rule list uses the Web reservation type, filters and offset")
+    expect(NeoRuleListQuery().queryItems.map(\.name) == ["type", "offset", "limit"], "all users and unselected filters are omitted")
+    expect(rulesQuery.pageCount(total: 49) == 3 && rulesQuery.pageCount(total: 0) == 1, "rule page count handles empty and partial last pages")
+
+    let ruleListData = Data(#"{"rules":[{"id":1,"isTimeSpecification":false,"searchOption":{"keyword":"  作品 ","channelIds":[40,41],"genres":[{"genre":7,"subGenre":0},{"genre":7,"subGenre":0}]},"reserveOption":{"enable":true,"allowEndLack":false,"avoidDuplicate":false},"reservesCnt":2,"annictId":35,"encodeOption":{"mode1":"HEVC","mode2":"H264","startDelayMinutes":10}}],"total":1}"#.utf8)
+    let ruleList = try JSONDecoder().decode(NeoRuleList.self, from: ruleListData)
+    guard let listRule = ruleList.rules.first else { fatalError("Missing fixture rule") }
+    expect(listRule.reservesCnt == 2 && listRule.annictId == 35 && listRule.listTitle == "作品", "rule card decodes count, link, and title")
+    expect(listRule.listConditions(channelNames: [40: "放送局"]) == "放送局、41 / アニメ・特撮 / 国内アニメ", "rule card joins channels and deduplicates genre paths")
+    expect(listRule.listEncodeSummary == "エンコード: HEVC、H264（録画完了後10分待機）", "rule card shows all modes and encode delay")
+
+    print("Program search and rule tests passed (\(assertionCount) assertions)")
   }
 }

@@ -9,6 +9,34 @@ enum NeoIcon {
     let path = UIBezierPath()
     switch name {
     // Exact MUI paths and Web MulticastIcon (MDI); see licenses/README.md.
+    case "AddOutlined":
+      path.append(UIBezierPath(rect: CGRect(x: 5, y: 11, width: 14, height: 2)))
+      path.append(UIBezierPath(rect: CGRect(x: 11, y: 5, width: 2, height: 14)))
+    case "DoneOutlined":
+      path.move(to: CGPoint(x: 9, y: 16.2))
+      path.addLine(to: CGPoint(x: 4.8, y: 12))
+      path.addLine(to: CGPoint(x: 3.4, y: 13.4))
+      path.addLine(to: CGPoint(x: 9, y: 19))
+      path.addLine(to: CGPoint(x: 21, y: 7))
+      path.addLine(to: CGPoint(x: 19.6, y: 5.6))
+      path.close()
+    case "FilterAltOutlined":
+      path.move(to: CGPoint(x: 7, y: 6))
+      path.addLine(to: CGPoint(x: 17, y: 6))
+      path.addLine(to: CGPoint(x: 11.99, y: 12.3))
+      path.close()
+      path.move(to: CGPoint(x: 4.25, y: 5.61))
+      path.addCurve(to: CGPoint(x: 10, y: 13), controlPoint1: CGPoint(x: 6.27, y: 8.2), controlPoint2: CGPoint(x: 10, y: 13))
+      path.addLine(to: CGPoint(x: 10, y: 19))
+      path.addCurve(to: CGPoint(x: 11, y: 20), controlPoint1: CGPoint(x: 10, y: 19.55), controlPoint2: CGPoint(x: 10.45, y: 20))
+      path.addLine(to: CGPoint(x: 13, y: 20))
+      path.addCurve(to: CGPoint(x: 14, y: 19), controlPoint1: CGPoint(x: 13.55, y: 20), controlPoint2: CGPoint(x: 14, y: 19.55))
+      path.addLine(to: CGPoint(x: 14, y: 13))
+      path.addCurve(to: CGPoint(x: 19.74, y: 5.61), controlPoint1: CGPoint(x: 14, y: 13), controlPoint2: CGPoint(x: 17.72, y: 8.2))
+      path.addCurve(to: CGPoint(x: 18.95, y: 4), controlPoint1: CGPoint(x: 20.25, y: 4.95), controlPoint2: CGPoint(x: 19.78, y: 4))
+      path.addLine(to: CGPoint(x: 5.04, y: 4))
+      path.addCurve(to: CGPoint(x: 4.25, y: 5.61), controlPoint1: CGPoint(x: 4.21, y: 4), controlPoint2: CGPoint(x: 3.74, y: 4.95))
+      path.close()
     case "PlaylistAddOutlined":
       path.append(UIBezierPath(rect: CGRect(x: 3, y: 6, width: 11, height: 2)))
       path.append(UIBezierPath(rect: CGRect(x: 3, y: 10, width: 11, height: 2)))
@@ -199,7 +227,7 @@ enum NeoIcon {
       path.addLine(to:CGPoint(x:10.58,y:10.41))
       path.addLine(to:CGPoint(x:12.16,y:12))
       path.close()
-    case "CheckBox":
+    case "CheckBox", "IndeterminateCheckBox":
       path.move(to:CGPoint(x:19,y:3))
       path.addLine(to:CGPoint(x:5,y:3))
       path.addCurve(to:CGPoint(x:3,y:5),controlPoint1:CGPoint(x:3.89,y:3),controlPoint2:CGPoint(x:3,y:3.9))
@@ -209,6 +237,14 @@ enum NeoIcon {
       path.addCurve(to:CGPoint(x:21,y:19),controlPoint1:CGPoint(x:20.11,y:21),controlPoint2:CGPoint(x:21,y:20.1))
       path.addLine(to:CGPoint(x:21,y:5))
       path.addCurve(to:CGPoint(x:19,y:3),controlPoint1:CGPoint(x:21,y:3.9),controlPoint2:CGPoint(x:20.11,y:3))
+      if name == "IndeterminateCheckBox" {
+        path.move(to: CGPoint(x: 17, y: 13))
+        path.addLine(to: CGPoint(x: 7, y: 13))
+        path.addLine(to: CGPoint(x: 7, y: 11))
+        path.addLine(to: CGPoint(x: 17, y: 11))
+        path.close()
+        break
+      }
       path.move(to:CGPoint(x:10,y:17))
       path.addLine(to:CGPoint(x:5,y:12))
       path.addLine(to:CGPoint(x:6.41,y:10.59))
@@ -217,7 +253,7 @@ enum NeoIcon {
       path.addLine(to:CGPoint(x:19,y:8))
       path.addLine(to:CGPoint(x:10,y:17))
       path.close()
-    case "CheckBoxOutlineBlank":
+    case "CheckBoxOutlineBlank", "CheckBoxOutlined":
       path.move(to:CGPoint(x:19,y:5))
       path.addLine(to:CGPoint(x:19,y:19))
       path.addLine(to:CGPoint(x:5,y:19))
@@ -233,6 +269,15 @@ enum NeoIcon {
       path.addCurve(to:CGPoint(x:21,y:19),controlPoint1:CGPoint(x:20.1,y:21),controlPoint2:CGPoint(x:21,y:20.1))
       path.addLine(to:CGPoint(x:21,y:5))
       path.addCurve(to:CGPoint(x:19,y:3),controlPoint1:CGPoint(x:21,y:3.9),controlPoint2:CGPoint(x:20.1,y:3))
+      if name == "CheckBoxOutlined" {
+        path.move(to: CGPoint(x: 17.99, y: 9))
+        path.addLine(to: CGPoint(x: 16.58, y: 7.58))
+        path.addLine(to: CGPoint(x: 9.99, y: 14.17))
+        path.addLine(to: CGPoint(x: 7.41, y: 11.6))
+        path.addLine(to: CGPoint(x: 5.99, y: 13.01))
+        path.addLine(to: CGPoint(x: 9.99, y: 17))
+        path.close()
+      }
     case "Multicast":
       path.move(to:CGPoint(x:17,y:2))
       path.addLine(to:CGPoint(x:17,y:4))

@@ -404,6 +404,16 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
         guard let self, let value = Int(length?.text ?? ""), (1...1000).contains(value) else { self?.alert("表示件数は1〜1000で入力してください。"); return }
         self.view.endEditing(true); api.recordedLength = value; self.alert("設定を保存しました。")
       }
+      let rulesLength = UITextField(); rulesLength.text = String(api.rulesLength); rulesLength.keyboardType = .numberPad
+      rulesLength.textColor = .white; rulesLength.borderStyle = .roundedRect; rulesLength.backgroundColor = NeoStyle.paper
+      rulesLength.widthAnchor.constraint(equalToConstant: 100).isActive = true; rulesLength.accessibilityLabel = "ルール表示件数"
+      row("ルール表示件数", explanation: "1ページの表示件数。初期値24件、1〜1000件。このアプリに保存します。", control: rulesLength)
+      button("ルール表示件数を保存") { [weak self, weak rulesLength] in
+        guard let self, let value = Int(rulesLength?.text ?? ""), (1...1000).contains(value) else {
+          self?.alert("表示件数は1〜1000で入力してください。"); return
+        }
+        self.view.endEditing(true); api.rulesLength = value; self.alert("設定を保存しました。")
+      }
       let searchLimit = UITextField(); searchLimit.text = String(api.programSearchLimit); searchLimit.keyboardType = .numberPad
       searchLimit.textColor = .white; searchLimit.borderStyle = .roundedRect; searchLimit.backgroundColor = NeoStyle.paper
       searchLimit.widthAnchor.constraint(equalToConstant: 100).isActive = true; searchLimit.accessibilityLabel = "検索最大表示件数"
@@ -490,6 +500,8 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
       let control = UIStackView(arrangedSubviews:[value,amount]); control.spacing = 8
       row("視聴判定割合",explanation:"シークを除き、実際に再生した累計時間がこの割合に達した時に記録します。",control:control)
     }
+    toggle("ルール無効化時に視聴中断扱いする", explanation: "オフにすると、Annict経由の最後の有効ルールを無効にしても作品の視聴ステータスを変更しません",
+      on: NeoAnnictPreferences.stopWatchingOnRuleDisable) { NeoAnnictPreferences.stopWatchingOnRuleDisable = $0 }
     toggle("最終話視聴後に作品を「見た」にする",explanation:"EPGの最終回表示を最優先し、表示がない場合はAnnictのエピソード情報で最終話を確認して更新します。",on:NeoAnnictPreferences.markFinal) { [weak self] in NeoAnnictPreferences.markFinal = $0; self?.render() }
     let rules = UISwitch(); rules.isOn = NeoAnnictPreferences.disableFinalRules; rules.onTintColor = NeoStyle.accent; rules.isEnabled = NeoAnnictPreferences.markFinal
     rules.accessibilityLabel = "最終話視聴後にルールを無効化する"

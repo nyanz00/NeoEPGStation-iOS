@@ -211,11 +211,13 @@ extension NeoPage {
 }
 
 extension NeoShell {
-  func recordingNotice(_ message: String, error: Bool = false) {
+  func recordingNotice(_ message: String, error: Bool = false, warning: Bool = false) {
     view.viewWithTag(80921)?.removeFromSuperview()
     let label = UILabel(); label.tag = 80921; label.text = "  "+message+"  "; label.numberOfLines = 0
     label.font = .systemFont(ofSize:14); label.textColor = error ? .white : UIColor.black.withAlphaComponent(0.87)
-    label.backgroundColor = error ? UIColor(red:211/255,green:47/255,blue:47/255,alpha:1) : UIColor(red:56/255,green:142/255,blue:60/255,alpha:1)
+    if error { label.backgroundColor = UIColor(red: 211/255, green: 47/255, blue: 47/255, alpha: 1) }
+    else if warning { label.backgroundColor = UIColor(red: 255/255, green: 167/255, blue: 38/255, alpha: 1) }
+    else { label.backgroundColor = UIColor(red: 56/255, green: 142/255, blue: 60/255, alpha: 1) }
     label.layer.cornerRadius = 4; label.clipsToBounds = true; label.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(label)
     NSLayoutConstraint.activate([label.centerXAnchor.constraint(equalTo:view.centerXAnchor),label.widthAnchor.constraint(lessThanOrEqualTo:view.widthAnchor,constant:-32),label.heightAnchor.constraint(greaterThanOrEqualToConstant:48),label.bottomAnchor.constraint(equalTo:view.safeAreaLayoutGuide.bottomAnchor,constant:-80)])

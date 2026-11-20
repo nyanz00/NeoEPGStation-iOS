@@ -112,7 +112,7 @@ private final class NeoEncodeSocketFixture: URLProtocol {
     let socketConfig = URLSessionConfiguration.ephemeral; socketConfig.protocolClasses = [NeoEncodeSocketFixture.self]
     let socketAPI = NeoAPI(base:URL(string:"https://socket-tests.invalid/epgstation")!,session:URLSession(configuration:socketConfig))
     socketAPI.activate(user:"private-user",headers:["Authorization":"private-token"])
-    let updates = NeoEncodeUpdates(); var updateCount = 0
+    let updates = NeoServerStatusUpdates(); var updateCount = 0
     updates.start(api:socketAPI,port:nil) { updateCount += 1 }
     let deadline = Date().addingTimeInterval(2)
     while updateCount == 0 && Date() < deadline { try await Task.sleep(nanoseconds:10_000_000) }

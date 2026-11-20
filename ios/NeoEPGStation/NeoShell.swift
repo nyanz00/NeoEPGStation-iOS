@@ -598,6 +598,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       else if id == "onair" { page = NeoOnAirPage(shell: self) }
       else if id == "encode" { page = NeoEncodePage(shell: self) }
       else if id == "search" { page = NeoProgramSearchPage(shell: self) }
+      else if id == "rule" { page = NeoRulesPage(shell: self) }
       else if id == "settings" { page = NeoSettingsPage(shell: self) }
       else if id == "history" { page = NeoHistoryPage(shell: self) }
       else { page = NeoPlaceholderPage(id: id, shell: self) }
@@ -614,7 +615,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     guard api != nil, popInteraction == nil, !routeBackRunning, active?.transitionCoordinator == nil else { return }
     historyReturnSnapshot = nil; historyReturnRevision = nil
     if let nav = controllers[id] {
-      if id == route, let list = nav.topViewController as? NeoRecordedPage {
+      if id == "rule" { nav.popToRootViewController(animated: id == route) }
+      else if id == route, let list = nav.topViewController as? NeoRecordedPage {
         if nav.viewControllers.count > 1 { nav.popViewController(animated: true) }
         else { list.returnToFirstPage() }
       } else if let list = nav.viewControllers.last(where: { $0 is NeoRecordedPage }) {
@@ -1351,7 +1353,12 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     if smokeStage == "program-search" {
       Task { [self] in
         var checks = await NeoProgramSearchSmoke.run(shell: self)
-        checks["streamingQualityDropdownKeepsFieldFixed"] = NeoStreamingDialog.smokeQualityMenuKeepsValueInPlace()
+        let searchAPI = api
+        let rulesChecks = await NeoRulesSmoke.run(shell: self)
+        checks.merge(rulesChecks) { _, new in new }
+        smokeUseAPI(searchAPI)
+        showRoute("search")
+        checks["streamingDropdownOutsideCardSelectsWithoutClosingDialog"] = NeoStreamingDialog.smokeQualityMenuKeepsValueInPlace()
         writeIPadSmoke(recorded, checks: checks, retained: retained)
       }
       return

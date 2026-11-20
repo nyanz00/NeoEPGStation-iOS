@@ -1,6 +1,6 @@
 import Foundation
 
-struct NeoProgramRule: Decodable {
+struct NeoProgramRule: Decodable, Equatable {
   let id: Int
   let userId: Int?
   let isTimeSpecification: Bool
@@ -8,6 +8,41 @@ struct NeoProgramRule: Decodable {
   let reserveOption: NeoProgramRuleReserveOption
   let saveOption: NeoProgramRuleSaveOption?
   let encodeOption: NeoProgramRuleEncodeOption?
+  var reservesCnt: Int? = nil
+  var annictId: Int? = nil
+
+  var listTitle: String {
+    let keyword = searchOption.keyword?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return keyword.isEmpty ? (isTimeSpecification ? "時刻指定ルール" : "キーワード指定なし") : keyword
+  }
+
+  func listConditions(channelNames: [Int: String]) -> String {
+    var types = searchOption.channelTypes ?? []
+    if searchOption.BS4K == true && !types.contains("BS4K") { types.append("BS4K") }
+    let channels: [String]
+    if let ids = searchOption.channelIds, !ids.isEmpty {
+      channels = ids.map { channelNames[$0] ?? String($0) }
+    } else if !types.isEmpty {
+      channels = types.map(NeoProgramSearchMetadata.channelTypeLabel)
+    } else {
+      channels = [("GR", searchOption.GR), ("BS", searchOption.BS), ("CS", searchOption.CS),
+        ("SKY", searchOption.SKY), ("BS4K", searchOption.BS4K)].compactMap { $0.1 == true ? $0.0 : nil }
+    }
+    var seen = Set<String>()
+    let genres = (searchOption.genres ?? []).map { NeoProgramSearchMetadata.genreLabel($0.genre, sub: $0.subGenre) }
+      .filter { seen.insert($0).inserted }
+    let channelLabel = channels.isEmpty ? "全局" : channels.joined(separator: "、")
+    let genreLabel = genres.isEmpty ? "全ジャンル" : genres.joined(separator: "、")
+    return "\(channelLabel) / \(genreLabel)"
+  }
+
+  var listEncodeSummary: String? {
+    guard let encodeOption, encodeOption.mode1 != nil else { return nil }
+    let modes = [encodeOption.mode1, encodeOption.mode2, encodeOption.mode3]
+      .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "、")
+    let delay = encodeOption.startDelayMinutes ?? 0
+    return "エンコード: \(modes)" + (delay > 0 ? "（録画完了後\(delay)分待機）" : "")
+  }
 
   var scheduleLabel: String {
     guard let time = searchOption.times?.first, let start = time.start, let range = time.range else { return "時刻情報なし" }
@@ -16,6 +51,35 @@ struct NeoProgramRule: Decodable {
     let window = NeoProgramRuleTime.text(start) + "～" + NeoProgramRuleTime.endText(start: start, range: range)
     return days.isEmpty ? window : "\(days) \(window)"
   }
+}
+
+struct NeoRuleListQuery: Equatable {
+  var userID: Int?
+  var keyword = ""
+  var hasReserve = false
+  var page = 1
+  var limit = 24
+
+  var queryItems: [URLQueryItem] {
+    var items: [URLQueryItem] = [.init(name: "type", value: "normal"),
+      .init(name: "offset", value: String((max(1, page) - 1) * limit)), .init(name: "limit", value: String(limit))]
+    if let userID, userID > 0 { items.append(.init(name: "userId", value: String(userID))) }
+    if !keyword.isEmpty { items.append(.init(name: "keyword", value: keyword)) }
+    if hasReserve { items.append(.init(name: "hasReserve", value: "true")) }
+    return items
+  }
+
+  func pageCount(total: Int) -> Int { total > 0 ? (total - 1) / limit + 1 : 1 }
+}
+
+struct NeoRuleList: Decodable, Equatable {
+  let rules: [NeoProgramRule]
+  let total: Int
+}
+
+struct NeoRuleMutationResult: Decodable {
+  let annictStatusError: String?
+  let annictLinkError: String?
 }
 
 struct NeoProgramRuleWrite: Encodable {
@@ -27,7 +91,7 @@ struct NeoProgramRuleWrite: Encodable {
   let encodeOption: NeoProgramRuleEncodeOption?
 }
 
-struct NeoProgramRuleReserveOption: Codable {
+struct NeoProgramRuleReserveOption: Codable, Equatable {
   var enable: Bool
   var allowEndLack: Bool
   var avoidDuplicate: Bool
@@ -35,13 +99,13 @@ struct NeoProgramRuleReserveOption: Codable {
   var tags: [Int]?
 }
 
-struct NeoProgramRuleSaveOption: Codable {
+struct NeoProgramRuleSaveOption: Codable, Equatable {
   var parentDirectoryName: String?
   var directory: String?
   var recordedFormat: String?
 }
 
-struct NeoProgramRuleEncodeOption: Codable {
+struct NeoProgramRuleEncodeOption: Codable, Equatable {
   var mode1: String?, mode2: String?, mode3: String?
   var channelIds1: [Int]?, channelIds2: [Int]?, channelIds3: [Int]?
   var channelId1: Int?, channelId2: Int?, channelId3: Int?

@@ -280,7 +280,9 @@ jobs:
               ios/NeoEPGStation/NeoProgramRuleModels.swift ios/NeoEPGStation/NeoProgramRuleEditor.swift \
               ios/NeoEPGStation/NeoProgramSearchFormView.swift ios/NeoEPGStation/NeoProgramSearchPage.swift \
               ios/NeoEPGStation/NeoProgramSearchControls.swift ios/NeoEPGStation/NeoProgramSearchPicker.swift \
-              ios/NeoEPGStation/NeoProgramDetailDialog.swift ios/NeoEPGStation/NeoProgramSearchSmoke.swift tests/program-search/ui-typecheck.swift
+              ios/NeoEPGStation/NeoEncodeUpdates.swift ios/NeoEPGStation/NeoRulesPage.swift ios/NeoEPGStation/NeoRuleCard.swift \
+              ios/NeoEPGStation/NeoProgramDetailDialog.swift ios/NeoEPGStation/NeoProgramSearchSmoke.swift \
+              ios/NeoEPGStation/NeoRulesSmoke.swift tests/program-search/ui-typecheck.swift
           fi
       - name: Check dead loopback relay and remote playlist recovery
         id: relay-recovery-checks
@@ -416,7 +418,7 @@ jobs:
       - name: Check encode UI on iPhone and iPad
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'encode' }}
         run: python3 -u scripts/simulator-smoke.py --encode-only
-      - name: Check program search UI on iPhone and iPad
+      - name: Check program search, rules and dropdown UI on iPhone and iPad
         if: ${{ !cancelled() && steps.simulator-build.outcome == 'success' && inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'program-search' }}
         run: python3 -u scripts/simulator-smoke.py --program-search-only
       - name: Check recorded bulk actions on iPhone and iPad

@@ -387,7 +387,7 @@ class NeoLiveDialog: UIViewController {
   var contentBackground: UIColor { UIColor.white.withAlphaComponent(0.08) }
   var contentHorizontalInset: CGFloat { 24 }
   var screenHorizontalInset: CGFloat { 12 }
-  private let card = UIView(), scroll = UIScrollView(), stack = UIStackView(), actions = UIStackView()
+  private let backdrop = UIControl(), card = UIView(), scroll = UIScrollView(), stack = UIStackView(), actions = UIStackView()
   private let headingLabel = NeoStyle.label(size:20,bold:true), contentFill = UIView(), topLine = UIView(), bottomLine = UIView()
   private lazy var closeButton = NeoStyle.iconButton("Close",label:"閉じる") { [weak self] in self?.cancel() }
   private let heading: String
@@ -398,7 +398,10 @@ class NeoLiveDialog: UIViewController {
   var smokeTitleHeight: CGFloat { contentFill.frame.minY }
   var smokeCardHeight: CGFloat { card.frame.height }
   var smokeOnCancel: (() -> Void)?
-  func smokeOutsideTap(inside: Bool) { cancelIfOutside(inside ? card.center : CGPoint(x:1,y:1)) }
+  func smokeOutsideTap(inside: Bool) {
+    let point = inside ? card.center : CGPoint(x: 1, y: 1)
+    if view.hitTest(point, with: nil) === backdrop { backdrop.sendActions(for: .touchUpInside) }
+  }
   func smokePressCancel() { actions.arrangedSubviews.compactMap { $0 as? UIButton }.first { $0.title(for:.normal) == "キャンセル" }?.sendActions(for:.touchUpInside) }
   var smokeNativeOnly: Bool {
     func hasSwitch(_ view: UIView) -> Bool { view is UISwitch || view.subviews.contains(where:hasSwitch) }
@@ -406,18 +409,21 @@ class NeoLiveDialog: UIViewController {
   }
 #endif
   override func loadView() {
-    view = UIView(); view.backgroundColor = .black.withAlphaComponent(0.5)
+    view = UIView(); view.backgroundColor = .clear
+    backdrop.backgroundColor = .black.withAlphaComponent(0.5)
+    backdrop.isAccessibilityElement = false
+    backdrop.accessibilityIdentifier = "liveDialog.backdrop"
+    backdrop.addTarget(self, action: #selector(backdropTapped), for: .touchUpInside)
     card.backgroundColor = NeoStyle.paper; card.layer.cornerRadius = 12; card.layer.borderColor = NeoStyle.border.cgColor; card.layer.borderWidth = 1
     card.clipsToBounds = true; contentFill.backgroundColor = contentBackground
     topLine.backgroundColor = NeoStyle.border; bottomLine.backgroundColor = NeoStyle.border
-    view.addSubview(card); [contentFill,scroll,headingLabel,actions,topLine,bottomLine].forEach(card.addSubview); scroll.addSubview(stack)
+    view.addSubview(backdrop); view.addSubview(card); [contentFill,scroll,headingLabel,actions,topLine,bottomLine].forEach(card.addSubview); scroll.addSubview(stack)
     stack.axis = .vertical; stack.spacing = 14; actions.spacing = 12; actions.alignment = .center; actions.addArrangedSubview(UIView())
     stack.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:scroll.contentLayoutGuide.leadingAnchor),stack.trailingAnchor.constraint(equalTo:scroll.contentLayoutGuide.trailingAnchor),
       stack.topAnchor.constraint(equalTo:scroll.contentLayoutGuide.topAnchor),stack.bottomAnchor.constraint(equalTo:scroll.contentLayoutGuide.bottomAnchor),stack.widthAnchor.constraint(equalTo:scroll.frameLayoutGuide.widthAnchor)])
     headingLabel.attributedText = NeoStyle.dialogTitle(heading).attributedText; headingLabel.numberOfLines = 0
     if showsCloseButton { card.addSubview(closeButton) }
-    let tap = UITapGestureRecognizer(target:self,action:#selector(tappedBackground(_:))); tap.cancelsTouchesInView = false; view.addGestureRecognizer(tap)
   }
   func cancel() {
     guard !isBeingDismissed else { return }
@@ -429,8 +435,7 @@ class NeoLiveDialog: UIViewController {
     }
   }
   func setCloseEnabled(_ enabled: Bool) { closeButton.isEnabled = enabled }
-  private func cancelIfOutside(_ point: CGPoint) { if !card.frame.contains(point) { cancel() } }
-  @objc private func tappedBackground(_ gesture: UITapGestureRecognizer) { cancelIfOutside(gesture.location(in:view)) }
+  @objc private func backdropTapped() { cancel() }
   func addText(_ text: String, bold: Bool = false) {
     loadViewIfNeeded(); guard !text.isEmpty else { return }; let label = NeoStyle.label(text,size:bold ? 20 : 14,bold:bold,muted:!bold); label.numberOfLines = 0; stack.addArrangedSubview(label)
   }
@@ -450,7 +455,8 @@ class NeoLiveDialog: UIViewController {
     return button
   }
   override func viewDidLayoutSubviews() {
-    super.viewDidLayoutSubviews(); let width = min(maximumWidth,max(0,view.bounds.width-2*screenHorizontalInset))
+    super.viewDidLayoutSubviews(); backdrop.frame = view.bounds
+    let width = min(maximumWidth,max(0,view.bounds.width-2*screenHorizontalInset))
     let content = stack.systemLayoutSizeFitting(CGSize(width:width-2*contentHorizontalInset,height:UIView.layoutFittingCompressedSize.height),withHorizontalFittingPriority:.required,verticalFittingPriority:.fittingSizeLevel).height
     let inset = titleInset ?? NeoStyle.dialogTitleInset(viewportWidth:view.bounds.width)
     let verticalInset = titleVerticalInset ?? inset

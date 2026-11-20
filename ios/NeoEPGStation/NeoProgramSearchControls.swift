@@ -42,7 +42,7 @@ final class NeoProgramSearchInput: UIView {
   private let placeholder: String
   let fieldLabel: String
 
-  init(label: String, placeholder: String, field: UITextField, accessory: UIView, fieldContent: UIView? = nil) {
+  init(label: String, placeholder: String, field: UITextField, accessory: UIView, fieldContent: UIView? = nil, verticalInset: CGFloat = 8) {
     fieldLabel = label
     self.field = field
     self.placeholder = placeholder
@@ -69,8 +69,8 @@ final class NeoProgramSearchInput: UIView {
       accessory.heightAnchor.constraint(equalToConstant: Self.accessoryWidth),
       contents.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.leadingInset),
       contents.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.trailingInset),
-      contents.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-      contents.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+      contents.topAnchor.constraint(equalTo: topAnchor, constant: verticalInset),
+      contents.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalInset),
     ])
     updateAppearance()
   }

@@ -503,6 +503,10 @@ enum NeoAnnictPreferences {
     get { UserDefaults.standard.object(forKey:"annict.disableFinalRules") as? Bool ?? true }
     set { UserDefaults.standard.set(newValue,forKey:"annict.disableFinalRules") }
   }
+  static var stopWatchingOnRuleDisable: Bool {
+    get { UserDefaults.standard.object(forKey: "annict.stopWatchingOnRuleDisable") as? Bool ?? true }
+    set { UserDefaults.standard.set(newValue, forKey: "annict.stopWatchingOnRuleDisable") }
+  }
   static var watchOptions: [String:Any] { ["markWorkWatchedOnFinalEpisode":markFinal,"disableRulesOnFinalEpisode":markFinal && disableFinalRules] }
   static func shouldRecord(started: Bool, watched: Double, duration: Double) -> Bool {
     guard started else { return false }
@@ -514,6 +518,7 @@ extension Notification.Name {
   static let neoAccountChanged = Notification.Name("NeoAccountChanged")
   static let neoHistoryChanged = Notification.Name("NeoHistoryChanged")
   static let neoRecordingPreferencesChanged = Notification.Name("NeoRecordingPreferencesChanged")
+  static let neoRuleListPreferencesChanged = Notification.Name("NeoRuleListPreferencesChanged")
   static let neoAnnictChanged = Notification.Name("NeoAnnictChanged")
   static let neoTextPreferencesChanged = Notification.Name("NeoTextPreferencesChanged")
   static let neoRecordedChanged = Notification.Name("NeoRecordedChanged")
@@ -592,6 +597,13 @@ final class NeoAPI {
     get { min(1000, max(1, UserDefaults.standard.object(forKey: "recorded.length." + base.absoluteString) as? Int ?? 24)) }
     set { UserDefaults.standard.set(min(1000, max(1, newValue)), forKey: "recorded.length." + base.absoluteString)
       NotificationCenter.default.post(name: .neoRecordingPreferencesChanged, object: self) }
+  }
+  var rulesLength: Int {
+    get { min(1000, max(1, UserDefaults.standard.object(forKey: "rules.length." + base.absoluteString) as? Int ?? 24)) }
+    set {
+      UserDefaults.standard.set(min(1000, max(1, newValue)), forKey: "rules.length." + base.absoluteString)
+      NotificationCenter.default.post(name: .neoRuleListPreferencesChanged, object: self)
+    }
   }
   var deleteRecordedDefaultValue: Bool {
     get { UserDefaults.standard.bool(forKey:"recorded.deleteDefault."+base.absoluteString) }

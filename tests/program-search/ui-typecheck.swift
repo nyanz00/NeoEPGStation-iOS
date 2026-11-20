@@ -21,14 +21,50 @@ class NeoPage: UIViewController {
 final class NeoShell: UIViewController {
   var api: NeoAPI?
   var account: NeoAccountCoordinator?
+  var serverConfig: NeoServerConfig?
   func pushPage(requestedAt: CFTimeInterval = CACurrentMediaTime(), _ make: () -> NeoPage) {}
   func smokeUseAPI(_ value: NeoAPI?) { api = value }
   func showRoute(_ id: String) {}
   func goBack() {}
-  func recordingNotice(_ message: String, error: Bool = false) {}
+  func recordingNotice(_ message: String, error: Bool = false, warning: Bool = false) {}
+  func showPopup(anchor: UIView, entries: [NeoMenuEntry], appearance: NeoAnchoredMenu.Appearance) {}
+  func dismissPopup() {}
 }
 
 struct NeoAccountCoordinator { var currentName: String }
+struct NeoMenuEntry { let title: String; var icon: String? = nil; let action: () -> Void }
+enum NeoAnchoredMenu { enum Appearance { case pageActions } }
+
+final class NeoUserSelector: NeoDropdownButton {
+  func setValue(_ text: String) {}
+  func setCaptionVisible(_ visible: Bool) {}
+}
+
+final class NeoPaginationFooter: UIView {
+  func configure(page: Int, count: Int, mobile: Bool, extended: Bool = false,
+    jump: (() -> Void)? = nil, action: @escaping (Int) -> Void) {}
+}
+
+class NeoLiveDialog: UIViewController {
+  var contentBackground: UIColor { .clear }
+  var contentHorizontalInset: CGFloat { 24 }
+  init(title: String) { super.init(nibName: nil, bundle: nil) }
+  required init?(coder: NSCoder) { fatalError() }
+  func addView(_ view: UIView) {}
+  func addText(_ text: String, bold: Bool = false) {}
+  func addAction(_ title: String, filled: Bool = false, enabled: Bool = true, action: @escaping () -> Void) -> UIButton { UIButton() }
+  func cancel() {}
+}
+
+final class NeoPageJumpDialog: NeoLiveDialog {
+  init(page: Int, count: Int, onMove: @escaping (Int) -> Void) { super.init(title: "ページを指定") }
+  required init?(coder: NSCoder) { fatalError() }
+}
+
+final class NeoRecordedPage: NeoPage {
+  init(shell: NeoShell, filters: NeoRecordedFilters, viewerFilter: String) { super.init(title: "録画済み", shell: shell) }
+  required init?(coder: NSCoder) { fatalError() }
+}
 
 enum NeoPiPSmoke {
   static let directory = FileManager.default.temporaryDirectory

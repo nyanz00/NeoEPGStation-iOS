@@ -20,6 +20,7 @@ final class NeoUserSelector: NeoDropdownButton {
   }
   required init?(coder: NSCoder) { fatalError() }
   func setValue(_ text: String, background: UIColor = NeoStyle.paper) { value.text = text; accessibilityValue = text; caption.backgroundColor = background }
+  func setCaptionVisible(_ visible: Bool) { caption.isHidden = !visible }
   override func layoutSubviews() {
     super.layoutSubviews(); CATransaction.begin(); CATransaction.setDisableActions(true)
     outline.frame = bounds; outline.path = UIBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), cornerRadius: 4).cgPath
@@ -145,11 +146,11 @@ final class NeoPaginationFooter: UICollectionReusableView {
       x = bounds.width-side-4; add(count,icon:"PageLast",enabled:page < count)
       subviews.last?.accessibilityLabel = "最後のページ"
     }
-    accessibilityIdentifier = "recorded-pagination"
+    if accessibilityIdentifier == nil { accessibilityIdentifier = "recorded-pagination" }
   }
 }
 
-private final class NeoPageJumpDialog: NeoLiveDialog {
+final class NeoPageJumpDialog: NeoLiveDialog {
   let field = UITextField()
   private(set) var move: UIButton!
   private let count: Int, onMove: (Int) -> Void
@@ -230,12 +231,13 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     let columns = max(1, Int((width + 8) / 288))
     return min(300, floor((width - CGFloat(columns - 1) * 8) / CGFloat(columns)))
   }
-  init(shell: NeoShell, keyword: String = "", reverse: Bool = false, filters: NeoRecordedFilters? = nil) {
+  init(shell: NeoShell, keyword: String = "", reverse: Bool = false, filters: NeoRecordedFilters? = nil, viewerFilter: String? = nil) {
     let layout = UICollectionViewFlowLayout(); collection = UICollectionView(frame: .zero, collectionViewLayout: layout)
     self.filters = filters ?? NeoRecordedFilters()
     if filters == nil { self.filters.keyword = keyword }
     self.reverse = reverse
-    self.locatedUserID = shell.api.flatMap { Int($0.viewer) }.flatMap { $0 > 0 ? $0 : nil }
+    self.locatedUserID = (viewerFilter ?? shell.api?.viewer).flatMap(Int.init).flatMap { $0 > 0 ? $0 : nil }
+    self.userFilterExplicit = viewerFilter != nil
     pageLength = shell.api?.recordedLength ?? 24
     super.init(title: "録画済み", shell: shell)
   }

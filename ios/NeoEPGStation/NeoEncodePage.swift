@@ -9,7 +9,7 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
   private var info = NeoEncodeInfo.empty, groups: [Group] = [], editingSelection = false, reordering = false
   private var selected = Set<Int>(), orderedIDs: [Int] = [], expectedIDs: [Int] = []
   private var task: Task<Void,Never>?, mutation: Task<Void,Never>?, observers: [NSObjectProtocol] = []
-  private let updates = NeoEncodeUpdates()
+  private let updates = NeoServerStatusUpdates()
   private var updatesTask: Task<Void,Never>?, channelTask: Task<Void,Never>?
   private var needsReload = false, renderedRows: [[Int]] = [], channelError = false
   private var didFinishInitialRead = false
