@@ -435,10 +435,11 @@ class NeoLiveDialog: UIViewController {
     loadViewIfNeeded(); guard !text.isEmpty else { return }; let label = NeoStyle.label(text,size:bold ? 20 : 14,bold:bold,muted:!bold); label.numberOfLines = 0; stack.addArrangedSubview(label)
   }
   func addView(_ value: UIView) { loadViewIfNeeded(); stack.addArrangedSubview(value) }
-  @discardableResult func addChoice(_ label: String, container: UIStackView? = nil) -> UIButton {
+  @discardableResult func addChoice(_ label: String, container: UIStackView? = nil) -> NeoDropdownButton {
     loadViewIfNeeded(); let field = UIStackView(); field.axis = .vertical; field.spacing = 3
     field.addArrangedSubview(NeoStyle.label(label,size:14,muted:true))
-    let button = UIButton(type:.system); button.contentHorizontalAlignment = .left; button.titleLabel?.font = .systemFont(ofSize:18); button.tintColor = .white; button.showsMenuAsPrimaryAction = true
+    let button = NeoDropdownButton(frame:.zero); button.contentHorizontalAlignment = .left; button.titleLabel?.font = .systemFont(ofSize:18)
+    button.setTitleColor(.white, for: .normal)
     button.heightAnchor.constraint(equalToConstant:38).isActive = true; field.addArrangedSubview(button)
     let line = UIView(); line.backgroundColor = NeoStyle.muted; line.heightAnchor.constraint(equalToConstant:1).isActive = true; field.addArrangedSubview(line); (container ?? stack).addArrangedSubview(field); return button
   }
@@ -469,7 +470,7 @@ class NeoLiveDialog: UIViewController {
 private final class NeoLiveStreamDialog: NeoLiveDialog {
   private let options: [NeoLiveOption]
   private var selected: NeoLiveOption?
-  private var stream: UIButton!, quality: UIButton!
+  private var stream: NeoDropdownButton!, quality: NeoDropdownButton!
   var onWatch: ((NeoLiveOption) -> Void)?
   init(title: String, options: [NeoLiveOption]) {
     self.options = options
@@ -495,11 +496,11 @@ private final class NeoLiveStreamDialog: NeoLiveDialog {
   private func updateChoices() {
     stream.setTitle((selected?.label ?? "")+" ▾",for:.normal); quality.setTitle((selected?.quality ?? "")+" ▾",for:.normal)
     let types = (NeoViewingPreferences.lowLatency ? ["m2tsll","m2ts"] : ["m2ts","m2tsll"]).filter { type in options.contains { $0.type == type } }
-    stream.menu = UIMenu(children:types.map { type in UIAction(title:type == "m2tsll" ? "M2TS-LL" : "M2TS",state:type == selected?.type ? .on : .off) { [weak self] _ in
+    stream.dropdownMenu = UIMenu(children:types.map { type in UIAction(title:type == "m2tsll" ? "M2TS-LL" : "M2TS",state:type == selected?.type ? .on : .off) { [weak self] _ in
       guard let self else { return }
       let values = self.options.filter { $0.type == type }; let index = NeoViewingPreferences.initialQuality(values.map(\.quality),saved:0)
       self.selected = values.indices.contains(index) ? values[index] : nil; self.updateChoices()
     } })
-    quality.menu = UIMenu(children:options.filter { $0.type == selected?.type }.map { value in UIAction(title:value.quality,state:value == selected ? .on : .off) { [weak self] _ in self?.selected = value; self?.updateChoices() } })
+    quality.dropdownMenu = UIMenu(children:options.filter { $0.type == selected?.type }.map { value in UIAction(title:value.quality,state:value == selected ? .on : .off) { [weak self] _ in self?.selected = value; self?.updateChoices() } })
   }
 }

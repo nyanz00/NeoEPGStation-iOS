@@ -36,7 +36,7 @@ final class NeoProgramSearchPickerController: UIViewController {
   private var cardWidthConstraint: NSLayoutConstraint!
   private var cardHeightConstraint: NSLayoutConstraint!
 
-  private let monthButton = UIButton(type: .system)
+  private let monthButton = NeoDropdownButton(frame: .zero)
   private var dayButtons: [UIButton] = []
   private let timeValueLabel = UILabel()
   private let timePicker = UIPickerView()
@@ -268,7 +268,6 @@ final class NeoProgramSearchPickerController: UIViewController {
     monthButton.titleLabel?.minimumScaleFactor = 0.8
     monthButton.accessibilityLabel = "年月を選択"
     monthButton.accessibilityHint = "年または月を変更します"
-    monthButton.showsMenuAsPrimaryAction = true
     monthButton.contentHorizontalAlignment = .left
     monthButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 42).isActive = true
     monthButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -362,7 +361,7 @@ final class NeoProgramSearchPickerController: UIViewController {
     let monthTitle = String(format: "%04d年%02d月", visibleYear, visibleMonth)
     monthButton.setTitle(monthTitle, for: .normal)
     monthButton.accessibilityValue = monthTitle
-    monthButton.menu = makeMonthMenu()
+    monthButton.dropdownMenu = makeMonthMenu()
 
     let firstDay = calendar.date(from: DateComponents(year: visibleYear, month: visibleMonth, day: 1))
     let firstWeekday = firstDay.map { calendar.component(.weekday, from: $0) } ?? 2

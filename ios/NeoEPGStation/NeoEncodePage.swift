@@ -12,6 +12,7 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
   private let updates = NeoEncodeUpdates()
   private var updatesTask: Task<Void,Never>?, channelTask: Task<Void,Never>?
   private var needsReload = false, renderedRows: [[Int]] = [], channelError = false
+  private var didFinishInitialRead = false
   private var channelAttempt = UUID()
   private var socketConnected = false
   private var revision: Int?, requestID = UUID(), visible = false
@@ -88,6 +89,7 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
     guard revision != api.identityRevision else { if visible { reload() }; return }
     requestID = UUID(); mutationID = UUID(); task?.cancel(); task = nil; mutation?.cancel(); mutation = nil
     confirm?.dismiss(animated:false); confirm = nil; info = .empty; selected = []; reordering = false; editingSelection = false
+    didFinishInitialRead = false; message.text = nil; spinner.stopAnimating()
     revision = api.identityRevision; render(); if visible { reload() }
   }
   func reload() {
@@ -96,7 +98,7 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
     needsReload = false
     let user = api.viewer, headers = api.profileHeaders, capturedRevision = api.identityRevision, halfWidth = api.isHalfWidthDisplayed
     revision = capturedRevision; let attempt = UUID(); requestID = attempt
-    if info.allItems.isEmpty && info.recoveryItems.isEmpty { spinner.startAnimating() }
+    if !didFinishInitialRead { spinner.startAnimating() }
     task = Task { [weak self] in
       guard let self else { return }
       defer { if requestID == attempt {
@@ -107,14 +109,20 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
         let value = try await api.encodes(user:user,headers:headers); try Task.checkCancellation()
         guard shell?.api === api, api.identityRevision == capturedRevision, api.profileHeaders == headers,
           api.isHalfWidthDisplayed == halfWidth, requestID == attempt else { return }
+        didFinishInitialRead = true
         let old = Set(info.allItems.map { $0.recorded.id }), new = Set(value.allItems.map { $0.recorded.id })
         info = value; selected.formIntersection(Set(value.allItems.map(\.id)))
         if !reordering { orderedIDs = value.waitItems.map(\.id) }
         for id in old.symmetricDifference(new) { api.recordingChanged(id) }
         message.text = nil; render(inPlace:true)
       } catch {
-        guard !Task.isCancelled, requestID == attempt else { return }
-        if groups.isEmpty { message.text = "エンコード情報を取得できませんでした" }
+        guard !Task.isCancelled, requestID == attempt, shell?.api === api, api.identityRevision == capturedRevision,
+          api.profileHeaders == headers, api.isHalfWidthDisplayed == halfWidth else { return }
+        didFinishInitialRead = true
+        if groups.isEmpty {
+          message.text = "エンコード情報を取得できませんでした"
+          message.isHidden = false
+        }
       }
     }
   }
@@ -132,7 +140,9 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
     let previousGroups = groups
     groups = [Group.running,.waiting,.scheduled,.recovery].filter { $0 == .recovery ? !info.recoveryItems.isEmpty : !items($0).isEmpty }
     let rows = groups.map { $0 == .recovery ? info.recoveryItems.map(\.id) : items($0).map(\.id) }
-    if groups.isEmpty && message.text == nil { message.text = "実行中、待機中、または開始予約中のエンコードはありません" }
+    if didFinishInitialRead && groups.isEmpty && message.text == nil {
+      message.text = "実行中、待機中、または開始予約中のエンコードはありません"
+    }
     if queueChanged { message.text = "編集中に待機キューが更新されました。キャンセルして最新の順番からやり直してください。" }
     message.isHidden = message.text == nil
     table.tableHeaderView = nil
@@ -309,6 +319,8 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
   var smokeCards: [NeoEncodeCard] { table.visibleCells.compactMap { $0 as? NeoEncodeCard } }
   var smokeSocketConnected: Bool { socketConnected }
   var smokeReadIdle: Bool { task == nil && !needsReload }
+  var smokeCentralSpinnerAnimating: Bool { spinner.isAnimating }
+  var smokeQueueMessage: String? { message.isHidden ? nil : message.text }
   func smokeLayoutCards() { view.layoutIfNeeded(); table.layoutIfNeeded(); smokeCards.forEach { $0.layoutIfNeeded(); $0.smokeTitle.layoutIfNeeded() } }
   var smokeSelected: Set<Int> { selected }
   var smokeOrder: [Int] { orderedIDs }

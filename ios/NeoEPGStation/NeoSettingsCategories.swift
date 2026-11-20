@@ -333,8 +333,8 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
       engine.setTitle(NeoPlaybackExperiment.selected.title, for: .normal); engine.tintColor = NeoStyle.accent
       engine.titleLabel?.font = .systemFont(ofSize: 14); engine.titleLabel?.numberOfLines = 2
       engine.widthAnchor.constraint(lessThanOrEqualToConstant: 180).isActive = true
-      engine.accessibilityIdentifier = "playback-experiment-engine"; engine.showsMenuAsPrimaryAction = true
-      engine.menu = UIMenu(children: NeoPlaybackExperiment.allCases.map { value in
+      engine.accessibilityIdentifier = "playback-experiment-engine"
+      engine.dropdownMenu = UIMenu(children: NeoPlaybackExperiment.allCases.map { value in
         UIAction(title: value.title, state: value == NeoPlaybackExperiment.selected ? .on : .off) { [weak self] _ in
           NeoPlaybackExperiment.selected = value; self?.render()
         }
@@ -346,8 +346,7 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
         guard let self else { return UIView() }
         let checkpoint = NeoSelectButton(frame:.zero)
         checkpoint.setTitle(NeoPlaybackExperiment.checkpointMode.title, for: .normal)
-        checkpoint.showsMenuAsPrimaryAction = true
-        checkpoint.menu = UIMenu(children: NeoCheckpointMode.allCases.map { value in
+        checkpoint.dropdownMenu = UIMenu(children: NeoCheckpointMode.allCases.map { value in
           UIAction(title: value.title, state: NeoPlaybackExperiment.checkpointMode == value ? .on : .off) { [weak self] _ in
             NeoPlaybackExperiment.checkpointMode = value; self?.render()
           }
@@ -446,8 +445,7 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
       selector.accessibilityIdentifier = "account-user-selector"
       selector.widthAnchor.constraint(equalToConstant: 160).isActive = true
       selector.heightAnchor.constraint(equalToConstant: 40).isActive = true
-      selector.showsMenuAsPrimaryAction = true
-      selector.menu = UIMenu(children: [UIDeferredMenuElement.uncached { [weak shell] completion in
+      selector.dropdownMenu = UIMenu(children: [UIDeferredMenuElement.uncached { [weak shell] completion in
         guard let account = shell?.account else { completion([]); return }
         account.loadSelectionMenu(completion: completion)
       }])
@@ -533,7 +531,7 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
       let control = NeoSelectButton(frame:.zero)
       control.setTitle(values.first { $0.0 == selected }?.1 ?? selected,for:.normal)
       control.accessibilityIdentifier = "viewing-"+title
-      control.menu = UIMenu(children:values.map { key,text in UIAction(title:text,state:key == selected ? .on : .off) { [weak self] _ in save(key); self?.render() } })
+      control.dropdownMenu = UIMenu(children:values.map { key,text in UIAction(title:text,state:key == selected ? .on : .off) { [weak self] _ in save(key); self?.render() } })
       return self.makeRow(title,control:control)
     }
     stack.addArrangedSubview(category == .viewing ? NeoDeferredSettingsRow(build:build) : build())
@@ -712,7 +710,8 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
   }
   var smokeAccountSelector: Bool {
     guard category == .account, let selector = stack.arrangedSubviews.flatMap({ $0.subviews }).first(where: { $0 is NeoUserSelector }) as? NeoUserSelector else { return false }
-    return selector.bounds.size == CGSize(width: 160, height: 40) && selector.showsMenuAsPrimaryAction && selector.menu != nil
+    return selector.bounds.size == CGSize(width: 160, height: 40)
+      && selector.smokeMenuButton.showsMenuAsPrimaryAction && selector.dropdownMenu != nil
   }
   func smokeSetHistoryDisabled(_ value: Bool) {
     if !contentConfigured { configureContent(); contentConfigured = true; render() }

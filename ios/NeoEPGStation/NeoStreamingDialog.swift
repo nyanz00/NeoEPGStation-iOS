@@ -5,7 +5,7 @@ import UIKit
 final class NeoStreamingDialog: UIViewController {
   private let file: NeoVideoFile, qualities: [String], start: (Int, Int, Int) -> Void
   private let card = UIView(), scroll = UIScrollView(), stack = UIStackView()
-  private let quality = UIButton(type: .system), subtitle = UIButton(type: .system), danmaku = UIButton(type:.system)
+  private let quality = NeoDropdownButton(frame: .zero), subtitle = NeoDropdownButton(frame: .zero), danmaku = NeoDropdownButton(frame:.zero)
   private let subtitleStatus = NeoStyle.label(size: 12, muted: true)
   private let loader: NeoCommentLoader
   private var watchButton: UIButton?
@@ -35,9 +35,9 @@ final class NeoStreamingDialog: UIViewController {
     stack.addArrangedSubview(padded(title, top: 16, bottom: 16, horizontal: 16, isTitle:true)); divider()
     let fields = UIStackView(); fields.axis = .vertical; fields.spacing = 12
     let row = UIStackView(); row.spacing = 12; row.distribution = .fillEqually
-    let stream = UIButton(type: .system); let type = file.type == "ts" ? "HLS-TS" : "HLS"
-    stream.setTitle(type, for: .normal); stream.showsMenuAsPrimaryAction = true
-    stream.menu = UIMenu(children: [UIAction(title: type, state: .on) { _ in }])
+    let stream = NeoDropdownButton(frame: .zero); let type = file.type == "ts" ? "HLS-TS" : "HLS"
+    stream.setTitle(type, for: .normal)
+    stream.dropdownMenu = UIMenu(children: [UIAction(title: type, state: .on) { _ in }])
     row.addArrangedSubview(field("ストリーム", button: stream)); row.addArrangedSubview(field("画質", button: quality))
     fields.addArrangedSubview(row); updateQuality()
     if file.type == "encoded" {
@@ -68,11 +68,11 @@ final class NeoStreamingDialog: UIViewController {
     return box
   }
   private func divider() { let line = UIView(); line.backgroundColor = NeoStyle.border; line.heightAnchor.constraint(equalToConstant: 1).isActive = true; stack.addArrangedSubview(line) }
-  private func field(_ title: String, button: UIButton) -> UIView {
+  private func field(_ title: String, button: NeoDropdownButton) -> UIView {
     let field = UIStackView(); field.axis = .vertical; field.spacing = 3
     field.addArrangedSubview(NeoStyle.label(title, size: 14, muted: true))
     button.contentHorizontalAlignment = .left; button.tintColor = .white; button.titleLabel?.font = .systemFont(ofSize: 18)
-    button.titleLabel?.lineBreakMode = .byTruncatingTail; button.showsMenuAsPrimaryAction = true
+    button.titleLabel?.lineBreakMode = .byTruncatingTail
     button.heightAnchor.constraint(equalToConstant: 38).isActive = true
     // Keep the field value independent of UIButton's menu/configuration state,
     // including the initial disabled -> ready transition during track lookup.
@@ -93,7 +93,7 @@ final class NeoStreamingDialog: UIViewController {
   }
   private func updateQuality() {
     showValue(qualities[mode], on: quality)
-    quality.menu = UIMenu(children: qualities.enumerated().filter { !$0.element.isEmpty }.map { index, name in
+    quality.dropdownMenu = UIMenu(children: qualities.enumerated().filter { !$0.element.isEmpty }.map { index, name in
       UIAction(title: name, state: index == mode ? .on : .off) { [weak self] _ in self?.mode = index; self?.updateQuality() }
     })
   }
@@ -124,7 +124,7 @@ final class NeoStreamingDialog: UIViewController {
   private func updateSubtitle() {
     showValue(tracks.first { $0.subtitleIndex == selectedSubtitle }?.displayName ?? "字幕なし", on: subtitle)
     let items = [(-1, "字幕なし")]+tracks.map { ($0.subtitleIndex, $0.displayName) }
-    subtitle.menu = UIMenu(children: items.map { index, name in
+    subtitle.dropdownMenu = UIMenu(children: items.map { index, name in
       UIAction(title: name, state: index == selectedSubtitle ? .on : .off) { [weak self] _ in self?.selectedSubtitle = index; self?.updateSubtitle() }
     })
   }
@@ -132,7 +132,7 @@ final class NeoStreamingDialog: UIViewController {
   private func updateDanmaku() {
     showValue(commentTracks.first { $0.subtitleIndex == selectedComment }?.displayName ?? "弾幕なし",on:danmaku)
     let items = [(-1,"弾幕なし")]+commentTracks.map { ($0.subtitleIndex,$0.displayName) }
-    danmaku.menu = UIMenu(children:items.map { index,name in
+    danmaku.dropdownMenu = UIMenu(children:items.map { index,name in
       UIAction(title:name,state:index == selectedComment ? .on : .off) { [weak self] _ in self?.selectDanmaku(index) }
     })
   }
@@ -156,6 +156,36 @@ final class NeoStreamingDialog: UIViewController {
     dismiss(animated: true) { [start, mode, selectedSubtitle, selectedComment] in start(mode, selectedSubtitle, selectedComment) }
   }
 #if targetEnvironment(simulator)
+  static func smokeQualityMenuKeepsValueInPlace() -> Bool {
+    let file = NeoVideoFile(id: 1, name: "Fixture", type: "ts", size: 1, filename: nil)
+    let source = URL(string: "https://encode-ui.invalid/fixture.ts")!
+    let dialog = NeoStreamingDialog(file: file, qualities: ["1080p", "720p"], source: source) { _, _, _ in }
+    defer { dialog.loader.close() }
+    dialog.mode = 0
+    dialog.loadViewIfNeeded()
+    dialog.view.frame = UIScreen.main.bounds
+    dialog.view.layoutIfNeeded()
+
+    let field = dialog.quality, trigger = field.smokeMenuButton
+    field.layoutIfNeeded()
+    guard let value = dialog.fieldLabels[ObjectIdentifier(field)], value.superview === field, !value.bounds.isEmpty,
+      value.text == "1080p", field.menu == nil, !field.bounds.isEmpty, trigger.frame == field.bounds,
+      trigger.showsMenuAsPrimaryAction, trigger.menu?.children.count == 2 else { return false }
+    let center = CGPoint(x: field.bounds.midX, y: field.bounds.midY)
+    guard field.hitTest(center, with: nil) === trigger else { return false }
+
+    let originalFrame = value.frame
+    trigger.isHidden = true
+    let keptVisible = !value.isHidden && value.text == "1080p" && value.frame == originalFrame
+    trigger.isHidden = false
+    dialog.mode = 1
+    dialog.updateQuality()
+    dialog.view.layoutIfNeeded()
+    let selected = trigger.menu?.children.compactMap { $0 as? UIAction }.first { $0.state == .on }
+    return keptVisible && value.text == "720p" && value.frame == originalFrame
+      && trigger.accessibilityValue == "720p" && selected?.title == "720p"
+  }
+
   static func runFeedbackProbe(host: UIViewController, source: URL, choice: Int, completion: @escaping (Int,Int,Int,[String:Bool]) -> Void) {
     let file = NeoVideoFile(id:1,name:"Fixture",type:"encoded",size:1,filename:nil)
     var checks = [String:Bool]()

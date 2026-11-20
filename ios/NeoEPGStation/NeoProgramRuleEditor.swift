@@ -705,7 +705,7 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     userPicker.setTitle("\(selectedName) ▾", for: .normal)
     userPicker.accessibilityIdentifier = "ruleEditor.user"
     userPicker.accessibilityLabel = "予約ユーザー"
-    userPicker.menu = UIMenu(options: [.singleSelection], children: entries.map { id, name in
+    userPicker.dropdownMenu = UIMenu(options: [.singleSelection], children: entries.map { id, name in
       UIAction(title: name, state: id == draft.userID ? .on : .off) { [weak self] _ in
         guard let self else { return }
         self.draft.userID = id
@@ -721,7 +721,7 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     }
     let title = draft.timeChannelID.flatMap { id in entries.first(where: { $0.0 == id })?.1 } ?? "放送局を選択"
     picker.setTitle("\(title) ▾", for: .normal)
-    picker.menu = UIMenu(options: [.singleSelection], children: entries.map { id, name in
+    picker.dropdownMenu = UIMenu(options: [.singleSelection], children: entries.map { id, name in
       UIAction(title: name, state: id == draft.timeChannelID ? .on : .off) { [weak self, weak picker] _ in
         guard let self, let picker else { return }
         self.draft.timeChannelID = id
@@ -752,7 +752,7 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
         self.rebuildContent()
       }
     })
-    picker.menu = UIMenu(options: [.singleSelection], children: children)
+    picker.dropdownMenu = UIMenu(options: [.singleSelection], children: children)
   }
 
   private func configureChannelPicker(_ picker: NeoSelectButton, index: Int) {
@@ -792,7 +792,7 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
         self.configureChannelPicker(picker, index: index)
       }
     })
-    picker.menu = UIMenu(title: "対象局", options: [], children: children)
+    picker.dropdownMenu = UIMenu(title: "対象局", options: [], children: children)
   }
 
   private func configureDirectoryPicker(_ picker: NeoSelectButton, selected: String, onSelect: @escaping (String) -> Void) {
@@ -816,7 +816,7 @@ final class NeoProgramRuleEditor: UIViewController, UITextFieldDelegate {
     children.append(contentsOf: values.map { value in
       UIAction(title: value, state: value == selected ? .on : .off) { _ in updateSelection(value) }
     })
-    picker.menu = UIMenu(options: [.singleSelection], children: children)
+    picker.dropdownMenu = UIMenu(options: [.singleSelection], children: children)
   }
 
   private static func isAudioVideoChannel(_ channel: NeoLiveChannel) -> Bool {

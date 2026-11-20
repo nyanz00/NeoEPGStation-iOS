@@ -195,13 +195,13 @@ final class NeoEncodeDialog: NeoLiveDialog {
   }
   private func refreshPickers() {
     modePicker.setTitle((settings.mode.isEmpty ? "" : settings.mode) + " ▾", for: .normal)
-    modePicker.menu = UIMenu(options: [.singleSelection], children: configModes.map { value in
+    modePicker.dropdownMenu = UIMenu(options: [.singleSelection], children: configModes.map { value in
       UIAction(title: value, state: settings.mode == value ? .on : .off) { [weak self] _ in
         guard let self, !self.locked else { return }; self.settings.mode = value; self.refreshPickers(); self.refreshControls()
       }
     })
     rootPicker.setTitle((settings.parentDir.isEmpty ? "" : settings.parentDir) + " ▾", for: .normal)
-    rootPicker.menu = UIMenu(options: [.singleSelection], children: configDirectories.map { value in
+    rootPicker.dropdownMenu = UIMenu(options: [.singleSelection], children: configDirectories.map { value in
       UIAction(title: value, state: settings.parentDir == value ? .on : .off) { [weak self] _ in
         guard let self, !self.locked else { return }; self.settings.parentDir = value; self.refreshPickers(); self.refreshControls()
       }
@@ -209,7 +209,7 @@ final class NeoEncodeDialog: NeoLiveDialog {
     let sources = commonSources
     if let sourceVideoFileID, let selected = sources.first(where: { $0.id == sourceVideoFileID }) { sourceName = selected.name }
     sourcePicker.setTitle((sourceName.isEmpty ? "" : sourceName) + " ▾", for: .normal)
-    sourcePicker.menu = UIMenu(options: [.singleSelection], children: sources.map { source in
+    sourcePicker.dropdownMenu = UIMenu(options: [.singleSelection], children: sources.map { source in
       UIAction(title: source.name, state: source.id == sourceVideoFileID ? .on : .off) { [weak self] _ in
         guard let self, !self.locked else { return }; self.sourceVideoFileID = source.id; self.sourceName = source.name; self.refreshPickers(); self.refreshControls()
       }

@@ -8,7 +8,7 @@ private final class NeoEncodeUIProtocol: URLProtocol {
   private static var running: [[String:Any]] = [], waiting: [[String:Any]] = [], scheduled: [[String:Any]] = [], recovery: [[String:Any]] = []
   private static var calls: [String:Int] = [:], bodies: [String:[[String:Any]]] = [:], mutations: [String] = []
   private static var failRecordedIDs = Set<Int>(), failCancelIDs = Set<Int>(), failOrder = false
-  private static var postDelay: TimeInterval = 0
+  private static var postDelay: TimeInterval = 0, encodeGetDelay: TimeInterval = 0
   private static var socketEvents: [String] = []
   private var cancelled = false
   private let cancellationLock = NSLock()
@@ -63,7 +63,13 @@ private final class NeoEncodeUIProtocol: URLProtocol {
       else { Self.running.removeAll { ($0["id"] as? Int) == id }; Self.waiting.removeAll { ($0["id"] as? Int) == id }; Self.scheduled.removeAll { ($0["id"] as? Int) == id }; Self.recovery.removeAll { ($0["id"] as? Int) == id } }
     } else if path.hasSuffix("/retry"), method == "POST" { }
     else { status = 404; value = ["message":"unexpected request: \(key)"] }
-    let delay = method == "POST" && path == "/api/encode" ? Self.postDelay : 0
+    let delay: TimeInterval
+    if method == "GET" && path == "/api/encode" {
+      delay = Self.encodeGetDelay
+      Self.encodeGetDelay = 0
+    } else {
+      delay = method == "POST" && path == "/api/encode" ? Self.postDelay : 0
+    }
     Self.lock.unlock()
     let data = (try? JSONSerialization.data(withJSONObject:value,options:[.fragmentsAllowed])) ?? Data("{}".utf8)
     let response = HTTPURLResponse(url:request.url!,statusCode:status,httpVersion:"HTTP/1.1",headerFields:["Content-Type":"application/json"])!
@@ -74,7 +80,7 @@ private final class NeoEncodeUIProtocol: URLProtocol {
   }
   static func reset(records: [[String:Any]], running: [[String:Any]], waiting: [[String:Any]], scheduled: [[String:Any]], recovery: [[String:Any]], failRecordedIDs: Set<Int> = [], failCancelIDs: Set<Int> = []) {
     lock.lock(); defer { lock.unlock() }; self.records=records; self.running=running; self.waiting=waiting; self.scheduled=scheduled; self.recovery=recovery
-    calls=[:]; bodies=[:]; mutations=[]; self.failRecordedIDs=failRecordedIDs; self.failCancelIDs=failCancelIDs; failOrder=false; postDelay=0
+    calls=[:]; bodies=[:]; mutations=[]; self.failRecordedIDs=failRecordedIDs; self.failCancelIDs=failCancelIDs; failOrder=false; postDelay=0; encodeGetDelay=0
   }
   static func count(_ key:String)->Int { lock.lock(); defer { lock.unlock() }; return calls[key,default:0] }
   static func body(_ key:String,index:Int = -1)->[String:Any]? { lock.lock(); defer { lock.unlock() }; guard let values=bodies[key] else { return nil }; let i=index < 0 ? values.count+index : index; return values.indices.contains(i) ? values[i] : nil }
@@ -84,6 +90,8 @@ private final class NeoEncodeUIProtocol: URLProtocol {
   static func mutationOrder()->[String] { lock.lock(); defer { lock.unlock() }; return mutations }
   static func makeNextOrderConflict() { lock.lock(); failOrder=true; lock.unlock() }
   static func delayNextPost(_ value:TimeInterval) { lock.lock(); postDelay=value; lock.unlock() }
+  static func delayNextEncodeGet(_ value:TimeInterval) { lock.lock(); encodeGetDelay=value; lock.unlock() }
+  static func enqueueStatusUpdate() { lock.lock(); socketEvents.append("42[\"updateStatus\"]"); lock.unlock() }
   static func requestCounts() -> [String:Int] { lock.lock(); defer { lock.unlock() }; return calls }
   static func progress(_ percent: Double) {
     lock.lock(); defer { lock.unlock() }
@@ -181,8 +189,68 @@ private final class NeoEncodeUIProtocol: URLProtocol {
       && NeoEncodeUIProtocol.allBodies("POST /api/encode").compactMap{$0["recordedId"] as? Int} == [7101,7101,7102,7102]
     checks["bulkEncodeNoticeKeepsCount"] = (shell.view.viewWithTag(80921) as? UILabel)?.text?.trimmingCharacters(in:.whitespaces) == "2 件をエンコードキューに追加しました。"
 
+    // A newly opened empty queue shows its central spinner only for the first
+    // load.  Later notification refreshes are deliberately quiet while their
+    // delayed GET is in flight, and the same empty message remains visible.
+    let emptyQueueMessage = "実行中、待機中、または開始予約中のエンコードはありません"
+    NeoEncodeUIProtocol.resetQueue(running:[],waiting:[],scheduled:[],recovery:[])
+    let encodeCountBeforeEmpty = NeoEncodeUIProtocol.count("GET /api/encode")
+    NeoEncodeUIProtocol.delayNextEncodeGet(0.35)
+    shell.showRoute("encode")
+    var emptyPage: NeoEncodePage?
+    let initialEncodeStarted = await wait {
+      emptyPage = shell.children.compactMap{$0 as? UINavigationController}.first(where:{$0.topViewController is NeoEncodePage})?.topViewController as? NeoEncodePage
+      return NeoEncodeUIProtocol.count("GET /api/encode") > encodeCountBeforeEmpty
+        && emptyPage?.viewIfLoaded?.window != nil
+        && emptyPage?.smokeCentralSpinnerAnimating == true
+    }
+    checks["emptyEncodeInitialLoadShowsCentralSpinner"] = initialEncodeStarted
+    let initialEmpty = await wait {
+      emptyPage?.smokeReadIdle == true
+        && emptyPage?.smokeInfo.allItems.isEmpty == true
+        && emptyPage?.smokeQueueMessage == emptyQueueMessage
+    }
+    checks["emptyEncodeInitialLoadShowsEmptyMessage"] = initialEmpty
+      && emptyPage?.smokeCentralSpinnerAnimating == false
+
+    let emptySocketReady = await wait {
+      emptyPage?.smokeSocketConnected == true && emptyPage?.smokeReadIdle == true
+    }
+    checks["emptyEncodeSocketReadyBeforeNotifications"] = emptySocketReady
+
+    if let emptyPage, emptySocketReady {
+      for index in 1...2 {
+        let before = NeoEncodeUIProtocol.count("GET /api/encode")
+        NeoEncodeUIProtocol.delayNextEncodeGet(0.35)
+        NeoEncodeUIProtocol.enqueueStatusUpdate()
+        let requestStarted = await wait { NeoEncodeUIProtocol.count("GET /api/encode") > before }
+        let responseDelayed = requestStarted && emptyPage.smokeReadIdle == false
+        let spinnerHidden = emptyPage.smokeCentralSpinnerAnimating == false
+        let messageUnchanged = emptyPage.smokeQueueMessage == emptyQueueMessage
+        let settled = await wait { emptyPage.smokeReadIdle && emptyPage.smokeQueueMessage == emptyQueueMessage }
+        checks["emptyEncodeNotification" + String(index) + "StartsDelayedGET"] = responseDelayed
+        checks["emptyEncodeNotification" + String(index) + "KeepsMessageWithoutSpinner"] = settled && spinnerHidden && messageUnchanged
+      }
+
+      NeoEncodeUIProtocol.resetQueue(running:[],waiting:[queueItem(8201,7103)],scheduled:[],recovery:[])
+      let beforeItem = NeoEncodeUIProtocol.count("GET /api/encode")
+      NeoEncodeUIProtocol.enqueueStatusUpdate()
+      let itemAppeared = await wait {
+        NeoEncodeUIProtocol.count("GET /api/encode") > beforeItem
+          && emptyPage.smokeInfo.waitItems.map(\.id) == [8201]
+          && emptyPage.smokeCards.contains { $0.smokeRepresentedEncodeID == 8201 }
+      }
+      checks["emptyEncodeNotificationAddsVisibleItem"] = itemAppeared
+    } else {
+      checks["emptyEncodeNotification1StartsDelayedGET"] = false
+      checks["emptyEncodeNotification1KeepsMessageWithoutSpinner"] = false
+      checks["emptyEncodeNotification2StartsDelayedGET"] = false
+      checks["emptyEncodeNotification2KeepsMessageWithoutSpinner"] = false
+      checks["emptyEncodeNotificationAddsVisibleItem"] = false
+    }
 
     NeoEncodeUIProtocol.resetQueue(running:[queueItem(8101,7101,"AV1-TEST-24",percent:0.4)],waiting:[queueItem(8102,7102),queueItem(8103,7103)],scheduled:[queueItem(8104,7104,"later")],recovery:[["id":8105,"status":"failed","mode":"h264","recorded":record(7101),"reason":"fixture retry","canRetry":true],["id":8106,"status":"failed","mode":"h264","recorded":record(7102),"reason":"not retryable","canRetry":false]])
+    NotificationCenter.default.post(name:.neoEncodeChanged,object:api)
     shell.showRoute("encode"); let page = shell.children.compactMap{$0 as? UINavigationController}.first(where:{$0.topViewController is NeoEncodePage})?.topViewController as? NeoEncodePage
     let queueLoaded = await wait { page?.smokeInfo.runningItems.map(\.id) == [8101] && page?.smokeInfo.waitItems.map(\.id) == [8102,8103] && page?.smokeInfo.scheduledItems.map(\.id) == [8104] && page?.smokeInfo.recoveryItems.map(\.id) == [8105,8106] }
     checks["queueDisplaysFourEncodeGroups"] = queueLoaded

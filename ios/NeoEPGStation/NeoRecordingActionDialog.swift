@@ -190,7 +190,7 @@ final class NeoRecordingActionDialog: NeoLiveDialog {
   private func refreshUserPicker() {
     let current = users.first { $0.id == selectedUser }
     userPicker.setTitle((current?.name ?? "ユーザーを選択") + " ▾", for: .normal)
-    userPicker.menu = UIMenu(options: [.singleSelection], children: users.map { user in
+    userPicker.dropdownMenu = UIMenu(options: [.singleSelection], children: users.map { user in
       UIAction(title: user.name, state: user.id == selectedUser ? .on : .off) { [weak self] _ in
         guard let self, !self.busy else { return }
         self.selectUser(user)
@@ -202,7 +202,7 @@ final class NeoRecordingActionDialog: NeoLiveDialog {
   private func refreshThumbnailPicker() {
     let current = files.first { $0.id == selectedFile }
     thumbnailPicker.setTitle((current?.name ?? "録画ファイルを選択") + " ▾", for: .normal)
-    thumbnailPicker.menu = UIMenu(options: [.singleSelection], children: files.map { file in
+    thumbnailPicker.dropdownMenu = UIMenu(options: [.singleSelection], children: files.map { file in
       UIAction(title: file.name, state: file.id == selectedFile ? .on : .off) { [weak self] _ in
         guard let self, !self.busy else { return }
         self.selectFile(file)

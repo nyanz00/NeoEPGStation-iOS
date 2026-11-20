@@ -2,7 +2,7 @@ import UIKit
 
 // UserSelector's MUI small outlined field: 160 x 40, label 16 * .75,
 // dark outline white .23, text white and a 24pt ArrowDropDown.
-final class NeoUserSelector: UIButton {
+final class NeoUserSelector: NeoDropdownButton {
   private let caption = NeoStyle.label("ユーザー", size: 12, muted: true)
   private let value = NeoStyle.label(size: 16), arrow = UIImageView()
   private let outline = CAShapeLayer()
@@ -251,7 +251,7 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     collection.refreshControl = refresh; body.addSubview(collection); body.addSubview(message); body.addSubview(spinner)
     message.numberOfLines = 0; message.textAlignment = .center
     headerAccessory = userButton
-    userButton.accessibilityIdentifier = "recorded-user-filter"; userButton.showsMenuAsPrimaryAction = true
+    userButton.accessibilityIdentifier = "recorded-user-filter"
     loadUsers()
     observers.append(NotificationCenter.default.addObserver(forName: .neoAccountChanged, object: nil, queue: .main) { [weak self] note in
       guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
@@ -356,14 +356,14 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
         let result = try await api.viewers(); guard !Task.isCancelled, self.shell?.api === api else { return }
         self.users = result.users; self.updateUserMenu()
       } catch { if !Task.isCancelled {
-        self.userButton.menu = UIMenu(children: [UIAction(title: "ユーザーを取得できません。再試行") { [weak self] _ in self?.loadUsers() }])
+        self.userButton.dropdownMenu = UIMenu(children: [UIAction(title: "ユーザーを取得できません。再試行") { [weak self] _ in self?.loadUsers() }])
       } }
     }
   }
   private func updateUserMenu() {
     let name = locatedUserID.map { id in users.first { $0.id == id }?.name ?? shell?.account?.currentName ?? String(id) } ?? "master（すべて）"
     userButton.setValue(name)
-    userButton.menu = UIMenu(children: [UIAction(title: "master（すべて）", state: locatedUserID == nil ? .on : .off) { [weak self] _ in self?.selectUser(nil) }] + users.filter { $0.id > 0 }.map { user in
+    userButton.dropdownMenu = UIMenu(children: [UIAction(title: "master（すべて）", state: locatedUserID == nil ? .on : .off) { [weak self] _ in self?.selectUser(nil) }] + users.filter { $0.id > 0 }.map { user in
       UIAction(title: user.name, state: user.id == locatedUserID ? .on : .off) { [weak self] _ in self?.selectUser(user.id) }
     })
   }
@@ -627,7 +627,8 @@ final class NeoRecordedPage: NeoPage, UICollectionViewDataSource, UICollectionVi
     view.layoutIfNeeded()
     return userButton.superview === header && userButton.frame.size == CGSize(width: 160, height: 40)
       && userButton.frame.minX >= titleLabel.frame.maxX && userButton.frame.maxX <= (actions.first?.frame.minX ?? 0)
-      && collection.frame == body.bounds && userButton.showsMenuAsPrimaryAction && userButton.menu?.children.count == 3
+      && collection.frame == body.bounds && userButton.smokeMenuButton.showsMenuAsPrimaryAction
+      && userButton.dropdownMenu?.children.count == 3
   }
   var smokeLoadSettled: Bool { isViewLoaded && total > 0 && !spinner.isAnimating && requestedPage == page }
   var smokeRequestedPage: Int { requestedPage }

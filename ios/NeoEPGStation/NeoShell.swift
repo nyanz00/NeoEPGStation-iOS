@@ -1238,7 +1238,9 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     checks["globalVisibilityReachesPlayer"] = visibility != nil && !overlay.enabled && !NeoViewingPreferences.commentsEnabled
     overlay.enabled = true; viewing.viewWillAppear(false)
     checks["playerVisibilityReachesGlobal"] = NeoViewingPreferences.commentsEnabled && viewing.smokeAllSettingViews.compactMap { $0 as? UISwitch }.first { $0.accessibilityLabel == "コメントを表示" }?.isOn == true
-    checks["outlinedSelectKeepsNativeMenu"] = viewing.smokeAllSettingViews.compactMap { $0 as? NeoSelectButton }.allSatisfy { $0.showsMenuAsPrimaryAction && $0.menu != nil && $0.layer.borderWidth == 1 }
+    checks["outlinedSelectKeepsNativeMenu"] = viewing.smokeAllSettingViews.compactMap { $0 as? NeoSelectButton }.allSatisfy {
+      $0.smokeMenuButton.showsMenuAsPrimaryAction && $0.dropdownMenu != nil && $0.layer.borderWidth == 1
+    }
     let size = viewing.smokeAllSettingViews.first { $0.accessibilityIdentifier == "viewing-comment-size" } as? UISlider
     size?.value = 1.25; size?.sendActions(for:.valueChanged)
     checks["globalSizeReachesPlayer"] = overlay.sizeMultiplier == 1.25
@@ -1363,6 +1365,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     if smokeStage == "encode" {
       Task { [self] in
         var checks = await runRecordedHistorySmoke(recorded)
+        checks["streamingQualityUsesSeparateNativeMenuButton"] = NeoStreamingDialog.smokeQualityMenuKeepsValueInPlace()
         let encodeChecks = await NeoEncodeSmoke.run(shell:self)
         checks.merge(encodeChecks,uniquingKeysWith:{ _,new in new })
         writeIPadSmoke(recorded,checks:checks,retained:retained)

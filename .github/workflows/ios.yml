@@ -268,6 +268,7 @@ jobs:
             xcrun swiftc -typecheck -target arm64-apple-ios18.0-simulator -sdk "$sdk" \
               ios/NeoEPGStation/NeoPlaybackExperiment.swift ios/NeoEPGStation/NeoModels.swift \
               ios/NeoEPGStation/NeoLiveModels.swift ios/NeoEPGStation/NeoEncodeModels.swift \
+              ios/NeoEPGStation/NeoStyle.swift ios/NeoEPGStation/NeoIcon.swift \
               ios/NeoEPGStation/NeoMarqueeTitle.swift ios/NeoEPGStation/NeoEncodeCard.swift tests/encode-ui-typecheck.swift
           fi
           if [ "${{ inputs.ui_stage }}" = "program-search" ]; then

@@ -298,7 +298,7 @@ final class NeoBulkRecordingDialog: NeoLiveDialog {
   private func refreshUserPicker() {
     let selected = users.first { $0.id == selectedUser }
     userPicker.setTitle((selected?.name ?? "ユーザーを選択") + " ▾", for: .normal)
-    userPicker.menu = UIMenu(options: [.singleSelection], children: users.map { user in
+    userPicker.dropdownMenu = UIMenu(options: [.singleSelection], children: users.map { user in
       UIAction(title: user.name, state: user.id == selectedUser ? .on : .off) { [weak self] _ in
         guard let self, !self.busy else { return }
         self.selectUser(user)
@@ -380,7 +380,7 @@ final class NeoBulkRecordingDialog: NeoLiveDialog {
   private func refreshDeletePicker() {
     let options: [(NeoBulkDeleteOption, String)] = [(.all, "すべて"), (.original, "オリジナルファイルだけ"), (.encoded, "エンコードファイルだけ"), (.names, "ファイル名を指定")]
     deleteOptionPicker.setTitle((options.first { $0.0 == deleteOption }?.1 ?? "すべて") + " ▾", for: .normal)
-    deleteOptionPicker.menu = UIMenu(options: [.singleSelection], children: options.map { option, title in
+    deleteOptionPicker.dropdownMenu = UIMenu(options: [.singleSelection], children: options.map { option, title in
       UIAction(title: title, state: option == deleteOption ? .on : .off) { [weak self] _ in self?.selectDeleteOption(option) }
     })
   }
