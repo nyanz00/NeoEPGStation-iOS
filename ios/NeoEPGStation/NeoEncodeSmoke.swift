@@ -356,10 +356,13 @@ private final class NeoEncodeUIProtocol: URLProtocol {
     let order = NeoEncodeUIProtocol.mutationOrder().filter{$0.hasPrefix("DELETE ")}
     checks["bulkCancelRequestsWaitingAndScheduledBeforeRunning"] = canceled && order == ["DELETE /api/encode/8104","DELETE /api/encode/8102","DELETE /api/encode/8101"]
     checks["cancelPartialFailureKeepsFailedSelection"] = await wait { page?.smokeSelected == [8102] && page?.smokeConfirm == nil && page?.smokeBusy == false && page?.presentedViewController == nil && page?.viewIfLoaded?.window != nil }
+    let recoveryVisible = page?.smokeRecoveryControlsEnabled(8105, reveal: true) == true
     page?.smokeRetry(8105)
     page?.smokeRetry(8106)
     checks["recoveryRetryUsesEligibleTaskOnly"] = await wait { NeoEncodeUIProtocol.count("POST /api/encode/8105/retry") == 1 && NeoEncodeUIProtocol.count("POST /api/encode/8106/retry") == 0 }
     let recoveryReady = await wait { page?.smokeBusy == false && page?.presentedViewController == nil && page?.viewIfLoaded?.window != nil }
+    let recoveryControlsReenabled = await wait { page?.smokeRecoveryControlsEnabled(8105) == true }
+    checks["encodeRecoveryControlsReenableAfterUnchangedResponse"] = recoveryVisible && recoveryControlsReenabled
     page?.smokeAskRecoveryDelete(8106); let deleteConfirm = page?.smokeConfirm
     let confirmationReady = await wait { deleteConfirm?.viewIfLoaded?.window != nil && deleteConfirm?.isBeingPresented == false }
     let notDeletedBeforeConfirm = NeoEncodeUIProtocol.count("DELETE /api/encode/8106") == 0

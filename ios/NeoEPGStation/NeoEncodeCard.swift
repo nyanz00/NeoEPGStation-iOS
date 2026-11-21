@@ -27,6 +27,7 @@ final class NeoEncodeCard: UITableViewCell {
   private var canMoveUp = false, canMoveDown = false, disabled = false
   private var touch = UITapGestureRecognizer()
   private var representedEncodeID: Int?
+  private var lastRawProgress: Double?
   private var lastKnownProgress: Float?
   private var lastProgressAnimationRequested = false
   private var progressAnimationCount = 0
@@ -102,7 +103,7 @@ final class NeoEncodeCard: UITableViewCell {
     setNeedsLayout()
   }
 
-  private var lastRawProgress: Double?
+  var controlsDisabled: Bool { disabled }
   func updateProgressAndLog(_ item: NeoEncodeItem, force: Bool = false) {
     if force || log.text != item.log {
       log.text = item.log; log.isHidden = waiting || item.log == nil

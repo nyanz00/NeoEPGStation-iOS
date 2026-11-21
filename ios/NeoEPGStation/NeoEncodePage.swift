@@ -193,17 +193,19 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
       table.tableHeaderView = nil
     }
     if inPlace, previousGroups == groups, renderedRows == rows {
+      let disabled = mutation != nil
       let oldItems = Dictionary((previous?.allItems ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
       for path in table.indexPathsForVisibleRows ?? [] {
         if let cell = table.cellForRow(at:path) as? NeoEncodeCard {
           let item = items(groups[path.section])[path.row]
-          if let old = oldItems[item.id], item.hasSameCardDetails(as: old) {
+          if let old = oldItems[item.id], item.hasSameCardDetails(as: old), cell.controlsDisabled == disabled {
             if item.percent != old.percent || item.log != old.log { cell.updateProgressAndLog(item) }
           } else {
             configure(cell,at:path)
           }
-        } else if previous == nil, let cell = table.cellForRow(at:path) as? NeoEncodeRecoveryCell {
-          cell.configure(info.recoveryItems[path.row],disabled:mutation != nil)
+        } else if let cell = table.cellForRow(at:path) as? NeoEncodeRecoveryCell,
+          previous == nil || cell.controlsDisabled != disabled {
+          cell.configure(info.recoveryItems[path.row],disabled:disabled)
         }
       }
     } else { table.reloadData() }
@@ -377,6 +379,17 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
   }
 #if targetEnvironment(simulator)
   func smokeSetScrolling(_ value: Bool) { scrollUpdate.smokeScrolling = value }
+  func smokeRecoveryControlsEnabled(_ id: Int, reveal: Bool = false) -> Bool {
+    guard let section = groups.firstIndex(of: .recovery),
+      let row = info.recoveryItems.firstIndex(where: { $0.id == id }) else { return false }
+    let path = IndexPath(row: row, section: section)
+    if reveal {
+      table.layoutIfNeeded()
+      table.scrollToRow(at: path, at: .middle, animated: false)
+      table.layoutIfNeeded()
+    }
+    return (table.cellForRow(at: path) as? NeoEncodeRecoveryCell)?.controlsDisabled == false
+  }
   var smokeInfo: NeoEncodeInfo { info }
   var smokeCards: [NeoEncodeCard] { table.visibleCells.compactMap { $0 as? NeoEncodeCard } }
   var smokeSocketConnected: Bool { socketConnected }
@@ -453,6 +466,7 @@ private final class NeoEncodeRecoveryCell:UITableViewCell {
     let row = UIStackView(arrangedSubviews:[UIView(),retry,remove]); row.spacing = 12; row.heightAnchor.constraint(equalToConstant:36).isActive = true; stack.addArrangedSubview(row)
   }
   required init?(coder:NSCoder) { fatalError() }
+  var controlsDisabled: Bool { !remove.isEnabled }
   func configure(_ item:NeoEncodeRecovery,disabled:Bool) {
     title.text = item.recorded?.name ?? "番組情報が見つかりません"
     mode.text = "\(item.mode ?? "エンコード設定を特定できません") ・ \(item.status == "paused" ? "一時停止中" : "要確認")"
