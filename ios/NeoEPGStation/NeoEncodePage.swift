@@ -235,7 +235,12 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
       values = [action("SaveOutlined","順番を保存",info.canSaveOrder(orderedIDs,expected:expectedIDs)) { [weak self] in self?.saveOrder() },
         action("Close","並べ替えをキャンセル") { [weak self] in self?.reordering = false; self?.render() }]
     } else if editingSelection {
-      values = [action("SelectAllOutlined",allSelected ? "すべて解除" : "すべて選択") { [weak self] in self?.selected = allSelected ? [] : all; self?.render() },
+      values = [action("SelectAllOutlined",allSelected ? "すべて解除" : "すべて選択") { [weak self] in
+        guard let self else { return }
+        let current = Set(info.allItems.map(\.id))
+        selected = selected == current ? [] : current
+        render()
+      },
         action("CancelOutlined","キャンセル",!selected.isEmpty) { [weak self] in guard let self else { return }; self.askCancel(Array(self.selected)) },
         action("Close","選択を終了") { [weak self] in self?.editingSelection = false; self?.selected = []; self?.render() }]
     } else {

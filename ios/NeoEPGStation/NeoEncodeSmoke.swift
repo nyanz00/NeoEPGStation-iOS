@@ -302,6 +302,17 @@ private final class NeoEncodeUIProtocol: URLProtocol {
       firstHeld && secondHeld && firstRows == [8102,8103] && secondRows == [8102,8103] && latestApplied
     NeoEncodeUIProtocol.replaceWaiting(waiting)
     _ = await wait { page?.smokeInfo.waitItems.map(\.id) == [8102,8103] }
+    page?.smokeSelect(8101)
+    let selectAll = page?.actions.first as? UIButton
+    NeoEncodeUIProtocol.replaceWaiting([queueItem(8192,7102), queueItem(8103,7103)])
+    let rowsReplaced = await wait { page?.smokeInfo.waitItems.map(\.id) == [8192,8103] }
+    let reusedSelectionButton = selectAll != nil && page?.actions.first === selectAll
+    selectAll?.sendActions(for: .touchUpInside)
+    checks["encodeReusedSelectAllUsesCurrentQueue"] = rowsReplaced && reusedSelectionButton
+      && page?.smokeSelected == [8101,8192,8103,8104]
+    (page?.actions.first { $0.accessibilityLabel == "選択を終了" } as? UIButton)?.sendActions(for: .touchUpInside)
+    NeoEncodeUIProtocol.replaceWaiting(waiting)
+    _ = await wait { page?.smokeInfo.waitItems.map(\.id) == [8102,8103] }
     let probe = NeoEncodeCard(style:.default,reuseIdentifier:nil); probe.isHidden = true
     shell.view.addSubview(probe)
     func configureProgress(_ id: Int, _ value: Double?) {
