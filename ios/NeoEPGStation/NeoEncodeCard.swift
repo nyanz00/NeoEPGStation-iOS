@@ -68,6 +68,9 @@ final class NeoEncodeCard: UITableViewCell {
 
   func configure(_ item: NeoEncodeItem, shell: NeoShell, mobile: Bool, waiting: Bool, editing: Bool,
                  reordering: Bool, selected: Bool, canMoveUp: Bool, canMoveDown: Bool, disabled: Bool) {
+#if targetEnvironment(simulator)
+    smokeConfigurationCount += 1
+#endif
     self.mobile = mobile; self.waiting = waiting; self.selectionMode = editing; self.reordering = reordering
     selectedCard = selected; self.canMoveUp = canMoveUp; self.canMoveDown = canMoveDown; self.disabled = disabled
     let scheduled = item.scheduledAt != nil
@@ -89,12 +92,30 @@ final class NeoEncodeCard: UITableViewCell {
     dragHandle.isHidden = !reordering || !waiting || mobile
     check.isHidden = !editing; check.image = NeoIcon.image(selected ? "CheckBox" : "CheckBoxOutlineBlank")
     check.tintColor = selected ? NeoStyle.accent : NeoStyle.muted
-    progress.isHidden = waiting || item.percent == nil; indeterminate.isHidden = waiting || item.percent != nil
-    if item.percent == nil && !waiting { indeterminate.startAnimating() } else { indeterminate.stopAnimating() }
-    percentLabel.isHidden = waiting; percentValue.isHidden = waiting; log.isHidden = waiting || item.log == nil
-    let p = min(1, max(0, item.percent ?? 0)); percentLabel.text = item.mode; percentValue.text = "\(Int(floor(p * 100)))%"
+    percentLabel.isHidden = waiting; percentValue.isHidden = waiting; percentLabel.text = item.mode
+    updateProgressAndLog(item, force: true)
+    alpha = disabled ? 0.55 : 1
+    card.layer.borderColor = selected ? NeoStyle.accent.cgColor : NeoStyle.border.cgColor
+    card.backgroundColor = selected ? UIColor.white.withAlphaComponent(0.16) : NeoStyle.paper
+    touch.isEnabled = editing
+    accessibilityLabel = "\(item.recorded.name)、\(mode)"
+    setNeedsLayout()
+  }
+
+  private var lastRawProgress: Double?
+  func updateProgressAndLog(_ item: NeoEncodeItem, force: Bool = false) {
+    if force || log.text != item.log {
+      log.text = item.log; log.isHidden = waiting || item.log == nil
+    }
     let normalizedProgress = item.percent.map { Float(min(1, max(0, $0))) }
     let sameEncode = representedEncodeID == item.id
+    lastProgressAnimationRequested = false
+    guard force || !sameEncode || item.percent != lastRawProgress else { return }
+    lastRawProgress = item.percent
+    let p = min(1, max(0, item.percent ?? 0))
+    percentValue.text = "\(Int(floor(p * 100)))%"
+    indeterminate.isHidden = waiting || item.percent != nil
+    if item.percent == nil && !waiting { indeterminate.startAnimating() } else { indeterminate.stopAnimating() }
     let previousProgress = sameEncode ? lastKnownProgress : nil
     let shouldAnimate = normalizedProgress != nil && previousProgress != nil
       && normalizedProgress != previousProgress && sameEncode && window != nil
@@ -113,12 +134,6 @@ final class NeoEncodeCard: UITableViewCell {
     }
     representedEncodeID = item.id
     lastKnownProgress = normalizedProgress
-    log.text = item.log; alpha = disabled ? 0.55 : 1
-    card.layer.borderColor = selected ? NeoStyle.accent.cgColor : NeoStyle.border.cgColor
-    card.backgroundColor = selected ? UIColor.white.withAlphaComponent(0.16) : NeoStyle.paper
-    touch.isEnabled = editing
-    accessibilityLabel = "\(item.recorded.name)、\(mode)"
-    setNeedsLayout()
   }
 
   override func layoutSubviews() {
@@ -157,6 +172,8 @@ final class NeoEncodeCard: UITableViewCell {
     log.frame = CGRect(x: x, y: y+28, width: width, height: 16)
   }
 #if targetEnvironment(simulator)
+  private(set) var smokeConfigurationCount = 0
+  var smokeLog: String? { log.text }
   var smokeProgressAnimationRequested: Bool { lastProgressAnimationRequested }
   var smokeProgressAnimationCount: Int { progressAnimationCount }
   var smokeRepresentedEncodeID: Int? { representedEncodeID }
@@ -188,6 +205,6 @@ final class NeoEncodeCard: UITableViewCell {
   @objc private func selectCard() { if selectionMode { onSelect?() } }
   override func prepareForReuse() {
     super.prepareForReuse(); thumbnail.load(nil); onSelect = nil; onCancel = nil; onMoveUp = nil; onMoveDown = nil
-    representedEncodeID = nil; lastKnownProgress = nil; lastProgressAnimationRequested = false
+    representedEncodeID = nil; lastKnownProgress = nil; lastRawProgress = nil; lastProgressAnimationRequested = false
   }
 }

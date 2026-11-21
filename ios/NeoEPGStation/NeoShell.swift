@@ -1,5 +1,53 @@
 import UIKit
 
+@MainActor
+final class NeoDeferredScrollUpdate {
+  private var pending: (() -> Void)?
+  private var wait: Task<Void, Never>?
+#if targetEnvironment(simulator)
+  var smokeScrolling = false
+#endif
+
+  private func isMoving(_ scrollView: UIScrollView) -> Bool {
+#if targetEnvironment(simulator)
+    if smokeScrolling { return true }
+#endif
+    return scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating
+  }
+
+  /// Returns true when the update must wait for scrolling to settle.
+  @discardableResult
+  func submit(in scrollView: UIScrollView, _ update: @escaping () -> Void) -> Bool {
+    guard isMoving(scrollView) else {
+      cancel()
+      update()
+      return false
+    }
+    pending = update
+    if wait == nil {
+      // Tracking can interrupt deceleration without a matching drag-end callback.
+      wait = Task { [weak self, weak scrollView] in
+        while !Task.isCancelled {
+          try? await Task.sleep(nanoseconds: 50_000_000)
+          guard !Task.isCancelled, let self else { return }
+          if let scrollView, isMoving(scrollView) { continue }
+          let update = pending
+          pending = nil; wait = nil
+          if scrollView != nil { update?() }
+          return
+        }
+      }
+    }
+    return true
+  }
+
+  func cancel() {
+    wait?.cancel(); wait = nil; pending = nil
+  }
+
+  deinit { wait?.cancel() }
+}
+
 struct NeoDestination {
   let id: String; let title: String; let icon: String
   static let all: [NeoDestination] = [
@@ -1397,6 +1445,14 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         checks["streamingQualityDropdownKeepsFieldFixed"] = NeoStreamingDialog.smokeQualityMenuKeepsValueInPlace()
         let encodeChecks = await NeoEncodeSmoke.run(shell:self)
         checks.merge(encodeChecks,uniquingKeysWith:{ _,new in new })
+        showRoute("onair")
+        if let onAir = active?.topViewController as? NeoOnAirPage {
+          checks.merge(await onAir.smokeAutomaticRefresh(), uniquingKeysWith: { _, new in new })
+          checks.merge(await onAir.smokeWaveScrollChecks(), uniquingKeysWith: { _, new in new })
+        } else {
+          checks["onAirRefreshFixturesDisplayed"] = false
+        }
+        showRoute("recorded")
         writeIPadSmoke(recorded,checks:checks,retained:retained)
       }
       return

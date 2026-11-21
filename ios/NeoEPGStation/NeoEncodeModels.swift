@@ -3,15 +3,35 @@ import Foundation
 struct NeoEncodeItem: Decodable {
   let id: Int, mode: String, recorded: NeoRecording
   let percent: Double?, log: String?, scheduledAt: Double?, scheduledAtLabel: String?
+
+  func hasSameCardDetails(as other: Self) -> Bool {
+    mode == other.mode && scheduledAt == other.scheduledAt && scheduledAtLabel == other.scheduledAtLabel
+      && recorded.name == other.recorded.name && recorded.startAt == other.recorded.startAt
+      && recorded.endAt == other.recorded.endAt && recorded.channelName == other.recorded.channelName
+      && recorded.channelId == other.recorded.channelId && recorded.thumbnails?.first == other.recorded.thumbnails?.first
+  }
 }
 struct NeoEncodeRecovery: Decodable {
   let id: Int, status: String, mode: String?, recorded: NeoRecording?, reason: String, canRetry: Bool
+
+  func hasSameRow(as other: Self) -> Bool {
+    id == other.id && status == other.status && mode == other.mode && recorded?.name == other.recorded?.name
+      && reason == other.reason && canRetry == other.canRetry
+  }
 }
 struct NeoEncodeInfo: Decodable {
   let runningItems: [NeoEncodeItem], waitItems: [NeoEncodeItem]
   var scheduledItems: [NeoEncodeItem] = [], recoveryItems: [NeoEncodeRecovery] = []
   static let empty = NeoEncodeInfo(runningItems: [], waitItems: [])
   var allItems: [NeoEncodeItem] { runningItems + waitItems + scheduledItems }
+
+  func hasSameRows(as other: Self) -> Bool {
+    runningItems.map(\.id) == other.runningItems.map(\.id)
+      && waitItems.map(\.id) == other.waitItems.map(\.id)
+      && scheduledItems.map(\.id) == other.scheduledItems.map(\.id)
+      && recoveryItems.count == other.recoveryItems.count
+      && zip(recoveryItems, other.recoveryItems).allSatisfy { $0.0.hasSameRow(as: $0.1) }
+  }
   private enum CodingKeys: CodingKey { case runningItems, waitItems, scheduledItems, recoveryItems }
   init(runningItems: [NeoEncodeItem], waitItems: [NeoEncodeItem], scheduledItems: [NeoEncodeItem] = [], recoveryItems: [NeoEncodeRecovery] = []) {
     self.runningItems = runningItems; self.waitItems = waitItems; self.scheduledItems = scheduledItems; self.recoveryItems = recoveryItems

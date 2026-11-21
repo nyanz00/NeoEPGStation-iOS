@@ -4,19 +4,25 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
   private enum Group: Int { case running, waiting, scheduled, recovery
     var title: String { ["エンコード中","待機中","エンコード予約","要確認"][rawValue] }
   }
+  private struct HeaderState: Equatable {
+    let mobile: Bool, busy: Bool, reordering: Bool, selecting: Bool
+    let selectionCount: Int, allSelected: Bool, hasItems: Bool, canReorder: Bool, canSave: Bool
+  }
   private let table = UITableView(frame:.zero,style:.plain), refresh = UIRefreshControl()
   private let message = NeoStyle.label(size:14,muted:true), spinner = UIActivityIndicatorView(style:.medium)
   private var info = NeoEncodeInfo.empty, groups: [Group] = [], editingSelection = false, reordering = false
   private var selected = Set<Int>(), orderedIDs: [Int] = [], expectedIDs: [Int] = []
   private var task: Task<Void,Never>?, mutation: Task<Void,Never>?, observers: [NSObjectProtocol] = []
   private let updates = NeoServerStatusUpdates()
+  private let scrollUpdate = NeoDeferredScrollUpdate()
+  private var latestInfo: NeoEncodeInfo = .empty
   private var updatesTask: Task<Void,Never>?, channelTask: Task<Void,Never>?
   private var needsReload = false, renderedRows: [[Int]] = [], channelError = false
   private var didFinishInitialRead = false
   private var channelAttempt = UUID()
   private var socketConnected = false
   private var revision: Int?, requestID = UUID(), visible = false
-  private var mutationID = UUID(), headerMobile: Bool?, layoutWidth: CGFloat = 0
+  private var mutationID = UUID(), headerState: HeaderState?, layoutWidth: CGFloat = 0
   private var confirm: NeoEncodeConfirm?
   private var mobile: Bool { (view.window?.bounds.width ?? view.bounds.width) < 600 }
   private var queueChanged: Bool { reordering && info.waitItems.map(\.id) != expectedIDs }
@@ -46,7 +52,7 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
     super.viewDidLayoutSubviews(); let width = min(900,body.bounds.width)
     table.frame = CGRect(x:(body.bounds.width-width)/2,y:0,width:width,height:body.bounds.height)
     message.frame = CGRect(x:16,y:40,width:max(0,body.bounds.width-32),height:140); spinner.center = CGPoint(x:body.bounds.midX,y:80)
-    if headerMobile != mobile { updateHeader() }
+    if headerState?.mobile != mobile { updateHeader() }
     layoutEncodeActions()
     if layoutWidth != width { layoutWidth = width; table.reloadData() }
   }
@@ -68,7 +74,10 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
       updates.start(api:api,port:config?.socketIOPort,connectionChanged:{ [weak self] in self?.socketConnected = $0 }) { [weak self] in self?.reload() }
     }
   }
-  private func stopUpdates() { updatesTask?.cancel(); updatesTask = nil; updates.stop(); socketConnected = false }
+  private func stopUpdates() {
+    scrollUpdate.cancel()
+    updatesTask?.cancel(); updatesTask = nil; updates.stop(); socketConnected = false
+  }
   private func loadChannels() {
     guard channelTask == nil, let api = shell?.api else { return }
     let attempt = UUID(); channelAttempt = attempt
@@ -87,13 +96,15 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
   private func accountChanged() {
     guard let api = shell?.api else { return }
     guard revision != api.identityRevision else { if visible { reload() }; return }
+    scrollUpdate.cancel(); latestInfo = .empty
     requestID = UUID(); mutationID = UUID(); task?.cancel(); task = nil; mutation?.cancel(); mutation = nil
     confirm?.dismiss(animated:false); confirm = nil; info = .empty; selected = []; reordering = false; editingSelection = false
     didFinishInitialRead = false; message.text = nil; spinner.stopAnimating()
     revision = api.identityRevision; render(); if visible { reload() }
   }
   func reload() {
-    guard let api = shell?.api, api.accountReady else { refresh.endRefreshing(); return }
+    guard UIApplication.shared.applicationState != .background,
+      let api = shell?.api, api.accountReady else { refresh.endRefreshing(); return }
     guard task == nil, mutation == nil else { needsReload = true; return }
     needsReload = false
     let user = api.viewer, headers = api.profileHeaders, capturedRevision = api.identityRevision, halfWidth = api.isHalfWidthDisplayed
@@ -102,19 +113,34 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
     task = Task { [weak self] in
       guard let self else { return }
       defer { if requestID == attempt {
-        task = nil; spinner.stopAnimating(); refresh.endRefreshing()
+        task = nil; spinner.stopAnimating()
+        if refresh.isRefreshing { refresh.endRefreshing() }
         if needsReload && visible { reload() }
       } }
       do {
         let value = try await api.encodes(user:user,headers:headers); try Task.checkCancellation()
-        guard shell?.api === api, api.identityRevision == capturedRevision, api.profileHeaders == headers,
+        guard UIApplication.shared.applicationState != .background,
+          shell?.api === api, api.identityRevision == capturedRevision, api.profileHeaders == headers,
           api.isHalfWidthDisplayed == halfWidth, requestID == attempt else { return }
         didFinishInitialRead = true
-        let old = Set(info.allItems.map { $0.recorded.id }), new = Set(value.allItems.map { $0.recorded.id })
-        info = value; selected.formIntersection(Set(value.allItems.map(\.id)))
-        if !reordering { orderedIDs = value.waitItems.map(\.id) }
+        let old = Set(latestInfo.allItems.map { $0.recorded.id }), new = Set(value.allItems.map { $0.recorded.id })
+        latestInfo = value
         for id in old.symmetricDifference(new) { api.recordingChanged(id) }
-        message.text = nil; render(inPlace:true)
+        if info.hasSameRows(as: value) {
+          scrollUpdate.cancel()
+          applyQueue(value)
+        } else if scrollUpdate.submit(in: table, { [weak self, weak api] in
+          guard let self, let api, visible, shell?.api === api, api.identityRevision == capturedRevision,
+            api.accountReady, api.profileHeaders == headers, api.isHalfWidthDisplayed == halfWidth else { return }
+          applyQueue(value)
+        }) {
+          // Keep displaying updates for jobs that are still running while
+          // the table continues to use the current section and row counts.
+          let running = Dictionary(value.runningItems.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+          let current = info.runningItems.map { running[$0.id] ?? $0 }
+          applyQueue(NeoEncodeInfo(runningItems: current, waitItems: info.waitItems,
+            scheduledItems: info.scheduledItems, recoveryItems: info.recoveryItems))
+        }
       } catch {
         guard !Task.isCancelled, requestID == attempt, shell?.api === api, api.identityRevision == capturedRevision,
           api.profileHeaders == headers, api.isHalfWidthDisplayed == halfWidth else { return }
@@ -126,6 +152,13 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
       }
     }
   }
+  private func applyQueue(_ value: NeoEncodeInfo) {
+    let previous = info
+    info = value
+    selected.formIntersection(Set(value.allItems.map(\.id)))
+    if !reordering { orderedIDs = value.waitItems.map(\.id) }
+    render(inPlace: previous.hasSameRows(as: value), previous: previous)
+  }
   private func items(_ group: Group) -> [NeoEncodeItem] {
     switch group {
     case .running: return info.runningItems
@@ -136,33 +169,55 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
     case .recovery: return []
     }
   }
-  private func render(inPlace: Bool = false) {
+  private func render(inPlace: Bool = false, previous: NeoEncodeInfo? = nil) {
     let previousGroups = groups
     groups = [Group.running,.waiting,.scheduled,.recovery].filter { $0 == .recovery ? !info.recoveryItems.isEmpty : !items($0).isEmpty }
     let rows = groups.map { $0 == .recovery ? info.recoveryItems.map(\.id) : items($0).map(\.id) }
-    if didFinishInitialRead && groups.isEmpty && message.text == nil {
-      message.text = "実行中、待機中、または開始予約中のエンコードはありません"
+    let emptyText = "実行中、待機中、または開始予約中のエンコードはありません"
+    let notice = didFinishInitialRead && groups.isEmpty ? emptyText : nil
+    if previous != nil || message.text == nil || message.text == emptyText {
+      if message.text != notice { message.text = notice }
     }
-    if queueChanged { message.text = "編集中に待機キューが更新されました。キャンセルして最新の順番からやり直してください。" }
-    message.isHidden = message.text == nil
-    table.tableHeaderView = nil
-    if queueChanged || (channelError && !info.allItems.isEmpty) {
-      let text = queueChanged ? message.text ?? "" : "放送局情報を取得できないため、放送局IDで表示しています。"
-      let warning = NeoStyle.label(text,size:14); warning.numberOfLines = 0; warning.textColor = NeoStyle.warning
-      warning.frame = CGRect(x:12,y:0,width:table.bounds.width-24,height:70); table.tableHeaderView = warning; message.isHidden = true
+    let warningText = queueChanged ? "編集中に待機キューが更新されました。キャンセルして最新の順番からやり直してください。"
+      : channelError && !info.allItems.isEmpty ? "放送局情報を取得できないため、放送局IDで表示しています。" : nil
+    let hideMessage = warningText != nil || message.text == nil
+    if message.isHidden != hideMessage { message.isHidden = hideMessage }
+    if let warningText {
+      if let warning = table.tableHeaderView as? UILabel {
+        if warning.text != warningText { warning.text = warningText }
+      } else {
+        let warning = NeoStyle.label(warningText,size:14); warning.numberOfLines = 0; warning.textColor = NeoStyle.warning
+        warning.frame = CGRect(x:12,y:0,width:max(0,table.bounds.width-24),height:70); table.tableHeaderView = warning
+      }
+    } else if table.tableHeaderView != nil {
+      table.tableHeaderView = nil
     }
     if inPlace, previousGroups == groups, renderedRows == rows {
+      let oldItems = Dictionary((previous?.allItems ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
       for path in table.indexPathsForVisibleRows ?? [] {
-        if let cell = table.cellForRow(at:path) as? NeoEncodeCard { configure(cell,at:path) }
-        else if let cell = table.cellForRow(at:path) as? NeoEncodeRecoveryCell { cell.configure(info.recoveryItems[path.row],disabled:mutation != nil) }
+        if let cell = table.cellForRow(at:path) as? NeoEncodeCard {
+          let item = items(groups[path.section])[path.row]
+          if let old = oldItems[item.id], item.hasSameCardDetails(as: old) {
+            if item.percent != old.percent || item.log != old.log { cell.updateProgressAndLog(item) }
+          } else {
+            configure(cell,at:path)
+          }
+        } else if previous == nil, let cell = table.cellForRow(at:path) as? NeoEncodeRecoveryCell {
+          cell.configure(info.recoveryItems[path.row],disabled:mutation != nil)
+        }
       }
     } else { table.reloadData() }
     renderedRows = rows; updateHeader()
   }
   private func updateHeader() {
-    headerMobile = mobile
-    titleLabel.text = editingSelection ? "\(selected.count)件選択" : "エンコード"
     let busy = mutation != nil, all = Set(info.allItems.map(\.id)), allSelected = !all.isEmpty && selected == all
+    let state = HeaderState(mobile: mobile, busy: busy, reordering: reordering, selecting: editingSelection,
+      selectionCount: selected.count, allSelected: allSelected, hasItems: !all.isEmpty,
+      canReorder: !reordering && info.waitItems.count >= 2,
+      canSave: reordering && info.canSaveOrder(orderedIDs,expected:expectedIDs))
+    guard headerState != state else { return }
+    headerState = state
+    titleLabel.text = editingSelection ? "\(state.selectionCount)件選択" : "エンコード"
     func icon(_ name:String,_ label:String,_ enabled:Bool = true,_ action:@escaping ()->Void) -> UIButton {
       let value = NeoStyle.iconButton(name,label:label,action:action); value.isEnabled = enabled && !busy; return value
     }
@@ -255,7 +310,7 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
     }; updateHeader(); table.reloadData()
   }
   private func saveOrder() {
-    guard mutation == nil, info.canSaveOrder(orderedIDs,expected:expectedIDs), let api = shell?.api, api.accountReady else { return }
+    guard mutation == nil, latestInfo.canSaveOrder(orderedIDs,expected:expectedIDs), let api = shell?.api, api.accountReady else { return }
     let ids = orderedIDs, expected = expectedIDs, rev = api.identityRevision, user = api.viewer, headers = api.profileHeaders
     let attempt = beginMutation()
     mutation = Task { [weak self] in
@@ -270,6 +325,7 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
     }; updateHeader()
   }
   private func beginMutation() -> UUID {
+    scrollUpdate.cancel()
     requestID = UUID(); task?.cancel(); task = nil; spinner.stopAnimating(); refresh.endRefreshing()
     mutationID = UUID(); return mutationID
   }
@@ -315,6 +371,7 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
       let id = coordinator.items.first?.dragItem.localObject as? Int else { return }; move(id,to:min(orderedIDs.count-1,path.row))
   }
 #if targetEnvironment(simulator)
+  func smokeSetScrolling(_ value: Bool) { scrollUpdate.smokeScrolling = value }
   var smokeInfo: NeoEncodeInfo { info }
   var smokeCards: [NeoEncodeCard] { table.visibleCells.compactMap { $0 as? NeoEncodeCard } }
   var smokeSocketConnected: Bool { socketConnected }

@@ -18,6 +18,7 @@ private final class NeoOnAirCell: UICollectionViewCell {
     logo.contentMode = .scaleAspectFit; fallback.textAlignment = .center
     [logo,fallback,station,wave,force,fire,title,times,summary,info,watch,pin,track].forEach(contentView.addSubview)
     [logo,station,wave,force,fire,title,times,summary].forEach { $0.isUserInteractionEnabled = false }
+    fire.image = NeoIcon.image("LocalFireDepartmentOutlined")
     summary.numberOfLines = 2
     track.backgroundColor = NeoStyle.border; progress.backgroundColor = NeoStyle.accent; track.addSubview(progress)
     pin.addAction(UIAction { [weak self] _ in self?.onPin?() },for:.touchUpInside)
@@ -30,24 +31,11 @@ private final class NeoOnAirCell: UICollectionViewCell {
     fallback.text = schedule.channel.waveLabel; fallback.isHidden = schedule.channel.hasLogoData == true
     station.text = schedule.channel.name
     wave.text = schedule.channel.waveLabel+(schedule.channel.remoteControlKeyId.map { " \($0)" } ?? "")
-    force.text = (amount.map { NumberFormatter.localizedString(from:NSNumber(value:$0),number:.decimal) } ?? "--")+" コメ/分"
-    // OnAirPage.forceColor, MUI dark warning.main orange[400], error.main red[500].
-    let color: UIColor = (amount ?? 0) < 100 ? NeoStyle.muted : amount! < 200 ? NeoStyle.accent : amount! < 500 ?
-      UIColor(red:255/255,green:167/255,blue:38/255,alpha:1) : UIColor(red:244/255,green:67/255,blue:54/255,alpha:1)
-    force.textColor = color; fire.tintColor = color; fire.image = NeoIcon.image("LocalFireDepartmentOutlined")
+    updateForce(amount)
     pin.setImage(NeoIcon.image(pinned ? "PushPin" : "PushPinOutlined"),for:.normal); pin.tintColor = pinned ? NeoStyle.accent : NeoStyle.muted
     pin.accessibilityLabel = schedule.channel.name+(pinned ? "のピン留めを解除" : "をピン留め")
     watch.accessibilityLabel = schedule.channel.name+"を視聴"; info.accessibilityLabel = schedule.channel.name+"の番組詳細を開く"
-    if let program = schedule.program {
-      title.text = program.name; summary.text = program.description; times.text = NeoOnAirPage.programTime(program)
-      fraction = program.progress(now); info.isEnabled = true
-    } else {
-      let hour = Calendar(identifier:.gregorian).dateComponents(in:TimeZone(identifier:"Asia/Tokyo")!,from:Date(timeIntervalSince1970:now/1000)).hour ?? 12
-      let paused = hour >= 23 || hour < 7
-      title.text = paused ? "放送休止" : "番組情報を取得できません"
-      summary.text = paused ? "この時間は放送を休止しています" : "放送局を選択して視聴できます"
-      times.text = nil; fraction = 0; info.isEnabled = false
-    }
+    updateProgram(schedule.program, now: now)
     if logoChannel != schedule.channel.id {
     logoChannel = schedule.channel.id; imageTask?.cancel(); imageID += 1; let version = imageID; logo.image = nil
     if schedule.channel.hasLogoData == true {
@@ -58,6 +46,41 @@ private final class NeoOnAirCell: UICollectionViewCell {
     }
     }
     setNeedsLayout()
+  }
+  func updateForce(_ amount: Int?) {
+    force.text = (amount.map { NumberFormatter.localizedString(from:NSNumber(value:$0),number:.decimal) } ?? "--")+" コメ/分"
+    // OnAirPage.forceColor, MUI dark warning.main orange[400], error.main red[500].
+    let value = amount ?? 0
+    let color: UIColor = value < 100 ? NeoStyle.muted : value < 200 ? NeoStyle.accent : value < 500 ?
+      UIColor(red:255/255,green:167/255,blue:38/255,alpha:1) : UIColor(red:244/255,green:67/255,blue:54/255,alpha:1)
+    force.textColor = color; fire.tintColor = color
+  }
+  func updateProgram(_ program: NeoLiveProgram?, now: Double) {
+    if let program {
+      title.text = program.name; summary.text = program.description; times.text = NeoOnAirPage.programTime(program)
+    } else {
+      times.text = nil
+    }
+    info.isEnabled = program != nil
+    updateClock(program, now: now)
+    setNeedsLayout()
+  }
+  func updateClock(_ program: NeoLiveProgram?, now: Double) {
+    if program == nil {
+      let hour = Calendar(identifier:.gregorian).dateComponents(in:TimeZone(identifier:"Asia/Tokyo")!,from:Date(timeIntervalSince1970:now/1000)).hour ?? 12
+      let paused = hour >= 23 || hour < 7
+      let fallbackTitle = paused ? "放送休止" : "番組情報を取得できません"
+      if title.text != fallbackTitle {
+        title.text = fallbackTitle
+        summary.text = paused ? "この時間は放送を休止しています" : "放送局を選択して視聴できます"
+        setNeedsLayout()
+      }
+    }
+    let value = program?.progress(now) ?? 0
+    if fraction != value {
+      fraction = value
+      progress.frame.size.width = track.bounds.width * fraction
+    }
   }
   override func layoutSubviews() {
     super.layoutSubviews(); let tablet = bounds.height >= 250, inset: CGFloat = tablet ? 16 : 10
@@ -80,6 +103,11 @@ private final class NeoOnAirCell: UICollectionViewCell {
     track.frame = CGRect(x:0,y:bounds.height-4,width:bounds.width,height:4)
     progress.frame = CGRect(x:0,y:0,width:track.bounds.width*fraction,height:4)
   }
+#if targetEnvironment(simulator)
+  var smokeProgram: String? { title.text }
+  var smokeForce: String? { force.text }
+  var smokeFraction: Double { fraction }
+#endif
 }
 
 final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
@@ -92,6 +120,7 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
   private let message = NeoStyle.label(size:14,muted:true), spinner = UIActivityIndicatorView(style:.medium)
   private let refresh = UIRefreshControl()
   private var task: Task<Void,Never>?, timer: Timer?, progressTimer: Timer?
+  private let scrollUpdate = NeoDeferredScrollUpdate()
   private var schedules: [NeoLiveSchedule] = [], forces: [Int:Int] = [:], buttons: [UIButton] = []
   private var visible: [NeoLiveSchedule] = [], waves: [String] = [], wave = "", active = false
   private var pins = Set<Int>()
@@ -115,6 +144,7 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     actions = [NeoStyle.iconButton("Refresh",label:"放映中を更新") { [weak self] in self?.reload() }]
     textObserver = NotificationCenter.default.addObserver(forName:.neoTextPreferencesChanged,object:nil,queue:.main) { [weak self] note in
       guard let self, let api = note.object as? NeoAPI, self.shell?.api === api else { return }
+      self.scrollUpdate.cancel()
       self.task?.cancel(); self.task = nil; self.schedules = []; self.visible = []; self.list.reloadData(); self.reload()
     }
     reload()
@@ -126,15 +156,17 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
   }
   override func viewDidDisappear(_ animated: Bool) {
     super.viewDidDisappear(animated); active = false; timer?.invalidate(); timer = nil; progressTimer?.invalidate(); progressTimer = nil
+    scrollUpdate.cancel(); reloadID = UUID(); task?.cancel(); task = nil
+    spinner.stopAnimating(); refresh.endRefreshing()
   }
   func reload() {
 #if targetEnvironment(simulator)
-    if shell?.smokeStage == "recorded-fixes" {
-      schedules = (0..<60).map { index in
+    if shell?.smokeStage == "recorded-fixes" || shell?.smokeStage == "encode" {
+      let fixtures = (0..<60).map { index in
         NeoLiveSchedule(channel:NeoLiveChannel(id:index+1,name:"Fixture channel \(index+1)",channelType:index < 30 ? "GR" : "BS"),
           programs:[NeoLiveProgram(id:index+1,name:"Fixture program",startAt:0,endAt:3600000)])
       }
-      rebuild(); return
+      receiveSchedules(fixtures, forces: [:]); return
     }
 #endif
     guard task == nil, let api = shell?.api else { return }
@@ -143,27 +175,73 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     let attempt = UUID(); reloadID = attempt
     task = Task { [weak self, api] in
       guard let self else { return }
-      defer { if self.reloadID == attempt { self.task = nil; self.spinner.stopAnimating(); self.refresh.endRefreshing() } }
+      defer { if self.reloadID == attempt {
+        self.task = nil; self.spinner.stopAnimating()
+        if self.refresh.isRefreshing { self.refresh.endRefreshing() }
+      } }
       do {
         async let schedule = api.broadcasting()
         async let status = try? api.liveForces()
         if self.shell?.serverConfig == nil { await self.shell?.refreshServerConfig() }
         let result = try await schedule, forceValues = await status
         try Task.checkCancellation(); guard self.shell?.api === api, api.isHalfWidthDisplayed == halfWidth else { return }
-        self.schedules = result; self.forces = Dictionary((forceValues ?? []).compactMap { item in item.force.map { (item.channelId,$0) } },uniquingKeysWith: { _,new in new })
-        self.rebuild()
+        let nextForces = Dictionary((forceValues ?? []).compactMap { item in item.force.map { (item.channelId,$0) } },uniquingKeysWith: { _,new in new })
+        self.receiveSchedules(result, forces: nextForces)
       } catch { if !Task.isCancelled, self.reloadID == attempt, self.schedules.isEmpty { self.message.text = "番組情報を取得できませんでした。"; self.message.isHidden = false } }
     }
   }
-  private func rebuild() {
+  private func receiveSchedules(_ result: [NeoLiveSchedule], forces: [Int: Int]) {
     let config = shell?.serverConfig
-    schedules = schedules.filter { config?.broadcast?[$0.channel.channelType] != false && $0.channel.defaultVisible }
-    let order = ["GR","GR-ALT1","GR-ALT2","GR-ALT3","BS","CS","SKY","BS4K"]
-    waves = Array(Set(schedules.map { $0.channel.channelType })).sorted {
-      let a = order.firstIndex(of:$0) ?? 100, b = order.firstIndex(of:$1) ?? 100
-      return a == b ? $0.localizedCompare($1) == .orderedAscending : a < b
+    let next = result.filter { config?.broadcast?[$0.channel.channelType] != false && $0.channel.defaultVisible }
+    let sameRows = next.count == schedules.count && zip(next, schedules).allSatisfy {
+      $0.0.channel.id == $0.1.channel.id && $0.0.channel.channelType == $0.1.channel.channelType
     }
-    if schedules.contains(where: { pins.contains($0.channel.id) }) { waves.insert("PINNED",at:0) }
+    if sameRows {
+      scrollUpdate.cancel()
+      applySchedules(next, forces: forces)
+    } else if scrollUpdate.submit(in: list, { [weak self] in self?.applySchedules(next, forces: forces) }) {
+      let updates = Dictionary(next.map { ($0.channel.id, $0) }, uniquingKeysWith: { first, _ in first })
+      let current = schedules.map { old in
+        guard let new = updates[old.channel.id], old.channel.channelType == new.channel.channelType else { return old }
+        return new
+      }
+      applySchedules(current, forces: forces)
+    }
+  }
+  private func applySchedules(_ next: [NeoLiveSchedule], forces: [Int: Int]) {
+    let previous = visible, previousForces = self.forces
+    schedules = next; self.forces = forces
+    if waves.isEmpty { updateWaveButtons() }
+    visible = schedulesForSelectedWave()
+    updateEmptyMessage()
+    guard visible.map(\.channel.id) == previous.map(\.channel.id) else {
+      list.reloadData()
+      return
+    }
+    let now = Date().timeIntervalSince1970 * 1000
+    for path in list.indexPathsForVisibleItems {
+      guard visible.indices.contains(path.item), let cell = list.cellForItem(at: path) as? NeoOnAirCell else { continue }
+      let schedule = visible[path.item], old = previous[path.item], id = schedule.channel.id
+      if schedule.channel != old.channel {
+        configure(cell, at: path)
+      } else {
+        if schedule.program != old.program { cell.updateProgram(schedule.program, now: now) }
+        if forces[id] != previousForces[id] { cell.updateForce(forces[id]) }
+      }
+    }
+  }
+  private func updateWaveButtons() {
+    let order = ["GR","GR-ALT1","GR-ALT2","GR-ALT3","BS","CS","SKY","BS4K"]
+    var next = waves.filter { $0 != "PINNED" }
+    if next.isEmpty {
+      next = Array(Set(schedules.map { $0.channel.channelType })).sorted {
+        let a = order.firstIndex(of:$0) ?? 100, b = order.firstIndex(of:$1) ?? 100
+        return a == b ? $0.localizedCompare($1) == .orderedAscending : a < b
+      }
+    }
+    if schedules.contains(where: { pins.contains($0.channel.id) }) { next.insert("PINNED",at:0) }
+    guard next != waves else { return }
+    waves = next
     if !waves.contains(wave) { wave = waves.first ?? "" }
     buttons.forEach { $0.removeFromSuperview() }
     buttons = waves.map { id in
@@ -173,7 +251,8 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
       button.addAction(UIAction { [weak self] _ in self?.selectWave(id) },for:.touchUpInside)
       tabs.addSubview(button); return button
     }
-    filter()
+    updateWaveSelection()
+    view.setNeedsLayout()
   }
   private func selectWave(_ id: String) {
     guard waves.contains(id), id != wave else { return }
@@ -204,16 +283,33 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     selectWave(waves[index+direction])
   }
   private func filter() {
-    visible = schedules.filter { wave == "PINNED" ? pins.contains($0.channel.id) : $0.channel.channelType == wave }
-    message.text = "表示できる放送局がありません。"; message.isHidden = !visible.isEmpty
+    visible = schedulesForSelectedWave()
+    updateEmptyMessage()
+    updateWaveSelection()
+    list.reloadData(); view.setNeedsLayout()
+  }
+  private func schedulesForSelectedWave() -> [NeoLiveSchedule] {
+    schedules.filter { wave == "PINNED" ? pins.contains($0.channel.id) : $0.channel.channelType == wave }
+  }
+  private func updateEmptyMessage() {
+    let text = "表示できる放送局がありません。"
+    if message.text != text { message.text = text }
+    let hidden = !visible.isEmpty
+    if message.isHidden != hidden { message.isHidden = hidden }
+  }
+  private func updateWaveSelection() {
     for (index,button) in buttons.enumerated() {
       button.tintColor = waves[index] == wave ? NeoStyle.accent : NeoStyle.muted
       button.accessibilityTraits = waves[index] == wave ? [.button,.selected] : .button
     }
-    list.reloadData(); view.setNeedsLayout()
   }
   private func updateCards() {
-    for path in list.indexPathsForVisibleItems { if let cell = list.cellForItem(at:path) as? NeoOnAirCell, visible.indices.contains(path.item) { configure(cell,at:path) } }
+    let now = Date().timeIntervalSince1970 * 1000
+    for path in list.indexPathsForVisibleItems {
+      if let cell = list.cellForItem(at: path) as? NeoOnAirCell, visible.indices.contains(path.item) {
+        cell.updateClock(visible[path.item].program, now: now)
+      }
+    }
   }
   override func viewDidLayoutSubviews() {
     super.viewDidLayoutSubviews(); let tabHeight: CGFloat = waves.isEmpty ? 0 : 48
@@ -226,10 +322,12 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     // Assign bounds and center, not frame, while the surface is transformed.
     listSurface.bounds = listViewport.bounds
     listSurface.center = CGPoint(x:listViewport.bounds.midX,y:listViewport.bounds.midY)
-    list.frame = listSurface.bounds
+    if list.bounds.size != listSurface.bounds.size {
+      list.frame = listSurface.bounds
+      list.collectionViewLayout.invalidateLayout()
+    }
     message.frame = CGRect(x:16,y:tabHeight+30,width:max(0,body.bounds.width-32),height:180)
     spinner.center = CGPoint(x:body.bounds.midX,y:tabHeight+130)
-    list.collectionViewLayout.invalidateLayout()
   }
   func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int { visible.count }
   func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
@@ -238,9 +336,22 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
   private func configure(_ cell: NeoOnAirCell, at path: IndexPath) {
     guard visible.indices.contains(path.item), let api = shell?.api else { return }; let schedule = visible[path.item]
     cell.configure(schedule,force:forces[schedule.channel.id],pinned:pins.contains(schedule.channel.id),api:api,now:Date().timeIntervalSince1970*1000)
-    cell.onWatch = { [weak self] in self?.watch(schedule) }
-    cell.onInfo = { [weak self] in self?.program(schedule) }
-    cell.onPin = { [weak self] in guard let self else { return }; if !self.pins.insert(schedule.channel.id).inserted { self.pins.remove(schedule.channel.id) }; UserDefaults.standard.set(Array(self.pins),forKey:self.pinKey); self.rebuild() }
+    let id = schedule.channel.id
+    cell.onWatch = { [weak self] in
+      guard let self, let current = visible.first(where: { $0.channel.id == id }) else { return }
+      watch(current)
+    }
+    cell.onInfo = { [weak self] in
+      guard let self, let current = visible.first(where: { $0.channel.id == id }) else { return }
+      program(current)
+    }
+    cell.onPin = { [weak self] in
+      guard let self else { return }
+      if !pins.insert(id).inserted { pins.remove(id) }
+      UserDefaults.standard.set(Array(pins), forKey: pinKey)
+      updateWaveButtons()
+      filter()
+    }
   }
   func collectionView(_ collectionView: UICollectionView, layout: UICollectionViewLayout, sizeForItemAt path: IndexPath) -> CGSize {
     let columns: CGFloat = collectionView.bounds.width >= 1536 ? 4 : collectionView.bounds.width >= 1200 ? 3 : collectionView.bounds.width >= 600 ? 2 : 1
@@ -278,6 +389,39 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     present(dialog,animated:true)
   }
 #if targetEnvironment(simulator)
+  func smokeAutomaticRefresh() async -> [String: Bool] {
+    view.layoutIfNeeded(); list.layoutIfNeeded()
+    scrollUpdate.smokeScrolling = true
+    defer { scrollUpdate.smokeScrolling = false }
+    guard let first = visible.first, let card = list.cellForItem(at: IndexPath(item: 0, section: 0)) as? NeoOnAirCell,
+      let offset = schedules.firstIndex(of: first), let button = buttons.first else {
+      return ["onAirRefreshFixturesDisplayed": false]
+    }
+    let initialCount = schedules.count, now = Date().timeIntervalSince1970 * 1000
+    var updated = schedules
+    let program = NeoLiveProgram(id: 7001, name: "Updated fixture program", startAt: now - 30_000, endAt: now + 90_000)
+    updated[offset] = NeoLiveSchedule(channel: first.channel, programs: [program])
+    let forces = [first.channel.id: 220]
+    receiveSchedules(updated, forces: forces)
+    let contentUpdated = card.smokeProgram == program.name && card.smokeForce == "220 コメ/分"
+      && card === list.cellForItem(at: IndexPath(item: 0, section: 0)) && buttons.first === button
+    let progressUpdated = card.smokeFraction > 0.2 && card.smokeFraction < 0.3
+    let firstNew = NeoLiveSchedule(channel: NeoLiveChannel(id: 7010, name: "First additional station", channelType: first.channel.channelType), programs: [])
+    let latestNew = NeoLiveSchedule(channel: NeoLiveChannel(id: 7011, name: "Latest additional station", channelType: first.channel.channelType), programs: [])
+    receiveSchedules(updated + [firstNew], forces: forces)
+    let firstHeld = schedules.count == initialCount
+    receiveSchedules(updated + [latestNew], forces: forces)
+    let latestHeld = schedules.count == initialCount
+    scrollUpdate.smokeScrolling = false
+    for _ in 0..<30 where schedules.count == initialCount {
+      try? await Task.sleep(nanoseconds: 20_000_000)
+    }
+    return [
+      "onAirRefreshUsesExistingCardsAndWaveButtons": contentUpdated && progressUpdated,
+      "onAirChannelChangesWaitAndApplyOnlyLatest": firstHeld && latestHeld && schedules.last == latestNew && buttons.first === button,
+    ]
+  }
+
   func smokeWaveScrollChecks() async -> [String:Bool] {
     view.layoutIfNeeded(); list.layoutIfNeeded()
     // The test has just attached this route. A real tap occurs after it has

@@ -93,10 +93,18 @@ private final class NeoEncodeUIProtocol: URLProtocol {
   static func delayNextEncodeGet(_ value:TimeInterval) { lock.lock(); encodeGetDelay=value; lock.unlock() }
   static func enqueueStatusUpdate() { lock.lock(); socketEvents.append("42[\"updateStatus\"]"); lock.unlock() }
   static func requestCounts() -> [String:Int] { lock.lock(); defer { lock.unlock() }; return calls }
-  static func progress(_ percent: Double) {
+  static func progress(_ percent: Double, log: String? = nil) {
     lock.lock(); defer { lock.unlock() }
-    if !running.isEmpty { running[0]["percent"] = percent }
+    if !running.isEmpty {
+      running[0]["percent"] = percent
+      running[0]["log"] = log
+    }
     socketEvents.append("42[\"updateEncode\"]")
+  }
+  static func replaceWaiting(_ items: [[String: Any]]) {
+    lock.lock(); defer { lock.unlock() }
+    waiting = items
+    socketEvents.append("42[\"updateStatus\"]")
   }
 }
 
@@ -265,13 +273,35 @@ private final class NeoEncodeUIProtocol: URLProtocol {
     checks["compactCardsAlignBadgeThumbnailTextAndProgress"] = settledLayout
     checks["badgeUsesRawTextWithSinglePaddingAndLeftAlignment"] = page?.smokeCards.isEmpty == false && page?.smokeCards.allSatisfy { $0.smokeBadgeTextFits } == true
     let moving = page?.smokeCards.first, generation = moving?.smokeTitle.animationGeneration
+    let configurationCount = moving?.smokeConfigurationCount, button = page?.actions.first
     let animations = moving?.smokeProgressAnimationCount ?? -1
     checks["initialProgressIsImmediate"] = moving?.smokeProgressAnimationRequested == false && animations == 0
     checks["encodeTitleUsesOneWayMarquee"] = UIAccessibility.isReduceMotionEnabled || moving?.smokeTitle.smokeOneWay == true
-    NeoEncodeUIProtocol.progress(0.73)
+    page?.smokeSetScrolling(true)
+    NeoEncodeUIProtocol.progress(0.73, log: "Updated while scrolling")
     let refreshed = await wait { page?.smokeInfo.runningItems.first?.percent == 0.73 }
     checks["socketNotificationRefreshesProgressWithoutReplacingCard"] = refreshed && page?.smokeCards.first === moving && moving?.smokeTitle.animationGeneration == generation
     checks["sameJobProgressUsesSmoothUpdate"] = refreshed && (UIAccessibility.isReduceMotionEnabled || (moving?.smokeProgressAnimationCount ?? -1) > animations)
+    checks["encodeProgressAndLogDoNotReconfigureCardOrButtons"] = refreshed && moving?.smokeLog == "Updated while scrolling"
+      && moving?.smokeConfigurationCount == configurationCount && button != nil && page?.actions.first === button
+    let waiting = [queueItem(8102,7102),queueItem(8103,7103)]
+    let firstRead = NeoEncodeUIProtocol.count("GET /api/encode")
+    NeoEncodeUIProtocol.replaceWaiting(waiting + [queueItem(8190,7103)])
+    let firstHeld = await wait { NeoEncodeUIProtocol.count("GET /api/encode") > firstRead && page?.smokeReadIdle == true }
+    let firstRows = page?.smokeInfo.waitItems.map(\.id)
+    let secondRead = NeoEncodeUIProtocol.count("GET /api/encode")
+    NeoEncodeUIProtocol.replaceWaiting(waiting + [queueItem(8191,7103)])
+    NeoEncodeUIProtocol.progress(0.78, log: "More progress during a queue update")
+    let secondHeld = await wait {
+      NeoEncodeUIProtocol.count("GET /api/encode") > secondRead && page?.smokeReadIdle == true && moving?.smokeLog == "More progress during a queue update"
+    }
+    let secondRows = page?.smokeInfo.waitItems.map(\.id)
+    page?.smokeSetScrolling(false)
+    let latestApplied = await wait { page?.smokeInfo.waitItems.map(\.id) == [8102,8103,8191] }
+    checks["encodeQueueChangesWaitWhileProgressContinues"] =
+      firstHeld && secondHeld && firstRows == [8102,8103] && secondRows == [8102,8103] && latestApplied
+    NeoEncodeUIProtocol.replaceWaiting(waiting)
+    _ = await wait { page?.smokeInfo.waitItems.map(\.id) == [8102,8103] }
     let probe = NeoEncodeCard(style:.default,reuseIdentifier:nil); probe.isHidden = true
     shell.view.addSubview(probe)
     func configureProgress(_ id: Int, _ value: Double?) {
