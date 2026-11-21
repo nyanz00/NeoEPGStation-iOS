@@ -984,12 +984,14 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
         _ = keywordField.becomeFirstResponder()
         page.view.layoutIfNeeded()
         let focusDuration = keywordOutline.smokeMotionDuration
+        let openingNotch = keywordOutline.smokeNotchAnimation
         let focused = await waitFor { keywordOutline.smokeFloated && keywordField.isFirstResponder }
         let fieldDuring = keywordField.frame
 
         _ = keywordField.resignFirstResponder()
         page.view.layoutIfNeeded()
         let blurDuration = keywordOutline.smokeMotionDuration
+        let closingNotch = keywordOutline.smokeNotchAnimation
         let blurred = await waitFor { !keywordOutline.smokeFloated && !keywordField.isFirstResponder }
         let fieldAfter = keywordField.frame
         let animationDurationOK: Bool = {
@@ -1000,11 +1002,20 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
           && keywordField.text?.isEmpty == true
           && (startHour.title(for: .normal) ?? "") == selectedHour
         checks["programSearchOutlinedLabelMotionDuration"] = animationDurationOK
+        checks["programSearchOutlinedNotchTiming"] = {
+          guard animationExpected, let openingNotch, let closingNotch else {
+            return !animationExpected && openingNotch == nil && closingNotch == nil
+          }
+          return openingNotch.duration == 0.05 && closingNotch.duration == 0.05
+            && openingNotch.fillMode != .backwards && closingNotch.fillMode == .backwards
+            && closingNotch.beginTime > 0
+        }()
         checks["programSearchOutlinedLabelNoLayoutShift"] = closeEnough(fieldBefore, fieldDuring)
           && closeEnough(fieldBefore, fieldAfter) && closeEnough(outlineBefore, keywordOutline.frame)
       } else {
         checks["programSearchOutlinedLabelFocusBlur"] = false
         checks["programSearchOutlinedLabelMotionDuration"] = false
+        checks["programSearchOutlinedNotchTiming"] = false
         checks["programSearchOutlinedLabelNoLayoutShift"] = false
       }
 
@@ -1023,6 +1034,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       checks["programSearchStartHourFloatsAfterSelection"] = false
       checks["programSearchOutlinedLabelFocusBlur"] = false
       checks["programSearchOutlinedLabelMotionDuration"] = false
+      checks["programSearchOutlinedNotchTiming"] = false
       checks["programSearchOutlinedLabelNoLayoutShift"] = false
     }
 

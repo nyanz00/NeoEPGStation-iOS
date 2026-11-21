@@ -77,6 +77,9 @@ final class NeoRulesPage: NeoPage, UITableViewDataSource, UITableViewDelegate, U
   private let statusUpdates = NeoServerStatusUpdates()
   private var statusRefresh: Task<Void, Never>?
   private var statusNeedsRefresh = false
+  private var pendingRuleResponse: (query: NeoRuleListQuery, result: Result<NeoRuleList, Error>)?
+  private var pendingChannelNames: [Int: String]?
+  private var deferredUpdate: Task<Void, Never>?
   private var observers: [NSObjectProtocol] = []
   private var measuredWidth: CGFloat = 0
   private let errorColor = UIColor(red: 239/255, green: 83/255, blue: 80/255, alpha: 1)
@@ -451,6 +454,7 @@ final class NeoRulesPage: NeoPage, UITableViewDataSource, UITableViewDelegate, U
       }
       table.setContentOffset(CGPoint(x: 0, y: -table.adjustedContentInset.top), animated: false)
     } else if let limit = next?.api.rulesLength, query.limit != limit {
+      clearDeferredUpdate()
       query.limit = limit
       query.page = 1
       result = nil
@@ -469,6 +473,7 @@ final class NeoRulesPage: NeoPage, UITableViewDataSource, UITableViewDelegate, U
 
   private func reloadRules(quiet: Bool = false) {
     stopRead(endRefresh: false)
+    if !quiet { clearDeferredUpdate() }
     guard let owner = account, displayed, owns(owner), owner.api.accountReady else {
       stopStatusUpdates()
       if let owner = account, !owner.api.accountReady, !owner.api.accountRevalidating { loadError = "アクティブユーザーの確認が必要です。" }
@@ -497,46 +502,110 @@ final class NeoRulesPage: NeoPage, UITableViewDataSource, UITableViewDelegate, U
           guard acceptsRead() else { return }
           viewers = names
           viewersFailed = false
-          if let id = query.userID, !names.contains(where: { $0.id == id }) {
-            userFilterExplicit = false
-            query.userID = names.first(where: { $0.id == owner.userID })?.id ?? (owner.userID == nil ? nil : names.first?.id)
-            query.page = 1
-            result = nil
-            clearSelection()
-          }
         } catch {
           guard acceptsRead() else { return }
           viewersFailed = true
         }
         updateUsers()
       }
-      let requested = query
-      var renderResult = !quiet || result == nil || loadError != nil
+      var requested = query
+      if let names = viewers, let id = requested.userID, !names.contains(where: { $0.id == id }) {
+        requested.userID = names.first(where: { $0.id == owner.userID })?.id ?? (owner.userID == nil ? nil : names.first?.id)
+        requested.page = 1
+      }
+      let response: Result<NeoRuleList, Error>
       do {
         let list = try await owner.api.programRules(requested, user: owner.viewer, headers: headers)
-        guard acceptsRead() else { return }
-        let pages = requested.pageCount(total: list.total)
-        if requested.page > pages {
-          var next = requested
-          next.page = pages
-          applyQuery(next)
-          return
-        }
-        renderResult = renderResult || result != list
-        result = list
-        selectedIDs.formIntersection(list.rules.map(\.id))
-        loadError = nil
+        response = .success(list)
       } catch {
-        guard acceptsRead() else { return }
-        renderResult = renderResult || loadError != error.localizedDescription
-        loadError = error.localizedDescription
+        response = .failure(error)
       }
+      guard acceptsRead() else { return }
       read = nil
       pullToRefresh.endRefreshing()
-      if renderResult { render() }
+      if quiet {
+        pendingRuleResponse = (requested, response)
+        applyAutomaticUpdates()
+      } else {
+        applyRuleResponse(response, query: requested, forceRender: true)
+      }
       scheduleStatusRefresh()
     }
-    if !quiet || result == nil { render() }
+    if !quiet || (result == nil && !listIsMoving) { render() }
+  }
+
+  private func applyRuleResponse(_ response: Result<NeoRuleList, Error>, query requested: NeoRuleListQuery,
+    forceRender: Bool) {
+    let queryChanged = query != requested
+    if queryChanged {
+      userFilterExplicit = false
+      query = requested
+      result = nil
+      clearSelection()
+    }
+    let changed: Bool
+    switch response {
+    case .success(let list):
+      let pages = query.pageCount(total: list.total)
+      if query.page > pages {
+        var next = query
+        next.page = pages
+        applyQuery(next)
+        return
+      }
+      changed = result != list || loadError != nil
+      result = list
+      selectedIDs.formIntersection(list.rules.map(\.id))
+      loadError = nil
+    case .failure(let error):
+      changed = loadError != error.localizedDescription
+      loadError = error.localizedDescription
+    }
+    if changed || queryChanged || forceRender { render() }
+  }
+
+  private var listIsMoving: Bool {
+#if targetEnvironment(simulator)
+    if smokeScrolling { return true }
+#endif
+    return table.isTracking || table.isDragging || table.isDecelerating
+  }
+
+  private func applyAutomaticUpdates() {
+    guard displayed, let owner = account, owns(owner), owner.api.accountReady else {
+      clearDeferredUpdate()
+      return
+    }
+    if listIsMoving {
+      guard deferredUpdate == nil else { return }
+      // A touch can stop deceleration without starting a new drag. Wait for
+      // tracking to end as well, even if there is no drag-end callback.
+      deferredUpdate = Task { [weak self] in
+        repeat {
+          try? await Task.sleep(nanoseconds: 50_000_000)
+          guard !Task.isCancelled else { return }
+        } while self?.listIsMoving == true
+        self?.deferredUpdate = nil
+        self?.applyAutomaticUpdates()
+      }
+      return
+    }
+    deferredUpdate?.cancel(); deferredUpdate = nil
+    let names = pendingChannelNames
+    if let names { channelNames = names }
+    pendingChannelNames = nil
+    if let response = pendingRuleResponse {
+      pendingRuleResponse = nil
+      applyRuleResponse(response.result, query: response.query, forceRender: names != nil)
+    } else if names != nil {
+      table.reloadData()
+    }
+  }
+
+  private func clearDeferredUpdate() {
+    deferredUpdate?.cancel(); deferredUpdate = nil
+    pendingRuleResponse = nil
+    pendingChannelNames = nil
   }
 
   private func scheduleStatusRefresh() {
@@ -551,20 +620,26 @@ final class NeoRulesPage: NeoPage, UITableViewDataSource, UITableViewDelegate, U
   }
 
   private func stopStatusUpdates() {
+    clearDeferredUpdate()
     statusRefresh?.cancel(); statusRefresh = nil
     statusNeedsRefresh = false
     statusUpdates.stop()
   }
 
   private func loadChannelNames(_ owner: Account, headers: [String: String]) {
-    guard channelNames == nil, channelRead == nil else { return }
+    guard channelNames == nil, pendingChannelNames == nil, channelRead == nil else { return }
     channelRead = Task { [weak self] in
       let channels = try? await owner.api.programSearchChannels(user: owner.viewer, headers: headers)
       guard let self, !Task.isCancelled, owns(owner) else { return }
       channelRead = nil
       guard let channels else { return }
-      channelNames = Dictionary(channels.map { ($0.id, $0.name) }, uniquingKeysWith: { current, _ in current })
-      table.reloadData()
+      let names = Dictionary(channels.map { ($0.id, $0.name) }, uniquingKeysWith: { current, _ in current })
+      if displayed {
+        pendingChannelNames = names
+        applyAutomaticUpdates()
+      } else {
+        channelNames = names
+      }
     }
   }
 
@@ -712,11 +787,13 @@ final class NeoRulesPage: NeoPage, UITableViewDataSource, UITableViewDelegate, U
   }
 
   deinit {
-    read?.cancel(); channelRead?.cancel(); mutation?.cancel(); statusRefresh?.cancel()
+    read?.cancel(); channelRead?.cancel(); mutation?.cancel(); statusRefresh?.cancel(); deferredUpdate?.cancel()
     observers.forEach(NotificationCenter.default.removeObserver)
   }
 
 #if targetEnvironment(simulator)
+  var smokeScrolling = false
+  func smokeRefreshAutomatically() { reloadRules(quiet: true) }
   var smokeRules: [NeoProgramRule] { rules }
   var smokeQuery: NeoRuleListQuery { query }
   var smokeSelecting: Bool { selecting }

@@ -71,6 +71,12 @@ private final class NeoRulesSmokeProtocol: URLProtocol {
     return counts[key, default: 0]
   }
 
+  static func setReservationCount(_ reserves: Int, ruleID: Int) {
+    lock.lock()
+    defer { lock.unlock() }
+    fixtures[ruleID]?.value["reservesCnt"] = reserves
+  }
+
   static func rulesQueries() -> [[String: String]] {
     lock.lock()
     defer { lock.unlock() }
@@ -327,6 +333,27 @@ private final class NeoRulesSmokeProtocol: URLProtocol {
       NeoRulesSmokeProtocol.rulesQueries().last,
       ["type": "normal", "offset": "0", "limit": "2", "userId": "7"]
     )
+    let ruleReads = NeoRulesSmokeProtocol.count("GET /api/rules")
+    page.smokeScrolling = true
+    NeoRulesSmokeProtocol.setReservationCount(2, ruleID: 1001)
+    page.smokeRefreshAutomatically()
+    let firstReadHeld = await waitFor {
+      page.smokeIdle && NeoRulesSmokeProtocol.count("GET /api/rules") > ruleReads
+    }
+    let firstCountHeld = page.smokeRules.first?.reservesCnt == 1
+    NeoRulesSmokeProtocol.setReservationCount(3, ruleID: 1001)
+    page.smokeRefreshAutomatically()
+    let latestReadHeld = await waitFor {
+      page.smokeIdle && NeoRulesSmokeProtocol.count("GET /api/rules") > ruleReads + 1
+    }
+    let latestCountHeld = page.smokeRules.first?.reservesCnt == 1
+    page.smokeScrolling = false
+    let latestApplied = await waitFor { page.smokeRules.first?.reservesCnt == 3 }
+    checks["rulesAutomaticRefreshWaitsAndAppliesLatest"] =
+      firstReadHeld && firstCountHeld && latestReadHeld && latestCountHeld && latestApplied
+    NeoRulesSmokeProtocol.setReservationCount(1, ruleID: 1001)
+    page.smokeRefreshAutomatically()
+    checks["rulesAutomaticRefreshAppliesWhileIdle"] = await waitFor { page.smokeRules.first?.reservesCnt == 1 }
 
     if let selector = control(in: page.view, "rules.user") as? NeoDropdownButton {
       let expectedWidth: CGFloat

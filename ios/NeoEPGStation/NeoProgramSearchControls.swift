@@ -104,22 +104,31 @@ final class NeoOutlinedFieldLabel: UIView {
       if previousBounds != captionLayer.bounds {
         animate(captionLayer, key: "bounds", from: NSValue(cgRect: previousBounds))
       }
-      if let previousOutline { animate(outline, key: "path", from: previousOutline) }
+      if let previousOutline {
+        // Clear the upper edge before the label reaches it. On the way
+        // down, keep the gap open until the label has moved below the stroke.
+        animate(outline, key: "path", from: previousOutline, duration: 0.05, delay: floated ? 0 : 0.06)
+      }
     } else {
       Self.animationKeys.forEach(captionLayer.removeAnimation(forKey:))
       outline.removeAnimation(forKey: "path")
     }
   }
 
-  private func animate(_ layer: CALayer, key: String, from value: Any) {
+  private func animate(_ layer: CALayer, key: String, from value: Any, duration: CFTimeInterval = 0.2,
+    delay: CFTimeInterval = 0) {
     let animation = CABasicAnimation(keyPath: key)
     animation.fromValue = value
-    animation.duration = 0.2
+    animation.duration = duration
     animation.timingFunction = timing
+    if delay > 0 {
+      animation.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil) + delay
+      animation.fillMode = .backwards
+    }
     layer.add(animation, forKey: key)
   }
 
-  // The endpoints on the top edge move apart when the label reaches the border.
+  // The gap is part of the outline path.
   private func outlinePath(notchWidth: CGFloat) -> CGPath {
     let rect = bounds.insetBy(dx: 1, dy: 1)
     let minX = rect.minX, maxX = rect.maxX, minY = rect.minY, maxY = rect.maxY
@@ -144,6 +153,7 @@ final class NeoOutlinedFieldLabel: UIView {
   var smokeFloated: Bool { floated }
   var smokeCaption: UILabel { caption }
   var smokeMotionDuration: CFTimeInterval? { caption.layer.animation(forKey: "position")?.duration }
+  var smokeNotchAnimation: CAAnimation? { outline.animation(forKey: "path") }
 #endif
 }
 
