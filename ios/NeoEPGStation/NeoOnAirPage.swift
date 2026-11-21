@@ -390,6 +390,12 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
   }
 #if targetEnvironment(simulator)
   func smokeAutomaticRefresh() async -> [String: Bool] {
+    // viewDidAppear issues the initial refresh again. Let it finish before
+    // injecting later snapshots so it cannot overwrite the test inputs.
+    for _ in 0..<100 where !active {
+      try? await Task.sleep(nanoseconds: 20_000_000)
+    }
+    guard active else { return ["onAirInitialAppearanceCompleted": false] }
     view.layoutIfNeeded(); list.layoutIfNeeded()
     scrollUpdate.smokeScrolling = true
     defer { scrollUpdate.smokeScrolling = false }
@@ -418,7 +424,9 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     }
     return [
       "onAirRefreshUsesExistingCardsAndWaveButtons": contentUpdated && progressUpdated,
-      "onAirChannelChangesWaitAndApplyOnlyLatest": firstHeld && latestHeld && schedules.last == latestNew && buttons.first === button,
+      "onAirChannelChangesWaitWhileScrolling": firstHeld && latestHeld,
+      "onAirAppliesOnlyLatestChannelChangesAfterScrolling": schedules.count == initialCount + 1 && schedules.last == latestNew,
+      "onAirChannelChangesKeepWaveButtons": buttons.first === button,
     ]
   }
 
