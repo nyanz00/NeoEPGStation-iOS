@@ -7,6 +7,8 @@ enum NeoStyle {
   static let accent = UIColor(red: 32/255, green: 168/255, blue: 154/255, alpha: 1)
   static let muted = UIColor.white.withAlphaComponent(0.7)
   static let border = UIColor.white.withAlphaComponent(0.12)
+  static let error = UIColor(red: 244/255, green: 67/255, blue: 54/255, alpha: 1)
+  static let warning = UIColor(red: 255/255, green: 226/255, blue: 183/255, alpha: 1)
   // MUI default success.main in dark mode (green[400]), with its contrast text.
   static let success = UIColor(red: 102/255, green: 187/255, blue: 106/255, alpha: 1) // #66BB6A
   static let successText = UIColor.black.withAlphaComponent(0.87)

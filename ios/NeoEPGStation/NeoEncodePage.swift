@@ -414,11 +414,6 @@ final class NeoEncodePage: NeoPage, UITableViewDataSource, UITableViewDelegate, 
   deinit { task?.cancel(); mutation?.cancel(); updatesTask?.cancel(); channelTask?.cancel(); observers.forEach(NotificationCenter.default.removeObserver) }
 }
 
-extension NeoStyle {
-  static var error: UIColor { UIColor(red:244/255,green:67/255,blue:54/255,alpha:1) }
-  static var warning: UIColor { UIColor(red:255/255,green:226/255,blue:183/255,alpha:1) }
-}
-
 final class NeoEncodeConfirm: NeoLiveDialog {
   private var busy = false
   private let text = NeoStyle.label(size:16), progress = UIProgressView(progressViewStyle:.default)

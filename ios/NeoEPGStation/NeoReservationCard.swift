@@ -5,7 +5,6 @@ import UIKit
 /// The containing table owns row selection and reservation mutations. This
 /// cell only presents the reservation and reports the menu anchor.
 final class NeoReservationCard: UITableViewCell {
-  private static let conflictColor = UIColor(red: 244 / 255, green: 67 / 255, blue: 54 / 255, alpha: 1)
 
   var onMenu: ((UIView) -> Void)?
 
@@ -132,7 +131,7 @@ final class NeoReservationCard: UITableViewCell {
     menuButton.isHidden = editing
     menuButton.isEnabled = !editing
 
-    card.layer.borderColor = conflict ? Self.conflictColor.cgColor : selected ? NeoStyle.accent.cgColor : NeoStyle.border.cgColor
+    card.layer.borderColor = conflict ? NeoStyle.error.cgColor : selected ? NeoStyle.accent.cgColor : NeoStyle.border.cgColor
     card.backgroundColor = selected ? UIColor.white.withAlphaComponent(0.16)
       : subdued ? UIColor.white.withAlphaComponent(0.12) : NeoStyle.paper
 
