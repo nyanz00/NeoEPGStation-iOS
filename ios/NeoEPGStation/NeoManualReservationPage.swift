@@ -120,7 +120,7 @@ final class NeoManualReservationPage: NeoPage {
     let title = text(program.name, size: 20, bold: true)
     let details = [program.description, program.extended].compactMap { $0 }.filter { !$0.isEmpty }
     var summary: [UIView] = [title, text(channelName(program.channelId), muted: true), text(Self.schedule(program), muted: true)]
-    if !program.genreLabels.isEmpty { summary.append(text(program.genreLabels.joined(separator: " / "), muted: true)) }
+    summary.append(contentsOf: program.genreLabels.map { text($0, muted: true) })
     summary.append(contentsOf: details.map { text($0) })
     if showFree { summary.append(text(program.isFree ? "無料放送" : "有料放送", muted: true)) }
     form.addArrangedSubview(panel(summary))
@@ -326,12 +326,12 @@ final class NeoManualReservationPage: NeoPage {
     return label
   }
 
-  private func channelName(_ id: Int) -> String { roster.first { $0.id == id }?.name ?? "放送局ID: \(id)" }
+  private func channelName(_ id: Int) -> String { roster.first { $0.id == id }?.name ?? String(id) }
 
   static func schedule(_ program: NeoScheduledProgram) -> String {
     let format = DateFormatter()
     format.locale = Locale(identifier: "ja_JP"); format.timeZone = TimeZone(identifier: "Asia/Tokyo")
-    format.dateFormat = "MM/dd(EEE) HH:mm"
+    format.dateFormat = "yyyy/MM/dd(EEE) HH:mm"
     let start = format.string(from: Date(timeIntervalSince1970: program.startAt / 1000))
     format.dateFormat = "HH:mm"
     let end = format.string(from: Date(timeIntervalSince1970: program.endAt / 1000))

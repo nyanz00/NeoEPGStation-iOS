@@ -259,8 +259,8 @@ struct ProgramSearchTests {
     details.directory = "  drama  "; details.recordedFormat = "  $name$  "
     details.encodes[2] = .init(mode: "AV1", parentDirectory: "Archive", directory: " final ")
     let detailed = try details.body()
-    let saved = detailed["saveOption"] as? [String: String], modes = detailed["encodeOption"] as? [String: Any]
-    expect(saved?["directory"] == "drama" && saved?["recordedFormat"] == "$name$", "reserve save options trim input")
+    let savedReservation = detailed["saveOption"] as? [String: String], modes = detailed["encodeOption"] as? [String: Any]
+    expect(savedReservation?["directory"] == "drama" && savedReservation?["recordedFormat"] == "$name$", "reserve save options trim input")
     expect(modes?["mode1"] == nil && modes?["mode3"] as? String == "AV1"
       && modes?["encodeParentDirectoryName3"] as? String == "Archive" && modes?["directory3"] as? String == "final",
       "manual reservation preserves encode slot index and output directory")

@@ -417,7 +417,7 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
     cell.configure(title: item.name, source: item.ruleId == nil ? "手動" : "ルール",
       status: item.kind == .normal ? nil : item.kind.label, conflict: item.isConflict == true,
       subdued: item.isSkip == true || item.isOverlap == true,
-      channel: channels?[item.channelId]?.name ?? "放送局ID: \(item.channelId)",
+      channel: channels?[item.channelId]?.name ?? String(item.channelId),
       time: NeoManualReservationPage.schedule(item.program), summary: item.description,
       editing: editing, selected: selected.contains(item.id))
     cell.onMenu = { [weak self] anchor in self?.openMenu(item, anchor: anchor) }
