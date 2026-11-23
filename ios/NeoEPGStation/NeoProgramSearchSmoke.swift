@@ -1284,15 +1284,15 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     }
     checks["programDetailOpensFromResult"] = detailReady
     guard let detail = page.presentedViewController as? NeoProgramDetailDialog, detailReady else {
-      checks["programDetailReadOnly"] = false
+      checks["programDetailConflictHasDetailsWithoutBookingActions"] = false
       return checks
     }
     detail.view.layoutIfNeeded()
 
     let detailButtons = views(in: detail.view).compactMap { $0 as? UIButton }
     let buttonTitles = Set(detailButtons.filter { !$0.isHidden }.compactMap { $0.title(for: .normal) })
-    let forbidden = Set(["予約", "削除", "編集", "解除", "除外", "詳細"])
-    checks["programDetailReadOnly"] = buttonTitles.contains("検索") && buttonTitles.contains("閉じる")
+    let forbidden = Set(["予約", "削除", "編集", "解除", "除外"])
+    checks["programDetailConflictHasDetailsWithoutBookingActions"] = Set(["検索", "閉じる", "詳細"]).isSubset(of: buttonTitles)
       && buttonTitles.isDisjoint(with: forbidden)
     checks["programDetailShowsOverviewAndExtended"] = views(in: detail.view).compactMap { $0 as? UITextView }
       .map { $0.text ?? "" }.joined(separator: "\n").contains("概要とリンク")
