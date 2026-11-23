@@ -17,6 +17,8 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
   private static var reservationFailures = 0
   private static var ruleCreateFailures = 0
   private static var nonSearchWrites = 0
+  private static var exercisesReservations = false
+  private static var manualReservations: [Int: [String: Any]] = [:]
   private var stopped = false
   private let stateLock = NSLock()
 
@@ -56,6 +58,12 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
   static func reset() {
     lock.lock(); defer { lock.unlock() }
     calls.removeAll(); bodies.removeAll(); urls.removeAll(); reservationFailures = 1; ruleCreateFailures = 1; nonSearchWrites = 0
+    exercisesReservations = false; manualReservations.removeAll()
+  }
+
+  static func enableReservationFlow() {
+    lock.lock(); defer { lock.unlock() }
+    exercisesReservations = true
   }
 
   static func count(_ key: String) -> Int {
@@ -120,7 +128,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
         ]
       }
     } else if path == "/api/config", request.httpMethod == "GET" {
-      value = ["encode": [] as [String], "broadcast": ["GR": true]] as [String: Any]
+      value = ["encode": exercisesReservations ? ["Fixture AVC"] : [], "recorded": ["Archive"], "broadcast": ["GR": true]] as [String: Any]
     } else if path == "/api/rules/41", request.httpMethod == "GET" {
       value = Self.normalRule()
     } else if path == "/api/rules/42", request.httpMethod == "GET" {
@@ -139,6 +147,31 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       let option = body["option"] as? [String: Any] ?? [:]
       let hasRelatedChannel = (option["channelIds"] as? [Any])?.contains { ($0 as? NSNumber)?.intValue == 1 } == true
       value = [Self.program(hasRelatedChannel ? 9002 : 9001, related: hasRelatedChannel)]
+    } else if exercisesReservations, path.hasPrefix("/api/schedules/detail/"),
+      let id = path.split(separator: "/").last.flatMap({ Int($0) }) {
+      value = Self.program(id, related: id == 9002)
+    } else if exercisesReservations, path == "/api/reserves", request.httpMethod == "POST" {
+      let id = 6100 + calls[key, default: 0]
+      let time = body["timeSpecifiedOption"] as? [String: Any]
+      let programID = body["programId"] as? Int
+      var item = Self.program(programID ?? 9002, related: true)
+      item["id"] = id; item["programId"] = programID
+      for field in ["name", "channelId", "startAt", "endAt"] {
+        if let value = time?[field] { item[field] = value }
+      }
+      manualReservations[id] = editReservation(item, body: body)
+      status = 201; value = ["reserveId": id]
+    } else if exercisesReservations, path.hasPrefix("/api/reserves/"),
+      let id = path.split(separator: "/").last.flatMap({ Int($0) }), let item = manualReservations[id] {
+      switch request.httpMethod {
+      case "PUT":
+        manualReservations[id] = editReservation(item, body: body)
+        value = ["code": 201]
+      case "DELETE":
+        manualReservations[id] = nil
+        value = ["code": 200]
+      default: value = item
+      }
     } else if path == "/api/reserves", request.httpMethod == "GET" {
       let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
       let ruleID = query.first(where: { $0.name == "ruleId" })?.value.flatMap(Int.init)
@@ -152,6 +185,12 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
           ] as [String: Any]],
           "total": 1
         ] as [String: Any]
+      } else if exercisesReservations {
+        let type = query.first(where: { $0.name == "type" })?.value
+        let values = type == "normal" ? manualReservations.keys.sorted().compactMap { manualReservations[$0] } : []
+        let offset = query.first(where: { $0.name == "offset" })?.value.flatMap(Int.init) ?? 0
+        let limit = query.first(where: { $0.name == "limit" })?.value.flatMap(Int.init) ?? 24
+        value = ["reserves": Array(values.dropFirst(offset).prefix(limit)), "total": values.count] as [String: Any]
       } else {
         status = 404
         value = ["message": "unexpected reserve fixture"]
@@ -161,6 +200,12 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
         reservationFailures -= 1
         status = 503
         value = ["message": "fixture reservation failure"]
+      } else if exercisesReservations {
+        let normal: [[String: Any]] = manualReservations.values.compactMap { item in
+          guard let programID = item["programId"] else { return nil }
+          return ["reserveId": item["id"]!, "userId": item["userId"]!, "programId": programID]
+        }
+        value = ["normal": normal, "conflicts": [[String: Any]](), "overlaps": [[String: Any]](), "skips": [[String: Any]]()]
       } else {
         let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let start = query.first(where: { $0.name == "startAt" })?.value.flatMap(Int64.init) ?? 0
@@ -180,6 +225,22 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     }
     lock.unlock()
     return (status, value)
+  }
+
+  private static func editReservation(_ input: [String: Any], body: [String: Any]) -> [String: Any] {
+    var item = input
+    item["allowEndLack"] = body["allowEndLack"]
+    item["userId"] = body["userId"]
+    let save = body["saveOption"] as? [String: Any], encode = body["encodeOption"] as? [String: Any]
+    for key in ["parentDirectoryName", "directory", "recordedFormat"] { item[key] = save?[key] }
+    for index in 1...3 {
+      item["encodeMode\(index)"] = encode?["mode\(index)"]
+      item["encodeParentDirectoryName\(index)"] = encode?["encodeParentDirectoryName\(index)"]
+      item["encodeDirectory\(index)"] = encode?["directory\(index)"]
+    }
+    item["isDeleteOriginalAfterEncode"] = encode?["isDeleteOriginalAfterEncode"]
+    item["updateThumbnail"] = encode?["updateThumbnail"]
+    return item
   }
 
   private static func program(_ id: Int, related: Bool) -> [String: Any] {
@@ -1307,9 +1368,9 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
           button(in: dialog.view, identifier: $0)
         }
         checks["programDetailUnreservedBookingLayout"] = mode?.title(for: .normal) == "TS" && user?.title(for: .normal)?.isEmpty == false
-          && !(mode?.isUserInteractionEnabled ?? true) && !(user?.isUserInteractionEnabled ?? true)
+          && mode?.isUserInteractionEnabled == true && user?.isUserInteractionEnabled == true
           && checkboxes.count == 2 && checkboxes.allSatisfy { !$0.isEnabled && !$0.frame.isEmpty }
-          && footer.count == 4 && footer.prefix(2).allSatisfy(\.isEnabled) && footer.suffix(2).allSatisfy { !$0.isEnabled }
+          && footer.count == 4 && footer.allSatisfy(\.isEnabled)
           && footer.allSatisfy { !$0.isHidden && !$0.frame.isEmpty }
           && zip(footer, footer.dropFirst()).allSatisfy { $0.0.frame.maxX <= $0.1.frame.minX }
         capture("detail-unreserved")
@@ -1443,6 +1504,140 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     } else {
       checks["programSearchTimeRuleRequestAndNoScheduleSearch"] = false
     }
+    if navigation.topViewController !== page { shell.goBack() }
+    _ = await waitFor { navigation.topViewController === page && navigation.transitionCoordinator == nil }
+    checks.merge(await reservationFlow(shell: shell, api: api, navigation: navigation)) { _, new in new }
+    return checks
+  }
+
+  private static func reservationFlow(shell: NeoShell, api: NeoAPI, navigation: UINavigationController) async -> [String: Bool] {
+    var checks = [String: Bool]()
+    func find(_ root: UIView, _ id: String) -> UIView? {
+      if root.accessibilityIdentifier == id { return root }
+      return root.subviews.lazy.compactMap { find($0, id) }.first
+    }
+    func wait(_ ready: () -> Bool) async -> Bool {
+      for _ in 0..<200 {
+        if ready() { return true }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+      }
+      return ready()
+    }
+    func tap(_ root: UIView, _ id: String) { (find(root, id) as? UIButton)?.sendActions(for: .touchUpInside) }
+    func capture(_ name: String) {
+      guard let window = shell.view.window else { return }
+      let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+        window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+      }
+      try? image.pngData()?.write(to: NeoPiPSmoke.directory.appendingPathComponent("program-search-\(name).png"))
+    }
+
+    NeoProgramSearchSmokeProtocol.enableReservationFlow()
+    let originalSettings = api.quickReservationSettings
+    api.quickReservationSettings = .init()
+    defer { api.quickReservationSettings = originalSettings; shell.showRoute("search") }
+    let seed = NeoScheduledProgram(id: 9002, channelId: 1, startAt: 1_791_025_200_000,
+      endAt: 1_791_027_000_000, isFree: true, name: "Fixture reservation")
+    let form = NeoProgramSearchForm.related(to: seed, includeChannel: true, includeGenre: false)
+    let search = NeoProgramSearchPage(shell: shell, relatedForm: form)
+    shell.pushPage { search }
+    guard await wait({
+      navigation.topViewController === search && navigation.transitionCoordinator == nil
+        && (find(search.view, "programSearch.list") as? UITableView)?.numberOfRows(inSection: 0) == 1
+    }), let results = find(search.view, "programSearch.list") as? UITableView else {
+      return ["reservationSearchResultsReady": false]
+    }
+
+    let row = IndexPath(row: 0, section: 0)
+    results.scrollToRow(at: row, at: .top, animated: false)
+    search.tableView(results, didSelectRowAt: row)
+    guard await wait({
+      guard let dialog = search.presentedViewController as? NeoProgramDetailDialog else { return false }
+      return !dialog.isBeingPresented && dialog.viewIfLoaded?.window != nil
+    }), let quick = search.presentedViewController as? NeoProgramDetailDialog,
+      let mode = find(quick.view, "program-detail-booking-mode") as? NeoDropdownButton,
+      let preset = mode.dropdownRows.first(where: { $0.title == "Fixture AVC" }) else {
+      return ["quickReservationShowsServerPresets": false]
+    }
+    preset.action?()
+    tap(quick.view, "program-detail-booking-delete")
+    tap(quick.view, "program-detail-booking-thumbnail")
+    capture("quick-reservation")
+    let reads = NeoProgramSearchSmokeProtocol.count("GET /api/reserves/lists")
+    tap(quick.view, "program-detail-reserve")
+    let booked = await wait {
+      search.presentedViewController == nil && NeoProgramSearchSmokeProtocol.count("POST /api/reserves") == 1
+        && NeoProgramSearchSmokeProtocol.count("GET /api/reserves/lists") > reads && search.smokeReservationKind(9002) == .normal
+    }
+    let booking = NeoProgramSearchSmokeProtocol.requestBodies("POST /api/reserves").first
+    let encode = booking?["encodeOption"] as? [String: Any]
+    checks["quickReservationSendsPresetAndRefreshesSearch"] = booked && booking?["programId"] as? Int == 9002
+      && booking?["userId"] as? Int == 7 && encode?["mode1"] as? String == "Fixture AVC"
+      && encode?["isDeleteOriginalAfterEncode"] as? Bool == true && encode?["updateThumbnail"] as? Bool == true
+      && api.quickReservationSettings.mode == "Fixture AVC"
+
+    shell.showRoute("reserves")
+    guard await wait({
+      shell.children.compactMap { $0 as? UINavigationController }.contains { nav in
+        guard let page = nav.topViewController as? NeoReservationsPage else { return false }
+        return (find(page.view, "reserves.list") as? UITableView)?.numberOfRows(inSection: 0) == 1
+      }
+    }), let reservesNav = shell.children.compactMap({ $0 as? UINavigationController }).first(where: { $0.topViewController is NeoReservationsPage }),
+      let reserves = reservesNav.topViewController as? NeoReservationsPage, let table = find(reserves.view, "reserves.list") as? UITableView else {
+      checks["reservationTabShowsCreatedReservation"] = false
+      return checks
+    }
+    checks["reservationTabShowsCreatedReservation"] = true
+    capture("reservation-list")
+    reserves.tableView(table, didSelectRowAt: row)
+    let detailReady = await wait { reserves.presentedViewController is NeoProgramDetailDialog && reserves.presentedViewController?.isBeingPresented == false }
+    if detailReady, let detail = reserves.presentedViewController { tap(detail.view, "program-detail-details") }
+    let editReady = await wait {
+      guard let editor = reservesNav.topViewController as? NeoManualReservationPage else { return false }
+      return reservesNav.transitionCoordinator == nil && (find(editor.view, "manualReserve.save") as? UIButton)?.isEnabled == true
+    }
+    if editReady, let editor = reservesNav.topViewController as? NeoManualReservationPage {
+      capture("manual-reservation-edit")
+      tap(editor.view, "manualReserve.save")
+    }
+    let edited = await wait {
+      reservesNav.topViewController === reserves && reservesNav.transitionCoordinator == nil
+        && NeoProgramSearchSmokeProtocol.count("PUT /api/reserves/6101") == 1
+    }
+    checks["reservationListOpensAndUpdatesManualReservation"] = editReady && edited
+    if reservesNav.topViewController !== reserves {
+      shell.goBack()
+      _ = await wait { reservesNav.topViewController === reserves && reservesNav.transitionCoordinator == nil }
+    }
+    tap(reserves.view, "reserves.edit"); tap(reserves.view, "reserves.selectAll"); tap(reserves.view, "reserves.bulkAction")
+    let confirmed = await wait { reserves.presentedViewController?.isBeingPresented == false && reserves.presentedViewController != nil }
+    if confirmed, let prompt = reserves.presentedViewController { tap(prompt.view, "reserves.confirm") }
+    let cancelled = await wait {
+      NeoProgramSearchSmokeProtocol.count("DELETE /api/reserves/6101") == 1 && table.numberOfRows(inSection: 0) == 0
+        && reserves.presentedViewController == nil
+    }
+    checks["reservationBulkCancelUpdatesList"] = confirmed && cancelled
+
+    shell.showRoute("search")
+    let returned = await wait { navigation.topViewController === search && navigation.transitionCoordinator == nil }
+    if returned {
+      NotificationCenter.default.post(name: .neoReservationsChanged, object: api)
+      _ = await wait { search.smokeReservationKind(9002) == nil }
+    }
+    if returned, results.numberOfRows(inSection: 0) == 1 { search.tableView(results, didSelectRowAt: row) }
+    let newReady = await wait { search.presentedViewController is NeoProgramDetailDialog && search.presentedViewController?.isBeingPresented == false }
+    if newReady, let dialog = search.presentedViewController { tap(dialog.view, "program-detail-details") }
+    let newEditor = await wait {
+      guard let editor = navigation.topViewController as? NeoManualReservationPage else { return false }
+      return navigation.transitionCoordinator == nil && (find(editor.view, "manualReserve.save") as? UIButton)?.isEnabled == true
+    }
+    if newEditor, let editor = navigation.topViewController as? NeoManualReservationPage { tap(editor.view, "manualReserve.save") }
+    let added = await wait {
+      navigation.topViewController === search && NeoProgramSearchSmokeProtocol.count("POST /api/reserves") == 2
+    }
+    let detailed = NeoProgramSearchSmokeProtocol.requestBodies("POST /api/reserves").last
+    checks["searchOpensDetailedReservationAndAdds"] = newEditor && added && detailed?["programId"] as? Int == 9002
+      && detailed?["encodeOption"] == nil
     return checks
   }
 }

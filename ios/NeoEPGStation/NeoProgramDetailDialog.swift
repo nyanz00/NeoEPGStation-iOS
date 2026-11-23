@@ -1,11 +1,6 @@
 import UIKit
 
-/// Read-only program information used by search results and the mobile guide.
-///
-/// The presenter owns the selected program and navigation.  This controller
-/// renders the program, shows the Web-shaped unreserved booking controls as
-/// disabled presentation, dismisses itself, and reports a related-search
-/// request through `onRelatedSearch`.
+/// Program information and reservation controls shared by program presenters.
 final class NeoProgramDetailDialog: UIViewController, UIGestureRecognizerDelegate, UITextViewDelegate {
   private let program: NeoScheduledProgram
   private let channel: NeoLiveChannel?
@@ -28,6 +23,11 @@ final class NeoProgramDetailDialog: UIViewController, UIGestureRecognizerDelegat
   private let reservationView = NeoProgramChipWrap()
   private let bookingView: NeoProgramBookingView?
   private let bookingHasUser: Bool
+  private var bookingSubmit: ((Int, NeoQuickReservationSettings) -> Void)?
+  private var detailAction: (() -> Void)?
+  private var existingAction: (() -> Void)?
+  private var reservationBusy = false
+  private var showsRelatedSearch = true
   private lazy var searchButton: UIButton = {
     let button = NeoStyle.button("検索", action: { [weak self] in self?.searchRelated() })
     button.setImage(NeoIcon.image("SearchOutlined"), for: .normal)
@@ -125,7 +125,8 @@ final class NeoProgramDetailDialog: UIViewController, UIGestureRecognizerDelegat
     let image = NeoIcon.image(icon)
     let foreground: UIColor = filled ? (hasUser ? .black.withAlphaComponent(0.87) : .white.withAlphaComponent(0.3)) : .white
     button.setTitleColor(foreground, for: .disabled)
-    // Keep the planned Web appearance while exposing the action as unavailable.
+    button.setTitleColor(foreground, for: .normal)
+    button.setImage(image.withTintColor(foreground, renderingMode: .alwaysOriginal), for: .normal)
     button.setImage(image.withTintColor(foreground, renderingMode: .alwaysOriginal), for: .disabled)
     button.adjustsImageWhenDisabled = false
     button.titleLabel?.font = .systemFont(ofSize: 13, weight: .medium)
@@ -141,6 +142,83 @@ final class NeoProgramDetailDialog: UIViewController, UIGestureRecognizerDelegat
     button.accessibilityValue = "無効"
     button.isEnabled = false
     return button
+  }
+
+  func configureBooking(userID: Int?, users: [NeoViewer], modes: [String], settings: NeoQuickReservationSettings,
+    onSettingsChange: @escaping (NeoQuickReservationSettings) -> Void,
+    onSubmit: @escaping (Int, NeoQuickReservationSettings) -> Void, onDetails: @escaping () -> Void) {
+    bookingSubmit = onSubmit; detailAction = onDetails
+    bookingView?.configure(userID: userID, users: users, modes: modes, settings: settings,
+      onSettingsChange: onSettingsChange) { [weak self] in self?.updateReservationControls() }
+    detailsButton.isEnabled = true
+    detailsButton.accessibilityValue = nil
+    updateReservationControls()
+  }
+
+  func updateBookingUsers(_ users: [NeoViewer]) {
+    bookingView?.updateUsers(users)
+  }
+
+  func configureExistingReservation(detailsTitle: String, showsSearch: Bool = true,
+    onDetails: @escaping () -> Void, actionTitle: String? = nil, onAction: (() -> Void)? = nil) {
+    detailAction = onDetails; existingAction = onAction
+    showsRelatedSearch = showsSearch
+    detailsButton.setTitle(detailsTitle, for: .normal)
+    detailsButton.accessibilityLabel = detailsTitle
+    let icon = NeoIcon.image(detailsTitle == "編集" ? "EditOutlined" : "DescriptionOutlined")
+    detailsButton.setImage(icon.withTintColor(.white, renderingMode: .alwaysOriginal), for: .normal)
+    detailsButton.isEnabled = true; detailsButton.accessibilityValue = nil
+    if let actionTitle {
+      reserveButton.setTitle(actionTitle, for: .normal)
+      reserveButton.setImage(nil, for: .normal)
+      reserveButton.setImage(nil, for: .disabled)
+      reserveButton.setTitleColor(NeoStyle.error, for: .normal)
+      reserveButton.backgroundColor = .clear
+      reserveButton.accessibilityLabel = actionTitle
+    }
+    updateReservationControls()
+    viewIfLoaded?.setNeedsLayout()
+  }
+
+  func setReservationBusy(_ value: Bool) {
+    reservationBusy = value
+    updateReservationControls()
+  }
+
+  func finishReservationAction() {
+    reservationBusy = false
+    close()
+  }
+
+  private func updateReservationControls() {
+    if bookingSubmit != nil {
+      let canReserve = bookingView?.userID != nil
+      let foreground: UIColor = canReserve ? .black.withAlphaComponent(0.87) : .white.withAlphaComponent(0.3)
+      reserveButton.setTitleColor(foreground, for: .normal)
+      reserveButton.setImage(NeoIcon.image("EventAvailableOutlined").withTintColor(foreground, renderingMode: .alwaysOriginal), for: .normal)
+      reserveButton.backgroundColor = canReserve && !reservationBusy ? NeoStyle.accent : UIColor.white.withAlphaComponent(0.12)
+      reserveButton.isEnabled = canReserve && !reservationBusy
+      bookingView?.setBusy(reservationBusy)
+    } else if existingAction != nil {
+      reserveButton.isEnabled = !reservationBusy
+    }
+    reserveButton.accessibilityValue = reserveButton.isEnabled ? nil : "無効"
+    if detailAction != nil { detailsButton.isEnabled = !reservationBusy }
+  }
+
+  private func submitReservation() {
+    guard !closeRequested, !reservationBusy else { return }
+    if let bookingSubmit, let bookingView, let userID = bookingView.userID {
+      bookingSubmit(userID, bookingView.settings)
+    } else {
+      existingAction?()
+    }
+  }
+
+  private func openReservationDetails() {
+    guard !closeRequested, !reservationBusy, let action = detailAction else { return }
+    closeRequested = true
+    dismiss(animated: true, completion: action)
   }
 
   /// Replaces the read-only reservation user chips after an asynchronous user
@@ -220,6 +298,8 @@ final class NeoProgramDetailDialog: UIViewController, UIGestureRecognizerDelegat
     view.addSubview(card)
     [titleLabel, closeButton, bodyScroll, broadcastScroll, headerLine, broadcastLine, reservationScroll, reservationLine,
       bookingLine, searchButton, footerCloseButton, detailsButton, reserveButton, footerLine].forEach(card.addSubview)
+    detailsButton.addAction(UIAction { [weak self] _ in self?.openReservationDetails() }, for: .touchUpInside)
+    reserveButton.addAction(UIAction { [weak self] _ in self?.submitReservation() }, for: .touchUpInside)
     if let bookingView {
       card.addSubview(bookingView)
       card.bringSubviewToFront(bookingLine)
@@ -371,15 +451,17 @@ final class NeoProgramDetailDialog: UIViewController, UIGestureRecognizerDelegat
     let footerButtonY = footerY + 9
     let footerButtonHeight: CGFloat = 42
     let showBookingActions = bookingHeight > 0 && reservationHeight == 0
-    detailsButton.isHidden = !showBookingActions
-    reserveButton.isHidden = !showBookingActions
-    if showBookingActions {
+    detailsButton.isHidden = !showBookingActions && detailAction == nil
+    reserveButton.isHidden = !showBookingActions && existingAction == nil
+    searchButton.isHidden = !showsRelatedSearch
+    if !detailsButton.isHidden || !reserveButton.isHidden {
       let gap: CGFloat = 4
       let closeWidth: CGFloat = 56
-      let detailsWidth: CGFloat = 56
-      let reserveWidth: CGFloat = 60
+      let detailsWidth: CGFloat = detailsButton.isHidden ? 0 : 56
+      let actionWidth = min(122, (reserveButton.title(for: .normal)?.size(withAttributes: [.font: UIFont.systemFont(ofSize: 13)]).width ?? 0) + 16)
+      let reserveWidth: CGFloat = reserveButton.isHidden ? 0 : showBookingActions ? 60 : max(60, actionWidth)
       let rightWidth = closeWidth + detailsWidth + reserveWidth + gap * 3
-      let searchWidth = max(60, cardWidth - horizontalInset * 2 - rightWidth)
+      let searchWidth = max(0, cardWidth - horizontalInset * 2 - rightWidth)
       searchButton.frame = CGRect(x: horizontalInset, y: footerButtonY, width: searchWidth, height: footerButtonHeight)
       let closeX = searchButton.frame.maxX + gap
       footerCloseButton.frame = CGRect(x: closeX, y: footerButtonY, width: closeWidth, height: footerButtonHeight)
@@ -408,13 +490,13 @@ final class NeoProgramDetailDialog: UIViewController, UIGestureRecognizerDelegat
   }
 
   private func close() {
-    guard !closeRequested else { return }
+    guard !closeRequested, !reservationBusy else { return }
     closeRequested = true
     dismiss(animated: true)
   }
 
   private func searchRelated() {
-    guard !closeRequested else { return }
+    guard !closeRequested, !reservationBusy else { return }
     closeRequested = true
     let callback = onRelatedSearch
     dismiss(animated: true) { callback() }
@@ -743,6 +825,12 @@ private final class NeoProgramBookingView: UIView {
   private let viewer = NeoSelectButton()
   private let deleteOriginal: UIButton
   private let updateThumbnail: UIButton
+  private var users: [NeoViewer] = [], modes: [String] = []
+  private var changed: ((NeoQuickReservationSettings) -> Void)?
+  private var selectionChanged: (() -> Void)?
+  private var busy = false
+  private(set) var userID: Int?
+  private(set) var settings = NeoQuickReservationSettings()
 
   init(displayName: String?) {
     deleteOriginal = Self.checkbox(title: "元ファイル削除", identifier: "program-detail-booking-delete")
@@ -766,9 +854,64 @@ private final class NeoProgramBookingView: UIView {
     }
 
     addSubview(mode); addSubview(viewer); addSubview(deleteOriginal); addSubview(updateThumbnail)
+    deleteOriginal.addAction(UIAction { [weak self] _ in
+      guard let self else { return }; settings.deleteOriginal.toggle(); updateSettings()
+    }, for: .touchUpInside)
+    updateThumbnail.addAction(UIAction { [weak self] _ in
+      guard let self else { return }; settings.updateThumbnail.toggle(); updateSettings()
+    }, for: .touchUpInside)
   }
 
   required init?(coder: NSCoder) { fatalError() }
+
+  func configure(userID: Int?, users: [NeoViewer], modes: [String], settings: NeoQuickReservationSettings,
+    onSettingsChange: @escaping (NeoQuickReservationSettings) -> Void, selectionChanged: @escaping () -> Void) {
+    self.userID = userID; self.settings = settings
+    var seen = Set([""])
+    self.modes = modes.filter { seen.insert($0).inserted }
+    changed = onSettingsChange; self.selectionChanged = selectionChanged
+    for field in [mode, viewer] {
+      field.isUserInteractionEnabled = true
+      field.accessibilityTraits.remove(.notEnabled)
+    }
+    if !settings.mode.isEmpty && !self.modes.contains(settings.mode) { self.settings.mode = ""; changed?(self.settings) }
+    updateUsers(users)
+  }
+
+  func updateUsers(_ users: [NeoViewer]) { self.users = users; renderOptions() }
+
+  func setBusy(_ value: Bool) {
+    if busy != value { busy = value; renderOptions() }
+  }
+
+  private func updateSettings() { changed?(settings); renderOptions() }
+
+  private func renderOptions() {
+    mode.setTitle(settings.mode.isEmpty ? "TS" : settings.mode, for: .normal)
+    mode.dropdownRows = ([""] + modes).map { value in
+      .init(title: value.isEmpty ? "TS" : value, selected: value == settings.mode) { [weak self] in
+        self?.settings.mode = value; self?.updateSettings()
+      }
+    }
+    if let id = userID {
+      viewer.setTitle(users.first { $0.id == id }?.name ?? "ユーザーID: \(id)", for: .normal)
+    } else { viewer.setTitle("ユーザーを選択", for: .normal) }
+    viewer.dropdownRows = users.map { user in
+      .init(title: user.name, selected: user.id == userID) { [weak self] in
+        self?.userID = user.id; self?.renderOptions(); self?.selectionChanged?()
+      }
+    }
+    mode.isEnabled = !busy
+    viewer.isEnabled = !busy
+    for (button, selected) in [(deleteOriginal, settings.deleteOriginal), (updateThumbnail, settings.updateThumbnail)] {
+      button.isEnabled = !settings.mode.isEmpty && !busy
+      button.isSelected = selected
+      let image = NeoIcon.image(selected ? "CheckBox" : "CheckBoxOutlineBlank")
+      button.setImage(image.withTintColor(NeoStyle.accent, renderingMode: .alwaysOriginal), for: .normal)
+      button.setImage(image.withTintColor(.white.withAlphaComponent(0.3), renderingMode: .alwaysOriginal), for: .disabled)
+      button.accessibilityValue = selected ? "選択済み" : "未選択"
+    }
+  }
 
   override func sizeThatFits(_ size: CGSize) -> CGSize {
     let width = max(0, size.width)

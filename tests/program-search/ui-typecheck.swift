@@ -59,6 +59,15 @@ class NeoLiveDialog: UIViewController {
   func addText(_ text: String, bold: Bool = false) {}
   func addAction(_ title: String, filled: Bool = false, enabled: Bool = true, action: @escaping () -> Void) -> UIButton { UIButton() }
   func cancel() {}
+  func setCloseEnabled(_ enabled: Bool) {}
+}
+
+@MainActor final class NeoDeferredScrollUpdate {
+  @discardableResult func submit(in scrollView: UIScrollView, _ update: @escaping () -> Void) -> Bool {
+    update()
+    return false
+  }
+  func cancel() {}
 }
 
 final class NeoPageJumpDialog: NeoLiveDialog {

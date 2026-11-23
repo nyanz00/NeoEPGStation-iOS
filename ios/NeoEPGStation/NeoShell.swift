@@ -648,6 +648,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       else if id == "onair" { page = NeoOnAirPage(shell: self) }
       else if id == "encode" { page = NeoEncodePage(shell: self) }
       else if id == "search" { page = NeoProgramSearchPage(shell: self) }
+      else if id == "reserves" { page = NeoReservationsPage(shell: self) }
       else if id == "rule" { page = NeoRulesPage(shell: self) }
       else if id == "settings" { page = NeoSettingsPage(shell: self) }
       else if id == "history" { page = NeoHistoryPage(shell: self) }

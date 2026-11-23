@@ -128,7 +128,8 @@ jobs:
           set -o pipefail
           mkdir -p build/native-tests dist
           swiftc -parse-as-library ios/NeoEPGStation/NeoDateInput.swift ios/NeoEPGStation/NeoProgramSearchModels.swift \
-            ios/NeoEPGStation/NeoProgramRuleModels.swift tests/program-search/main.swift -o build/native-tests/program-search
+            ios/NeoEPGStation/NeoProgramRuleModels.swift ios/NeoEPGStation/NeoReservationModels.swift \
+            tests/program-search/main.swift -o build/native-tests/program-search
           build/native-tests/program-search | tee dist/program-search-models.txt
       - name: Check detail tool models
         if: ${{ inputs.check_scope == 'player-feedback' && inputs.ui_stage == 'detail-tools' }}
@@ -282,6 +283,8 @@ jobs:
               ios/NeoEPGStation/NeoProgramSearchControls.swift ios/NeoEPGStation/NeoProgramSearchPicker.swift \
               ios/NeoEPGStation/NeoEncodeUpdates.swift ios/NeoEPGStation/NeoRulesPage.swift ios/NeoEPGStation/NeoRuleCard.swift \
               ios/NeoEPGStation/NeoProgramDetailDialog.swift ios/NeoEPGStation/NeoProgramSearchSmoke.swift \
+              ios/NeoEPGStation/NeoReservationModels.swift ios/NeoEPGStation/NeoReservationAPI.swift \
+              ios/NeoEPGStation/NeoReservationCard.swift ios/NeoEPGStation/NeoReservationsPage.swift ios/NeoEPGStation/NeoManualReservationPage.swift \
               ios/NeoEPGStation/NeoRulesSmoke.swift tests/program-search/ui-typecheck.swift
           fi
       - name: Check dead loopback relay and remote playlist recovery

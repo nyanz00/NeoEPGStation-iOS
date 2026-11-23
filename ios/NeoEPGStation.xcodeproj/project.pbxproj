@@ -28,6 +28,11 @@
     BCAC00000000000000000025 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000025; };
     BCAC00000000000000000026 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000026; };
     BCAC00000000000000000027 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000027; };
+    BCAC00000000000000000028 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000028; };
+    BCAC00000000000000000029 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000029; };
+    BCAC0000000000000000002A = {isa = PBXBuildFile; fileRef = ACAC0000000000000000002A; };
+    BCAC0000000000000000002B = {isa = PBXBuildFile; fileRef = ACAC0000000000000000002B; };
+    BCAC0000000000000000002C = {isa = PBXBuildFile; fileRef = ACAC0000000000000000002C; };
     BCAC00000000000000000018 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000018; };
     BCAC00000000000000000019 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000019; };
     BCAC00000000000000000012 = {isa = PBXBuildFile; fileRef = ACAC00000000000000000012; };
@@ -132,6 +137,11 @@
     ACAC00000000000000000025 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoRulesPage.swift; sourceTree = "<group>"; };
     ACAC00000000000000000026 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoRuleCard.swift; sourceTree = "<group>"; };
     ACAC00000000000000000027 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoRulesSmoke.swift; sourceTree = "<group>"; };
+    ACAC00000000000000000028 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoReservationModels.swift; sourceTree = "<group>"; };
+    ACAC00000000000000000029 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoReservationAPI.swift; sourceTree = "<group>"; };
+    ACAC0000000000000000002A = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoManualReservationPage.swift; sourceTree = "<group>"; };
+    ACAC0000000000000000002B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoReservationCard.swift; sourceTree = "<group>"; };
+    ACAC0000000000000000002C = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoReservationsPage.swift; sourceTree = "<group>"; };
     ACAC00000000000000000018 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoProgramDetailDialog.swift; sourceTree = "<group>"; };
     ACAC00000000000000000019 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoProgramSearchSmoke.swift; sourceTree = "<group>"; };
     ACAC00000000000000000012 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeoEPGStation/NeoBulkRecordingDialog.swift; sourceTree = "<group>"; };
@@ -271,6 +281,11 @@
         ACAC00000000000000000025,
         ACAC00000000000000000026,
         ACAC00000000000000000027,
+        ACAC00000000000000000028,
+        ACAC00000000000000000029,
+        ACAC0000000000000000002A,
+        ACAC0000000000000000002B,
+        ACAC0000000000000000002C,
         ACAC00000000000000000018,
         ACAC00000000000000000019,
         ACAC0000000000000000000D,
@@ -559,6 +574,11 @@
         BCAC00000000000000000025,
         BCAC00000000000000000026,
         BCAC00000000000000000027,
+        BCAC00000000000000000028,
+        BCAC00000000000000000029,
+        BCAC0000000000000000002A,
+        BCAC0000000000000000002B,
+        BCAC0000000000000000002C,
         BCAC00000000000000000018,
         BCAC00000000000000000019,
         BCAC0000000000000000000D,

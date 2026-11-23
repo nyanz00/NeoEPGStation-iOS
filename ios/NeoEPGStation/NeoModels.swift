@@ -882,6 +882,10 @@ final class NeoAPI {
     do { return try JSONDecoder().decode(T.self, from: data) }
     catch { throw NeoError("APIの応答形式が一致しません。NeoEPGStationのURLを確認してください。") }
   }
+  func requestAcknowledgement(_ url: URL, method: String, body: [String: Any]? = nil,
+    user: String, headers: [String: String]) async throws {
+    _ = try await response(url, method: method, body: body, user: user, headers: headers)
+  }
   private func response(_ url: URL, method: String = "GET", body: [String: Any]? = nil,
     user: String? = nil, timeout: Double = 20, headers: [String: String]? = nil) async throws -> Data {
     var request = URLRequest(url: url); request.timeoutInterval = timeout; request.httpMethod = method

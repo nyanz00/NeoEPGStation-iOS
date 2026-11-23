@@ -248,6 +248,33 @@ struct ProgramSearchTests {
     expect(listRule.listConditions(channelNames: [40: "放送局"]) == "放送局、41 / アニメ・特撮 / 国内アニメ", "rule card joins channels and deduplicates genre paths")
     expect(listRule.listEncodeSummary == "エンコード: HEVC、H264（録画完了後10分待機）", "rule card shows all modes and encode delay")
 
-    print("Program search and rule tests passed (\(assertionCount) assertions)")
+    var quick = NeoQuickReservationSettings(mode: "", deleteOriginal: true, updateThumbnail: true)
+    let raw = try quick.options(userID: 7).body()
+    expect(raw["userId"] as? Int == 7 && raw["allowEndLack"] as? Bool == true && raw["encodeOption"] == nil, "TS booking omits encode flags")
+    quick.mode = "AVC"
+    let encoded = try quick.options(userID: 7).body()["encodeOption"] as? [String: Any]
+    expect(encoded?["mode1"] as? String == "AVC" && encoded?["isDeleteOriginalAfterEncode"] as? Bool == true
+      && encoded?["updateThumbnail"] as? Bool == true, "quick booking sends preset and both flags")
+    var details = NeoReservationOptions(userID: 8)
+    details.directory = "  drama  "; details.recordedFormat = "  $name$  "
+    details.encodes[2] = .init(mode: "AV1", parentDirectory: "Archive", directory: " final ")
+    let detailed = try details.body()
+    let saved = detailed["saveOption"] as? [String: String], modes = detailed["encodeOption"] as? [String: Any]
+    expect(saved?["directory"] == "drama" && saved?["recordedFormat"] == "$name$", "reserve save options trim input")
+    expect(modes?["mode1"] == nil && modes?["mode3"] as? String == "AV1"
+      && modes?["encodeParentDirectoryName3"] as? String == "Archive" && modes?["directory3"] as? String == "final",
+      "manual reservation preserves encode slot index and output directory")
+    expect((try? quick.options(userID: nil).body()) == nil, "booking requires a numbered user")
+    let bookingProgram = NeoScheduledProgram(id: 1, channelId: 2, startAt: 1_767_193_200_000,
+      endAt: 1_767_196_800_000, isFree: true, name: "Fixture")
+    var specified = NeoReservationTime(bookingProgram, timeZone: TimeZone(identifier: "Asia/Tokyo")!)
+    let timeBody = try specified.body()
+    expect(timeBody["startAt"] as? Int64 == 1_767_193_200_000 && timeBody["endAt"] as? Int64 == 1_767_196_800_000
+      && timeBody["channelId"] as? Int == 2, "time reservation round-trips local timestamps")
+    specified.endClock = specified.startClock
+    expect((try? specified.body()) == nil, "identical start and end are rejected")
+    expect(NeoReservationAction(kind: .skip).suffix == "/skip" && NeoReservationAction(kind: .overlap).suffix == "/overlap"
+      && NeoReservationAction(kind: .conflict).suffix.isEmpty, "reservation kinds map to their write endpoints")
+    print("Program search, rule and reservation tests passed (\(assertionCount) assertions)")
   }
 }

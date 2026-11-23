@@ -54,6 +54,9 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
     identifier: "programSearch.timeRule.settings", icon: "EditOutlined") { [weak self] in self?.openRuleEditor() }
   private var insets: CGFloat { max(0, (list.bounds.width - 980) / 2) + (list.bounds.width >= 900 ? 24 : 12) }
   private var hasResults: Bool { if case .results = stage { return true }; return false }
+#if targetEnvironment(simulator)
+  func smokeReservationKind(_ programID: Int) -> NeoProgramReserveKind? { reservations[programID]?.primary }
+#endif
 
   init(shell: NeoShell, relatedForm: NeoProgramSearchForm? = nil, ruleID: Int? = nil) {
     self.ruleID = ruleID
@@ -106,6 +109,7 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
     ])
     NotificationCenter.default.addObserver(self, selector: #selector(accountChanged(_:)), name: .neoAccountChanged, object: nil)
     NotificationCenter.default.addObserver(self, selector: #selector(accountChanged(_:)), name: .neoTextPreferencesChanged, object: nil)
+    NotificationCenter.default.addObserver(self, selector: #selector(reservationsChanged(_:)), name: .neoReservationsChanged, object: nil)
     render()
   }
   override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); appearing = true; synchronize() }
@@ -140,6 +144,13 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
   @objc private func accountChanged(_ note: Notification) {
     guard (note.object as? NeoAPI) === shell?.api else { return }
     synchronize()
+  }
+
+  @objc private func reservationsChanged(_ note: Notification) {
+    guard (note.object as? NeoAPI) === shell?.api else { return }
+    guard appearing, navigationController?.topViewController === self else { refreshOnReturn = true; return }
+    if isTimeRule { loadTimeReservations() }
+    else if hasResults { cancelWork(); refreshRetainedResults() }
   }
 
   private func synchronize() {
@@ -653,19 +664,84 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
         refreshOnReturn = true
         shell.pushPage { NeoProgramSearchPage(shell: shell, relatedForm: related) }
       }
+    let session = NeoReservationSession(api)
+    if status == nil {
+      var users = (viewerNames ?? [:]).map { NeoViewer(id: $0.key, name: $0.value) }.filter { $0.id > 0 }.sorted { $0.id < $1.id }
+      if let id = session.viewerID, !users.contains(where: { $0.id == id }) {
+        users.append(NeoViewer(id: id, name: bookingUserName ?? "ユーザーID: \(id)"))
+      }
+      dialog.configureBooking(userID: session.viewerID, users: users,
+        modes: (configuration ?? shell?.serverConfig)?.encode ?? [], settings: api.quickReservationSettings,
+        onSettingsChange: { [weak self] value in
+          if session.hasSameIdentity(as: self?.shell?.api) { api.quickReservationSettings = value }
+        }, onSubmit: { [weak self, weak dialog] id, settings in
+          guard let self, let dialog else { return }
+          performReservation(in: dialog, owner: session, success: "\(program.name)を予約しました", failure: "予約に失敗しました") { read in
+            try await read.add(programID: program.id, options: settings.options(userID: id))
+          }
+        }, onDetails: { [weak self] in self?.openReservationEditor(.program(program.id), owner: session) })
+    } else if let viewerID = session.viewerID, let entry = status?.entries.first(where: { $0.item.userId == viewerID }) {
+      let rule = entry.item.ruleId, id = entry.item.reserveId
+      let action = NeoReservationAction(kind: entry.kind)
+      var actionTitle: String?
+      var handleAction: (() -> Void)?
+      if entry.kind != .conflict {
+        actionTitle = action != .cancel ? "解除" : rule == nil ? "削除" : "除外"
+        handleAction = { [weak self, weak dialog] in
+          guard let self, let dialog else { return }
+          performReservation(in: dialog, owner: session, success: action.success(), failure: "予約の変更に失敗しました") { read in
+            try await read.change(id, action: action)
+          }
+        }
+      }
+      dialog.configureExistingReservation(detailsTitle: rule == nil ? "詳細" : "編集", onDetails: { [weak self] in
+        guard let self, let shell, session.hasSameIdentity(as: shell.api), session.api.accountReady else { return }
+        if let rule { shell.pushPage { NeoProgramSearchPage(shell: shell, ruleID: rule) } }
+        else { openReservationEditor(.reservation(id), owner: session) }
+      }, actionTitle: actionTitle, onAction: handleAction)
+    }
     detail = dialog
     formView?.dismissDropdown()
     view.endEditing(true)
     present(dialog, animated: !UIAccessibility.isReduceMotionEnabled)
-    guard let status, viewerNames == nil, let context else { return }
+    guard viewerNames == nil, let context else { return }
     namesTask?.cancel()
     let generation = queryGeneration
     namesTask = Task { [weak self, weak dialog] in
       let values = try? await api.viewers()
       guard let self, accepts(api, context, generation) else { return }
       if let values { viewerNames = Dictionary(values.users.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first }) }
-      if detail === dialog { dialog?.updateReservationUsers(reservationLabels(status, waiting: false, failed: values == nil)) }
+      if detail === dialog {
+        if let status { dialog?.updateReservationUsers(reservationLabels(status, waiting: false, failed: values == nil)) }
+        else if let values { dialog?.updateBookingUsers(values.users.filter { $0.id > 0 }) }
+      }
       namesTask = nil
+    }
+  }
+
+  private func openReservationEditor(_ target: NeoManualReservationPage.Target, owner: NeoReservationSession) {
+    guard let shell, owner.hasSameIdentity(as: shell.api), owner.api.accountReady,
+      navigationController?.topViewController === self else { return }
+    shell.pushPage { NeoManualReservationPage(shell: shell, target: target, owner: owner) }
+  }
+
+  private func performReservation(in dialog: NeoProgramDetailDialog, owner: NeoReservationSession,
+    success: String, failure: String, action: @escaping (NeoReservationSession) async throws -> Void) {
+    guard detail === dialog, owner.hasSameIdentity(as: shell?.api), owner.api.accountReady else { return }
+    let session = NeoReservationSession(owner.api)
+    dialog.setReservationBusy(true)
+    Task { [weak self, weak dialog] in
+      do {
+        try await action(session)
+        guard let self, session.hasSameIdentity(as: shell?.api) else { return }
+        dialog?.finishReservationAction()
+        NotificationCenter.default.post(name: .neoReservationsChanged, object: session.api)
+        shell?.recordingNotice(success)
+      } catch {
+        guard let self, session.hasSameIdentity(as: shell?.api) else { return }
+        dialog?.setReservationBusy(false)
+        shell?.recordingNotice("\(failure): \(error.localizedDescription)", error: true)
+      }
     }
   }
 

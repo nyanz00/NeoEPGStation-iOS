@@ -414,6 +414,16 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
         }
         self.view.endEditing(true); api.rulesLength = value; self.alert("設定を保存しました。")
       }
+      let reservesLength = UITextField(); reservesLength.text = String(api.reservesLength); reservesLength.keyboardType = .numberPad
+      reservesLength.textColor = .white; reservesLength.borderStyle = .roundedRect; reservesLength.backgroundColor = NeoStyle.paper
+      reservesLength.widthAnchor.constraint(equalToConstant: 100).isActive = true; reservesLength.accessibilityLabel = "予約表示件数"
+      row("予約表示件数", explanation: "1ページの表示件数。初期値24件、1〜1000件。このアプリに保存します。", control: reservesLength)
+      button("予約表示件数を保存") { [weak self, weak reservesLength] in
+        guard let self, let value = Int(reservesLength?.text ?? ""), (1...1000).contains(value) else {
+          self?.alert("表示件数は1〜1000で入力してください。"); return
+        }
+        self.view.endEditing(true); api.reservesLength = value; self.alert("設定を保存しました。")
+      }
       let searchLimit = UITextField(); searchLimit.text = String(api.programSearchLimit); searchLimit.keyboardType = .numberPad
       searchLimit.textColor = .white; searchLimit.borderStyle = .roundedRect; searchLimit.backgroundColor = NeoStyle.paper
       searchLimit.widthAnchor.constraint(equalToConstant: 100).isActive = true; searchLimit.accessibilityLabel = "検索最大表示件数"
