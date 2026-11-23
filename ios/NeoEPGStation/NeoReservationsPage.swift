@@ -12,19 +12,19 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
   private lazy var editButton = NeoStyle.iconButton("EditOutlined", label: "選択") { [weak self] in self?.toggleEditing() }
   private lazy var updateButton = NeoStyle.iconButton("RefreshOutlined", label: "予約情報更新") { [weak self] in self?.rebuildReservations() }
   private lazy var selectAll = NeoStyle.iconButton("CheckBoxOutlineBlank", label: "このページをすべて選択") { [weak self] in
-    guard let self, editing, mutation == nil else { return }
+    guard let self, bulkSelecting, mutation == nil else { return }
     selected = selected.count == items.count ? [] : Set(items.map(\.id))
     render()
   }
   private lazy var bulkAction = NeoStyle.iconButton("DeleteOutlineOutlined", label: "選択した予約をキャンセル") { [weak self] in
     guard let self else { return }
-    confirm(items.filter { selected.contains($0.id) }, bulk: true)
+    confirm(items.filter { self.selected.contains($0.id) }, bulk: true)
   }
 
   private let updates = NeoServerStatusUpdates(), deferred = NeoDeferredScrollUpdate()
   private var read: Task<Void, Never>?, metadata: Task<Void, Never>?, mutation: Task<Void, Never>?, updateTask: Task<Void, Never>?
   private var readVersion = UUID(), account: NeoReservationSession?
-  private var wantsUpdate = false, shown = false, editing = false
+  private var wantsUpdate = false, shown = false, bulkSelecting = false
   private var kind = NeoProgramReserveKind.normal, page = 1, limit = 24
   private var userID: Int?
   private var users: [NeoViewer]?, channels: [Int: NeoLiveChannel]?, userLoadFailed = false
@@ -187,7 +187,7 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
 
   private func resetRows() {
     page = 1; result = nil; loadError = nil
-    editing = false; selected.removeAll()
+    bulkSelecting = false; selected.removeAll()
     if isViewLoaded {
       table.setContentOffset(CGPoint(x: 0, y: -table.adjustedContentInset.top), animated: false)
     }
@@ -328,7 +328,7 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
       errorLabel.textColor = result == nil ? NeoStyle.error : NeoStyle.warning
     }
     empty.isHidden = result == nil || !items.isEmpty
-    selectionBar.isHidden = !editing
+    selectionBar.isHidden = !bulkSelecting
     countLabel.text = "\(selected.count)件選択"
     let all = !items.isEmpty && selected.count == items.count
     selectAll.setImage(NeoIcon.image(all ? "CheckBox" : selected.isEmpty ? "CheckBoxOutlineBlank" : "IndeterminateCheckBox"), for: .normal)
@@ -356,12 +356,12 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
   }
 
   private func updateHeader() {
-    titleLabel.text = editing ? "\(selected.count)件選択" : kind.label
-    editButton.setImage(NeoIcon.image(editing ? "Close" : "EditOutlined"), for: .normal)
-    editButton.accessibilityLabel = editing ? "選択を終了" : "選択"
+    titleLabel.text = bulkSelecting ? "\(selected.count)件選択" : kind.label
+    editButton.setImage(NeoIcon.image(bulkSelecting ? "Close" : "EditOutlined"), for: .normal)
+    editButton.accessibilityLabel = bulkSelecting ? "選択を終了" : "選択"
     let enabled = account?.isCurrent(shell?.api) == true && mutation == nil
     editButton.isEnabled = enabled; updateButton.isEnabled = enabled
-    let next: [UIView] = editing ? [editButton] : [compact ? compactUser : wideUser, editButton, updateButton]
+    let next: [UIView] = bulkSelecting ? [editButton] : [compact ? compactUser : wideUser, editButton, updateButton]
     if next.map(ObjectIdentifier.init) != actions.map(ObjectIdentifier.init) { actions = next }
   }
 
@@ -393,7 +393,7 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
 
   private func toggleEditing() {
     guard mutation == nil else { return }
-    editing.toggle(); selected.removeAll(); render()
+    bulkSelecting.toggle(); selected.removeAll(); render()
   }
 
   func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { items.count }
@@ -407,7 +407,7 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
     tableView.deselectRow(at: path, animated: false)
     guard mutation == nil, items.indices.contains(path.row) else { return }
     let item = items[path.row]
-    if editing {
+    if bulkSelecting {
       if selected.remove(item.id) == nil { selected.insert(item.id) }
       render()
     } else { openDetails(item) }
@@ -419,12 +419,12 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
       subdued: item.isSkip == true || item.isOverlap == true,
       channel: channels?[item.channelId]?.name ?? String(item.channelId),
       time: NeoManualReservationPage.schedule(item.program), summary: item.description,
-      editing: editing, selected: selected.contains(item.id))
+      editing: bulkSelecting, selected: selected.contains(item.id))
     cell.onMenu = { [weak self] anchor in self?.openMenu(item, anchor: anchor) }
   }
 
   private func openMenu(_ item: NeoReservationItem, anchor: UIView) {
-    guard !editing, mutation == nil else { return }
+    guard !bulkSelecting, mutation == nil else { return }
     var entries: [NeoMenuEntry] = []
     if let rule = item.ruleId {
       entries.append(.init(title: "recorded", icon: "FilmstripBoxMultiple") { [weak self] in self?.openRecordings(rule) })
@@ -507,7 +507,7 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
       guard !Task.isCancelled, session.hasSameIdentity(as: shell?.api) else { return }
       mutation = nil
       if bulk {
-        selected = Set(failed.map { $0.0.id }); editing = !selected.isEmpty
+        selected = Set(failed.map { $0.0.id }); bulkSelecting = !selected.isEmpty
       }
       prompt?.dismiss(animated: true) { if !succeeded.isEmpty { detail?.finishReservationAction() } }
       if !succeeded.isEmpty {
