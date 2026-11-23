@@ -62,7 +62,7 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
       tabs.heightAnchor.constraint(equalTo: scope.frameLayoutGuide.heightAnchor),
     ])
     for tab in NeoProgramReserveKind.allCases {
-      let button = UIButton(type: .system)
+      let button = UIButton(type: .custom)
       button.titleLabel?.font = .systemFont(ofSize: 14, weight: .medium)
       button.accessibilityIdentifier = "reserves.tab." + tab.queryType
       button.widthAnchor.constraint(greaterThanOrEqualToConstant: 78).isActive = true
@@ -348,7 +348,7 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
       let active = value == kind
       let title = value.label + (counts[value].map { " \($0)" } ?? "")
       if button.title(for: .normal) != title { button.setTitle(title, for: .normal) }
-      button.tintColor = active ? NeoStyle.accent : NeoStyle.muted
+      button.setTitleColor(active ? NeoStyle.accent : NeoStyle.muted, for: .normal)
       button.viewWithTag(851)?.isHidden = !active
       button.accessibilityTraits = active ? [.button, .selected] : .button
       button.isEnabled = mutation == nil

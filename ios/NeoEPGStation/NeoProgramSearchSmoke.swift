@@ -1588,6 +1588,12 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       return checks
     }
     checks["reservationTabShowsCreatedReservation"] = true
+    checks["reservationTabShowsSelectedTitleAndCount"] = await wait {
+      guard let tab = find(reserves.view, "reserves.tab.normal") as? UIButton else { return false }
+      tab.layoutIfNeeded()
+      return tab.titleLabel?.text == "予約 1" && tab.accessibilityTraits.contains(.selected)
+        && (tab.titleLabel?.bounds.width ?? 0) > 0
+    }
     capture("reservation-list")
     reserves.tableView(table, didSelectRowAt: row)
     let detailReady = await wait { reserves.presentedViewController is NeoProgramDetailDialog && reserves.presentedViewController?.isBeingPresented == false }

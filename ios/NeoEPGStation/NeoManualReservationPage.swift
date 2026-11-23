@@ -146,9 +146,14 @@ final class NeoManualReservationPage: NeoPage {
     }
     form.addArrangedSubview(check("エンコード後に元ファイルを削除", draft.deleteOriginal) { [weak self] in self?.options?.deleteOriginal = $0 })
     form.addArrangedSubview(check("サムネイル再生成", draft.updateThumbnail) { [weak self] in self?.options?.updateThumbnail = $0 })
-    let buttons = UIStackView(arrangedSubviews: [
-      UIView(), NeoStyle.button("キャンセル") { [weak self] in self?.shell?.goBack() }, saveButton,
-    ])
+    let cancelButton = NeoStyle.button("キャンセル") { [weak self] in self?.shell?.goBack() }
+    for button in [cancelButton, saveButton] {
+      button.contentEdgeInsets = UIEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+      button.heightAnchor.constraint(greaterThanOrEqualToConstant: 36).isActive = true
+      button.widthAnchor.constraint(greaterThanOrEqualToConstant: 64).isActive = true
+      button.setContentHuggingPriority(.required, for: .horizontal)
+    }
+    let buttons = UIStackView(arrangedSubviews: [UIView(), cancelButton, saveButton])
     buttons.spacing = 8
     form.addArrangedSubview(buttons)
     updateButtons()
@@ -276,21 +281,31 @@ final class NeoManualReservationPage: NeoPage {
     let inner = UIStackView(arrangedSubviews: content)
     inner.axis = .vertical; inner.spacing = 12; inner.isHidden = !expanded
     let outer = UIStackView()
-    outer.axis = .vertical; outer.spacing = 12
+    outer.axis = .vertical
     outer.backgroundColor = NeoStyle.paper; outer.layer.cornerRadius = 6
     outer.layer.borderWidth = 1; outer.layer.borderColor = NeoStyle.border.cgColor
-    outer.isLayoutMarginsRelativeArrangement = true
-    outer.layoutMargins = UIEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+    inner.isLayoutMarginsRelativeArrangement = true
+    inner.layoutMargins = UIEdgeInsets(top: title == nil ? 16 : 0, left: 16, bottom: 16, right: 16)
     if let title {
-      let header = UIButton(type: .system)
+      let header = UIButton(type: .custom)
       header.setTitle(title, for: .normal); header.setTitleColor(.white, for: .normal)
-      header.setImage(NeoIcon.image(expanded ? "ExpandLessOutlined" : "ExpandMoreOutlined"), for: .normal)
-      header.semanticContentAttribute = .forceRightToLeft; header.contentHorizontalAlignment = .fill
-      header.tintColor = NeoStyle.muted
-      header.addAction(UIAction { [weak inner, weak header] _ in
+      header.titleLabel?.font = .systemFont(ofSize: 16)
+      header.contentHorizontalAlignment = .leading
+      header.contentEdgeInsets = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 44)
+      header.accessibilityValue = expanded ? "展開" : "折りたたみ"
+      let arrow = UIImageView(image: NeoIcon.image(expanded ? "KeyboardArrowUpOutlined" : "KeyboardArrowDownOutlined"))
+      arrow.tintColor = NeoStyle.muted; arrow.translatesAutoresizingMaskIntoConstraints = false
+      header.addSubview(arrow)
+      NSLayoutConstraint.activate([
+        header.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
+        arrow.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -16),
+        arrow.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+      ])
+      header.addAction(UIAction { [weak inner, weak header, weak arrow] _ in
         guard let inner else { return }
         inner.isHidden.toggle()
-        header?.setImage(NeoIcon.image(inner.isHidden ? "ExpandMoreOutlined" : "ExpandLessOutlined"), for: .normal)
+        header?.accessibilityValue = inner.isHidden ? "折りたたみ" : "展開"
+        arrow?.image = NeoIcon.image(inner.isHidden ? "KeyboardArrowDownOutlined" : "KeyboardArrowUpOutlined")
       }, for: .touchUpInside)
       outer.addArrangedSubview(header)
     }
@@ -308,10 +323,14 @@ final class NeoManualReservationPage: NeoPage {
   }
 
   private func check(_ label: String, _ checked: Bool, change: @escaping (Bool) -> Void) -> UIButton {
-    let button = UIButton(type: .system)
+    let button = UIButton(type: .custom)
     button.contentHorizontalAlignment = .left
-    button.setTitle(label, for: .normal); button.setTitleColor(.white, for: .normal); button.tintColor = NeoStyle.accent
-    button.setImage(NeoIcon.image("CheckBoxOutlineBlank"), for: .normal); button.setImage(NeoIcon.image("CheckBox"), for: .selected)
+    button.setTitle(label, for: .normal); button.setTitleColor(.white, for: .normal)
+    button.titleLabel?.font = .systemFont(ofSize: 16)
+    button.imageEdgeInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 8)
+    button.contentEdgeInsets = UIEdgeInsets(top: 6, left: 4, bottom: 6, right: 4)
+    button.setImage(NeoIcon.image("CheckBoxOutlineBlank").withTintColor(NeoStyle.muted, renderingMode: .alwaysOriginal), for: .normal)
+    button.setImage(NeoIcon.image("CheckBox").withTintColor(NeoStyle.accent, renderingMode: .alwaysOriginal), for: .selected)
     button.isSelected = checked
     button.addAction(UIAction { [weak button] _ in
       guard let button else { return }

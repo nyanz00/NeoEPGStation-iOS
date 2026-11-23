@@ -907,7 +907,7 @@ private final class NeoProgramBookingView: UIView {
       button.isEnabled = !settings.mode.isEmpty && !busy
       button.isSelected = selected
       let image = NeoIcon.image(selected ? "CheckBox" : "CheckBoxOutlineBlank")
-      button.setImage(image.withTintColor(NeoStyle.accent, renderingMode: .alwaysOriginal), for: .normal)
+      button.setImage(image.withTintColor(selected ? NeoStyle.accent : NeoStyle.muted, renderingMode: .alwaysOriginal), for: .normal)
       button.setImage(image.withTintColor(.white.withAlphaComponent(0.3), renderingMode: .alwaysOriginal), for: .disabled)
       button.accessibilityValue = selected ? "選択済み" : "未選択"
     }
@@ -948,10 +948,11 @@ private final class NeoProgramBookingView: UIView {
   }
 
   private static func checkbox(title: String, identifier: String) -> UIButton {
-    let button = UIButton(type: .system)
+    let button = UIButton(type: .custom)
     button.setImage(NeoIcon.image("CheckBoxOutlineBlank"), for: .normal)
     button.setTitle(title, for: .normal)
     let disabledColor = UIColor.white.withAlphaComponent(0.3)
+    button.setTitleColor(.white, for: .normal)
     button.setTitleColor(disabledColor, for: .disabled)
     button.setImage(NeoIcon.image("CheckBoxOutlineBlank").withTintColor(disabledColor, renderingMode: .alwaysOriginal), for: .disabled)
     button.adjustsImageWhenDisabled = false
