@@ -1703,16 +1703,16 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     NeoProgramSearchSmokeProtocol.setWarningCounts(conflicts: 2, overlaps: 3)
     shell.showRoute("reserves")
     let menu = shell.smokeReservationMenu(true)
-    func row(_ id: String) -> UITableViewCell? {
+    func menuRow(_ id: String) -> UITableViewCell? {
       menu.layoutIfNeeded()
       return menu.visibleCells.first { $0.accessibilityIdentifier == "menu-" + id }
     }
     let warningRows = await wait {
-      row("reserves-conflict")?.accessibilityValue == "2件" && row("reserves-overlap")?.accessibilityValue == "3件"
+      menuRow("reserves-conflict")?.accessibilityValue == "2件" && menuRow("reserves-overlap")?.accessibilityValue == "3件"
     }
-    let regularIndex = row("reserves").flatMap { menu.indexPath(for: $0)?.row }
-    let conflictIndex = row("reserves-conflict").flatMap { menu.indexPath(for: $0)?.row }
-    let overlapPath = row("reserves-overlap").flatMap { menu.indexPath(for: $0) }
+    let regularIndex = menuRow("reserves").flatMap { menu.indexPath(for: $0)?.row }
+    let conflictIndex = menuRow("reserves-conflict").flatMap { menu.indexPath(for: $0)?.row }
+    let overlapPath = menuRow("reserves-overlap").flatMap { menu.indexPath(for: $0) }
     checks["reservationSidebarShowsWarningCountsInOrder"] = warningRows
       && regularIndex.map { $0 + 1 } == conflictIndex && conflictIndex.map { $0 + 1 } == overlapPath?.row
     if let overlapPath { menu.delegate?.tableView?(menu, didSelectRowAt: overlapPath) }
@@ -1738,14 +1738,14 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
 
     _ = shell.smokeReservationMenu(true)
     checks["reservationSidebarHighlightsSwipedTab"] = await wait {
-      row("reserves-conflict")?.accessibilityTraits.contains(.selected) == true
-        && row("reserves-overlap")?.accessibilityTraits.contains(.selected) == false
+      menuRow("reserves-conflict")?.accessibilityTraits.contains(.selected) == true
+        && menuRow("reserves-overlap")?.accessibilityTraits.contains(.selected) == false
     }
     capture("reservation-sidebar")
     NeoProgramSearchSmokeProtocol.setWarningCounts(conflicts: 0, overlaps: 3)
     NotificationCenter.default.post(name: .neoReservationsChanged, object: api)
     checks["reservationSidebarHidesZeroCountOnly"] = await wait {
-      row("reserves-conflict") == nil && row("reserves-overlap")?.accessibilityValue == "3件"
+      menuRow("reserves-conflict") == nil && menuRow("reserves-overlap")?.accessibilityValue == "3件"
     }
     return checks
   }
