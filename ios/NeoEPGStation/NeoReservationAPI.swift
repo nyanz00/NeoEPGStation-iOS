@@ -25,6 +25,10 @@ struct NeoReservationSession: Equatable {
     lhs.api === rhs.api && lhs.viewer == rhs.viewer && lhs.revision == rhs.revision && lhs.headers == rhs.headers
   }
 
+  func counts() async throws -> NeoReservationCounts {
+    try await api.request(api.url("/reserves/cnts"), user: viewer, headers: headers)
+  }
+
   func list(_ kind: NeoProgramReserveKind, userID: Int?, offset: Int, limit: Int, halfWidth: Bool) async throws -> NeoReservationList {
     var url = URLComponents(url: api.url("/reserves"), resolvingAgainstBaseURL: false)!
     url.queryItems = [
@@ -72,6 +76,11 @@ struct NeoReservationSession: Equatable {
   func rebuild() async throws {
     try await api.requestAcknowledgement(api.url("/reserves/update"), method: "POST", user: viewer, headers: headers)
   }
+}
+
+struct NeoReservationCounts: Decodable, Equatable {
+  let conflicts: Int
+  let overlaps: Int
 }
 
 extension Notification.Name {

@@ -21,11 +21,12 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
     confirm(items.filter { self.selected.contains($0.id) }, bulk: true)
   }
 
-  private let updates = NeoServerStatusUpdates(), deferred = NeoDeferredScrollUpdate()
+  private let deferred = NeoDeferredScrollUpdate()
   private var read: Task<Void, Never>?, metadata: Task<Void, Never>?, mutation: Task<Void, Never>?, updateTask: Task<Void, Never>?
   private var readVersion = UUID(), account: NeoReservationSession?
   private var wantsUpdate = false, shown = false, bulkSelecting = false
-  private var kind = NeoProgramReserveKind.normal, page = 1, limit = 24
+  private(set) var kind: NeoProgramReserveKind
+  private var page = 1, limit = 24
   private var userID: Int?
   private var users: [NeoViewer]?, channels: [Int: NeoLiveChannel]?, userLoadFailed = false
   private var result: NeoReservationList?, loadError: String?
@@ -36,7 +37,10 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
   private var pages: Int { max(1, ((result?.total ?? 0) - 1) / limit + 1) }
   private var compact: Bool { view.bounds.width < 900 }
 
-  init(shell: NeoShell) { super.init(title: "予約", shell: shell) }
+  init(shell: NeoShell, kind: NeoProgramReserveKind = .normal) {
+    self.kind = kind
+    super.init(title: kind.label, shell: shell)
+  }
   required init?(coder: NSCoder) { fatalError() }
 
   override func viewDidLoad() {
@@ -194,18 +198,28 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
   }
 
   private func suspendRead() {
-    updates.stop()
     updateTask?.cancel(); updateTask = nil; wantsUpdate = false
     read?.cancel(); read = nil; readVersion = UUID()
     metadata?.cancel(); metadata = nil
     deferred.cancel()
   }
 
-  private func switchKind(_ value: NeoProgramReserveKind) {
+  func switchKind(_ value: NeoProgramReserveKind) {
     guard kind != value, mutation == nil else { return }
-    kind = value; resetRows(); load()
+    kind = value; resetRows()
+    shell?.reservationTabDidChange(self)
+    if isViewLoaded { load() }
     if let button = tabButtons[value] { scope.scrollRectToVisible(button.frame, animated: true) }
   }
+
+  func ownsTabSwipe(in scrollView: UIScrollView?) -> Bool { scrollView === table }
+
+  func adjacentTab(horizontal: CGFloat) -> NeoProgramReserveKind? {
+    guard mutation == nil, horizontal != 0 else { return nil }
+    return NeoProgramReserveKind(rawValue: kind.rawValue + (horizontal < 0 ? 1 : -1))
+  }
+
+  func refreshOnServerStatus() { if shown { requestUpdate() } }
 
   private func switchUser(_ value: Int?) {
     guard mutation == nil else { return }
@@ -237,7 +251,6 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
     guard shown, let account, account.isCurrent(shell?.api) else { render(); refreshControl.endRefreshing(); return }
     let attempt = readVersion, activeKind = kind, halfWidth = account.api.isHalfWidthDisplayed
     let page = self.page, limit = self.limit
-    updates.start(api: account.api, port: shell?.serverConfig?.socketIOPort, events: ["updateStatus"]) { [weak self] in self?.requestUpdate() }
     loadMetadata(account)
     read = Task { [weak self] in
       guard let self else { return }

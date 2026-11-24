@@ -745,6 +745,29 @@ enum NeoIcon {
       path.addLine(to: CGPoint(x: 12, y: 15))
       path.addLine(to: CGPoint(x: 12, y: 18))
       path.close()
+    case "PendingActionsOutlined":
+      path.usesEvenOddFillRule = true
+      path.append(UIBezierPath(ovalIn: CGRect(x: 12, y: 12, width: 10, height: 10)))
+      path.move(to: CGPoint(x: 18.65, y: 19.35))
+      for point in [CGPoint(x: 16.5, y: 17.2), CGPoint(x: 16.5, y: 14), CGPoint(x: 17.5, y: 14),
+        CGPoint(x: 17.5, y: 16.79), CGPoint(x: 19.35, y: 18.64)] { path.addLine(to: point) }
+      path.close()
+      path.move(to: CGPoint(x: 18, y: 3)); path.addLine(to: CGPoint(x: 14.82, y: 3))
+      path.addCurve(to: CGPoint(x: 12, y: 1), controlPoint1: CGPoint(x: 14.4, y: 1.84), controlPoint2: CGPoint(x: 13.3, y: 1))
+      path.addCurve(to: CGPoint(x: 9.18, y: 3), controlPoint1: CGPoint(x: 10.7, y: 1), controlPoint2: CGPoint(x: 9.6, y: 1.84))
+      path.addLine(to: CGPoint(x: 6, y: 3))
+      path.addCurve(to: CGPoint(x: 4, y: 5), controlPoint1: CGPoint(x: 4.9, y: 3), controlPoint2: CGPoint(x: 4, y: 3.9))
+      path.addLine(to: CGPoint(x: 4, y: 20))
+      path.addCurve(to: CGPoint(x: 6, y: 22), controlPoint1: CGPoint(x: 4, y: 21.1), controlPoint2: CGPoint(x: 4.9, y: 22))
+      path.addLine(to: CGPoint(x: 12.11, y: 22))
+      path.addCurve(to: CGPoint(x: 10.69, y: 20), controlPoint1: CGPoint(x: 11.52, y: 21.43), controlPoint2: CGPoint(x: 11.04, y: 20.75))
+      for point in [CGPoint(x: 6, y: 20), CGPoint(x: 6, y: 5), CGPoint(x: 8, y: 5), CGPoint(x: 8, y: 8),
+        CGPoint(x: 16, y: 8), CGPoint(x: 16, y: 5), CGPoint(x: 18, y: 5), CGPoint(x: 18, y: 10.08)] { path.addLine(to: point) }
+      path.addCurve(to: CGPoint(x: 20, y: 10.68), controlPoint1: CGPoint(x: 18.71, y: 10.18), controlPoint2: CGPoint(x: 19.38, y: 10.39))
+      path.addLine(to: CGPoint(x: 20, y: 5))
+      path.addCurve(to: CGPoint(x: 18, y: 3), controlPoint1: CGPoint(x: 20, y: 3.9), controlPoint2: CGPoint(x: 19.1, y: 3))
+      path.close()
+      path.append(UIBezierPath(ovalIn: CGRect(x: 11, y: 3, width: 2, height: 2)))
     case "ScheduleOutlined":
       path.move(to: CGPoint(x: 11.99, y: 2))
       path.addCurve(to: CGPoint(x: 2, y: 12), controlPoint1: CGPoint(x: 6.47, y: 2), controlPoint2: CGPoint(x: 2, y: 6.48))

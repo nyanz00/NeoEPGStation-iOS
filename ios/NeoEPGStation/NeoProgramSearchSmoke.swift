@@ -18,6 +18,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
   private static var ruleCreateFailures = 0
   private static var nonSearchWrites = 0
   private static var exercisesReservations = false
+  private static var warningCounts = (conflicts: 0, overlaps: 0)
   private static var manualReservations: [Int: [String: Any]] = [:]
   private var stopped = false
   private let stateLock = NSLock()
@@ -58,12 +59,17 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
   static func reset() {
     lock.lock(); defer { lock.unlock() }
     calls.removeAll(); bodies.removeAll(); urls.removeAll(); reservationFailures = 1; ruleCreateFailures = 1; nonSearchWrites = 0
-    exercisesReservations = false; manualReservations.removeAll()
+    exercisesReservations = false; warningCounts = (0, 0); manualReservations.removeAll()
   }
 
   static func enableReservationFlow() {
     lock.lock(); defer { lock.unlock() }
     exercisesReservations = true
+  }
+
+  static func setWarningCounts(conflicts: Int, overlaps: Int) {
+    lock.lock(); defer { lock.unlock() }
+    warningCounts = (conflicts, overlaps)
   }
 
   static func count(_ key: String) -> Int {
@@ -127,6 +133,9 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
           "hasLogoData": false
         ]
       }
+    } else if path == "/api/reserves/cnts", request.httpMethod == "GET" {
+      value = ["normal": manualReservations.count, "conflicts": warningCounts.conflicts,
+        "overlaps": warningCounts.overlaps, "skips": 0]
     } else if path == "/api/config", request.httpMethod == "GET" {
       value = ["encode": exercisesReservations ? ["Fixture AVC"] : [], "recorded": ["Archive"], "broadcast": ["GR": true]] as [String: Any]
     } else if path == "/api/rules/41", request.httpMethod == "GET" {
@@ -146,15 +155,16 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     } else if path == "/api/schedules/search", request.httpMethod == "POST" {
       let option = body["option"] as? [String: Any] ?? [:]
       let hasRelatedChannel = (option["channelIds"] as? [Any])?.contains { ($0 as? NSNumber)?.intValue == 1 } == true
-      value = [Self.program(hasRelatedChannel ? 9002 : 9001, related: hasRelatedChannel)]
+      value = [Self.program(hasRelatedChannel ? 9002 : 9001, related: hasRelatedChannel,
+        longDetails: exercisesReservations && hasRelatedChannel)]
     } else if exercisesReservations, path.hasPrefix("/api/schedules/detail/"),
       let id = path.split(separator: "/").last.flatMap({ Int($0) }) {
-      value = Self.program(id, related: id == 9002)
+      value = Self.program(id, related: id == 9002, longDetails: true)
     } else if exercisesReservations, path == "/api/reserves", request.httpMethod == "POST" {
       let id = 6100 + calls[key, default: 0]
       let time = body["timeSpecifiedOption"] as? [String: Any]
       let programID = body["programId"] as? Int
-      var item = Self.program(programID ?? 9002, related: true)
+      var item = Self.program(programID ?? 9002, related: true, longDetails: true)
       item["id"] = id; item["programId"] = programID
       for field in ["name", "channelId", "startAt", "endAt"] {
         if let value = time?[field] { item[field] = value }
@@ -243,17 +253,22 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     return item
   }
 
-  private static func program(_ id: Int, related: Bool) -> [String: Any] {
+  private static func program(_ id: Int, related: Bool, longDetails: Bool = false) -> [String: Any] {
     let start = related ? 1791025200000.0 : 1791021600000.0
+    let reservationFixture = longDetails && id == 9002
     return [
       "id": id,
       "channelId": 1,
       "startAt": start,
       "endAt": start + 1_800_000,
       "isFree": true,
-      "name": "Fixture program",
-      "description": "概要とリンク https://program-search.invalid/details",
-      "extended": "◇見どころ\n拡張情報とリンク https://program-search.invalid/extended",
+      "name": reservationFixture ? "長い番組名でも画面内で折り返して表示できる予約テスト番組" : "Fixture program",
+      "description": reservationFixture
+        ? "これは狭い画面で番組情報が横にはみ出さず折り返されることを確認するための予約テスト用の長い概要です。放送内容、出演者、関連情報が続いても予約画面の幅を超えないように表示します。"
+        : "概要とリンク https://program-search.invalid/details",
+      "extended": reservationFixture
+        ? "◇見どころ\n長い日本語の拡張情報を複数行で表示します。空白のない文章やURLを含む番組情報でも、カードとフォームの中に収まり、左右のスクロールを発生させないことを確認します。\nhttps://program-search.invalid/extended"
+        : "◇見どころ\n拡張情報とリンク https://program-search.invalid/extended",
       "genre1": 3,
       "subGenre1": 0,
       "videoType": "h.264",
@@ -1531,6 +1546,29 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       }
       try? image.pngData()?.write(to: NeoPiPSmoke.directory.appendingPathComponent("program-search-\(name).png"))
     }
+    func labels(in root: UIView) -> [UILabel] {
+      let own = root as? UILabel
+      return (own.map { [$0] } ?? []) + root.subviews.flatMap { labels(in: $0) }
+    }
+    func firstSwitch(in root: UIView) -> UISwitch? {
+      if let control = root as? UISwitch { return control }
+      return root.subviews.lazy.compactMap { firstSwitch(in: $0) }.first
+    }
+    func manualReservationLayoutFitsViewport(_ editor: NeoManualReservationPage, requireTimeFields: Bool = false) -> Bool {
+      editor.view.layoutIfNeeded()
+      guard let scroll = find(editor.view, "manualReserve.form") as? UIScrollView,
+        let stack = find(editor.view, "manualReserve.formStack"),
+        let summary = find(editor.view, "manualReserve.summary") else { return false }
+      scroll.layoutIfNeeded()
+      let frame = stack.convert(stack.bounds, to: scroll)
+      let tolerance: CGFloat = 1
+      let insideViewport = frame.width > 0 && frame.minX >= -tolerance && frame.maxX <= scroll.bounds.width + tolerance
+      let hasWrappedProgramInfo = labels(in: summary).contains { label in
+        label.numberOfLines == 0 && label.bounds.width > 0 && label.bounds.height > label.font.lineHeight * 1.25
+      }
+      let timeFieldsVisible = (find(editor.view, "manualReserve.timeFields") as? UIStackView)?.isHidden == false
+      return insideViewport && hasWrappedProgramInfo && (!requireTimeFields || timeFieldsVisible)
+    }
 
     NeoProgramSearchSmokeProtocol.enableReservationFlow()
     let originalSettings = api.quickReservationSettings
@@ -1602,10 +1640,13 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       guard let editor = reservesNav.topViewController as? NeoManualReservationPage else { return false }
       return reservesNav.transitionCoordinator == nil && (find(editor.view, "manualReserve.save") as? UIButton)?.isEnabled == true
     }
+    var editLayout = false
     if editReady, let editor = reservesNav.topViewController as? NeoManualReservationPage {
+      editLayout = manualReservationLayoutFitsViewport(editor)
       capture("manual-reservation-edit")
       tap(editor.view, "manualReserve.save")
     }
+    checks["manualReservationEditFitsViewport"] = editReady && editLayout
     let edited = await wait {
       reservesNav.topViewController === reserves && reservesNav.transitionCoordinator == nil
         && NeoProgramSearchSmokeProtocol.count("PUT /api/reserves/6101") == 1
@@ -1637,13 +1678,75 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       guard let editor = navigation.topViewController as? NeoManualReservationPage else { return false }
       return navigation.transitionCoordinator == nil && (find(editor.view, "manualReserve.save") as? UIButton)?.isEnabled == true
     }
-    if newEditor, let editor = navigation.topViewController as? NeoManualReservationPage { tap(editor.view, "manualReserve.save") }
+    var newLayout = false, newTimeLayout = false
+    if newEditor, let editor = navigation.topViewController as? NeoManualReservationPage {
+      newLayout = manualReservationLayoutFitsViewport(editor)
+      if let timeRow = find(editor.view, "manualReserve.timeSpecified"), let timeSwitch = firstSwitch(in: timeRow) {
+        timeSwitch.isOn = true
+        timeSwitch.sendActions(for: .valueChanged)
+        newTimeLayout = manualReservationLayoutFitsViewport(editor, requireTimeFields: true)
+        capture("manual-reservation-new")
+        timeSwitch.isOn = false
+        timeSwitch.sendActions(for: .valueChanged)
+      }
+      tap(editor.view, "manualReserve.save")
+    }
+    checks["manualReservationNewFitsViewport"] = newEditor && newLayout
+    checks["manualReservationNewTimeFieldsFitViewport"] = newEditor && newTimeLayout
     let added = await wait {
       navigation.topViewController === search && NeoProgramSearchSmokeProtocol.count("POST /api/reserves") == 2
     }
     let detailed = NeoProgramSearchSmokeProtocol.requestBodies("POST /api/reserves").last
     checks["searchOpensDetailedReservationAndAdds"] = newEditor && added && detailed?["programId"] as? Int == 9002
       && detailed?["encodeOption"] == nil
+
+    NeoProgramSearchSmokeProtocol.setWarningCounts(conflicts: 2, overlaps: 3)
+    shell.showRoute("reserves")
+    let menu = shell.smokeReservationMenu(true)
+    func row(_ id: String) -> UITableViewCell? {
+      menu.layoutIfNeeded()
+      return menu.visibleCells.first { $0.accessibilityIdentifier == "menu-" + id }
+    }
+    let warningRows = await wait {
+      row("reserves-conflict")?.accessibilityValue == "2件" && row("reserves-overlap")?.accessibilityValue == "3件"
+    }
+    let regularIndex = row("reserves").flatMap { menu.indexPath(for: $0)?.row }
+    let conflictIndex = row("reserves-conflict").flatMap { menu.indexPath(for: $0)?.row }
+    let overlapPath = row("reserves-overlap").flatMap { menu.indexPath(for: $0) }
+    checks["reservationSidebarShowsWarningCountsInOrder"] = warningRows
+      && regularIndex.map { $0 + 1 } == conflictIndex && conflictIndex.map { $0 + 1 } == overlapPath?.row
+    if let overlapPath { menu.delegate?.tableView?(menu, didSelectRowAt: overlapPath) }
+    checks["reservationSidebarOpensRequestedTab"] = overlapPath != nil && reserves.kind == .overlap
+    _ = shell.smokeReservationMenu(false)
+
+    let edge = shell.view.safeAreaInsets.left + 2
+    let edgeSwipe = shell.smokeReservationSwipe(in: table, velocity: CGPoint(x: 500, y: 0), translation: 80, edgeX: edge)
+    let verticalSwipe = shell.smokeReservationSwipe(in: table, velocity: CGPoint(x: 100, y: 450), translation: 10)
+    let cancelledSwipe = shell.smokeReservationSwipe(in: table, velocity: CGPoint(x: -500, y: 0), translation: -60, cancelled: true)
+    checks["reservationTabSwipePreservesEdgeScrollAndCancellation"] = edgeSwipe.menu && !edgeSwipe.tab
+      && !verticalSwipe.tab && cancelledSwipe.tab && reserves.kind == .overlap && table.isScrollEnabled
+
+    let left = shell.smokeReservationSwipe(in: table, velocity: CGPoint(x: -500, y: 0), translation: -80)
+    let movedToSkip = left.tab && reserves.kind == .skip
+    let noWrap = shell.smokeReservationSwipe(in: table, velocity: CGPoint(x: -500, y: 0), translation: -80)
+    let stayedOnSkip = !noWrap.tab && reserves.kind == .skip
+    let right = shell.smokeReservationSwipe(in: table, velocity: CGPoint(x: 500, y: 0), translation: 80)
+    let movedToOverlap = right.tab && reserves.kind == .overlap
+    let rightAgain = shell.smokeReservationSwipe(in: table, velocity: CGPoint(x: 500, y: 0), translation: 80)
+    checks["reservationTabSwipeMovesOneTabAndDoesNotWrap"] = movedToSkip && stayedOnSkip
+      && movedToOverlap && rightAgain.tab && reserves.kind == .conflict
+
+    _ = shell.smokeReservationMenu(true)
+    checks["reservationSidebarHighlightsSwipedTab"] = await wait {
+      row("reserves-conflict")?.accessibilityTraits.contains(.selected) == true
+        && row("reserves-overlap")?.accessibilityTraits.contains(.selected) == false
+    }
+    capture("reservation-sidebar")
+    NeoProgramSearchSmokeProtocol.setWarningCounts(conflicts: 0, overlaps: 3)
+    NotificationCenter.default.post(name: .neoReservationsChanged, object: api)
+    checks["reservationSidebarHidesZeroCountOnly"] = await wait {
+      row("reserves-conflict") == nil && row("reserves-overlap")?.accessibilityValue == "3件"
+    }
     return checks
   }
 }

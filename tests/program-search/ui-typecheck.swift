@@ -25,7 +25,11 @@ final class NeoShell: UIViewController {
   func pushPage(requestedAt: CFTimeInterval = CACurrentMediaTime(), _ make: () -> NeoPage) {}
   func smokeUseAPI(_ value: NeoAPI?) { api = value }
   func showRoute(_ id: String) {}
+  func reservationTabDidChange(_ page: NeoReservationsPage) {}
   func smokeSelectDestination(_ id: String) {}
+  func smokeReservationMenu(_ open: Bool) -> UITableView { UITableView() }
+  func smokeReservationSwipe(in scroll: UIScrollView, velocity: CGPoint, translation: CGFloat,
+    edgeX: CGFloat? = nil, cancelled: Bool = false) -> (tab: Bool, menu: Bool) { (false, false) }
   func returnAfterRuleSave(from page: NeoProgramSearchPage) -> Bool { false }
   func goBack() {}
   func recordingNotice(_ message: String, error: Bool = false, warning: Bool = false) {}

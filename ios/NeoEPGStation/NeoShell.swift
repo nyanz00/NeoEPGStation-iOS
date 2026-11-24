@@ -50,6 +50,7 @@ final class NeoDeferredScrollUpdate {
 
 struct NeoDestination {
   let id: String; let title: String; let icon: String
+  var count: Int? = nil
   static let all: [NeoDestination] = [
     .init(id: "dashboard", title: "ダッシュボード", icon: "DashboardOutlined"),
     .init(id: "onair", title: "放映中", icon: "LiveTvOutlined"),
@@ -64,6 +65,10 @@ struct NeoDestination {
     .init(id: "history", title: "視聴履歴", icon: "HistoryOutlined"),
     .init(id: "system", title: "システム", icon: "DnsOutlined"),
     .init(id: "settings", title: "設定", icon: "SettingsOutlined")]
+}
+
+private extension NeoProgramReserveKind {
+  var sidebarDestination: String { self == .normal ? "reserves" : "reserves-" + queryType }
 }
 
 // A public UIKit interactive transition, rather than forwarding touches into
@@ -353,20 +358,31 @@ class NeoPage: UIViewController {
 // Explicit safe-area margins keep the brand and icons aligned in either host.
 private final class NeoSidebarCell: UITableViewCell {
   let icon = UIImageView(), caption = NeoStyle.label(size: 14)
+  let badge = NeoStyle.label(size: 12, bold: true)
   var leftInset: CGFloat = 0 { didSet { setNeedsLayout() } }
   var iconWidth: CGFloat = 24 { didSet { setNeedsLayout() } }
   override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
     super.init(style: style, reuseIdentifier: reuseIdentifier)
     // Own the row geometry. UIListContentView can retain safe-area margins
     // from a previous orientation on only the reused/visible rows.
-    addSubview(icon); addSubview(caption); icon.contentMode = .scaleAspectFit
+    addSubview(icon); addSubview(caption); addSubview(badge); icon.contentMode = .scaleAspectFit
+    badge.backgroundColor = NeoStyle.accent; badge.textColor = NeoStyle.successText
+    badge.textAlignment = .center; badge.layer.cornerRadius = 10; badge.clipsToBounds = true
     icon.tintColor = NeoStyle.muted; isAccessibilityElement = true
   }
   required init?(coder: NSCoder) { fatalError() }
   override func layoutSubviews() {
     super.layoutSubviews()
     icon.frame = CGRect(x: leftInset+16, y: (bounds.height-27)/2, width: iconWidth, height: 27)
-    caption.frame = CGRect(x: leftInset+56, y: 0, width: max(0, bounds.width-leftInset-72), height: bounds.height)
+    let available = max(0, bounds.width - leftInset - 72)
+    if badge.isHidden {
+      caption.frame = CGRect(x: leftInset+56, y: 0, width: available, height: bounds.height)
+    } else {
+      let badgeWidth = min(available, max(20, ceil(badge.intrinsicContentSize.width) + 10))
+      let captionWidth = min(ceil(caption.intrinsicContentSize.width), max(0, available - badgeWidth - 6))
+      caption.frame = CGRect(x: leftInset+56, y: 0, width: captionWidth, height: bounds.height)
+      badge.frame = CGRect(x: caption.frame.maxX+6, y: (bounds.height-20)/2, width: badgeWidth, height: 20)
+    }
   }
 }
 
@@ -393,6 +409,20 @@ final class NeoSidebar: UIView, UITableViewDataSource, UITableViewDelegate {
   let logo = UIImageView(image: UIImage(named: "Brand"))
   let list = UITableView(frame: .zero, style: .plain)
   var onSelect: ((String) -> Void)?
+  private var items = NeoDestination.all
+  var reservationCounts: NeoReservationCounts? {
+    didSet {
+      guard oldValue != reservationCounts else { return }
+      items = NeoDestination.all.flatMap { item -> [NeoDestination] in
+        guard item.id == "reserves", let reservationCounts else { return [item] }
+        let warnings: [(NeoProgramReserveKind, Int)] = [(.conflict, reservationCounts.conflicts), (.overlap, reservationCounts.overlaps)]
+        return [item] + warnings.filter { $0.1 > 0 }.map { kind, count in
+          NeoDestination(id: kind.sidebarDestination, title: kind.label, icon: "PendingActionsOutlined", count: count)
+        }
+      }
+      list.reloadData()
+    }
+  }
   var selected = "recorded" { didSet { if oldValue != selected { list.reloadData() } } }
   var contentSafeArea = UIEdgeInsets.zero {
     didSet {
@@ -419,19 +449,22 @@ final class NeoSidebar: UIView, UITableViewDataSource, UITableViewDelegate {
     logo.frame = CGRect(x: brand.frame.maxX + 7, y: safe.top + 16, width: logoWidth, height: 28)
     list.frame = CGRect(x: 0, y: safe.top + 60, width: bounds.width, height: max(0, bounds.height - safe.top - 60 - safe.bottom))
   }
-  func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { NeoDestination.all.count }
+  func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { items.count }
   func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-    let cell = tableView.dequeueReusableCell(withIdentifier: "navigation", for: indexPath) as! NeoSidebarCell, item = NeoDestination.all[indexPath.row]
+    let cell = tableView.dequeueReusableCell(withIdentifier: "navigation", for: indexPath) as! NeoSidebarCell, item = items[indexPath.row]
     cell.insetsLayoutMarginsFromSafeArea = false; cell.preservesSuperviewLayoutMargins = false
     cell.contentView.insetsLayoutMarginsFromSafeArea = false; cell.contentView.preservesSuperviewLayoutMargins = false
     cell.leftInset = contentSafeArea.left; cell.icon.image = NeoIcon.image(item.icon); cell.caption.text = item.title
     cell.iconWidth = item.icon == "AlphaA" ? 27 : 24
     cell.accessibilityLabel = item.title
+    cell.badge.text = item.count.map { String($0) }; cell.badge.isHidden = item.count == nil
+    cell.accessibilityValue = item.count.map { "\($0)件" }
     cell.backgroundColor = item.id == selected ? NeoStyle.accent.withAlphaComponent(0.16) : .clear
+    cell.accessibilityTraits = item.id == selected ? [.button, .selected] : .button
     cell.accessibilityIdentifier = "menu-" + item.id; return cell
   }
   func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-    tableView.deselectRow(at: indexPath, animated: false); onSelect?(NeoDestination.all[indexPath.row].id)
+    tableView.deselectRow(at: indexPath, animated: false); onSelect?(items[indexPath.row].id)
   }
   func rowHasExpectedLayout(_ cell: UITableViewCell) -> Bool {
     guard let cell = cell as? NeoSidebarCell else { return false }
@@ -465,13 +498,23 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   var canReturnToHistory: Bool { route == "recorded" && historyReturnRevision != nil && historyReturnRevision == api?.identityRevision && controllers["history"] != nil }
   private let content = UIView(), bottom = UIView(), dim = UIView()
   private let sidebar = NeoSidebar()
+  private let reservationUpdates = NeoServerStatusUpdates()
+  private var reservationFeed: NeoReservationSession?
+  private var reservationSocketPort: Int?
+  private var reservationCountRead: Task<Void, Never>?
+  private var reservationCountRefreshPending = false
+  private var reservationsBackgrounded = false
   private var sidebarWidth: CGFloat { 240 + view.safeAreaInsets.left }
   private var shortcuts: [String] = []
   private var bottomButtons: [UIButton] = []
   private var menuOpen = false, tabletExpanded = true
   private var tabletReveal: CGFloat = 1
 #if targetEnvironment(simulator)
-  func smokeUseAPI(_ value: NeoAPI?) { api = value; account = value.map { NeoAccountCoordinator(api: $0, shell: self) } }
+  func smokeUseAPI(_ value: NeoAPI?) {
+    stopReservationFeed(clearCounts: true)
+    api = value; account = value.map { NeoAccountCoordinator(api: $0, shell: self) }
+    synchronizeReservationFeed()
+  }
   func smokeUseServerConfig(config: NeoServerConfig?) { serverConfig = config }
   private var startupDrawerWasStill = false
 #endif
@@ -484,6 +527,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private weak var pageSwipe: NeoRecordedPage?
   private var popupHiddenForNavigation = false
   private var waveSwipe: Int?
+  private var reservationSwipe: (page: NeoReservationsPage, target: NeoProgramReserveKind, sign: CGFloat)?
   private weak var swipeScroll: UIScrollView?
   private var scrollWasEnabled = false
   private var popInteraction: UIPercentDrivenInteractiveTransition?
@@ -524,6 +568,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     view.addSubview(content); view.addSubview(bottom); view.addSubview(dim); view.addSubview(sidebar)
     sidebar.backgroundColor = NeoStyle.paper; bottom.backgroundColor = NeoStyle.paper
     sidebar.onSelect = { [weak self] in self?.selectDestination($0) }
+    let notifications = NotificationCenter.default
+    notifications.addObserver(self, selector: #selector(reservationAccountChanged(_:)), name: .neoAccountChanged, object: nil)
+    notifications.addObserver(self, selector: #selector(reservationDataChanged(_:)), name: .neoReservationsChanged, object: nil)
+    notifications.addObserver(self, selector: #selector(suspendReservationFeed), name: UIApplication.didEnterBackgroundNotification, object: nil)
+    notifications.addObserver(self, selector: #selector(resumeReservationFeed), name: UIApplication.didBecomeActiveNotification, object: nil)
     dim.backgroundColor = UIColor.black.withAlphaComponent(0.5); dim.alpha = 0
     dim.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(closeMenu)))
     contentPan = UIPanGestureRecognizer(target: self, action: #selector(dragContent(_:))); contentPan.delegate = self
@@ -580,6 +629,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
   func connect(_ url: URL) {
     cancelRecordingActions()
+    stopReservationFeed(clearCounts: true)
     dismissPopup(); historyReturnSnapshot = nil; historyReturnRevision = nil; api = NeoAPI(base: url); channels = [:]; serverConfig = nil
     for controller in controllers.values { controller.willMove(toParent: nil); controller.view.removeFromSuperview(); controller.removeFromParent() }
     controllers.removeAll(); active = nil
@@ -601,6 +651,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     guard let api, serverConfig == nil else { return }
     guard let config = try? await api.configuration(), self.api === api else { return }
     serverConfig = config
+    synchronizeReservationFeed()
     for nav in controllers.values {
       for case let detail as NeoDetailPage in nav.viewControllers where detail.isViewLoaded { detail.refreshCapabilities() }
     }
@@ -618,6 +669,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   }
   func showConnection(message: String? = nil) {
     cancelRecordingActions()
+    stopReservationFeed(clearCounts: true)
     dismissPopup()
     api = nil; account = nil; menuOpen = false; route = "connection"; searchReturnRoute = nil
     let page = NeoConnectionPage(shell: self)
@@ -629,13 +681,13 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     api?.stopRecordingUpdates()
     for nav in controllers.values { for case let page as NeoPage in nav.viewControllers { page.recordingActions?.cancel(); page.encodeActions?.cancel() } }
   }
-  func showRoute(_ id: String) {
+  func showRoute(_ id: String, reservationKind: NeoProgramReserveKind = .normal) {
     guard api != nil, popInteraction == nil, !routeBackRunning else { return }
     if id != route {
       searchReturnRoute = nil
       pageSwipe?.cancelPageHistoryInteraction(); recordedHistoryPage?.cancelPageHistoryInteraction(); pageSwipe = nil
       if scrollWasEnabled { swipeScroll?.isScrollEnabled = true }
-      swipeScroll = nil; swipeAction = nil
+      swipeScroll = nil; swipeAction = nil; reservationSwipe = nil
     }
     dismissPopup()
     if id != route { historyReturnSnapshot = nil; historyReturnRevision = nil }
@@ -648,7 +700,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       else if id == "onair" { page = NeoOnAirPage(shell: self) }
       else if id == "encode" { page = NeoEncodePage(shell: self) }
       else if id == "search" { page = NeoProgramSearchPage(shell: self) }
-      else if id == "reserves" { page = NeoReservationsPage(shell: self) }
+      else if id == "reserves" { page = NeoReservationsPage(shell: self, kind: reservationKind) }
       else if id == "rule" { page = NeoRulesPage(shell: self) }
       else if id == "settings" { page = NeoSettingsPage(shell: self) }
       else if id == "history" { page = NeoHistoryPage(shell: self) }
@@ -658,15 +710,88 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       nav.interactivePopGestureRecognizer?.isEnabled = false
       controllers[id] = nav
     }
-    attach(nav); sidebar.selected = route; updateBottom(); setMenu(false, animated: true)
+    attach(nav)
+    sidebar.selected = (nav.viewControllers.first as? NeoReservationsPage)?.kind.sidebarDestination ?? route
+    updateBottom(); setMenu(false, animated: true)
+    synchronizeReservationFeed()
+  }
+
+  func reservationTabDidChange(_ page: NeoReservationsPage) {
+    if active?.viewControllers.first === page { sidebar.selected = page.kind.sidebarDestination }
+  }
+
+  private var sidebarShowsReservations: Bool { tablet ? tabletExpanded : menuOpen }
+
+  @objc private func reservationAccountChanged(_ note: Notification) {
+    guard let api, note.object as? NeoAPI === api else { return }
+    stopReservationFeed(clearCounts: true)
+    synchronizeReservationFeed()
+  }
+
+  @objc private func reservationDataChanged(_ note: Notification) {
+    guard let api, note.object as? NeoAPI === api else { return }
+    scheduleReservationCounts()
+  }
+
+  @objc private func suspendReservationFeed() {
+    reservationsBackgrounded = true
+    stopReservationFeed()
+  }
+
+  @objc private func resumeReservationFeed() {
+    reservationsBackgrounded = false
+    synchronizeReservationFeed()
+  }
+
+  private func stopReservationFeed(clearCounts: Bool = false) {
+    reservationUpdates.stop(); reservationFeed = nil; reservationSocketPort = nil
+    reservationCountRead?.cancel(); reservationCountRead = nil; reservationCountRefreshPending = false
+    if clearCounts { sidebar.reservationCounts = nil }
+  }
+
+  private func synchronizeReservationFeed() {
+    guard !reservationsBackgrounded, sidebarShowsReservations || route == "reserves", let api, api.accountReady else {
+      stopReservationFeed()
+      return
+    }
+    let session = NeoReservationSession(api), port = serverConfig?.socketIOPort
+    if reservationFeed != session || reservationSocketPort != port {
+      stopReservationFeed()
+      reservationFeed = session; reservationSocketPort = port
+      reservationUpdates.start(api: api, port: port, events: ["updateStatus"]) { [weak self] in
+        guard let self, session.isCurrent(self.api) else { return }
+        (self.active?.topViewController as? NeoReservationsPage)?.refreshOnServerStatus()
+        self.scheduleReservationCounts()
+      }
+    }
+    scheduleReservationCounts()
+  }
+
+  private func scheduleReservationCounts() {
+    guard sidebarShowsReservations, let session = reservationFeed, session.isCurrent(api) else { return }
+    if reservationCountRead != nil { reservationCountRefreshPending = true; return }
+    reservationCountRead = Task { [weak self] in
+      try? await Task.sleep(for: .milliseconds(300))
+      guard let self, !Task.isCancelled else { return }
+      reservationCountRefreshPending = false
+      guard sidebarShowsReservations, session.isCurrent(api) else { reservationCountRead = nil; return }
+      let counts = try? await session.counts()
+      guard !Task.isCancelled else { return }
+      reservationCountRead = nil
+      if session.isCurrent(api), let counts { sidebar.reservationCounts = counts }
+      if reservationCountRefreshPending { scheduleReservationCounts() }
+    }
   }
   // A navigation button returns to the retained list first. Only a second tap
   // on that list resets pagination; programmatic route changes keep the stack.
-  private func selectDestination(_ id: String) {
+  private func selectDestination(_ destination: String) {
     guard api != nil, popInteraction == nil, !routeBackRunning, active?.transitionCoordinator == nil else { return }
+    let reserveTab = NeoProgramReserveKind.allCases.first { $0.sidebarDestination == destination }
+    let id = reserveTab == nil ? destination : "reserves"
     let searchOrigin = id == "search" && id != route && controllers[route] != nil ? route : nil
     historyReturnSnapshot = nil; historyReturnRevision = nil
     if let nav = controllers[id] {
+      if let reserveTab, let page = nav.viewControllers.first as? NeoReservationsPage { page.switchKind(reserveTab) }
       if id == "rule" { nav.popToRootViewController(animated: id == route) }
       else if id == route, let list = nav.topViewController as? NeoRecordedPage {
         if nav.viewControllers.count > 1 { nav.popViewController(animated: true) }
@@ -677,7 +802,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         nav.popToRootViewController(animated: id == route)
       }
     }
-    showRoute(id)
+    showRoute(id, reservationKind: reserveTab ?? .normal)
     if id == "search" {
       if let searchOrigin { searchReturnRoute = searchOrigin }
       (controllers[id]?.viewControllers.first as? NeoProgramSearchPage)?.resetForNavigation()
@@ -697,6 +822,27 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
 
 #if targetEnvironment(simulator)
   func smokeSelectDestination(_ id: String) { selectDestination(id) }
+  func smokeReservationMenu(_ open: Bool) -> UITableView {
+    if tablet { setTabletMenu(open, animated: false) }
+    else { setMenu(open, animated: false) }
+    view.layoutIfNeeded()
+    return sidebar.list
+  }
+
+  func smokeReservationSwipe(in scroll: UIScrollView, velocity: CGPoint, translation: CGFloat,
+    edgeX: CGFloat? = nil, cancelled: Bool = false) -> (tab: Bool, menu: Bool) {
+    swipeStart = scroll.convert(CGPoint(x: scroll.bounds.midX, y: scroll.bounds.midY), to: view)
+    if let edgeX { swipeStart.x = edgeX }
+    swipeScroll = scroll
+    let begins = beginNavigationSwipe(contentPan, velocity: velocity)
+    let tab = begins && reservationSwipe != nil, menu = begins && swipeAction == .menu
+    if tab {
+      updateContentSwipe(state: .began, translation: 0, velocity: velocity.x)
+      updateContentSwipe(state: cancelled ? .cancelled : .ended, translation: translation, velocity: velocity.x)
+    }
+    swipeScroll = nil; swipeAction = nil; reservationSwipe = nil
+    return (tab, menu)
+  }
 #endif
   private func attach(_ nav: UINavigationController) {
     if active !== nav {
@@ -885,6 +1031,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private func setTabletMenu(_ open: Bool, animated: Bool) {
     if open { dismissPopup() }
     tabletExpanded = open; tabletReveal = open ? 1 : 0
+    synchronizeReservationFeed()
     let changes = { self.view.setNeedsLayout(); self.view.layoutIfNeeded() }
     if animated && view.window != nil && !UIAccessibility.isReduceMotionEnabled {
       UIView.animate(withDuration: 0.22, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut], animations: changes)
@@ -896,6 +1043,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     if open { dismissPopup() }
     let changed = menuOpen != open
     menuOpen = open
+    if changed { synchronizeReservationFeed() }
     // A fading backdrop must stop intercepting the new page immediately.
     // Its opacity animation previously swallowed the first swipe after routing.
     dim.isUserInteractionEnabled = open
@@ -968,6 +1116,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     }
     if let direction = waveSwipe {
       if state == .ended { finishWaveSwipe(direction,translation:translation,velocity:velocity) }
+    } else if let swipe = reservationSwipe {
+      if state == .ended, active?.topViewController === swipe.page,
+        translation * swipe.sign >= 44 || velocity * swipe.sign >= 350 {
+        swipe.page.switchKind(swipe.target)
+      }
     } else if let page = pageSwipe {
       if state == .changed || state == .began { page.updateHistorySwipe(translation:translation) }
       else if [.ended,.cancelled,.failed].contains(state) {
@@ -979,7 +1132,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     else if swipeAction == .back { updateBack(state:state,translation:translation,velocity:velocity) }
     if [.ended, .cancelled, .failed].contains(state) {
       if scrollWasEnabled { swipeScroll?.isScrollEnabled = true }
-      swipeScroll = nil; swipeAction = nil; waveSwipe = nil
+      swipeScroll = nil; swipeAction = nil; waveSwipe = nil; reservationSwipe = nil
       pageSwipe = nil
       if popupHiddenForNavigation { dismissPopup(); popupHiddenForNavigation = false }
     }
@@ -1176,7 +1329,17 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       popInteraction == nil, pendingBack == nil, !routeBackRunning else { return false }
     guard recordedHistoryPage?.pageHistoryNavigationBusy != true else { return false }
     pageSwipe = nil
-    if popup == nil, active?.transitionCoordinator == nil, recognizer === contentPan, beginWaveSwipe(horizontal:velocity.x) { return true }
+    reservationSwipe = nil
+    if popup == nil, active?.transitionCoordinator == nil, recognizer === contentPan {
+      if let page = active?.topViewController as? NeoReservationsPage, page.ownsTabSwipe(in: swipeScroll),
+        swipeStart.x > view.safeAreaInsets.left + 24, swipeStart.x < view.bounds.width - view.safeAreaInsets.right - 24 {
+        guard abs(velocity.x) > abs(velocity.y) * 1.25, let target = page.adjacentTab(horizontal: velocity.x) else { return false }
+        reservationSwipe = (page, target, velocity.x < 0 ? -1 : 1)
+        swipeAction = nil
+        return true
+      }
+      if beginWaveSwipe(horizontal:velocity.x) { return true }
+    }
     swipeAction = NeoNavigationGesture.action(startY: Double(swipeStart.y), height: Double(view.bounds.height),
       canGoBack: canGoBack, tablet: tablet && tabletExpanded, horizontal: Double(velocity.x), vertical: Double(velocity.y), persistentMenu: tablet,
       fullScreenBack:true,canGoForward:recordedHistoryPage?.canPageForward == true)

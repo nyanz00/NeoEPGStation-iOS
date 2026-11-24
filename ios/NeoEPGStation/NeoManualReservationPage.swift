@@ -32,12 +32,18 @@ final class NeoManualReservationPage: NeoPage {
     scroll.keyboardDismissMode = .interactive
     scroll.alwaysBounceVertical = true
     scroll.accessibilityIdentifier = "manualReserve.form"
+    form.accessibilityIdentifier = "manualReserve.formStack"
     saveButton.accessibilityIdentifier = "manualReserve.save"
-    form.axis = .vertical; form.spacing = 12
+    form.axis = .vertical; form.spacing = 12; form.alignment = .fill
     for element in [scroll, form, spinner] { element.translatesAutoresizingMaskIntoConstraints = false }
     body.addSubview(scroll); scroll.addSubview(form); body.addSubview(spinner)
     let width = form.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -24)
-    width.priority = .defaultHigh
+    // Keep the form inside the viewport even when an arranged label has a long
+    // intrinsic width.  The 800pt preference keeps the Web layout on iPad,
+    // while the viewport constraint wins on phones and narrow split views.
+    width.priority = UILayoutPriority(999)
+    let preferredWidth = form.widthAnchor.constraint(equalToConstant: 800)
+    preferredWidth.priority = UILayoutPriority(998)
     let bottom = scroll.bottomAnchor.constraint(equalTo: body.bottomAnchor)
     bottom.priority = .defaultHigh
     NSLayoutConstraint.activate([
@@ -48,7 +54,8 @@ final class NeoManualReservationPage: NeoPage {
       form.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -20),
       form.centerXAnchor.constraint(equalTo: scroll.frameLayoutGuide.centerXAnchor),
       scroll.contentLayoutGuide.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
-      width, form.widthAnchor.constraint(lessThanOrEqualToConstant: 800),
+      width, form.widthAnchor.constraint(lessThanOrEqualToConstant: 800), preferredWidth,
+      form.widthAnchor.constraint(lessThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor),
       spinner.centerXAnchor.constraint(equalTo: body.centerXAnchor), spinner.topAnchor.constraint(equalTo: body.topAnchor, constant: 80),
     ])
     NotificationCenter.default.addObserver(self, selector: #selector(accountChanged(_:)), name: .neoAccountChanged, object: nil)
@@ -123,7 +130,9 @@ final class NeoManualReservationPage: NeoPage {
     summary.append(contentsOf: program.genreLabels.map { text($0, muted: true) })
     summary.append(contentsOf: details.map { text($0) })
     if showFree { summary.append(text(program.isFree ? "無料放送" : "有料放送", muted: true)) }
-    form.addArrangedSubview(panel(summary))
+    let summaryPanel = panel(summary)
+    summaryPanel.accessibilityIdentifier = "manualReserve.summary"
+    form.addArrangedSubview(summaryPanel)
     if let time { form.addArrangedSubview(timePanel(time)) }
 
     let viewer = NeoSelectButton()
@@ -171,11 +180,13 @@ final class NeoManualReservationPage: NeoPage {
       dateFields("終了", date: time.endDay, clock: time.endClock,
         onDay: { [weak self] in self?.time?.endDay = $0 }, onClock: { [weak self] in self?.time?.endClock = $0 }),
     ])
+    fields.accessibilityIdentifier = "manualReserve.timeFields"
     fields.axis = .vertical; fields.spacing = 12; fields.isHidden = true
     let timeSwitch = toggle("時刻指定", false) { [weak self, weak fields] enabled in
       self?.timeEnabled = enabled
       fields?.isHidden = !enabled
     }
+    timeSwitch.accessibilityIdentifier = "manualReserve.timeSpecified"
     return panel([timeSwitch, fields])
   }
 
@@ -342,6 +353,11 @@ final class NeoManualReservationPage: NeoPage {
   private func text(_ value: String, size: CGFloat = 15, bold: Bool = false, muted: Bool = false) -> UILabel {
     let label = NeoStyle.label(value, size: size, bold: bold, muted: muted)
     label.numberOfLines = 0
+    // Program descriptions may contain long Japanese text or URLs without
+    // whitespace.  Truncating the label's intrinsic width can expand the
+    // surrounding stack and push the reservation form off-screen.
+    label.lineBreakMode = .byCharWrapping
+    label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     return label
   }
 
