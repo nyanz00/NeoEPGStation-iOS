@@ -587,14 +587,24 @@ private final class NeoActiveRecordingsProtocol: URLProtocol {
       views(in: rootView()).first { $0.accessibilityIdentifier == identifier }
     }
     func button(_ identifier: String) -> UIButton? { view(identifier) as? UIButton }
-    func card(_ id: Int) -> UIView? { view("recording.card.\(id)") }
-    func confirm() async -> UIButton? {
-      guard await waitFor({ button("recording.confirm") != nil }) else { return nil }
-      return button("recording.confirm")
+    func table() -> UITableView? { view("recording.list") as? UITableView }
+    func card(_ id: Int) -> UITableViewCell? {
+      table()?.visibleCells.first { $0.accessibilityIdentifier == "recording.card.\(id)" }
+    }
+    func confirm(_ title: String) async -> UIButton? {
+      func matchingButton() -> UIButton? {
+        views(in: rootView()).compactMap { $0 as? UIButton }.first {
+          $0.accessibilityIdentifier == "recording.confirm" && $0.currentTitle == title && $0.isEnabled
+        }
+      }
+      guard await waitFor({ matchingButton() != nil }) else { return nil }
+      return matchingButton()
+    }
+    func confirmationClosed() -> Bool {
+      view("recording.confirm") == nil
     }
     func selectRow(_ id: Int) -> Bool {
-      guard let table = view("recording.list") as? UITableView,
-        let cell = card(id) as? UITableViewCell, let indexPath = table.indexPath(for: cell) else { return false }
+      guard let table = table(), let cell = card(id), let indexPath = table.indexPath(for: cell) else { return false }
       table.selectRow(at: indexPath, animated: false, scrollPosition: .none)
       table.delegate?.tableView?(table, didSelectRowAt: indexPath)
       return true
@@ -627,7 +637,8 @@ private final class NeoActiveRecordingsProtocol: URLProtocol {
     checks["activeRecordingIndicatorTurnsOn"] = loaded && shell.hasActiveRecording
 
     let dropRendered = await waitFor(attempts: 340) {
-      guard let label = view("recording.drop") as? UILabel else { return false }
+      guard let cell = card(7201),
+        let label = views(in: cell).first(where: { $0.accessibilityIdentifier == "recording.drop" }) as? UILabel else { return false }
       return NeoActiveRecordingsProtocol.count("GET", "/api/recording/dropStatus") > 0
         && (label.text == "drop: 3 / error: 1 / scrambling: 0" || label.accessibilityValue == "drop: 3 / error: 1 / scrambling: 0")
     }
@@ -649,8 +660,10 @@ private final class NeoActiveRecordingsProtocol: URLProtocol {
     let menu = menuReady ? (view("anchored-menu") as? NeoAnchoredMenu) : nil
     checks["recordingMenuUsesWebStopDeleteLabels"] = menu?.titles.contains("stop") == true && menu?.titles.contains("delete") == true
     if let menu, let stop = menu.titles.firstIndex(of: "stop") { menu.select(stop) }
-    if let stopConfirm = await confirm() { stopConfirm.sendActions(for: .touchUpInside) }
-    checks["individualStopUsesRecordingEndpoint"] = await waitFor { NeoActiveRecordingsProtocol.stopped().contains(7201) && card(7201) == nil }
+    if let stopConfirm = await confirm("録画停止") { stopConfirm.sendActions(for: .touchUpInside) }
+    checks["individualStopUsesRecordingEndpoint"] = await waitFor {
+      NeoActiveRecordingsProtocol.stopped().contains(7201) && card(7201) == nil && confirmationClosed()
+    }
 
     // The individual delete action must use the same file-selection dialog as
     // recorded items. For an active recording it refreshes /recorded/{id},
@@ -677,16 +690,21 @@ private final class NeoActiveRecordingsProtocol: URLProtocol {
     let selectedForStop = selectRow(7203)
     checks["recordingSelectionEnablesBulkStop"] = selectedForStop && button("recording.bulkStop")?.isEnabled == true
     button("recording.bulkStop")?.sendActions(for: .touchUpInside)
-    if let stopConfirm = await confirm() { stopConfirm.sendActions(for: .touchUpInside) }
-    checks["bulkStopUsesRecordingEndpoint"] = await waitFor { NeoActiveRecordingsProtocol.stopped().contains(7203) && card(7203) == nil }
+    if let stopConfirm = await confirm("録画停止") { stopConfirm.sendActions(for: .touchUpInside) }
+    checks["bulkStopUsesRecordingEndpoint"] = await waitFor {
+      NeoActiveRecordingsProtocol.stopped().contains(7203) && card(7203) == nil && confirmationClosed()
+    }
 
     button("recording.select")?.sendActions(for: .touchUpInside)
     let selectedForDelete = selectRow(7204)
     checks["recordingSelectionEnablesBulkDelete"] = selectedForDelete && button("recording.bulkDelete")?.isEnabled == true
     button("recording.bulkDelete")?.sendActions(for: .touchUpInside)
-    if let deleteConfirm = await confirm() { deleteConfirm.sendActions(for: .touchUpInside) }
-    checks["bulkDeleteUsesVideoEndpoint"] = await waitFor { NeoActiveRecordingsProtocol.deletedVideos().contains(72041) && card(7204) == nil }
-    checks["activeRecordingIndicatorTurnsOffWhenEmpty"] = await waitFor { !shell.hasActiveRecording && view("recording.list") is UITableView && card(7204) == nil }
+    let deleteConfirm = await confirm("削除")
+    checks["bulkDeleteConfirmationReady"] = deleteConfirm != nil
+    deleteConfirm?.sendActions(for: .touchUpInside)
+    checks["bulkDeleteUsesVideoEndpoint"] = await waitFor { NeoActiveRecordingsProtocol.deletedVideos().contains(72041) }
+    checks["bulkDeleteRefreshesActiveList"] = await waitFor { table()?.numberOfRows(inSection: 0) == 0 && confirmationClosed() }
+    checks["activeRecordingIndicatorTurnsOffWhenEmpty"] = await waitFor { !shell.hasActiveRecording }
     let auth = NeoActiveRecordingsProtocol.authSummary()
     checks["recordingRequestsCarryIdentityHeaders"] = auth.passes > 0 && auth.failures == 0
     return checks

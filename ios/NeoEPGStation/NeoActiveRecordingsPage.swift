@@ -27,7 +27,7 @@ final class NeoActiveRecordingsPage: NeoPage, UITableViewDataSource, UITableView
   private var session: NeoReservationSession?
   private var listTask: Task<Void, Never>?, dropsTask: Task<Void, Never>?, mutationTask: Task<Void, Never>?, statusTask: Task<Void, Never>?
   private var mobileHeader = true
-  private weak var confirm: NeoLiveDialog?
+  private weak var confirm: NeoActiveRecordingConfirmation?
 
   init(shell: NeoShell) { super.init(title: "録画中", shell: shell) }
   required init?(coder: NSCoder) { fatalError() }
@@ -354,26 +354,25 @@ final class NeoActiveRecordingsPage: NeoPage, UITableViewDataSource, UITableView
     guard mutationTask == nil, presentedViewController == nil, let context = session, context.isCurrent(shell?.api) else { return }
     let targets = records.filter { ids.contains($0.id) }
     guard !targets.isEmpty else { return }
-    let dialog = NeoLiveDialog(title: operation.title)
-    dialog.addText(operation.message(targets))
-    dialog.addAction("キャンセル") { [weak dialog] in dialog?.cancel() }
-    let submit = dialog.addAction(operation.button, filled: true) { [weak self, weak dialog] in
-      dialog?.dismiss(animated: true) { [weak self] in self?.perform(operation, ids: ids, session: context) }
+    let color = operation == .stop ? UIColor(red: 1, green: 0.655, blue: 0.149, alpha: 1) : NeoStyle.error
+    let dialog = NeoActiveRecordingConfirmation(title: operation.title, message: operation.message(targets), submit: operation.button,
+      color: color, foreground: operation == .stop ? .black : .white)
+    dialog.onSubmit = { [weak self, weak dialog] in
+      guard let dialog else { return }
+      self?.perform(operation, ids: ids, session: context, dialog: dialog)
     }
-    submit.accessibilityIdentifier = "recording.confirm"
-    submit.backgroundColor = operation == .stop ? UIColor(red: 1, green: 0.655, blue: 0.149, alpha: 1) : NeoStyle.error
-    submit.tintColor = operation == .stop ? .black : .white
     confirm = dialog
     present(dialog, animated: true)
   }
 
-  private func perform(_ operation: Operation, ids: Set<Int>, session: NeoReservationSession) {
-    guard visible, mutationTask == nil, session.isCurrent(shell?.api) else { return }
+  private func perform(_ operation: Operation, ids: Set<Int>, session: NeoReservationSession, dialog: NeoActiveRecordingConfirmation) {
+    guard confirm === dialog, mutationTask == nil, session.isCurrent(shell?.api) else { return }
     let targets = records.filter { ids.contains($0.id) }
-    guard !targets.isEmpty else { return }
+    guard !targets.isEmpty else { dialog.cancel(); return }
+    dialog.startProcessing()
     let api = session.api
     listTask?.cancel(); listTask = nil; deferredUpdate.cancel()
-    mutationTask = Task { [weak self] in
+    mutationTask = Task { [weak self, weak dialog] in
       var failures: [(NeoRecording, Error)] = []
       var changed: Set<Int> = []
       for item in targets {
@@ -411,10 +410,39 @@ final class NeoActiveRecordingsPage: NeoPage, UITableViewDataSource, UITableView
         let detail = failures.prefix(3).map { "\($0.0.name): \($0.1.localizedDescription)" }.joined(separator: " / ")
         result.append("\(failures.count)件を\(operation.completed)できませんでした。\n\(detail)")
       }
-      if visible { shell?.recordingNotice(result.joined(separator: "\n"), error: !failures.isEmpty) }
+      confirm = nil
+      let notice = result.joined(separator: "\n"), failed = !failures.isEmpty
+      dialog?.dismiss(animated: true) { [weak self] in
+        if self?.visible == true { self?.shell?.recordingNotice(notice, error: failed) }
+      }
     }
     updateHeader()
   }
 
   deinit { listTask?.cancel(); dropsTask?.cancel(); mutationTask?.cancel(); statusTask?.cancel() }
+}
+
+private final class NeoActiveRecordingConfirmation: NeoLiveDialog {
+  var onSubmit: (() -> Void)?
+  private var submitButton: UIButton?, cancelButton: UIButton?
+  private var processing = false
+  override var maximumWidth: CGFloat { 600 }
+
+  init(title: String, message: String, submit: String, color: UIColor, foreground: UIColor) {
+    super.init(title: title)
+    addText(message)
+    cancelButton = addAction("キャンセル") { [weak self] in self?.cancel() }
+    submitButton = addAction(submit, filled: true) { [weak self] in self?.onSubmit?() }
+    submitButton?.accessibilityIdentifier = "recording.confirm"
+    submitButton?.backgroundColor = color
+    submitButton?.setTitleColor(foreground, for: .normal)
+  }
+
+  required init?(coder: NSCoder) { fatalError() }
+  override func cancel() { if !processing { super.cancel() } }
+
+  func startProcessing() {
+    processing = true
+    submitButton?.isEnabled = false; cancelButton?.isEnabled = false
+  }
 }
