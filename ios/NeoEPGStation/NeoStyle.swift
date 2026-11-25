@@ -63,6 +63,34 @@ enum NeoStyle {
   }
 }
 
+@MainActor final class NeoListSlide {
+  private(set) var snapshot: UIView?
+
+  func cancel(surface: UIView) {
+    snapshot?.removeFromSuperview(); snapshot = nil
+    surface.layer.removeAllAnimations(); surface.transform = .identity
+  }
+
+  func move(in viewport: UIView, surface: UIView, direction: CGFloat, update: () -> Void) {
+    cancel(surface: surface)
+    let old = UIAccessibility.isReduceMotionEnabled ? nil : surface.snapshotView(afterScreenUpdates: false)
+    if let old {
+      old.frame = viewport.bounds; old.isUserInteractionEnabled = false
+      viewport.addSubview(old); snapshot = old
+    }
+    UIView.performWithoutAnimation(update)
+    guard let old else { return }
+    let offset = direction * viewport.bounds.width
+    surface.transform = CGAffineTransform(translationX: offset, y: 0)
+    UIView.animate(withDuration: 0.22, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]) {
+      surface.transform = .identity; old.transform = CGAffineTransform(translationX: -offset, y: 0)
+    } completion: { [weak self, weak old] _ in
+      old?.removeFromSuperview()
+      if self?.snapshot === old { self?.snapshot = nil }
+    }
+  }
+}
+
 // Decoding/resizing runs off the main thread. Cache is shared across cards and
 // details; reused cells cancel requests and never display another record's image.
 final class NeoThumbnail: UIImageView {

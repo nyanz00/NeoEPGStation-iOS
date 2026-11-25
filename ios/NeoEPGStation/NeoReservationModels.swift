@@ -57,18 +57,10 @@ enum NeoReservationAction: Hashable {
   var suffix: String {
     switch self { case .cancel: return ""; case .restoreSkip: return "/skip"; case .restoreOverlap: return "/overlap" }
   }
-  var label: String {
+  func buttonTitle(ruleBased: Bool) -> String {
     switch self {
-    case .cancel: return "予約をキャンセル"
-    case .restoreSkip: return "予約に戻す"
-    case .restoreOverlap: return "重複状態を解除"
-    }
-  }
-  var confirmation: String {
-    switch self {
-    case .cancel: return "予約をキャンセルしますか？"
-    case .restoreSkip: return "除外から予約に戻しますか？"
-    case .restoreOverlap: return "重複状態を解除しますか？"
+    case .cancel: return ruleBased ? "除外" : "削除"
+    case .restoreSkip, .restoreOverlap: return "解除"
     }
   }
   func success(count: Int? = nil) -> String {
@@ -77,6 +69,43 @@ enum NeoReservationAction: Hashable {
     case .cancel: return "\(prefix)予約をキャンセルしました"
     case .restoreSkip: return (count.map { "\($0)件を" } ?? "") + "除外から予約に戻しました"
     case .restoreOverlap: return (count.map { "\($0)件の" } ?? "") + "重複状態を解除して予約に戻しました"
+    }
+  }
+}
+
+struct NeoReservationConfirmationCopy {
+  static let exclusionNote = "ルールから作成された予約は、ルール自体を残したまま除外扱いになります。"
+
+  let heading: String, text: String, button: String
+  var note: String? = nil
+
+  static func single(_ item: NeoReservationItem) -> Self {
+    let ruleBased = item.ruleId != nil
+    let button = item.action.buttonTitle(ruleBased: ruleBased)
+    switch item.action {
+    case .cancel:
+      return .init(heading: "予約を\(button)しますか？", text: item.name, button: button,
+        note: ruleBased ? exclusionNote : nil)
+    case .restoreSkip:
+      return .init(heading: "除外から予約に戻しますか？", text: item.name, button: button)
+    case .restoreOverlap:
+      return .init(heading: "重複状態を解除しますか？", text: item.name, button: button)
+    }
+  }
+
+  static func bulk(action: NeoReservationAction, count: Int, ruleCount: Int) -> Self {
+    switch action {
+    case .restoreSkip:
+      return .init(heading: "除外から予約に戻しますか？", text: "\(count)件を除外から予約に戻します。", button: "解除")
+    case .restoreOverlap:
+      return .init(heading: "重複状態を解除しますか？", text: "\(count)件の重複状態を解除します。", button: "重複状態を解除")
+    case .cancel:
+      if ruleCount == count {
+        return .init(heading: "予約を除外しますか？", text: "\(count)件の予約を除外します。", button: "除外", note: exclusionNote)
+      }
+      let deletion = "手動予約は削除されます。"
+      return .init(heading: "予約をキャンセルしますか？", text: "\(count)件の予約をキャンセルします。",
+        button: "予約をキャンセル", note: ruleCount > 0 ? deletion + exclusionNote : deletion)
     }
   }
 }

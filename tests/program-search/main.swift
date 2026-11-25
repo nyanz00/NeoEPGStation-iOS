@@ -275,6 +275,24 @@ struct ProgramSearchTests {
     expect((try? specified.body()) == nil, "identical start and end are rejected")
     expect(NeoReservationAction(kind: .skip).suffix == "/skip" && NeoReservationAction(kind: .overlap).suffix == "/overlap"
       && NeoReservationAction(kind: .conflict).suffix.isEmpty, "reservation kinds map to their write endpoints")
+    let reservationJSON = #"{"id":7,"channelId":1,"name":"Fixture","startAt":0,"endAt":1800000,"ruleId":42}"#
+    var copyFixture = try JSONDecoder().decode(NeoReservationItem.self, from: Data(reservationJSON.utf8))
+    let exclusion = NeoReservationConfirmationCopy.single(copyFixture)
+    let exclusionNote = "ルールから作成された予約は、ルール自体を残したまま除外扱いになります。"
+    expect(exclusion.button == "除外" && exclusion.text == "Fixture" && exclusion.note == exclusionNote, "single rule booking exclusion uses Web copy")
+    copyFixture.isSkip = true
+    let restore = NeoReservationConfirmationCopy.single(copyFixture)
+    expect(restore.button == "解除" && restore.heading == "除外から予約に戻しますか？" && restore.note == nil, "single excluded booking confirms restore")
+    copyFixture.isSkip = false; copyFixture.ruleId = nil
+    expect(NeoReservationConfirmationCopy.single(copyFixture).button == "削除", "single manual booking confirms deletion")
+
+    let bulkExclude = NeoReservationConfirmationCopy.bulk(action: .cancel, count: 2, ruleCount: 2)
+    let bulkMixed = NeoReservationConfirmationCopy.bulk(action: .cancel, count: 3, ruleCount: 2)
+    let bulkRestore = NeoReservationConfirmationCopy.bulk(action: .restoreSkip, count: 2, ruleCount: 2)
+    expect(bulkExclude.button == "除外" && bulkExclude.text == "2件の予約を除外します。" && bulkExclude.note == exclusionNote, "all rule bookings are excluded with a count")
+    expect(bulkMixed.button == "予約をキャンセル" && bulkMixed.text == "3件の予約をキャンセルします。"
+      && bulkMixed.note == "手動予約は削除されます。" + exclusionNote, "mixed cancellations explain both outcomes")
+    expect(bulkRestore.button == "解除" && bulkRestore.text == "2件を除外から予約に戻します。", "bulk restore uses the requested label")
     print("Program search, rule and reservation tests passed (\(assertionCount) assertions)")
   }
 }

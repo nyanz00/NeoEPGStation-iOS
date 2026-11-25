@@ -111,7 +111,7 @@ private final class NeoOnAirCell: UICollectionViewCell {
 }
 
 final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
-  private var waveSnapshot: UIView?
+  private let waveSlide = NeoListSlide()
   // Animate an unscrolled surface. UICollectionView.bounds.origin contains
   // contentOffset, so its frame must not also serve as the slide's geometry.
   private let listViewport = UIView(), listSurface = UIView()
@@ -256,20 +256,11 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
   }
   private func selectWave(_ id: String) {
     guard waves.contains(id), id != wave else { return }
-    waveSnapshot?.removeFromSuperview(); waveSnapshot = nil; listSurface.layer.removeAllAnimations(); listSurface.transform = .identity
     let direction: CGFloat = (waves.firstIndex(of:id) ?? 0) > (waves.firstIndex(of:wave) ?? 0) ? 1 : -1
-    let old = !UIAccessibility.isReduceMotionEnabled ? listSurface.snapshotView(afterScreenUpdates:false) : nil
-    if let old { old.frame = listViewport.bounds; listViewport.addSubview(old); waveSnapshot = old }
-    UIView.performWithoutAnimation {
+    waveSlide.move(in: listViewport, surface: listSurface, direction: direction) {
       wave = id; filter(); view.layoutIfNeeded(); list.layoutIfNeeded()
       list.setContentOffset(CGPoint(x:0,y:-list.adjustedContentInset.top),animated:false)
       list.layoutIfNeeded()
-    }
-    if let old {
-      listSurface.transform = CGAffineTransform(translationX:direction*listViewport.bounds.width,y:0)
-      UIView.animate(withDuration:0.22,delay:0,options:[.beginFromCurrentState,.allowUserInteraction,.curveEaseOut]) {
-        self.listSurface.transform = .identity; old.transform = CGAffineTransform(translationX:-direction*self.listViewport.bounds.width,y:0)
-      } completion: { [weak self,weak old] _ in old?.removeFromSuperview(); if self?.waveSnapshot === old { self?.waveSnapshot = nil } }
     }
     if let index = waves.firstIndex(of:id), buttons.indices.contains(index) { tabs.scrollRectToVisible(buttons[index].frame,animated:true) }
   }
@@ -458,7 +449,7 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
       checks[name+"HasHorizontalMotion"] = observedMotion
       checks[name+"HasNoVerticalMotion"] = yStable
       try? await Task.sleep(nanoseconds:90_000_000)
-      checks[name+"FinishesAtViewport"] = waveSnapshot == nil && listSurface.transform == .identity
+      checks[name+"FinishesAtViewport"] = waveSlide.snapshot == nil && listSurface.transform == .identity
     }
     // Reverse before completion, including a second scrolled starting point.
     selectWave(waves[1]); try? await Task.sleep(nanoseconds:35_000_000)
@@ -467,7 +458,7 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     let surface = listSurface.layer.presentation()?.frame ?? listSurface.frame
     checks["rapidSwitchHasNoVerticalMotion"] = abs(surface.minY)<0.5 && abs(list.contentOffset.y+list.adjustedContentInset.top)<1
     try? await Task.sleep(nanoseconds:200_000_000)
-    checks["rapidSwitchReleasesSnapshot"] = waveSnapshot == nil && wave == waves[0]
+    checks["rapidSwitchReleasesSnapshot"] = waveSlide.snapshot == nil && wave == waves[0]
     return checks
   }
   func runLiveUIProbe(_ completion: @escaping ([String:Bool]) -> Void) {
@@ -479,7 +470,7 @@ final class NeoOnAirPage: NeoPage, UICollectionViewDataSource, UICollectionViewD
     checks["firstWaveRightSwipeUsesDrawer"] = shell?.smokeSwipeWave(horizontal:100) == false
     if waves.count > 1 {
       checks["leftSwipeChangesWave"] = shell?.smokeSwipeWave(horizontal:-100) == true && wave == waves[1]
-      checks["waveSlideAnimated"] = UIAccessibility.isReduceMotionEnabled || (waveSnapshot != nil && !(listSurface.layer.animationKeys()?.isEmpty ?? true))
+      checks["waveSlideAnimated"] = UIAccessibility.isReduceMotionEnabled || (waveSlide.snapshot != nil && !(listSurface.layer.animationKeys()?.isEmpty ?? true))
       list.setContentOffset(CGPoint(x:0,y:200),animated:false); filter(); list.layoutIfNeeded()
       checks["refreshPreservesScroll"] = list.contentOffset.y > 150
       checks["rightSwipeChangesWave"] = shell?.smokeSwipeWave(horizontal:100) == true && wave == waves[0]

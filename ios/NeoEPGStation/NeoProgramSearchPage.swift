@@ -39,7 +39,7 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
   private var refreshPreferences = false, refreshOnReturn = false
   private var submitted: NeoProgramSearchOption?
   private var programs: [NeoScheduledProgram] = [], reservations: [Int: NeoProgramReserveStatus] = [:]
-  private var lastOpened: Int?, shouldScrollToResults = false
+  private var shouldScrollToResults = false
   private var viewerNames: [Int: String]?
   private weak var detail: NeoProgramDetailDialog?
   private var isTimeRule: Bool { loadedRule?.isTimeSpecification == true }
@@ -167,7 +167,7 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
       timeRuleSummary?.removeFromSuperview(); timeRuleSummary = nil; actions = []
       formView?.dismissDropdown()
       formView?.removeFromSuperview(); formView = nil
-      submitted = nil; programs = []; reservations = [:]; lastOpened = nil
+      submitted = nil; programs = []; reservations = [:]
       if hadContext { form = .init(); autoSearch = false; shouldScrollToResults = false }
       stage = .loadingSetup; render()
     } else if context != current {
@@ -269,7 +269,7 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
     autoSearch = false; focusOnArrival = resetFocus
     form = .init(); form.channelTypes = availableTypes
     formView?.update(form)
-    submitted = nil; programs = []; reservations = [:]; lastOpened = nil; shouldScrollToResults = false
+    submitted = nil; programs = []; reservations = [:]; shouldScrollToResults = false
     refreshPreferences = false; refreshOnReturn = false
     if ready { stage = .form }
     view.endEditing(true); render()
@@ -299,7 +299,7 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
   private func run(_ option: NeoProgramSearchOption, scroll: Bool) {
     guard let api = shell?.api, let context, api.accountReady else { return }
     cancelWork(); submitted = option; shouldScrollToResults = scroll
-    programs = []; reservations = [:]; lastOpened = nil
+    programs = []; reservations = [:]
     stage = .searching; render()
     let generation = queryGeneration, headers = api.profileHeaders
     task = Task { [weak self] in
@@ -634,18 +634,13 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
     let cell = tableView.dequeueReusableCell(withIdentifier: "program", for: indexPath) as! NeoProgramSearchCell
     let program = programs[indexPath.row]
     cell.fill(program, channel: channelsByID[program.channelId]?.name ?? String(program.channelId),
-      status: reservations[program.id], selected: lastOpened == program.id, inset: insets)
+      status: reservations[program.id], inset: insets)
     return cell
   }
   func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
     tableView.deselectRow(at: indexPath, animated: false)
     guard programs.indices.contains(indexPath.row), let api = shell?.api, api.accountReady, presentedViewController == nil else { return }
-    let program = programs[indexPath.row], status = reservations[program.id], prior = lastOpened
-    lastOpened = program.id
-    if prior != lastOpened {
-      let paths = tableView.indexPathsForVisibleRows?.filter { programs[$0.row].id == prior || $0 == indexPath } ?? [indexPath]
-      tableView.reloadRows(at: paths, with: .none)
-    }
+    let program = programs[indexPath.row], status = reservations[program.id]
     let channel = channelsByID[program.channelId], owner = Context(api)
     let bookingUserName = Int(api.viewer).flatMap { viewerID -> String? in
       guard viewerID > 0 else { return nil }
@@ -686,7 +681,7 @@ final class NeoProgramSearchPage: NeoPage, UITableViewDataSource, UITableViewDel
       var actionTitle: String?
       var handleAction: (() -> Void)?
       if entry.kind != .conflict {
-        actionTitle = action != .cancel ? "解除" : rule == nil ? "削除" : "除外"
+        actionTitle = action.buttonTitle(ruleBased: rule != nil)
         handleAction = { [weak self, weak dialog] in
           guard let self, let dialog else { return }
           performReservation(in: dialog, owner: session, success: action.success(), failure: "予約の変更に失敗しました") { read in
@@ -818,7 +813,7 @@ private final class NeoProgramSearchCell: UITableViewCell {
   }
   required init?(coder: NSCoder) { fatalError() }
 
-  func fill(_ program: NeoScheduledProgram, channel station: String, status: NeoProgramReserveStatus?, selected: Bool, inset: CGFloat) {
+  func fill(_ program: NeoScheduledProgram, channel station: String, status: NeoProgramReserveStatus?, inset: CGFloat) {
     start.constant = inset; end.constant = -inset
     name.text = program.name; channel.text = station
     let start = Self.date.string(from: Date(timeIntervalSince1970: program.startAt / 1000))
@@ -829,7 +824,7 @@ private final class NeoProgramSearchCell: UITableViewCell {
     chipWidth.constant = status == nil ? 0 : ceil(chip.intrinsicContentSize.width) + 16
     let conflict = status?.primary == .conflict, scheduled = status?.primary == .normal || conflict
     chipWrap.backgroundColor = conflict ? Self.errorColor : NeoStyle.accent
-    outline.strokeColor = (scheduled ? Self.errorColor : (status != nil || selected ? NeoStyle.accent : NeoStyle.border)).cgColor
+    outline.strokeColor = (scheduled ? Self.errorColor : (status != nil ? NeoStyle.accent : NeoStyle.border)).cgColor
     outline.lineWidth = scheduled ? 4 : 1
     dashed = conflict; setNeedsLayout()
     accessibilityLabel = [name.text, chip.text, channel.text, time.text, summary.text].compactMap { $0 }.joined(separator: "、")

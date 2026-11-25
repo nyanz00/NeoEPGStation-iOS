@@ -67,6 +67,15 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     exercisesReservations = true
   }
 
+  static func addReservationCopyFixtures() {
+    lock.lock(); defer { lock.unlock() }
+    for (id, name, skipped) in [(7100, "Rule booking", false), (7101, "Excluded booking", true)] {
+      var item = program(9001, related: false)
+      item["id"] = id; item["name"] = name; item["userId"] = 7; item["ruleId"] = 41; item["isSkip"] = skipped
+      manualReservations[id] = item
+    }
+  }
+
   static func setWarningCounts(conflicts: Int, overlaps: Int) {
     lock.lock(); defer { lock.unlock() }
     warningCounts = (conflicts, overlaps)
@@ -197,7 +206,10 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
         ] as [String: Any]
       } else if exercisesReservations {
         let type = query.first(where: { $0.name == "type" })?.value
-        let values = type == "normal" ? manualReservations.keys.sorted().compactMap { manualReservations[$0] } : []
+        let values = manualReservations.keys.sorted().compactMap { manualReservations[$0] }.filter { item in
+          let skipped = item["isSkip"] as? Bool == true
+          return type == (skipped ? "skip" : "normal")
+        }
         let offset = query.first(where: { $0.name == "offset" })?.value.flatMap(Int.init) ?? 0
         let limit = query.first(where: { $0.name == "limit" })?.value.flatMap(Int.init) ?? 24
         value = ["reserves": Array(values.dropFirst(offset).prefix(limit)), "total": values.count] as [String: Any]
@@ -1587,6 +1599,11 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     }
 
     let row = IndexPath(row: 0, section: 0)
+    func resultOutline() -> CAShapeLayer? {
+      results.cellForRow(at: row)?.contentView.subviews.lazy.compactMap { view in
+        view.layer.sublayers?.compactMap { $0 as? CAShapeLayer }.first
+      }.first
+    }
     results.scrollToRow(at: row, at: .top, animated: false)
     search.tableView(results, didSelectRowAt: row)
     guard await wait({
@@ -1597,6 +1614,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       let preset = mode.dropdownRows.first(where: { $0.title == "Fixture AVC" }) else {
       return ["quickReservationShowsServerPresets": false]
     }
+    checks["openingSearchCardKeepsNormalBorder"] = resultOutline()?.strokeColor == NeoStyle.border.cgColor
     preset.action?()
     tap(quick.view, "program-detail-booking-delete")
     tap(quick.view, "program-detail-booking-thumbnail")
@@ -1613,6 +1631,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       && booking?["userId"] as? Int == 7 && encode?["mode1"] as? String == "Fixture AVC"
       && encode?["isDeleteOriginalAfterEncode"] as? Bool == true && encode?["updateThumbnail"] as? Bool == true
       && api.quickReservationSettings.mode == "Fixture AVC"
+    checks["bookedSearchCardRetainsStatusBorder"] = resultOutline()?.lineWidth == 4
 
     shell.showRoute("reserves")
     guard await wait({
@@ -1672,6 +1691,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
       _ = await wait { search.smokeReservationKind(9002) == nil }
     }
     if returned, results.numberOfRows(inSection: 0) == 1 { search.tableView(results, didSelectRowAt: row) }
+    let searchOffset = results.contentOffset.y
     let newReady = await wait { search.presentedViewController is NeoProgramDetailDialog && search.presentedViewController?.isBeingPresented == false }
     if newReady, let dialog = search.presentedViewController { tap(dialog.view, "program-detail-details") }
     let newEditor = await wait {
@@ -1699,6 +1719,10 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     let detailed = NeoProgramSearchSmokeProtocol.requestBodies("POST /api/reserves").last
     checks["searchOpensDetailedReservationAndAdds"] = newEditor && added && detailed?["programId"] as? Int == 9002
       && detailed?["encodeOption"] == nil
+    checks["manualReservationReturnKeepsSearchPosition"] = await wait {
+      navigation.topViewController === search && navigation.transitionCoordinator == nil
+        && results.numberOfRows(inSection: 0) == 1 && abs(results.contentOffset.y - searchOffset) < 2
+    }
 
     NeoProgramSearchSmokeProtocol.setWarningCounts(conflicts: 2, overlaps: 3)
     shell.showRoute("reserves")
@@ -1728,6 +1752,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
 
     let left = shell.smokeReservationSwipe(in: table, velocity: CGPoint(x: -500, y: 0), translation: -80)
     let movedToSkip = left.tab && reserves.kind == .skip
+    checks["reservationTabUsesListSlide"] = left.tab && (UIAccessibility.isReduceMotionEnabled || reserves.smokeListSlideActive)
     let noWrap = shell.smokeReservationSwipe(in: table, velocity: CGPoint(x: -500, y: 0), translation: -80)
     let stayedOnSkip = !noWrap.tab && reserves.kind == .skip
     let right = shell.smokeReservationSwipe(in: table, velocity: CGPoint(x: 500, y: 0), translation: 80)
@@ -1735,6 +1760,7 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     let rightAgain = shell.smokeReservationSwipe(in: table, velocity: CGPoint(x: 500, y: 0), translation: 80)
     checks["reservationTabSwipeMovesOneTabAndDoesNotWrap"] = movedToSkip && stayedOnSkip
       && movedToOverlap && rightAgain.tab && reserves.kind == .conflict
+    checks["reservationListSlideSettlesAfterRapidSwipes"] = await wait { reserves.smokeListSlideSettled }
 
     _ = shell.smokeReservationMenu(true)
     checks["reservationSidebarHighlightsSwipedTab"] = await wait {
@@ -1747,6 +1773,64 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     checks["reservationSidebarHidesZeroCountOnly"] = await wait {
       menuRow("reserves-conflict") == nil && menuRow("reserves-overlap")?.accessibilityValue == "3件"
     }
+
+    _ = shell.smokeReservationMenu(false)
+    NeoProgramSearchSmokeProtocol.addReservationCopyFixtures()
+    reserves.switchKind(.normal)
+    let centerSwipe = shell.smokeReservationSwipe(in: table, velocity: CGPoint(x: 500, y: 0), translation: 80)
+    checks["firstReservationTabHandsCenterSwipeToMenu"] = centerSwipe.menu && !centerSwipe.tab && reserves.kind == .normal
+
+    let exclusionNote = "ルールから作成された予約は、ルール自体を残したまま除外扱いになります。"
+    func promptMatches(_ prompt: UIViewController, buttonTitle: String, contains: [String]) -> Bool {
+      let title = (find(prompt.view, "reserves.confirm") as? UIButton)?.title(for: .normal)
+      let texts = labels(in: prompt.view).compactMap(\.text)
+      return title == buttonTitle && contains.allSatisfy { texts.contains($0) }
+    }
+    func checkSingle(at path: IndexPath, buttonTitle: String, contains: [String]) async -> Bool {
+      reserves.tableView(table, didSelectRowAt: path)
+      guard await wait({ reserves.presentedViewController is NeoProgramDetailDialog && reserves.presentedViewController?.isBeingPresented == false }),
+        let detail = reserves.presentedViewController,
+        let button = find(detail.view, "program-detail-reserve") as? UIButton else { return false }
+      let quickTitleMatches = button.title(for: .normal) == buttonTitle
+      button.sendActions(for: .touchUpInside)
+      let ready = await wait { detail.presentedViewController?.isBeingPresented == false && detail.presentedViewController != nil }
+      var matches = false
+      if ready, let prompt = detail.presentedViewController {
+        matches = promptMatches(prompt, buttonTitle: buttonTitle, contains: contains)
+        tap(prompt.view, "reserves.cancel")
+        _ = await wait { detail.presentedViewController == nil }
+      }
+      tap(detail.view, "program-detail-footer-close")
+      let closed = await wait { reserves.presentedViewController == nil }
+      return quickTitleMatches && matches && closed
+    }
+    func checkBulk(select path: IndexPath? = nil, buttonTitle: String, contains: [String]) async -> Bool {
+      tap(reserves.view, "reserves.edit")
+      if let path { reserves.tableView(table, didSelectRowAt: path) }
+      else { tap(reserves.view, "reserves.selectAll") }
+      tap(reserves.view, "reserves.bulkAction")
+      let ready = await wait { reserves.presentedViewController?.isBeingPresented == false && reserves.presentedViewController != nil }
+      var matches = false
+      if ready, let prompt = reserves.presentedViewController {
+        matches = promptMatches(prompt, buttonTitle: buttonTitle, contains: contains)
+        tap(prompt.view, "reserves.cancel")
+        _ = await wait { reserves.presentedViewController == nil }
+      }
+      tap(reserves.view, "reserves.edit")
+      return matches
+    }
+    if await wait({ table.numberOfRows(inSection: 0) == 2 && reserves.smokeListSlideSettled }) {
+      let ruleRow = IndexPath(row: 1, section: 0)
+      checks["ruleReservationUsesExclusionCopyInBothDialogs"] = await checkSingle(at: ruleRow, buttonTitle: "除外", contains: [exclusionNote])
+      checks["bulkRuleReservationUsesExclusionCopy"] = await checkBulk(select: ruleRow, buttonTitle: "除外", contains: ["1件の予約を除外します。", exclusionNote])
+      checks["mixedReservationsExplainDeletionAndExclusion"] = await checkBulk(buttonTitle: "予約をキャンセル",
+        contains: ["2件の予約をキャンセルします。", "手動予約は削除されます。" + exclusionNote])
+    } else { checks["reservationCopyFixturesLoaded"] = false }
+    reserves.switchKind(.skip)
+    if await wait({ table.numberOfRows(inSection: 0) == 1 && reserves.smokeListSlideSettled }) {
+      checks["excludedReservationUsesRestoreCopyInBothDialogs"] = await checkSingle(at: row, buttonTitle: "解除", contains: ["除外から予約に戻しますか？"])
+      checks["bulkExcludedReservationsUseRestoreCopy"] = await checkBulk(buttonTitle: "解除", contains: ["1件を除外から予約に戻します。"])
+    } else { checks["excludedCopyFixtureLoaded"] = false }
     return checks
   }
 }

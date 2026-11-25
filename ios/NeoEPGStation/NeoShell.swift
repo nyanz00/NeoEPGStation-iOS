@@ -526,8 +526,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private var swipeAction: NeoSwipeAction?
   private weak var pageSwipe: NeoRecordedPage?
   private var popupHiddenForNavigation = false
-  private var waveSwipe: Int?
-  private var reservationSwipe: (page: NeoReservationsPage, target: NeoProgramReserveKind, sign: CGFloat)?
+  private var tabSwipe: (sign: CGFloat, complete: () -> Void)?
   private weak var swipeScroll: UIScrollView?
   private var scrollWasEnabled = false
   private var popInteraction: UIPercentDrivenInteractiveTransition?
@@ -687,7 +686,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       searchReturnRoute = nil
       pageSwipe?.cancelPageHistoryInteraction(); recordedHistoryPage?.cancelPageHistoryInteraction(); pageSwipe = nil
       if scrollWasEnabled { swipeScroll?.isScrollEnabled = true }
-      swipeScroll = nil; swipeAction = nil; reservationSwipe = nil
+      swipeScroll = nil; swipeAction = nil; tabSwipe = nil
     }
     dismissPopup()
     if id != route { historyReturnSnapshot = nil; historyReturnRevision = nil }
@@ -835,12 +834,12 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     if let edgeX { swipeStart.x = edgeX }
     swipeScroll = scroll
     let begins = beginNavigationSwipe(contentPan, velocity: velocity)
-    let tab = begins && reservationSwipe != nil, menu = begins && swipeAction == .menu
+    let tab = begins && tabSwipe != nil, menu = begins && swipeAction == .menu
     if tab {
       updateContentSwipe(state: .began, translation: 0, velocity: velocity.x)
       updateContentSwipe(state: cancelled ? .cancelled : .ended, translation: translation, velocity: velocity.x)
     }
-    swipeScroll = nil; swipeAction = nil; reservationSwipe = nil
+    swipeScroll = nil; swipeAction = nil; tabSwipe = nil
     return (tab, menu)
   }
 #endif
@@ -1114,13 +1113,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
         if !page.beginHistorySwipe(direction) { pageSwipe = nil; swipeAction = nil }
       }
     }
-    if let direction = waveSwipe {
-      if state == .ended { finishWaveSwipe(direction,translation:translation,velocity:velocity) }
-    } else if let swipe = reservationSwipe {
-      if state == .ended, active?.topViewController === swipe.page,
-        translation * swipe.sign >= 44 || velocity * swipe.sign >= 350 {
-        swipe.page.switchKind(swipe.target)
-      }
+    if tabSwipe != nil {
+      if state == .ended { finishTabSwipe(translation: translation, velocity: velocity) }
     } else if let page = pageSwipe {
       if state == .changed || state == .began { page.updateHistorySwipe(translation:translation) }
       else if [.ended,.cancelled,.failed].contains(state) {
@@ -1132,24 +1126,29 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     else if swipeAction == .back { updateBack(state:state,translation:translation,velocity:velocity) }
     if [.ended, .cancelled, .failed].contains(state) {
       if scrollWasEnabled { swipeScroll?.isScrollEnabled = true }
-      swipeScroll = nil; swipeAction = nil; waveSwipe = nil; reservationSwipe = nil
+      swipeScroll = nil; swipeAction = nil; tabSwipe = nil
       pageSwipe = nil
       if popupHiddenForNavigation { dismissPopup(); popupHiddenForNavigation = false }
     }
   }
   private func beginWaveSwipe(horizontal: CGFloat) -> Bool {
-    waveSwipe = nil
     guard let page = active?.topViewController as? NeoOnAirPage, let direction = page.waveSwipeDirection(horizontal:horizontal) else { return false }
-    waveSwipe = direction; swipeAction = nil; return true
+    tabSwipe = (-CGFloat(direction), { [weak self, weak page] in
+      guard let page, self?.active?.topViewController === page else { return }
+      page.swipeWave(direction)
+    })
+    swipeAction = nil
+    return true
   }
-  private func finishWaveSwipe(_ direction: Int, translation: CGFloat, velocity: CGFloat) {
-    if translation*CGFloat(-direction) >= 44 || velocity*CGFloat(-direction) >= 350 { (active?.topViewController as? NeoOnAirPage)?.swipeWave(direction) }
+  private func finishTabSwipe(translation: CGFloat, velocity: CGFloat) {
+    guard let swipe = tabSwipe, translation * swipe.sign >= 44 || velocity * swipe.sign >= 350 else { return }
+    swipe.complete()
   }
 #if targetEnvironment(simulator)
   func smokeSwipeWave(horizontal: CGFloat, complete: Bool = true) -> Bool {
     let owns = beginWaveSwipe(horizontal:horizontal)
-    if owns, complete, let direction = waveSwipe { finishWaveSwipe(direction,translation:horizontal,velocity:horizontal*5) }
-    waveSwipe = nil; return owns
+    if owns, complete { finishTabSwipe(translation: horizontal, velocity: horizontal * 5) }
+    tabSwipe = nil; return owns
   }
 #endif
   private func dragBack(_ recognizer: UIPanGestureRecognizer) {
@@ -1329,12 +1328,15 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       popInteraction == nil, pendingBack == nil, !routeBackRunning else { return false }
     guard recordedHistoryPage?.pageHistoryNavigationBusy != true else { return false }
     pageSwipe = nil
-    reservationSwipe = nil
+    tabSwipe = nil
     if popup == nil, active?.transitionCoordinator == nil, recognizer === contentPan {
       if let page = active?.topViewController as? NeoReservationsPage, page.ownsTabSwipe(in: swipeScroll),
-        swipeStart.x > view.safeAreaInsets.left + 24, swipeStart.x < view.bounds.width - view.safeAreaInsets.right - 24 {
-        guard abs(velocity.x) > abs(velocity.y) * 1.25, let target = page.adjacentTab(horizontal: velocity.x) else { return false }
-        reservationSwipe = (page, target, velocity.x < 0 ? -1 : 1)
+        swipeStart.x > view.safeAreaInsets.left + 24, swipeStart.x < view.bounds.width - view.safeAreaInsets.right - 24,
+        let target = page.adjacentTab(horizontal: velocity.x) {
+        tabSwipe = (velocity.x < 0 ? -1 : 1, { [weak self, weak page] in
+          guard let page, self?.active?.topViewController === page else { return }
+          page.switchKind(target)
+        })
         swipeAction = nil
         return true
       }

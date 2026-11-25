@@ -2,6 +2,7 @@ import UIKit
 
 final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDelegate {
   private let scope = UIScrollView(), tabs = UIStackView()
+  private let listViewport = UIView(), listSurface = UIView(), listSlide = NeoListSlide()
   private let table = UITableView(frame: .zero, style: .plain)
   private let refreshControl = UIRefreshControl(), footer = NeoPaginationFooter()
   private let spinner = UIActivityIndicatorView(style: .medium)
@@ -45,7 +46,7 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    let stack = UIStackView(arrangedSubviews: [scope, selectionBar, errorBar, table])
+    let stack = UIStackView(arrangedSubviews: [scope, selectionBar, errorBar, listViewport])
     stack.axis = .vertical; stack.translatesAutoresizingMaskIntoConstraints = false
     body.addSubview(stack)
     NSLayoutConstraint.activate([
@@ -117,17 +118,20 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
     table.contentInset.top = 12
     table.refreshControl = refreshControl
     refreshControl.addAction(UIAction { [weak self] _ in self?.load() }, for: .valueChanged)
-    body.addSubview(empty); body.addSubview(spinner)
+    listViewport.clipsToBounds = true
+    listViewport.addSubview(listSurface)
+    [table, empty, spinner].forEach(listSurface.addSubview)
     empty.textAlignment = .center; empty.numberOfLines = 0
-    let center = UILayoutGuide()
-    body.addLayoutGuide(center)
+    listSurface.translatesAutoresizingMaskIntoConstraints = false; table.translatesAutoresizingMaskIntoConstraints = false
     empty.translatesAutoresizingMaskIntoConstraints = false; spinner.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
-      center.topAnchor.constraint(equalTo: table.topAnchor), center.bottomAnchor.constraint(equalTo: table.bottomAnchor),
-      center.leadingAnchor.constraint(equalTo: table.leadingAnchor), center.trailingAnchor.constraint(equalTo: table.trailingAnchor),
-      empty.centerXAnchor.constraint(equalTo: center.centerXAnchor), empty.centerYAnchor.constraint(equalTo: center.centerYAnchor),
-      empty.widthAnchor.constraint(lessThanOrEqualTo: center.widthAnchor, constant: -32),
-      spinner.centerXAnchor.constraint(equalTo: center.centerXAnchor), spinner.topAnchor.constraint(equalTo: center.topAnchor, constant: 70),
+      listSurface.topAnchor.constraint(equalTo: listViewport.topAnchor), listSurface.bottomAnchor.constraint(equalTo: listViewport.bottomAnchor),
+      listSurface.leadingAnchor.constraint(equalTo: listViewport.leadingAnchor), listSurface.trailingAnchor.constraint(equalTo: listViewport.trailingAnchor),
+      table.topAnchor.constraint(equalTo: listSurface.topAnchor), table.bottomAnchor.constraint(equalTo: listSurface.bottomAnchor),
+      table.leadingAnchor.constraint(equalTo: listSurface.leadingAnchor), table.trailingAnchor.constraint(equalTo: listSurface.trailingAnchor),
+      empty.centerXAnchor.constraint(equalTo: listSurface.centerXAnchor), empty.centerYAnchor.constraint(equalTo: listSurface.centerYAnchor),
+      empty.widthAnchor.constraint(lessThanOrEqualTo: listSurface.widthAnchor, constant: -32),
+      spinner.centerXAnchor.constraint(equalTo: listSurface.centerXAnchor), spinner.topAnchor.constraint(equalTo: listSurface.topAnchor, constant: 70),
     ])
     for name in [Notification.Name.neoAccountChanged, .neoTextPreferencesChanged, .neoReservationsChanged,
       .neoReservationPreferencesChanged, .neoRecordingPreferencesChanged] {
@@ -145,6 +149,7 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
 
   override func viewWillDisappear(_ animated: Bool) {
     super.viewWillDisappear(animated)
+    listSlide.cancel(surface: listSurface)
     shown = false; suspendRead()
   }
 
@@ -206,11 +211,22 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
 
   func switchKind(_ value: NeoProgramReserveKind) {
     guard kind != value, mutation == nil else { return }
-    kind = value; resetRows()
-    shell?.reservationTabDidChange(self)
-    if isViewLoaded { load() }
+    let direction: CGFloat = value.rawValue > kind.rawValue ? 1 : -1
+    let update = {
+      self.kind = value; self.resetRows()
+      self.shell?.reservationTabDidChange(self)
+      if self.isViewLoaded { self.load(); self.view.layoutIfNeeded(); self.table.layoutIfNeeded() }
+    }
+    if shown, listViewport.window != nil, listViewport.bounds.width > 0 {
+      listSlide.move(in: listViewport, surface: listSurface, direction: direction, update: update)
+    } else { update() }
     if let button = tabButtons[value] { scope.scrollRectToVisible(button.frame, animated: true) }
   }
+
+#if targetEnvironment(simulator)
+  var smokeListSlideActive: Bool { listSlide.snapshot != nil && !(listSurface.layer.animationKeys()?.isEmpty ?? true) }
+  var smokeListSlideSettled: Bool { listSlide.snapshot == nil && listSurface.transform == .identity }
+#endif
 
   func ownsTabSwipe(in scrollView: UIScrollView?) -> Bool { scrollView === table }
 
@@ -349,7 +365,8 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
     selectAll.isEnabled = mutation == nil && !items.isEmpty
     let action = NeoReservationAction(kind: kind)
     bulkAction.setImage(NeoIcon.image(action == .cancel ? "DeleteOutlineOutlined" : "LockOpenOutlined"), for: .normal)
-    bulkAction.accessibilityLabel = "選択した" + action.label
+    bulkAction.accessibilityLabel = selected.isEmpty ? "選択した予約の操作"
+      : bulkConfirmation(items.filter { selected.contains($0.id) }, action: action).button
     bulkAction.tintColor = action == .cancel ? NeoStyle.error : NeoStyle.accent
     bulkAction.isEnabled = !selected.isEmpty && mutation == nil
     table.reloadData()
@@ -476,7 +493,7 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
     let action: (() -> Void)? = item.isConflict == true ? nil : { [weak self, weak dialog] in
       self?.confirm([item], bulk: false, from: dialog)
     }
-    let label = item.action != .cancel ? item.action.label : item.ruleId == nil ? "予約を削除" : "予約を除外"
+    let label = item.action.buttonTitle(ruleBased: item.ruleId != nil)
     dialog.configureExistingReservation(detailsTitle: item.ruleId == nil ? "詳細" : "編集",
       showsSearch: item.ruleId != nil, onDetails: { [weak self] in self?.openEditor(item) },
       actionTitle: action == nil ? nil : label, onAction: action)
@@ -488,18 +505,17 @@ final class NeoReservationsPage: NeoPage, UITableViewDataSource, UITableViewDele
     let presenter = (detail as UIViewController?) ?? self
     guard presenter.presentedViewController == nil else { return }
     let action = bulk ? NeoReservationAction(kind: kind) : targets[0].action
-    let heading = detail != nil && action == .cancel
-      ? (targets[0].ruleId == nil ? "予約を削除しますか？" : "予約を除外しますか？") : action.confirmation
-    let text = bulk ? "\(targets.count)件の\(action.label)を実行します。" : targets[0].name
-    let footer = action == .cancel
-      ? (bulk ? "手動予約は削除され、ルールから作成された予約は除外扱いになります。"
-        : targets[0].ruleId == nil ? "この予約をキャンセルします。" : "ルールから作成された予約は除外扱いになります。") : nil
-    let prompt = NeoReservationConfirmation(heading, text: text, note: footer, action: action)
+    let copy = bulk ? bulkConfirmation(targets, action: action) : .single(targets[0])
+    let prompt = NeoReservationConfirmation(copy, action: action)
     prompt.onConfirm = { [weak self, weak prompt, weak detail] in
       guard let self, let prompt, account.isCurrent(shell?.api), mutation == nil else { return }
       mutate(targets, session: account, prompt: prompt, detail: detail, bulk: bulk)
     }
     presenter.present(prompt, animated: !UIAccessibility.isReduceMotionEnabled)
+  }
+
+  private func bulkConfirmation(_ targets: [NeoReservationItem], action: NeoReservationAction) -> NeoReservationConfirmationCopy {
+    .bulk(action: action, count: targets.count, ruleCount: targets.filter { $0.ruleId != nil }.count)
   }
 
   private func mutate(_ targets: [NeoReservationItem], session: NeoReservationSession,
@@ -569,12 +585,13 @@ private final class NeoReservationConfirmation: NeoLiveDialog {
   private var cancelAction: UIButton?
   private var busy = false
 
-  init(_ heading: String, text: String, note: String?, action: NeoReservationAction) {
-    super.init(title: heading)
-    addText(text)
-    if let note { addText(note) }
+  init(_ copy: NeoReservationConfirmationCopy, action: NeoReservationAction) {
+    super.init(title: copy.heading)
+    addText(copy.text)
+    if let note = copy.note { addText(note) }
     cancelAction = addAction("キャンセル") { [weak self] in self?.cancel() }
-    submit = addAction(action.label, filled: true) { [weak self] in self?.onConfirm?() }
+    cancelAction?.accessibilityIdentifier = "reserves.cancel"
+    submit = addAction(copy.button, filled: true) { [weak self] in self?.onConfirm?() }
     submit?.accessibilityIdentifier = "reserves.confirm"
     if action == .cancel {
       submit?.backgroundColor = NeoStyle.error
