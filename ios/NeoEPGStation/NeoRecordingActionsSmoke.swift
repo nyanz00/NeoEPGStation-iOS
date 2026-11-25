@@ -591,6 +591,18 @@ private final class NeoActiveRecordingsProtocol: URLProtocol {
     func card(_ id: Int) -> UITableViewCell? {
       table()?.visibleCells.first { $0.accessibilityIdentifier == "recording.card.\(id)" }
     }
+    func paginationButton(_ label: String) -> UIButton? {
+      guard let table = table(), let footer = table.tableFooterView else { return nil }
+      table.layoutIfNeeded(); footer.layoutIfNeeded()
+      return views(in: footer).compactMap { $0 as? UIButton }.first {
+        $0.accessibilityLabel == label && $0.isEnabled
+      }
+    }
+    func firstRowIs(_ id: Int) -> Bool {
+      guard let table = table(), table.numberOfRows(inSection: 0) > 0 else { return false }
+      table.layoutIfNeeded()
+      return table.cellForRow(at: IndexPath(row: 0, section: 0))?.accessibilityIdentifier == "recording.card.\(id)"
+    }
     func confirm(_ title: String) async -> UIButton? {
       func matchingButton() -> UIButton? {
         views(in: rootView()).compactMap { $0 as? UIButton }.first {
@@ -644,14 +656,13 @@ private final class NeoActiveRecordingsProtocol: URLProtocol {
     }
     checks["dropStatusPollsAndUpdatesVisibleCard"] = dropRendered
 
-    if let next = views(in: rootView()).compactMap({ $0 as? UIButton }).first(where: { $0.accessibilityLabel == "次のページ" }) {
-      next.sendActions(for: .touchUpInside)
-    }
-    checks["recordingPaginationLoadsSecondPage"] = await waitFor { card(7203) != nil && card(7201) == nil }
-    if let previous = views(in: rootView()).compactMap({ $0 as? UIButton }).first(where: { $0.accessibilityLabel == "前のページ" }) {
-      previous.sendActions(for: .touchUpInside)
-    }
-    _ = await waitFor { card(7201) != nil }
+    let nextReady = await waitFor { paginationButton("次のページ") != nil }
+    checks["recordingNextPageButtonIsEnabled"] = nextReady
+    if nextReady { paginationButton("次のページ")?.sendActions(for: .touchUpInside) }
+    checks["recordingPaginationLoadsSecondPage"] = await waitFor { firstRowIs(7203) }
+    _ = await waitFor { paginationButton("前のページ") != nil }
+    paginationButton("前のページ")?.sendActions(for: .touchUpInside)
+    checks["recordingPaginationReturnsToFirstPage"] = await waitFor { firstRowIs(7201) }
 
     if let menuButton = views(in: card(7201) ?? UIView()).compactMap({ $0 as? UIButton }).first(where: { $0.accessibilityIdentifier == "recording.card.menu" }) {
       menuButton.sendActions(for: .touchUpInside)
