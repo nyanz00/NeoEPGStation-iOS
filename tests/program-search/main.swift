@@ -275,8 +275,8 @@ struct ProgramSearchTests {
     expect((try? specified.body()) == nil, "identical start and end are rejected")
     expect(NeoReservationAction(kind: .skip).suffix == "/skip" && NeoReservationAction(kind: .overlap).suffix == "/overlap"
       && NeoReservationAction(kind: .conflict).suffix.isEmpty, "reservation kinds map to their write endpoints")
-    let reservationJSON = #"{"id":7,"channelId":1,"name":"Fixture","startAt":0,"endAt":1800000,"ruleId":42}"#
-    var copyFixture = try JSONDecoder().decode(NeoReservationItem.self, from: Data(reservationJSON.utf8))
+    let confirmationFixtureJSON = #"{"id":7,"channelId":1,"name":"Fixture","startAt":0,"endAt":1800000,"ruleId":42}"#
+    var copyFixture = try JSONDecoder().decode(NeoReservationItem.self, from: Data(confirmationFixtureJSON.utf8))
     let exclusion = NeoReservationConfirmationCopy.single(copyFixture)
     let exclusionNote = "ルールから作成された予約は、ルール自体を残したまま除外扱いになります。"
     expect(exclusion.button == "除外" && exclusion.text == "Fixture" && exclusion.note == exclusionNote, "single rule booking exclusion uses Web copy")
