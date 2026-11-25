@@ -287,9 +287,12 @@ struct ProgramSearchTests {
     expect(NeoReservationConfirmationCopy.single(copyFixture).button == "削除", "single manual booking confirms deletion")
 
     let bulkExclude = NeoReservationConfirmationCopy.bulk(action: .cancel, count: 2, ruleCount: 2)
+    let bulkManualDeletion = NeoReservationConfirmationCopy.bulk(action: .cancel, count: 2, ruleCount: 0)
     let bulkMixed = NeoReservationConfirmationCopy.bulk(action: .cancel, count: 3, ruleCount: 2)
     let bulkRestore = NeoReservationConfirmationCopy.bulk(action: .restoreSkip, count: 2, ruleCount: 2)
     expect(bulkExclude.button == "除外" && bulkExclude.text == "2件の予約を除外します。" && bulkExclude.note == exclusionNote, "all rule bookings are excluded with a count")
+    expect(bulkManualDeletion.button == "削除" && bulkManualDeletion.text == "2件の予約を削除します。"
+      && bulkManualDeletion.note == nil, "manual-only selection confirms deletion with a count")
     expect(bulkMixed.button == "予約をキャンセル" && bulkMixed.text == "3件の予約をキャンセルします。"
       && bulkMixed.note == "手動予約は削除されます。" + exclusionNote, "mixed cancellations explain both outcomes")
     expect(bulkRestore.button == "解除" && bulkRestore.text == "2件を除外から予約に戻します。", "bulk restore uses the requested label")

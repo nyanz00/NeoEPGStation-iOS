@@ -100,12 +100,14 @@ struct NeoReservationConfirmationCopy {
     case .restoreOverlap:
       return .init(heading: "重複状態を解除しますか？", text: "\(count)件の重複状態を解除します。", button: "重複状態を解除")
     case .cancel:
+      if ruleCount == 0 {
+        return .init(heading: "予約を削除しますか？", text: "\(count)件の予約を削除します。", button: "削除")
+      }
       if ruleCount == count {
         return .init(heading: "予約を除外しますか？", text: "\(count)件の予約を除外します。", button: "除外", note: exclusionNote)
       }
-      let deletion = "手動予約は削除されます。"
       return .init(heading: "予約をキャンセルしますか？", text: "\(count)件の予約をキャンセルします。",
-        button: "予約をキャンセル", note: ruleCount > 0 ? deletion + exclusionNote : deletion)
+        button: "予約をキャンセル", note: "手動予約は削除されます。" + exclusionNote)
     }
   }
 }

@@ -1677,7 +1677,13 @@ private final class NeoProgramSearchSmokeProtocol: URLProtocol {
     }
     tap(reserves.view, "reserves.edit"); tap(reserves.view, "reserves.selectAll"); tap(reserves.view, "reserves.bulkAction")
     let confirmed = await wait { reserves.presentedViewController?.isBeingPresented == false && reserves.presentedViewController != nil }
-    if confirmed, let prompt = reserves.presentedViewController { tap(prompt.view, "reserves.confirm") }
+    var deleteCopyMatches = false
+    if confirmed, let prompt = reserves.presentedViewController {
+      deleteCopyMatches = (find(prompt.view, "reserves.confirm") as? UIButton)?.title(for: .normal) == "削除"
+        && labels(in: prompt.view).contains { $0.text == "1件の予約を削除します。" }
+      tap(prompt.view, "reserves.confirm")
+    }
+    checks["bulkManualReservationsUseDeleteCopy"] = deleteCopyMatches
     let cancelled = await wait {
       NeoProgramSearchSmokeProtocol.count("DELETE /api/reserves/6101") == 1 && table.numberOfRows(inSection: 0) == 0
         && reserves.presentedViewController == nil
