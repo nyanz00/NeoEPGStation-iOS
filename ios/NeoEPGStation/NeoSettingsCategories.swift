@@ -404,6 +404,16 @@ final class NeoSettingsCategoryPage: NeoPage, UITableViewDataSource, UITableView
         guard let self, let value = Int(length?.text ?? ""), (1...1000).contains(value) else { self?.alert("表示件数は1〜1000で入力してください。"); return }
         self.view.endEditing(true); api.recordedLength = value; self.alert("設定を保存しました。")
       }
+      let activeLength = UITextField(); activeLength.text = String(api.activeRecordingLength); activeLength.keyboardType = .numberPad
+      activeLength.textColor = .white; activeLength.borderStyle = .roundedRect; activeLength.backgroundColor = NeoStyle.paper
+      activeLength.widthAnchor.constraint(equalToConstant: 100).isActive = true; activeLength.accessibilityLabel = "録画中表示件数"
+      row("録画中表示件数", explanation: "1ページの表示件数。初期値24件、1〜1000件。このアプリに保存します。", control: activeLength)
+      button("録画中表示件数を保存") { [weak self, weak activeLength] in
+        guard let self, let value = Int(activeLength?.text ?? ""), (1...1000).contains(value) else {
+          self?.alert("表示件数は1〜1000で入力してください。"); return
+        }
+        self.view.endEditing(true); api.activeRecordingLength = value; self.alert("設定を保存しました。")
+      }
       let rulesLength = UITextField(); rulesLength.text = String(api.rulesLength); rulesLength.keyboardType = .numberPad
       rulesLength.textColor = .white; rulesLength.borderStyle = .roundedRect; rulesLength.backgroundColor = NeoStyle.paper
       rulesLength.widthAnchor.constraint(equalToConstant: 100).isActive = true; rulesLength.accessibilityLabel = "ルール表示件数"

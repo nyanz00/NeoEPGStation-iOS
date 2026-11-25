@@ -170,18 +170,18 @@ extension NeoRecordingCommand {
 }
 
 extension NeoPage {
-  func showRecordingMenu(_ item: NeoRecording, anchor: UIView, detail: Bool) {
+  func showRecordingMenu(_ item: NeoRecording, anchor: UIView, detail: Bool, onStop: (() -> Void)? = nil) {
     guard let shell else { return }
     if shell.serverConfig == nil {
       Task { [weak shell] in await shell?.refreshServerConfig() }
     }
-    presentRecordingMenu(item, anchor: anchor, detail: detail)
+    presentRecordingMenu(item, anchor: anchor, detail: detail, onStop: onStop)
   }
-  private func presentRecordingMenu(_ item: NeoRecording, anchor: UIView, detail: Bool) {
+  private func presentRecordingMenu(_ item: NeoRecording, anchor: UIView, detail: Bool, onStop: (() -> Void)?) {
     guard let shell else { return }
     let commands = NeoRecordingMenu.commands(item: item, detail: detail, config: shell.serverConfig,
       hideThumbnailButton: shell.storage.hideRecordedThumbnailButton)
-    shell.showPopup(anchor: anchor, entries: commands.map { command in
+    var entries = commands.map { command in
       NeoMenuEntry(title: command.rawValue, icon: command.icon) { [weak self] in
         if command == .encode { self?.openEncode([item]); return }
         if command == .rule { self?.openProgramRule(for: item); return }
@@ -204,6 +204,10 @@ extension NeoPage {
         // server operation from a UI-only placeholder.
         self?.alert("\(command.rawValue) の操作は準備中です。")
       }
-    }, appearance: .actions)
+    }
+    if let onStop, item.isRecording, let index = commands.firstIndex(where: { $0 == .protect || $0 == .unprotect }) {
+      entries.insert(NeoMenuEntry(title: "stop", icon: "StopCircleOutlined", action: onStop), at: index)
+    }
+    shell.showPopup(anchor: anchor, entries: entries, appearance: .actions)
   }
 }

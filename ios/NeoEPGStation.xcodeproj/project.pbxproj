@@ -106,6 +106,8 @@
     BDEF00000000000000000003 /* NeoIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000003; };
     BDEF00000000000000000004 /* NeoShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000004; };
     BDEF00000000000000000005 /* NeoRecordedPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000005; };
+    BDEF000000000000000000F1 /* NeoActiveRecordingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF000000000000000000F1; };
+    BDEF000000000000000000F2 /* NeoActiveRecordingCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF000000000000000000F2; };
     BDEF00000000000000000006 /* NeoDetailPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000006; };
     BDEF00000000000000000007 /* NeoSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000007; };
     BDEF00000000000000000009 /* NeoMenus.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEF00000000000000000008; };
@@ -222,6 +224,8 @@
     ADEF00000000000000000003 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoIcon.swift; path = NeoEPGStation/NeoIcon.swift; sourceTree = "<group>"; };
     ADEF00000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoShell.swift; path = NeoEPGStation/NeoShell.swift; sourceTree = "<group>"; };
     ADEF00000000000000000005 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoRecordedPage.swift; path = NeoEPGStation/NeoRecordedPage.swift; sourceTree = "<group>"; };
+    ADEF000000000000000000F1 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoActiveRecordingsPage.swift; path = NeoEPGStation/NeoActiveRecordingsPage.swift; sourceTree = "<group>"; };
+    ADEF000000000000000000F2 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoActiveRecordingCard.swift; path = NeoEPGStation/NeoActiveRecordingCard.swift; sourceTree = "<group>"; };
     ADEF00000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoDetailPage.swift; path = NeoEPGStation/NeoDetailPage.swift; sourceTree = "<group>"; };
     ADEF00000000000000000007 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoSettingsPage.swift; path = NeoEPGStation/NeoSettingsPage.swift; sourceTree = "<group>"; };
     ADEF00000000000000000008 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NeoMenus.swift; path = NeoEPGStation/NeoMenus.swift; sourceTree = "<group>"; };
@@ -348,6 +352,8 @@
         ADEF00000000000000000011,
         ADEF00000000000000000006,
         ADEF00000000000000000005,
+        ADEF000000000000000000F1,
+        ADEF000000000000000000F2,
         ADEF00000000000000000004,
         ADEF00000000000000000003,
         ADEF00000000000000000002,
@@ -633,6 +639,8 @@
         BDEF00000000000000000009,
         BDEF00000000000000000006,
         BDEF00000000000000000005,
+        BDEF000000000000000000F1,
+        BDEF000000000000000000F2,
         BDEF00000000000000000004,
         BDEF00000000000000000003,
         BDEF00000000000000000002,

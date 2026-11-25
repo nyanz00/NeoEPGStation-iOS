@@ -417,4 +417,286 @@ private final class NeoRecordingActionsEventFlag {
     try! JSONDecoder().decode(NeoRecording.self, from: JSONSerialization.data(withJSONObject: value))
   }
 }
+
+private final class NeoActiveRecordingsProtocol: URLProtocol {
+  private struct Fixture { var value: [String: Any] }
+
+  private static let lock = NSLock()
+  private static var fixtures: [Int: Fixture] = [:]
+  private static var listIDs: [Int] = []
+  private static var dropValues: [Int: [String: Any]] = [:]
+  private static var removedIDs = Set<Int>()
+  private static var stoppedIDs = Set<Int>()
+  private static var deletedVideoIDs: [Int] = []
+  private static var counts: [String: Int] = [:]
+  private static var authPasses = 0
+  private static var authFailures = 0
+  private var cancelled = false
+  private let cancellationLock = NSLock()
+
+  override class func canInit(with request: URLRequest) -> Bool {
+    request.url?.host == "recording-active.invalid"
+  }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func stopLoading() {
+    cancellationLock.lock(); cancelled = true; cancellationLock.unlock()
+  }
+
+  override func startLoading() {
+    let (status, body) = Self.response(for: request)
+    let data = try! JSONSerialization.data(withJSONObject: body)
+    let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
+    DispatchQueue.global().async { [self] in
+      cancellationLock.lock(); let stopped = cancelled; cancellationLock.unlock()
+      guard !stopped else { return }
+      client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+      client?.urlProtocol(self, didLoad: data)
+      client?.urlProtocolDidFinishLoading(self)
+    }
+  }
+
+  static func reset(_ values: [[String: Any]], drops: [Int: [String: Any]]) {
+    lock.lock(); defer { lock.unlock() }
+    fixtures = Dictionary(uniqueKeysWithValues: values.compactMap { value in
+      guard let id = value["id"] as? Int else { return nil }
+      return (id, Fixture(value: value))
+    })
+    listIDs = fixtures.keys.sorted()
+    dropValues = drops; removedIDs = []; stoppedIDs = []; deletedVideoIDs = []; counts = [:]
+    authPasses = 0; authFailures = 0
+  }
+
+  static func count(_ method: String, _ path: String) -> Int {
+    lock.lock(); defer { lock.unlock() }
+    return counts[method + " " + path, default: 0]
+  }
+  static func stopped() -> Set<Int> {
+    lock.lock(); defer { lock.unlock() }; return stoppedIDs
+  }
+  static func deletedVideos() -> [Int] {
+    lock.lock(); defer { lock.unlock() }; return deletedVideoIDs
+  }
+  static func authSummary() -> (passes: Int, failures: Int) {
+    lock.lock(); defer { lock.unlock() }; return (authPasses, authFailures)
+  }
+
+  private static func response(for request: URLRequest) -> (Int, Any) {
+    let path = request.url!.path
+    let parts = path.split(separator: "/").map(String.init)
+    let method = request.httpMethod ?? "GET"
+    let key = method + " " + path
+    lock.lock(); defer { lock.unlock() }
+    counts[key, default: 0] += 1
+
+    guard path == "/api/recording" || path.hasPrefix("/api/recording/") || path.hasPrefix("/api/recorded/")
+      || path.hasPrefix("/api/videos/") else { return (404, ["message": "unexpected fixture request"]) }
+    let hasIdentity = request.value(forHTTPHeaderField: "X-EPGStation-User-Id") == "7"
+      && request.value(forHTTPHeaderField: "X-Viewer-Profile-Id") == "21"
+      && request.value(forHTTPHeaderField: "X-Viewer-Session") == "active-recording-session"
+    if hasIdentity { authPasses += 1 } else { authFailures += 1 }
+    guard hasIdentity else { return (401, ["message": "fixture authentication failed"]) }
+
+    if path == "/api/recording", method == "GET" {
+      let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+      let offset = Int(query.first(where: { $0.name == "offset" })?.value ?? "0") ?? 0
+      let limit = Int(query.first(where: { $0.name == "limit" })?.value ?? "24") ?? 24
+      let activeIDs = listIDs.filter { !removedIDs.contains($0) }
+      let page = activeIDs.dropFirst(max(0, offset)).prefix(max(0, limit))
+      return (200, ["records": page.compactMap { fixtures[$0]?.value }, "total": activeIDs.count])
+    }
+    if path == "/api/recording/dropStatus", method == "GET" {
+      let statuses = listIDs.filter { !removedIDs.contains($0) }.compactMap { id -> [String: Any]? in
+        guard let value = dropValues[id] else { return nil }
+        return ["recordedId": id, "dropLogFile": value]
+      }
+      return (200, statuses as [[String: Any]])
+    }
+    if parts.count == 4, parts[0] == "api", parts[1] == "recording", let id = Int(parts[2]), parts[3] == "stop", method == "POST" {
+      guard fixtures[id] != nil, !removedIDs.contains(id) else { return (404, ["message": "active recording not found"]) }
+      stoppedIDs.insert(id); removedIDs.insert(id)
+      return (200, ["code": 200])
+    }
+    if parts.count == 3, parts[0] == "api", parts[1] == "recorded", let id = Int(parts[2]), method == "GET" {
+      guard let fixture = fixtures[id] else { return (404, ["message": "recording fixture not found"]) }
+      return (200, fixture.value)
+    }
+    if parts.count == 3, parts[0] == "api", parts[1] == "videos", let fileID = Int(parts[2]), method == "DELETE" {
+      guard let id = fixtures.first(where: { _, fixture in
+        guard let files = fixture.value["videoFiles"] as? [[String: Any]] else { return false }
+        return files.contains { ($0["id"] as? Int) == fileID }
+      })?.key else { return (404, ["message": "video fixture not found"]) }
+      deletedVideoIDs.append(fileID)
+      if fixtures[id]?.value["isRecording"] as? Bool == true {
+        removedIDs.insert(id)
+      } else if var fixture = fixtures[id], let files = fixture.value["videoFiles"] as? [[String: Any]] {
+        fixture.value["videoFiles"] = files.filter { ($0["id"] as? Int) != fileID }
+        fixtures[id] = fixture
+      }
+      return (200, ["code": 200])
+    }
+    if parts.count == 3, parts[0] == "api", parts[1] == "recorded", let id = Int(parts[2]), method == "DELETE" {
+      guard fixtures[id] != nil else { return (404, ["message": "recording fixture not found"]) }
+      removedIDs.insert(id); return (200, ["code": 200])
+    }
+    return (404, ["message": "unexpected fixture request"])
+  }
+}
+
+@MainActor enum NeoActiveRecordingsSmoke {
+  static func run(shell: NeoShell) async -> [String: Bool] {
+    let savedAPI = shell.api
+    let savedRoute = shell.route
+    let savedConfig = shell.serverConfig
+    let base = URL(string: "https://recording-active.invalid")!
+    let values = [
+      record(7201, files: [(72011, "Live-1.ts")], thumbnail: 71),
+      record(7202, files: [(72021, "Live-2.ts")], thumbnail: 72),
+      record(7203, files: [(72031, "Live-3.ts")], thumbnail: 73),
+      record(7204, files: [(72041, "Live-4.ts")], thumbnail: 74),
+    ]
+    NeoActiveRecordingsProtocol.reset(values, drops: [
+      7201: ["id": 9701, "dropCnt": 3, "errorCnt": 1, "scramblingCnt": 0],
+      7202: ["id": 9702, "dropCnt": 0, "errorCnt": 0, "scramblingCnt": 0],
+      7203: ["id": 9703, "dropCnt": 2, "errorCnt": 0, "scramblingCnt": 1],
+      7204: ["id": 9704, "dropCnt": 0, "errorCnt": 0, "scramblingCnt": 0],
+    ])
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [NeoActiveRecordingsProtocol.self]
+    let session = URLSession(configuration: configuration)
+    let api = NeoAPI(base: base, session: session)
+    api.activate(user: "7", headers: ["X-Viewer-Profile-Id": "21", "X-Viewer-Session": "active-recording-session"])
+    api.activeRecordingLength = 2
+    shell.smokeUseAPI(api)
+    shell.smokeUseServerConfig(config: nil)
+    shell.showRoute("recording")
+    shell.view.layoutIfNeeded()
+
+    var checks: [String: Bool] = [:]
+    func waitFor(_ condition: () -> Bool, attempts: Int = 220) async -> Bool {
+      for _ in 0..<attempts {
+        if condition() { return true }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+      }
+      return condition()
+    }
+    func views(in root: UIView) -> [UIView] {
+      [root] + root.subviews.flatMap { views(in: $0) }
+    }
+    func rootView() -> UIView { shell.view.window ?? shell.view }
+    func view(_ identifier: String) -> UIView? {
+      views(in: rootView()).first { $0.accessibilityIdentifier == identifier }
+    }
+    func button(_ identifier: String) -> UIButton? { view(identifier) as? UIButton }
+    func card(_ id: Int) -> UIView? { view("recording.card.\(id)") }
+    func confirm() async -> UIButton? {
+      guard await waitFor({ button("recording.confirm") != nil }) else { return nil }
+      return button("recording.confirm")
+    }
+    func selectRow(_ id: Int) -> Bool {
+      guard let table = view("recording.list") as? UITableView,
+        let cell = card(id) as? UITableViewCell, let indexPath = table.indexPath(for: cell) else { return false }
+      table.selectRow(at: indexPath, animated: false, scrollPosition: .none)
+      table.delegate?.tableView?(table, didSelectRowAt: indexPath)
+      return true
+    }
+    func actionDialog() async -> NeoRecordingActionDialog? {
+      func find(_ controller: UIViewController) -> NeoRecordingActionDialog? {
+        if let dialog = controller as? NeoRecordingActionDialog { return dialog }
+        for child in controller.children {
+          if let dialog = find(child) { return dialog }
+        }
+        if let presented = controller.presentedViewController, let dialog = find(presented) { return dialog }
+        return nil
+      }
+      _ = await waitFor { find(shell) != nil }
+      return find(shell)
+    }
+    defer {
+      api.stopRecordingUpdates()
+      shell.smokeUseAPI(savedAPI)
+      shell.smokeUseServerConfig(config: savedConfig)
+      if savedAPI != nil { shell.showRoute(savedRoute) }
+    }
+
+    let loaded = await waitFor {
+      guard let table = view("recording.list") as? UITableView else { return false }
+      return table.numberOfRows(inSection: 0) == 2 && card(7201) != nil && card(7202) != nil
+    }
+    checks["recordingPageLoadsActiveList"] = loaded
+    checks["recordingPaginationAppears"] = view("recording.pagination") != nil
+    checks["activeRecordingIndicatorTurnsOn"] = loaded && shell.hasActiveRecording
+
+    let dropRendered = await waitFor(attempts: 340) {
+      guard let label = view("recording.drop") as? UILabel else { return false }
+      return NeoActiveRecordingsProtocol.count("GET", "/api/recording/dropStatus") > 0
+        && (label.text == "drop: 3 / error: 1 / scrambling: 0" || label.accessibilityValue == "drop: 3 / error: 1 / scrambling: 0")
+    }
+    checks["dropStatusPollsAndUpdatesVisibleCard"] = dropRendered
+
+    if let next = views(in: rootView()).compactMap({ $0 as? UIButton }).first(where: { $0.accessibilityLabel == "次のページ" }) {
+      next.sendActions(for: .touchUpInside)
+    }
+    checks["recordingPaginationLoadsSecondPage"] = await waitFor { card(7203) != nil && card(7201) == nil }
+    if let previous = views(in: rootView()).compactMap({ $0 as? UIButton }).first(where: { $0.accessibilityLabel == "前のページ" }) {
+      previous.sendActions(for: .touchUpInside)
+    }
+    _ = await waitFor { card(7201) != nil }
+
+    if let menuButton = views(in: card(7201) ?? UIView()).compactMap({ $0 as? UIButton }).first(where: { $0.accessibilityIdentifier == "recording.card.menu" }) {
+      menuButton.sendActions(for: .touchUpInside)
+    }
+    let menuReady = await waitFor { (view("anchored-menu") as? NeoAnchoredMenu) != nil }
+    let menu = menuReady ? (view("anchored-menu") as? NeoAnchoredMenu) : nil
+    checks["recordingMenuUsesWebStopDeleteLabels"] = menu?.titles.contains("stop") == true && menu?.titles.contains("delete") == true
+    if let menu, let stop = menu.titles.firstIndex(of: "stop") { menu.select(stop) }
+    if let stopConfirm = await confirm() { stopConfirm.sendActions(for: .touchUpInside) }
+    checks["individualStopUsesRecordingEndpoint"] = await waitFor { NeoActiveRecordingsProtocol.stopped().contains(7201) && card(7201) == nil }
+
+    // The individual delete action must use the same file-selection dialog as
+    // recorded items. For an active recording it refreshes /recorded/{id},
+    // then deletes through /videos/{fileId}; the server promotes that request
+    // to removal of the whole active recording.
+    if let menuButton = views(in: card(7202) ?? UIView()).compactMap({ $0 as? UIButton }).first(where: { $0.accessibilityIdentifier == "recording.card.menu" }) {
+      menuButton.sendActions(for: .touchUpInside)
+    }
+    let deleteMenuReady = await waitFor { (view("anchored-menu") as? NeoAnchoredMenu) != nil }
+    let deleteMenu = deleteMenuReady ? (view("anchored-menu") as? NeoAnchoredMenu) : nil
+    if let deleteMenu, let delete = deleteMenu.titles.firstIndex(of: "delete") { deleteMenu.select(delete) }
+    if let dialog = await actionDialog() {
+      dialog.smokeToggleFile(72021)
+      dialog.smokeTapSubmit()
+      checks["individualDeleteUsesVideoEndpoint"] = await waitFor {
+        NeoActiveRecordingsProtocol.deletedVideos().contains(72021) && card(7202) == nil && dialog.view.window == nil
+      }
+    } else {
+      checks["individualDeleteUsesVideoEndpoint"] = false
+    }
+    checks["activeDeleteLoadsCurrentRecordedFixture"] = NeoActiveRecordingsProtocol.count("GET", "/api/recorded/7202") > 0
+
+    button("recording.select")?.sendActions(for: .touchUpInside)
+    let selectedForStop = selectRow(7203)
+    checks["recordingSelectionEnablesBulkStop"] = selectedForStop && button("recording.bulkStop")?.isEnabled == true
+    button("recording.bulkStop")?.sendActions(for: .touchUpInside)
+    if let stopConfirm = await confirm() { stopConfirm.sendActions(for: .touchUpInside) }
+    checks["bulkStopUsesRecordingEndpoint"] = await waitFor { NeoActiveRecordingsProtocol.stopped().contains(7203) && card(7203) == nil }
+
+    button("recording.select")?.sendActions(for: .touchUpInside)
+    let selectedForDelete = selectRow(7204)
+    checks["recordingSelectionEnablesBulkDelete"] = selectedForDelete && button("recording.bulkDelete")?.isEnabled == true
+    button("recording.bulkDelete")?.sendActions(for: .touchUpInside)
+    if let deleteConfirm = await confirm() { deleteConfirm.sendActions(for: .touchUpInside) }
+    checks["bulkDeleteUsesVideoEndpoint"] = await waitFor { NeoActiveRecordingsProtocol.deletedVideos().contains(72041) && card(7204) == nil }
+    checks["activeRecordingIndicatorTurnsOffWhenEmpty"] = await waitFor { !shell.hasActiveRecording && view("recording.list") is UITableView && card(7204) == nil }
+    let auth = NeoActiveRecordingsProtocol.authSummary()
+    checks["recordingRequestsCarryIdentityHeaders"] = auth.passes > 0 && auth.failures == 0
+    return checks
+  }
+
+  private static func record(_ id: Int, files: [(Int, String)], thumbnail: Int) -> [String: Any] {
+    ["id": id, "name": "Live fixture \(id)", "startAt": 1_700_000_000_000, "endAt": 1_700_001_800_000,
+      "isRecording": true, "description": "Active recording fixture", "extended": "", "channelId": 1, "channelName": "Fixture Channel",
+      "thumbnails": [thumbnail], "videoFiles": files.map { ["id": $0.0, "name": $0.1, "type": "TS", "size": 1024] },
+      "isProtected": false, "userId": 7]
+  }
+}
 #endif

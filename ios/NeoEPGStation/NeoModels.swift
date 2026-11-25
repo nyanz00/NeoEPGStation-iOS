@@ -21,10 +21,10 @@ enum NeoServerURL {
     return url
   }
 }
-struct NeoVideoFile: Decodable {
+struct NeoVideoFile: Decodable, Equatable {
   let id: Int; let name: String; let type: String; let size: Double; let filename: String?
 }
-struct NeoRecording: Decodable {
+struct NeoRecording: Decodable, Equatable {
   let id: Int; var name: String; let startAt: Double; let endAt: Double; let isRecording: Bool
   var description: String?; var extended: String?; let channelId: Int?; let channelName: String?
   let thumbnails: [Int]?; let videoFiles: [NeoVideoFile]?
@@ -43,7 +43,7 @@ struct NeoRecording: Decodable {
     return copy
   }
 }
-struct NeoDropLog: Decodable {
+struct NeoDropLog: Decodable, Equatable {
   let id: Int; let errorCnt: Int; let dropCnt: Int; let scramblingCnt: Int
   var hasErrors: Bool { dropCnt > 0 || errorCnt > 0 || scramblingCnt > 0 }
 }
@@ -196,6 +196,10 @@ enum NeoRecordingMenu {
   }
 }
 struct NeoRecords: Decodable { let records: [NeoRecording]; let total: Int }
+struct NeoActiveRecordingDrop: Decodable {
+  let recordedId: Int
+  let dropLogFile: NeoDropLog
+}
 struct NeoChannel: Decodable { let id: Int; let name: String }
 struct NeoRule: Decodable {
   struct Search: Decodable { let keyword: String? }
@@ -366,9 +370,12 @@ enum NeoProgramText {
     let f = DateFormatter(); f.locale = Locale(identifier: "ja_JP"); f.timeZone = TimeZone(identifier: "Asia/Tokyo")
     f.dateFormat = "HH:mm"; return f
   }()
-  static func interval(start: Double, end: Double) -> String {
+  static func interval(start: Double, end: Double, japaneseDuration: Bool = false) -> String {
     let minutes = max(0, Int(((end - start) / 60000).rounded()))
-    return "\(date.string(from: Date(timeIntervalSince1970: start / 1000))) - \(time.string(from: Date(timeIntervalSince1970: end / 1000))) (\(minutes) m)"
+    let startText = date.string(from: Date(timeIntervalSince1970: start / 1000))
+    let endText = time.string(from: Date(timeIntervalSince1970: end / 1000))
+    let duration = japaneseDuration ? "（\(minutes)分）" : " (\(minutes) m)"
+    return "\(startText) - \(endText)\(duration)"
   }
   static func bytes(_ size: Double) -> String {
     if size >= 1073741824 { return String(format: "%.2f GB", size / 1073741824) }
@@ -522,6 +529,7 @@ extension Notification.Name {
   static let neoAnnictChanged = Notification.Name("NeoAnnictChanged")
   static let neoTextPreferencesChanged = Notification.Name("NeoTextPreferencesChanged")
   static let neoRecordedChanged = Notification.Name("NeoRecordedChanged")
+  static let neoActiveRecordingPreferencesChanged = Notification.Name("NeoActiveRecordingPreferencesChanged")
 }
 private final class NeoAPIRedirectPolicy: NSObject, URLSessionTaskDelegate {
   func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -598,6 +606,13 @@ final class NeoAPI {
     set { UserDefaults.standard.set(min(1000, max(1, newValue)), forKey: "recorded.length." + base.absoluteString)
       NotificationCenter.default.post(name: .neoRecordingPreferencesChanged, object: self) }
   }
+  var activeRecordingLength: Int {
+    get { min(1000, max(1, UserDefaults.standard.object(forKey: "recording.length." + base.absoluteString) as? Int ?? 24)) }
+    set {
+      UserDefaults.standard.set(min(1000, max(1, newValue)), forKey: "recording.length." + base.absoluteString)
+      NotificationCenter.default.post(name: .neoActiveRecordingPreferencesChanged, object: self)
+    }
+  }
   var rulesLength: Int {
     get { min(1000, max(1, UserDefaults.standard.object(forKey: "rules.length." + base.absoluteString) as? Int ?? 24)) }
     set {
@@ -639,6 +654,22 @@ final class NeoAPI {
     accountReady = viewer == "master" || viewer == "0"
   }
   func url(_ path: String) -> URL { URL(string: base.absoluteString + "/api" + path)! }
+  func activeRecordings(offset: Int, limit: Int, halfWidth: Bool, user: String, headers: [String: String]) async throws -> NeoRecords {
+    var parts = URLComponents(url: url("/recording"), resolvingAgainstBaseURL: false)!
+    parts.queryItems = [.init(name: "isHalfWidth", value: String(halfWidth)),
+      .init(name: "limit", value: String(limit)), .init(name: "offset", value: String(offset))]
+    let result: NeoRecords = try await request(parts.url!, user: user, headers: headers)
+    guard result.total >= 0, result.records.allSatisfy({ $0.id > 0 }) else {
+      throw NeoError("録画中一覧の応答形式が一致しません。")
+    }
+    return NeoRecords(records: result.records.map { $0.displayed(halfWidth: halfWidth) }, total: result.total)
+  }
+  func activeRecordingDrops(user: String, headers: [String: String]) async throws -> [NeoActiveRecordingDrop] {
+    try await request(url("/recording/dropStatus"), user: user, headers: headers)
+  }
+  func stopActiveRecording(_ id: Int, user: String, headers: [String: String]) async throws {
+    try await requestAcknowledgement(url("/recording/\(id)/stop"), method: "POST", user: user, headers: headers)
+  }
   func recordings(page: Int, keyword: String = "", reverse: Bool = false, userID: Int? = nil, filters: NeoRecordedFilters? = nil) async throws -> NeoRecords {
     var parts = URLComponents(url: url("/recorded"), resolvingAgainstBaseURL: false)!
     let halfWidth = isHalfWidthDisplayed

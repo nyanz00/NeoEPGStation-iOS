@@ -102,7 +102,7 @@ extension NeoPage {
           guard !selected.isEmpty, selected.isSubset(of:available) else {
             dialog.setFiles(files); throw NeoError("録画ファイルが変更されました。もう一度選択してください。")
           }
-          if selected == available {
+          if selected == available && !item.isRecording && !latest.isRecording {
             try await api.deleteRecording(item.id,user:user,headers:headers)
             changed = true; api.recordingChanged(item.id,deleted:true); try check(); complete("録画を削除しました。")
           } else {
@@ -112,7 +112,9 @@ extension NeoPage {
               // Deleting a file while recording promotes to whole-record
               // deletion on the server. Do not submit the remaining IDs then.
               if latest.isRecording {
-                api.recordingChanged(item.id,deleted:true); try check(); complete("録画を削除しました。"); return
+                api.recordingChanged(item.id,deleted:true)
+                NotificationCenter.default.post(name: .neoReservationsChanged, object: api)
+                try check(); complete("録画を削除しました。"); return
               }
             }
             try check()

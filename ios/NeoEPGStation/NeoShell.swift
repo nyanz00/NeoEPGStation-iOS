@@ -410,6 +410,14 @@ final class NeoSidebar: UIView, UITableViewDataSource, UITableViewDelegate {
   let list = UITableView(frame: .zero, style: .plain)
   var onSelect: ((String) -> Void)?
   private var items = NeoDestination.all
+  var hasActiveRecording = false {
+    didSet {
+      guard oldValue != hasActiveRecording, let row = items.firstIndex(where: { $0.id == "recording" }),
+        let cell = list.cellForRow(at: IndexPath(row: row, section: 0)) as? NeoSidebarCell else { return }
+      cell.icon.image = NeoIcon.image(recordingIcon)
+    }
+  }
+  private var recordingIcon: String { hasActiveRecording ? "RadioButtonCheckedOutlined" : "RadioButtonUncheckedOutlined" }
   var reservationCounts: NeoReservationCounts? {
     didSet {
       guard oldValue != reservationCounts else { return }
@@ -454,7 +462,8 @@ final class NeoSidebar: UIView, UITableViewDataSource, UITableViewDelegate {
     let cell = tableView.dequeueReusableCell(withIdentifier: "navigation", for: indexPath) as! NeoSidebarCell, item = items[indexPath.row]
     cell.insetsLayoutMarginsFromSafeArea = false; cell.preservesSuperviewLayoutMargins = false
     cell.contentView.insetsLayoutMarginsFromSafeArea = false; cell.contentView.preservesSuperviewLayoutMargins = false
-    cell.leftInset = contentSafeArea.left; cell.icon.image = NeoIcon.image(item.icon); cell.caption.text = item.title
+    cell.leftInset = contentSafeArea.left
+    cell.icon.image = NeoIcon.image(item.id == "recording" ? recordingIcon : item.icon); cell.caption.text = item.title
     cell.iconWidth = item.icon == "AlphaA" ? 27 : 24
     cell.accessibilityLabel = item.title
     cell.badge.text = item.count.map { String($0) }; cell.badge.isHidden = item.count == nil
@@ -503,6 +512,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private var reservationSocketPort: Int?
   private var reservationCountRead: Task<Void, Never>?
   private var reservationCountRefreshPending = false
+  private var activeRecordingCountRead: Task<Void, Never>?
+  private var activeRecordingCountRefreshPending = false
+  private(set) var hasActiveRecording = false {
+    didSet { sidebar.hasActiveRecording = hasActiveRecording }
+  }
   private var reservationsBackgrounded = false
   private var sidebarWidth: CGFloat { 240 + view.safeAreaInsets.left }
   private var shortcuts: [String] = []
@@ -570,6 +584,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     let notifications = NotificationCenter.default
     notifications.addObserver(self, selector: #selector(reservationAccountChanged(_:)), name: .neoAccountChanged, object: nil)
     notifications.addObserver(self, selector: #selector(reservationDataChanged(_:)), name: .neoReservationsChanged, object: nil)
+    notifications.addObserver(self, selector: #selector(activeRecordingDataChanged(_:)), name: .neoRecordedChanged, object: nil)
     notifications.addObserver(self, selector: #selector(suspendReservationFeed), name: UIApplication.didEnterBackgroundNotification, object: nil)
     notifications.addObserver(self, selector: #selector(resumeReservationFeed), name: UIApplication.didBecomeActiveNotification, object: nil)
     dim.backgroundColor = UIColor.black.withAlphaComponent(0.5); dim.alpha = 0
@@ -698,6 +713,7 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       if id == "recorded" { page = NeoRecordedPage(shell: self) }
       else if id == "onair" { page = NeoOnAirPage(shell: self) }
       else if id == "encode" { page = NeoEncodePage(shell: self) }
+      else if id == "recording" { page = NeoActiveRecordingsPage(shell: self) }
       else if id == "search" { page = NeoProgramSearchPage(shell: self) }
       else if id == "reserves" { page = NeoReservationsPage(shell: self, kind: reservationKind) }
       else if id == "rule" { page = NeoRulesPage(shell: self) }
@@ -732,6 +748,11 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     scheduleReservationCounts()
   }
 
+  @objc private func activeRecordingDataChanged(_ note: Notification) {
+    guard let api, note.object as? NeoAPI === api else { return }
+    scheduleActiveRecordingCount()
+  }
+
   @objc private func suspendReservationFeed() {
     reservationsBackgrounded = true
     stopReservationFeed()
@@ -745,11 +766,12 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
   private func stopReservationFeed(clearCounts: Bool = false) {
     reservationUpdates.stop(); reservationFeed = nil; reservationSocketPort = nil
     reservationCountRead?.cancel(); reservationCountRead = nil; reservationCountRefreshPending = false
-    if clearCounts { sidebar.reservationCounts = nil }
+    activeRecordingCountRead?.cancel(); activeRecordingCountRead = nil; activeRecordingCountRefreshPending = false
+    if clearCounts { sidebar.reservationCounts = nil; hasActiveRecording = false }
   }
 
   private func synchronizeReservationFeed() {
-    guard !reservationsBackgrounded, sidebarShowsReservations || route == "reserves", let api, api.accountReady else {
+    guard !reservationsBackgrounded, let api, api.accountReady else {
       stopReservationFeed()
       return
     }
@@ -760,10 +782,36 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
       reservationUpdates.start(api: api, port: port, events: ["updateStatus"]) { [weak self] in
         guard let self, session.isCurrent(self.api) else { return }
         (self.active?.topViewController as? NeoReservationsPage)?.refreshOnServerStatus()
+        if let recording = self.active?.topViewController as? NeoActiveRecordingsPage { recording.refreshOnServerStatus() }
+        else { self.scheduleActiveRecordingCount() }
         self.scheduleReservationCounts()
       }
+      scheduleActiveRecordingCount()
     }
     scheduleReservationCounts()
+  }
+
+  func activeRecordingTotalChanged(_ total: Int, session: NeoReservationSession) {
+    guard session.isCurrent(api) else { return }
+    activeRecordingCountRead?.cancel()
+    activeRecordingCountRead = nil; activeRecordingCountRefreshPending = false
+    hasActiveRecording = total > 0
+  }
+
+  private func scheduleActiveRecordingCount() {
+    guard let session = reservationFeed, session.isCurrent(api) else { return }
+    if activeRecordingCountRead != nil { activeRecordingCountRefreshPending = true; return }
+    activeRecordingCountRead = Task { [weak self] in
+      try? await Task.sleep(for: .milliseconds(300))
+      guard let self, !Task.isCancelled, session.isCurrent(api) else { return }
+      activeRecordingCountRefreshPending = false
+      let result = try? await session.api.activeRecordings(offset: 0, limit: 1, halfWidth: false,
+        user: session.viewer, headers: session.headers)
+      guard !Task.isCancelled else { return }
+      activeRecordingCountRead = nil
+      if session.isCurrent(api), let result { hasActiveRecording = result.total > 0 }
+      if activeRecordingCountRefreshPending { scheduleActiveRecordingCount() }
+    }
   }
 
   private func scheduleReservationCounts() {
@@ -1632,7 +1680,8 @@ final class NeoShell: UIViewController, UIGestureRecognizerDelegate, UINavigatio
     }
     if smokeStage == "recording-actions" {
       Task { [self] in
-        let checks = await NeoRecordingActionsSmoke.run(shell:self)
+        var checks = await NeoRecordingActionsSmoke.run(shell:self)
+        checks.merge(await NeoActiveRecordingsSmoke.run(shell: self)) { _, activeRecordingCheck in activeRecordingCheck }
         writeIPadSmoke(recorded,checks:checks,retained:retained)
       }
       return
