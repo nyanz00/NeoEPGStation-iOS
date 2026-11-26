@@ -8,6 +8,9 @@ import UIKit
 final class NeoActiveRecordingCard: UITableViewCell {
   var onMenu: ((UIView) -> Void)?
 
+  private static let verticalPadding: CGFloat = 12
+  private static let badgeHeight: CGFloat = 22
+
   private let card = UIView()
   private let thumbnail = NeoThumbnail()
   private let body = UIStackView()
@@ -57,7 +60,7 @@ final class NeoActiveRecordingCard: UITableViewCell {
     NSLayoutConstraint.activate([
       thumbnail.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 8),
       thumbnail.centerYAnchor.constraint(equalTo: card.centerYAnchor),
-      thumbnail.topAnchor.constraint(greaterThanOrEqualTo: card.topAnchor, constant: 8),
+      thumbnail.topAnchor.constraint(greaterThanOrEqualTo: card.topAnchor, constant: Self.verticalPadding),
       thumbnailWidth,
       thumbnail.heightAnchor.constraint(equalTo: thumbnail.widthAnchor, multiplier: 9 / 16)
     ])
@@ -66,12 +69,12 @@ final class NeoActiveRecordingCard: UITableViewCell {
     body.axis = .vertical
     body.alignment = .fill
     body.distribution = .fill
-    body.spacing = 2
+    body.spacing = 4
     card.addSubview(body)
     NSLayoutConstraint.activate([
       body.leadingAnchor.constraint(equalTo: thumbnail.trailingAnchor, constant: 10),
-      body.topAnchor.constraint(equalTo: card.topAnchor, constant: 8),
-      body.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -8)
+      body.topAnchor.constraint(equalTo: card.topAnchor, constant: Self.verticalPadding),
+      body.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -Self.verticalPadding)
     ])
 
     title.numberOfLines = 1
@@ -110,7 +113,7 @@ final class NeoActiveRecordingCard: UITableViewCell {
     recordingBadge.textAlignment = .center
     recordingBadge.textColor = .white
     recordingBadge.backgroundColor = NeoStyle.error
-    recordingBadge.layer.cornerRadius = 4
+    recordingBadge.layer.cornerRadius = Self.badgeHeight / 2
     recordingBadge.clipsToBounds = true
     recordingBadge.translatesAutoresizingMaskIntoConstraints = false
     card.addSubview(recordingBadge)
@@ -130,7 +133,7 @@ final class NeoActiveRecordingCard: UITableViewCell {
       menuButton.widthAnchor.constraint(equalToConstant: 32),
       menuButton.heightAnchor.constraint(equalToConstant: 32),
       recordingBadge.widthAnchor.constraint(equalToConstant: 54),
-      recordingBadge.heightAnchor.constraint(equalToConstant: 22),
+      recordingBadge.heightAnchor.constraint(equalToConstant: Self.badgeHeight),
       body.heightAnchor.constraint(greaterThanOrEqualToConstant: 82)
     ])
     compactActions = [
